@@ -25,7 +25,9 @@ using TaleWorlds.Library;
 using Helpers;
 using TaleWorlds.ObjectSystem;
 using CoopSpectator.Campaign.LordsHall;
+using CoopSpectator.Campaign.SallyOut;
 using CoopSpectator.Infrastructure.LordsHall;
+using CoopSpectator.Infrastructure.SallyOut;
 
 namespace CoopSpectator.Campaign // Тримаємо battle/campaign логіку в одному namespace
 { // Починаємо блок простору імен
@@ -653,6 +655,19 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 if (isBlockadeBattle || isBlockadeSallyOutBattle)
                 {
                     reason = "blockade";
+                    return true;
+                }
+
+                if (SallyOutCampaignBattleAdapter.IsCampaignBattle(battle) &&
+                    !SallyOutCampaignBattleAdapter.TryValidateActiveMission(
+                        battle,
+                        encounterSettlement,
+                        mission,
+                        out _,
+                        out string sallyOutDiagnostics))
+                {
+                    reason = "sally-out-contract-invalid";
+                    summary += " SallyOutDiagnostics={" + sallyOutDiagnostics + "}";
                     return true;
                 }
 
@@ -3236,6 +3251,24 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 TryInjectMainPartyPrisonerAftermathIntoLiveMapEvent(result);
 
             bool encounterPrepared = TryPrepareAuthoritativeEncounterResultBridge(result);
+            bool finalSallyOutCompletionArmed = false;
+            string finalSallyOutCompletionDiagnostics = "not-requested";
+            if (encounterPrepared && ShouldCommitFinalSallyOutWinner(result))
+            {
+                List<KeyValuePair<Hero, int>> finalHeroHitPoints =
+                    _cachedHostAftermathMainPartyPreviewHeroHitPointsByHeroId
+                        .Select(pair => new KeyValuePair<Hero, int>(
+                            TryResolveCharacterObjectFromIds(pair.Key)?.HeroObject,
+                            pair.Value))
+                        .Where(pair => pair.Key != null)
+                        .ToList();
+                finalSallyOutCompletionArmed =
+                    SallyOutCampaignBattleAdapter.TryArmFinalEncounterCompletion(
+                        PlayerEncounter.Battle,
+                        result,
+                        finalHeroHitPoints,
+                        out finalSallyOutCompletionDiagnostics);
+            }
             bool exitRequested = TryRequestLocalMissionExit(mission, "campaign battle_result bridge");
             if (exitRequested)
             {
@@ -3259,6 +3292,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     "Requested local mission exit. " +
                     "DedicatedEndMissionRequested=" + dedicatedEndMissionRequested + " " +
                     "EncounterPrepared=" + encounterPrepared + " " +
+                    "FinalSallyOutCompletionArmed=" + finalSallyOutCompletionArmed + " " +
+                    "FinalSallyOutCompletionDiagnostics=[" + finalSallyOutCompletionDiagnostics + "] " +
                     "BattleId=" + (result.BattleId ?? "null") +
                     " WinnerSide=" + (result.WinnerSide ?? "none") +
                     " MissionScene=" + SafeMissionSceneName(mission) + ".");
@@ -3731,15 +3766,25 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 }
 
                 PlayerEncounter.CampaignBattleResult = campaignBattleResult;
+                BattleSideEnum winnerSide = TryResolveWinnerSideEnum(result.WinnerSide);
                 bool finalLordsHallWinnerOverridden = false;
                 if (ShouldUseNativeFinalLordsHallAftermath(result))
                 {
-                    BattleSideEnum winnerSide = TryResolveWinnerSideEnum(result.WinnerSide);
                     if (winnerSide != BattleSideEnum.None)
                     {
                         PlayerEncounter.Battle.SetOverrideWinner(winnerSide);
                         finalLordsHallWinnerOverridden = true;
                     }
+                }
+                bool sallyOutWinnerOverridden = false;
+                if (ShouldCommitFinalSallyOutWinner(result) && winnerSide != BattleSideEnum.None)
+                {
+                    // A land sally-out uses the field-battle mission shell, so Bannerlord does not
+                    // necessarily commit the terminal battle state before PlayerEncounter.DoWait.
+                    // Commit it here; otherwise the native continuation check can reopen the same
+                    // encounter even when the defeated side has no healthy troops left.
+                    PlayerEncounter.Battle.SetOverrideWinner(winnerSide);
+                    sallyOutWinnerOverridden = true;
                 }
                 string settlementId = BattleSnapshotRuntimeState.GetCurrent()?
                     .ScenarioContext?
@@ -3758,6 +3803,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     " EnemyPulledBack=" + campaignBattleResult.EnemyPulledBack +
                     " EnemyRetreated=" + campaignBattleResult.EnemyRetreated + "] " +
                     "FinalLordsHallWinnerOverridden=" + finalLordsHallWinnerOverridden + " " +
+                    "SallyOutWinnerOverridden=" + sallyOutWinnerOverridden + " " +
                     "ContinueReset=" + continueReset + ".");
                 return true;
             }
@@ -3878,6 +3924,18 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                    !result.DefenderPushedBack &&
                    LordsHallResultBridge.IsLordsHallResult(result) &&
                    TryResolveWinnerSideEnum(result.WinnerSide) != BattleSideEnum.None;
+        }
+
+        private static bool ShouldCommitFinalSallyOutWinner(
+            CoopBattleResultBridgeFile.BattleResultSnapshot result)
+        {
+            return result?.IsFinalStage == true &&
+                   !result.DefenderPushedBack &&
+                   string.Equals(
+                       result.BattleStage,
+                       SallyOutScenarioContract.ResultStage,
+                       StringComparison.OrdinalIgnoreCase) &&
+                   SallyOutCampaignBattleAdapter.IsCampaignBattle(PlayerEncounter.Battle);
         }
 
         private static void CapturePendingLordsHallStageState(
@@ -4106,6 +4164,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             int populatedSideCount = 0;
             bool hasAttacker = false;
             bool hasDefender = false;
+            int attackerHealthyCount = 0;
+            int defenderHealthyCount = 0;
 
             foreach (BattleSideSnapshotMessage side in sides)
             {
@@ -4114,15 +4174,20 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     continue;
 
                 populatedSideCount++;
+                int healthyCount = side.Troops
+                    .Where(troop => troop != null)
+                    .Sum(troop => Math.Max(0, troop.Count - troop.WoundedCount));
                 if (string.Equals(side.SideId, "attacker", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(side.SideText, nameof(BattleSideEnum.Attacker), StringComparison.OrdinalIgnoreCase))
                 {
                     hasAttacker = true;
+                    attackerHealthyCount = healthyCount;
                 }
                 else if (string.Equals(side.SideId, "defender", StringComparison.OrdinalIgnoreCase) ||
                          string.Equals(side.SideText, nameof(BattleSideEnum.Defender), StringComparison.OrdinalIgnoreCase))
                 {
                     hasDefender = true;
+                    defenderHealthyCount = healthyCount;
                 }
             }
 
@@ -4132,15 +4197,21 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 " PopulatedSides=" + populatedSideCount +
                 " HasAttacker=" + hasAttacker +
                 " HasDefender=" + hasDefender +
+                " AttackerHealthy=" + attackerHealthyCount +
+                " DefenderHealthy=" + defenderHealthyCount +
                 " Troops=" + (payload?.Troops?.Count ?? 0);
 
             bool isCampaignMirrorHeroesSnapshot = CoopTestBattleOptions.IsCampaignMirrorHeroesSnapshot(snapshot);
             bool isCampaignMirrorHeroesCombatSnapshot = CoopTestBattleOptions.IsCampaignMirrorHeroesCombatSnapshot(snapshot);
-            bool ready = isCampaignMirrorHeroesCombatSnapshot
+            bool hasRequiredSides = isCampaignMirrorHeroesCombatSnapshot
                 ? sides.Count >= 2 && populatedSideCount >= 2 && hasAttacker && hasDefender
                 : isCampaignMirrorHeroesSnapshot
                     ? sides.Count >= 2 && populatedSideCount >= 1 && (payload?.Troops?.Count ?? 0) > 0
                     : sides.Count >= 2 && populatedSideCount >= 2 && hasAttacker && hasDefender;
+            bool sallyOutHasTwoHealthySides =
+                !SallyOutScenarioContract.IsSallyOutScenario(snapshot?.ScenarioContext) ||
+                (attackerHealthyCount > 0 && defenderHealthyCount > 0);
+            bool ready = hasRequiredSides && sallyOutHasTwoHealthySides;
             if (!ready && DateTime.UtcNow >= _nextBattleStartWaitLogUtc)
             {
                 _nextBattleStartWaitLogUtc = DateTime.UtcNow.AddSeconds(2);
@@ -4457,8 +4528,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             if (battle?.IsSiegeOutside == true)
                 return "Relief";
 
-            if (battle?.IsSallyOut == true)
-                return "SallyOut";
+            if (SallyOutCampaignBattleAdapter.IsCampaignBattle(battle))
+                return SallyOutScenarioContract.SiegeSubtype;
 
             if (battle?.IsSiegeAssault == true)
                 return "SiegeAssault";
@@ -4553,8 +4624,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             if (string.Equals(siegeSubtype, LordsHallScenarioContract.SiegeSubtype, StringComparison.OrdinalIgnoreCase))
                 return LordsHallScenarioContract.SceneLocationId;
 
-            if (string.Equals(siegeSubtype, "SiegeAssault", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(siegeSubtype, "SallyOut", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(siegeSubtype, "SiegeAssault", StringComparison.OrdinalIgnoreCase))
             {
                 return "center";
             }
@@ -10367,7 +10437,16 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 PlayerEncounter encounter = PlayerEncounter.Current;
                 MapEvent battle = PlayerEncounter.Battle ?? PlayerEncounter.EncounteredBattle ?? MobileParty.MainParty?.MapEvent;
                 if (TryResolveMapEventEncounterDirection(battle, out x, out y, out source))
+                {
+                    if (SallyOutCampaignBattleAdapter.RequiresNativeEncounterDirectionReversal(battle))
+                    {
+                        x = -x;
+                        y = -y;
+                        source += ":native-sally-out-defender-to-attacker";
+                    }
+
                     return true;
+                }
 
                 if (encounter != null && TryResolveEncounterPartyDirection(out x, out y, out source))
                     return true;

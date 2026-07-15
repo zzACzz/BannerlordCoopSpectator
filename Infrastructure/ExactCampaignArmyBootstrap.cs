@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Text;
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure.LordsHall;
+using CoopSpectator.Infrastructure.SallyOut;
 using CoopSpectator.MissionBehaviors;
 using CoopSpectator.MissionBehaviors.LordsHall;
 using CoopSpectator.Network.Messages;
@@ -115,6 +116,31 @@ namespace CoopSpectator.Infrastructure
             return mission != null &&
                    ReferenceEquals(_activeMission, mission) &&
                    _activeMode != ActiveBootstrapMode.None;
+        }
+
+        public static bool IsInitialSpawnMaterializationComplete(
+            Mission mission,
+            out string diagnostics)
+        {
+            diagnostics = "bootstrap-inactive";
+            if (!IsActive(mission) || _activeSpawnLogic == null)
+                return false;
+
+            try
+            {
+                bool initialSpawnOver = _activeSpawnLogic.IsInitialSpawnOver;
+                diagnostics =
+                    "InitialSpawnOver=" + initialSpawnOver +
+                    " ActiveDefender=" + _activeSpawnLogic.NumberOfActiveDefenderTroops +
+                    " ActiveAttacker=" + _activeSpawnLogic.NumberOfActiveAttackerTroops +
+                    " NumberOfAgents=" + _activeSpawnLogic.NumberOfAgents;
+                return initialSpawnOver;
+            }
+            catch (Exception ex)
+            {
+                diagnostics = "initial-spawn-read-failed:" + ex.GetType().Name;
+                return false;
+            }
         }
 
         public static bool TryGetSpawnHorses(Mission mission, BattleSideEnum side, out bool spawnHorses)
@@ -299,6 +325,7 @@ namespace CoopSpectator.Infrastructure
 
                 if (!TryResolveBootstrapScenarioContract(
                         scenarioContext,
+                        sceneName,
                         out string battleSpawnTag,
                         out Mission.BattleSizeType battleSizeType,
                         out string scenarioContractReason))
@@ -415,6 +442,7 @@ namespace CoopSpectator.Infrastructure
                 BattleScenarioContextMessage scenarioContext = ResolveScenarioContextForMission(mission);
                 if (!TryResolveBootstrapScenarioContract(
                         scenarioContext,
+                        sceneName,
                         out string battleSpawnTag,
                         out Mission.BattleSizeType battleSizeType,
                         out string scenarioContractReason))
@@ -424,6 +452,7 @@ namespace CoopSpectator.Infrastructure
                 }
                 bool useSiegeAmbushController = RequiresSiegeAmbushController(scenarioContext);
                 bool useLordsHallController = IsLordsHallSiegeSubtype(scenarioContext);
+                bool isLandSallyOutScenario = SallyOutScenarioContract.IsSallyOutScenario(scenarioContext);
                 bool isSallyOutSubtype = IsSallyOutSiegeSubtype(scenarioContext);
                 bool isReliefForceAttack = IsReliefSiegeSubtype(scenarioContext);
                 bool isSiegeAssaultWithDeploymentSubtype = ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext);
@@ -470,6 +499,7 @@ namespace CoopSpectator.Infrastructure
                 initializationStep = "resolve-siege-scene-preparation";
                 if (scenarioContext?.IsSiegeBattle == true &&
                     !useLordsHallController &&
+                    !isLandSallyOutScenario &&
                     !isSiegeAssaultNoDeploymentSubtype)
                 {
                     if (!TryEnsureSiegeScenePreparationBehavior(
@@ -1085,6 +1115,7 @@ namespace CoopSpectator.Infrastructure
 
         private static bool TryResolveBootstrapScenarioContract(
             BattleScenarioContextMessage scenarioContext,
+            string runtimeScene,
             out string battleSpawnTag,
             out Mission.BattleSizeType battleSizeType,
             out string reason)
@@ -1103,6 +1134,22 @@ namespace CoopSpectator.Infrastructure
                 return false;
             }
 
+            if (SallyOutScenarioContract.IsSallyOutScenario(scenarioContext))
+            {
+                if (!SallyOutScenarioContract.IsValidatedScenario(
+                        scenarioContext,
+                        runtimeScene,
+                        out string sallyOutDiagnostics))
+                {
+                    reason = "sally-out-contract-invalid:" + sallyOutDiagnostics;
+                    return false;
+                }
+
+                battleSpawnTag = BattleSpawnLogic.BattleTag;
+                battleSizeType = Mission.BattleSizeType.Battle;
+                return true;
+            }
+
             if (string.Equals(siegeSubtype, "SiegeAssault", StringComparison.OrdinalIgnoreCase))
             {
                 battleSpawnTag = BattleSpawnLogic.BattleTag;
@@ -1110,12 +1157,10 @@ namespace CoopSpectator.Infrastructure
                 return true;
             }
 
-            if (string.Equals(siegeSubtype, "SallyOut", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(siegeSubtype, "BlockadeSallyOut", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(siegeSubtype, "BlockadeSallyOut", StringComparison.OrdinalIgnoreCase))
             {
-                battleSpawnTag = BattleSpawnLogic.SallyOutTag;
-                battleSizeType = Mission.BattleSizeType.SallyOut;
-                return true;
+                reason = "siege-subtype-guarded:BlockadeSallyOut:no-land-mission-runtime-contract";
+                return false;
             }
 
             if (string.Equals(siegeSubtype, "Relief", StringComparison.OrdinalIgnoreCase))
@@ -1145,9 +1190,7 @@ namespace CoopSpectator.Infrastructure
         private static bool RequiresSiegeAmbushController(BattleScenarioContextMessage scenarioContext)
         {
             string siegeSubtype = scenarioContext?.SiegeContext?.SiegeSubtype ?? string.Empty;
-            return string.Equals(siegeSubtype, "SallyOut", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(siegeSubtype, "BlockadeSallyOut", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(siegeSubtype, "Relief", StringComparison.OrdinalIgnoreCase);
+            return string.Equals(siegeSubtype, "Relief", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsLordsHallSiegeSubtype(BattleScenarioContextMessage scenarioContext)
@@ -1158,8 +1201,7 @@ namespace CoopSpectator.Infrastructure
         private static bool IsSallyOutSiegeSubtype(BattleScenarioContextMessage scenarioContext)
         {
             string siegeSubtype = scenarioContext?.SiegeContext?.SiegeSubtype ?? string.Empty;
-            return string.Equals(siegeSubtype, "SallyOut", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(siegeSubtype, "BlockadeSallyOut", StringComparison.OrdinalIgnoreCase);
+            return string.Equals(siegeSubtype, "BlockadeSallyOut", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsReliefSiegeSubtype(BattleScenarioContextMessage scenarioContext)
@@ -1177,6 +1219,9 @@ namespace CoopSpectator.Infrastructure
         private static Mission.MissionTeamAITypeEnum ResolveMissionTeamAiType(BattleScenarioContextMessage scenarioContext)
         {
             if (scenarioContext?.IsSiegeBattle != true)
+                return Mission.MissionTeamAITypeEnum.FieldBattle;
+
+            if (SallyOutScenarioContract.IsSallyOutScenario(scenarioContext))
                 return Mission.MissionTeamAITypeEnum.FieldBattle;
 
             if (IsSallyOutSiegeSubtype(scenarioContext))
@@ -3839,6 +3884,14 @@ namespace CoopSpectator.Infrastructure
                 "Mode=" + (useMissionReadyOnly ? "MissionReadyOnly" : "FullBattleRoster") + " " +
                 "Defender=" + defenderTotal + "(" + defenderDiagnostics + ")" +
                 " Attacker=" + attackerTotal + "(" + attackerDiagnostics + ")";
+
+            if (SallyOutScenarioContract.IsSallyOutScenario(scenarioContext) &&
+                (defenderTotal <= 0 || attackerTotal <= 0))
+            {
+                diagnostics += " Rejected=terminal-sally-out-side-empty";
+                return false;
+            }
+
             return defenderTotal > 0 || attackerTotal > 0;
         }
 

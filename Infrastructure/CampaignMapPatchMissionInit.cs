@@ -1,6 +1,7 @@
 using System;
 using CoopSpectator.Campaign;
 using CoopSpectator.Infrastructure.LordsHall;
+using CoopSpectator.Infrastructure.SallyOut;
 using CoopSpectator.Network.Messages;
 using System.Reflection;
 using TaleWorlds.Core;
@@ -531,6 +532,27 @@ namespace CoopSpectator.Infrastructure
                 return;
 
             string siegeSubtype = snapshot.ScenarioContext.SiegeContext?.SiegeSubtype ?? string.Empty;
+            if (SallyOutScenarioContract.IsSallyOutScenario(snapshot.ScenarioContext))
+            {
+                BattleSiegeContextMessage sallyOutContext = snapshot.ScenarioContext.SiegeContext;
+                if (sallyOutContext?.HasMissionInitializerRecord != true)
+                    return;
+
+                string sallyOutSceneLevels = sallyOutContext.MissionInitializerSceneLevels ?? string.Empty;
+                if (string.Equals(record.SceneLevels, sallyOutSceneLevels, StringComparison.Ordinal))
+                    return;
+
+                string previousSceneLevels = record.SceneLevels;
+                record.SceneLevels = sallyOutSceneLevels;
+                ModLogger.Info(
+                    source + ": restored native sally-out field scene-level context. " +
+                    "RuntimeScene=" + (runtimeScene ?? "unknown") +
+                    " PreviousSceneLevels=" + (previousSceneLevels ?? "null") +
+                    " SceneLevels=" + (record.SceneLevels ?? "null") +
+                    " ExactSource=" + (sallyOutContext.MissionInitializerSource ?? "unknown") + ".");
+                return;
+            }
+
             if (LordsHallScenarioContract.IsLordsHallScenario(snapshot.ScenarioContext))
             {
                 BattleSiegeContextMessage lordsHallContext = snapshot.ScenarioContext.SiegeContext;
@@ -865,11 +887,13 @@ namespace CoopSpectator.Infrastructure
             if (LordsHallScenarioContract.IsLordsHallScenario(scenarioContext))
                 return Mission.MissionTeamAITypeEnum.NoTeamAI;
 
+            if (SallyOutScenarioContract.IsSallyOutScenario(scenarioContext))
+                return Mission.MissionTeamAITypeEnum.FieldBattle;
+
             if (string.Equals(siegeSubtype, "Blockade", StringComparison.OrdinalIgnoreCase))
                 return Mission.MissionTeamAITypeEnum.NoTeamAI;
 
-            if (string.Equals(siegeSubtype, "SallyOut", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(siegeSubtype, "BlockadeSallyOut", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(siegeSubtype, "BlockadeSallyOut", StringComparison.OrdinalIgnoreCase))
             {
                 return Mission.MissionTeamAITypeEnum.SallyOut;
             }

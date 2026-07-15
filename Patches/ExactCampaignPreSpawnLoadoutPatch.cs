@@ -100,7 +100,7 @@ namespace CoopSpectator.Patches
                     entryState,
                     contractPlayerControlledOrigin,
                     (int)exactOrigin.Side,
-                    ResolveFormationIndex(entryState),
+                    ResolveFormationIndex(entryState, exactOrigin.Side),
                     useDedicatedSafeStringIdExactEquipmentPath);
             ExactTransferSpawnContract exactTransferContract = resolvedContract?.Contract;
             ExactTransferValidationResult exactTransferValidation = resolvedContract?.Validation;
@@ -332,14 +332,12 @@ namespace CoopSpectator.Patches
                     string.Equals(entryState.OriginalCharacterId, "main_hero", StringComparison.OrdinalIgnoreCase));
         }
 
-        private static int ResolveFormationIndex(RosterEntryState entryState)
+        private static int ResolveFormationIndex(RosterEntryState entryState, BattleSideEnum side)
         {
-            BasicCharacterObject character = BattleSnapshotRuntimeState.TryResolveCharacterObject(entryState?.EntryId);
-            if (character == null)
-                return -1;
-
-            FormationClass formationClass = character.DefaultFormationClass;
-            return (int)formationClass;
+            return CoopMissionSpawnLogic.ResolveExactCampaignFormationIndex(
+                entryState,
+                Mission.Current,
+                side);
         }
 
         private static bool TryResolveEntryBodyProperties(

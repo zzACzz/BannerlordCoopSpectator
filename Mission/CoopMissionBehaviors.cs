@@ -20,6 +20,7 @@ using CoopSpectator.Campaign; // BattleRosterFileHelper (варіант A: roste
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure; // ModLogger, UiFeedback
 using CoopSpectator.Infrastructure.LordsHall;
+using CoopSpectator.Infrastructure.SallyOut;
 using CoopSpectator.MissionModels;
 using CoopSpectator.Network.Messages;
 using CoopSpectator.Patches;
@@ -3745,12 +3746,23 @@ namespace CoopSpectator.MissionBehaviors
         private static string _exactNativeClientVisualOverlayQueueSnapshotKey = string.Empty;
         private static readonly HashSet<int> _battlePhaseHeldFormationKeys = new HashSet<int>();
         private static readonly Dictionary<int, int> _battlePhaseHeldFormationUnitCounts = new Dictionary<int, int>();
+        private static readonly Dictionary<int, FiringOrder> _battlePhasePreviousFiringOrdersByFormationKey =
+            new Dictionary<int, FiringOrder>();
         private static readonly HashSet<string> _loggedAutomatedMaterializedEntrySkipIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<string> _loggedSuppressedMaterializedEquipmentKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<string> _loggedManualMaterializedSiegeRespawnRejectKeys = new HashSet<string>(StringComparer.Ordinal);
         private static readonly HashSet<string> _projectileLaunchDiagnosticKeys = new HashSet<string>(StringComparer.Ordinal);
         private const int ProjectileLaunchDiagnosticBudget = 64;
+        private static readonly EquipmentIndex[] SallyOutExactPreSpawnWeaponSlots =
+        {
+            EquipmentIndex.Weapon0,
+            EquipmentIndex.Weapon1,
+            EquipmentIndex.Weapon2,
+            EquipmentIndex.Weapon3
+        };
         private static Mission _lastBattlePhaseAiHoldMission;
+        private static Mission _validatedSallyOutExactInitialMaterializationMission;
+        private static string _validatedSallyOutExactInitialMaterializationSummary = string.Empty;
         private static Mission _lastMaterializedArmyMission;
         private static Mission _lastClientBattleSnapshotRefreshMission;
         private static string _lastClientMountedHeroRuntimeBundleMissionKey = string.Empty;
@@ -4915,6 +4927,7 @@ namespace CoopSpectator.MissionBehaviors
             _clientCreateAgentExactVisualStateByAgentIndex.Clear();
             _battlePhaseHeldFormationKeys.Clear();
             _battlePhaseHeldFormationUnitCounts.Clear();
+            _battlePhasePreviousFiringOrdersByFormationKey.Clear();
             _loggedAutomatedMaterializedEntrySkipIds.Clear();
             _loggedSuppressedMaterializedEquipmentKeys.Clear();
             _loggedManualMaterializedSiegeRespawnRejectKeys.Clear();
@@ -6341,6 +6354,7 @@ namespace CoopSpectator.MissionBehaviors
             _pendingClientExactVisualSelectionPauseSticky = false;
             _battlePhaseHeldFormationKeys.Clear();
             _battlePhaseHeldFormationUnitCounts.Clear();
+            _battlePhasePreviousFiringOrdersByFormationKey.Clear();
             _loggedAutomatedMaterializedEntrySkipIds.Clear();
             _loggedSuppressedMaterializedEquipmentKeys.Clear();
             _loggedManualMaterializedSiegeRespawnRejectKeys.Clear();
@@ -6815,6 +6829,7 @@ namespace CoopSpectator.MissionBehaviors
             _loggedManualMaterializedSiegeRespawnRejectKeys.Clear();
             _battlePhaseHeldFormationKeys.Clear();
             _battlePhaseHeldFormationUnitCounts.Clear();
+            _battlePhasePreviousFiringOrdersByFormationKey.Clear();
             _lastBattlePhaseAiHoldMission = null;
             _lastAppliedBattlePhaseAiHold = null;
             _lastAppliedFormationHoldPhase = null;
@@ -11676,9 +11691,9 @@ namespace CoopSpectator.MissionBehaviors
                 string.Equals(trackedEntryId, entryId, StringComparison.OrdinalIgnoreCase) &&
                 hadTrackedSide &&
                 trackedSide == side;
+            RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
             if (!alreadyTrackedSameAgent)
             {
-                RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
                 if (entryState != null)
                 {
                     RegisterMaterializedBattleResultEntry(agent, entryState, side);
@@ -11699,9 +11714,37 @@ namespace CoopSpectator.MissionBehaviors
                 }
             }
 
+            TryAlignExactCampaignNativeAgentFormation(agent, entryState, side);
+
             if (applySnapshotOverlay)
                 TryApplyExactCampaignSnapshotOverlayToNativeAgent(agent, entryId, source);
             return !alreadyTrackedSameAgent;
+        }
+
+        private static bool TryAlignExactCampaignNativeAgentFormation(
+            Agent agent,
+            RosterEntryState entryState,
+            BattleSideEnum side)
+        {
+            if (agent?.Mission == null || agent.Team == null || entryState == null)
+                return false;
+
+            int formationIndex = ResolveExactCampaignFormationIndex(
+                entryState,
+                agent.Mission,
+                side);
+            if (formationIndex < 0 || formationIndex >= (int)FormationClass.NumberOfRegularFormations)
+                return false;
+
+            Formation targetFormation = agent.Team.GetFormation((FormationClass)formationIndex);
+            if (targetFormation == null || ReferenceEquals(agent.Formation, targetFormation))
+                return false;
+
+            agent.Formation = targetFormation;
+            agent.ForceUpdateCachedAndFormationValues(
+                updateOnlyMovement: false,
+                arrangementChangeAllowed: false);
+            return true;
         }
 
         private static bool IsClientExactCampaignVisualOverlayRuntime(Mission mission)
@@ -12412,6 +12455,8 @@ namespace CoopSpectator.MissionBehaviors
                     " Source=" + (source ?? "unknown"));
             }
             bool exactSnapshotHasWeapons = HasAnySnapshotWeapons(entryState);
+            bool suppressClientLiveWeaponRefresh =
+                clientVisualOnly && IsClientExactVisualWatchdogSource(source);
             bool requiresClientVisibleWeaponProjection =
                 clientVisualOnly &&
                 includeWeaponsForOverlayRefresh &&
@@ -12487,7 +12532,8 @@ namespace CoopSpectator.MissionBehaviors
             }
             if (clientVisualOnly && !clientHeroEntry && !includeWeaponsForOverlayRefresh)
                 clientTroopWeaponSeedReason = "weapon-seed-skipped:client-weapon-overlay-suppressed";
-            bool clientVisibleWeaponProjectionApplied = !requiresClientVisibleWeaponProjection;
+            bool clientVisibleWeaponProjectionApplied =
+                !requiresClientVisibleWeaponProjection || suppressClientLiveWeaponRefresh;
             bool clientMountedVisualProjectionApplied = !requiresClientMountedVisualProjection;
             bool clientVisualRefreshAlreadySatisfied =
                 clientVisualOnly &&
@@ -12500,7 +12546,8 @@ namespace CoopSpectator.MissionBehaviors
                     out clientVisualRefreshBypassReason);
             if (clientVisualRefreshAlreadySatisfied)
             {
-                clientVisibleWeaponProjectionApplied = !requiresClientVisibleWeaponProjection;
+                clientVisibleWeaponProjectionApplied =
+                    !requiresClientVisibleWeaponProjection || suppressClientLiveWeaponRefresh;
                 clientMountedVisualProjectionApplied = true;
             }
             else if (clientVisualOnly)
@@ -12615,7 +12662,9 @@ namespace CoopSpectator.MissionBehaviors
                                 : equipmentMisses + ", agent-properties-refresh-failed:" + ex.GetType().Name;
                     }
 
-                    if (includeWeaponsForOverlayRefresh && spawnEquipment != null)
+                    if (!suppressClientLiveWeaponRefresh &&
+                        includeWeaponsForOverlayRefresh &&
+                        spawnEquipment != null)
                     {
                         string appliedInitialWieldRefresh = null;
                         string initialWieldIssue = null;
@@ -12841,7 +12890,9 @@ namespace CoopSpectator.MissionBehaviors
 
                 if (equipmentMisses.IndexOf("visual-refresh-failed:", StringComparison.Ordinal) < 0)
                 {
-                    if (clientVisualOnly && includeWeaponsForOverlayRefresh)
+                    if (clientVisualOnly &&
+                        includeWeaponsForOverlayRefresh &&
+                        !suppressClientLiveWeaponRefresh)
                     {
                         try
                         {
@@ -12904,6 +12955,7 @@ namespace CoopSpectator.MissionBehaviors
 
                     bool shouldRunClientLiveWieldRefresh =
                         clientVisualOnly &&
+                        !suppressClientLiveWeaponRefresh &&
                         spawnEquipment != null &&
                         (includeWeaponsForOverlayRefresh || requiresClientVisibleWeaponProjection);
                     if (shouldRunClientLiveWieldRefresh)
@@ -13091,6 +13143,12 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return true;
+        }
+
+        private static bool IsClientExactVisualWatchdogSource(string source)
+        {
+            return !string.IsNullOrWhiteSpace(source) &&
+                   source.IndexOf("watchdog", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private static bool TryRefreshClientOverlayLiveWeaponWieldState(
@@ -13862,6 +13920,29 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            if (SallyOutScenarioContract.IsSallyOutScenario(scenarioContext))
+            {
+                if (!ExactCampaignArmyBootstrap.IsInitialSpawnMaterializationComplete(
+                        mission,
+                        out string initialSpawnDiagnostics))
+                {
+                    readinessSource = "sally-out-initial-spawn-pending " + initialSpawnDiagnostics;
+                    return false;
+                }
+
+                if (!TryValidateSallyOutExactInitialMaterialization(
+                        mission,
+                        out string exactMaterializationDiagnostics))
+                {
+                    readinessSource = "sally-out-exact-materialization-pending " + exactMaterializationDiagnostics;
+                    return false;
+                }
+            }
+
             attackerActive = CountActiveTeamAgents(mission, BattleSideEnum.Attacker);
             defenderActive = CountActiveTeamAgents(mission, BattleSideEnum.Defender);
             readinessSource =
@@ -13869,6 +13950,227 @@ namespace CoopSpectator.MissionBehaviors
                 " MissionTeamAttacker=" + attackerActive +
                 " MissionTeamDefender=" + defenderActive;
             return attackerActive > 0 && defenderActive > 0;
+        }
+
+        private static bool TryValidateSallyOutExactInitialMaterialization(
+            Mission mission,
+            out string diagnostics)
+        {
+            if (mission == null)
+            {
+                diagnostics = "mission-null";
+                return false;
+            }
+
+            if (ReferenceEquals(_validatedSallyOutExactInitialMaterializationMission, mission))
+            {
+                diagnostics = _validatedSallyOutExactInitialMaterializationSummary;
+                return true;
+            }
+
+            int validatedAgentCount = 0;
+            int validatedMountedAgentCount = 0;
+            int attackerAgentCount = 0;
+            int defenderAgentCount = 0;
+            foreach (Team team in mission.Teams)
+            {
+                if (team == null ||
+                    ReferenceEquals(team, mission.SpectatorTeam) ||
+                    (team.Side != BattleSideEnum.Attacker && team.Side != BattleSideEnum.Defender))
+                {
+                    continue;
+                }
+
+                foreach (Agent agent in team.ActiveAgents)
+                {
+                    if (agent == null || !agent.IsActive() || agent.IsMount)
+                        continue;
+
+                    if (!(agent.Origin is ExactCampaignSnapshotAgentOrigin exactOrigin) ||
+                        string.IsNullOrWhiteSpace(exactOrigin.EntryId))
+                    {
+                        diagnostics =
+                            "exact-origin-missing AgentIndex=" + agent.Index +
+                            " TroopId=" + (agent.Character?.StringId ?? "null");
+                        return false;
+                    }
+
+                    string entryId = exactOrigin.EntryId;
+                    if (!CoopSpectator.Patches.ExactCampaignPreSpawnLoadoutPatch.WasEquipmentInjectedForEntry(entryId))
+                    {
+                        diagnostics =
+                            "pre-spawn-equipment-not-injected AgentIndex=" + agent.Index +
+                            " EntryId=" + entryId;
+                        return false;
+                    }
+
+                    if (!ExactTransferContractRuntimeCache.TryGetContract(
+                            entryId,
+                            out ExactTransferSpawnContract contract) ||
+                        contract == null)
+                    {
+                        diagnostics =
+                            "exact-contract-missing AgentIndex=" + agent.Index +
+                            " EntryId=" + entryId;
+                        return false;
+                    }
+
+                    if (!ExactTransferContractRuntimeCache.TryGetValidation(
+                            entryId,
+                            out ExactTransferValidationResult validation) ||
+                        validation?.IsValid != true)
+                    {
+                        diagnostics =
+                            "exact-contract-invalid AgentIndex=" + agent.Index +
+                            " EntryId=" + entryId;
+                        return false;
+                    }
+
+                    if (!TryValidateSallyOutExactPreSpawnEquipment(
+                            agent,
+                            contract,
+                            out string equipmentMismatch))
+                    {
+                        diagnostics =
+                            "exact-equipment-mismatch AgentIndex=" + agent.Index +
+                            " EntryId=" + entryId +
+                            " Mismatch=" + equipmentMismatch;
+                        return false;
+                    }
+
+                    validatedAgentCount++;
+                    if (contract.Mount?.IsMounted == true)
+                        validatedMountedAgentCount++;
+                    if (team.Side == BattleSideEnum.Attacker)
+                        attackerAgentCount++;
+                    else
+                        defenderAgentCount++;
+                }
+            }
+
+            if (validatedAgentCount <= 0 || attackerAgentCount <= 0 || defenderAgentCount <= 0)
+            {
+                diagnostics =
+                    "exact-agent-universe-incomplete" +
+                    " Total=" + validatedAgentCount +
+                    " Attacker=" + attackerAgentCount +
+                    " Defender=" + defenderAgentCount;
+                return false;
+            }
+
+            _validatedSallyOutExactInitialMaterializationMission = mission;
+            _validatedSallyOutExactInitialMaterializationSummary =
+                "validated" +
+                " Total=" + validatedAgentCount +
+                " Mounted=" + validatedMountedAgentCount +
+                " Attacker=" + attackerAgentCount +
+                " Defender=" + defenderAgentCount;
+            diagnostics = _validatedSallyOutExactInitialMaterializationSummary;
+            return true;
+        }
+
+        private static bool TryValidateSallyOutExactPreSpawnEquipment(
+            Agent agent,
+            ExactTransferSpawnContract contract,
+            out string mismatch)
+        {
+            mismatch = "none";
+            Equipment expectedEquipment = contract?.Equipment?.SpawnEquipment;
+            Equipment actualEquipment = agent?.SpawnEquipment;
+            if (expectedEquipment == null || actualEquipment == null)
+            {
+                mismatch = expectedEquipment == null
+                    ? "expected-equipment-null"
+                    : "actual-equipment-null";
+                return false;
+            }
+
+            if (contract.Equipment.IncludeWeaponsInPreSpawn)
+            {
+                foreach (EquipmentIndex slot in SallyOutExactPreSpawnWeaponSlots)
+                {
+                    if (!DoesSallyOutExactPreSpawnSlotMatch(expectedEquipment, actualEquipment, slot, out mismatch))
+                        return false;
+                }
+            }
+
+            if (contract.Equipment.IncludeArmorVisualsInPreSpawn &&
+                (!DoesSallyOutExactPreSpawnSlotMatch(expectedEquipment, actualEquipment, EquipmentIndex.Head, out mismatch) ||
+                 !DoesSallyOutExactPreSpawnSlotMatch(expectedEquipment, actualEquipment, EquipmentIndex.Body, out mismatch) ||
+                 !DoesSallyOutExactPreSpawnSlotMatch(expectedEquipment, actualEquipment, EquipmentIndex.Leg, out mismatch) ||
+                 !DoesSallyOutExactPreSpawnSlotMatch(expectedEquipment, actualEquipment, EquipmentIndex.Gloves, out mismatch)))
+            {
+                return false;
+            }
+
+            if (contract.Equipment.IncludeCapeInPreSpawn &&
+                !DoesSallyOutExactPreSpawnSlotMatch(
+                    expectedEquipment,
+                    actualEquipment,
+                    EquipmentIndex.Cape,
+                    out mismatch))
+            {
+                return false;
+            }
+
+            if (!contract.Equipment.IncludeMountVisualsInPreSpawn)
+                return true;
+
+            if (!DoesSallyOutExactPreSpawnSlotMatch(
+                    expectedEquipment,
+                    actualEquipment,
+                    EquipmentIndex.Horse,
+                    out mismatch) ||
+                !DoesSallyOutExactPreSpawnSlotMatch(
+                    expectedEquipment,
+                    actualEquipment,
+                    EquipmentIndex.HorseHarness,
+                    out mismatch))
+            {
+                return false;
+            }
+
+            if (contract.Mount?.IsMounted != true)
+                return true;
+
+            Agent mountAgent = agent.MountAgent;
+            if (mountAgent?.SpawnEquipment == null)
+            {
+                mismatch = "mount-agent-link-missing";
+                return false;
+            }
+
+            return DoesSallyOutExactPreSpawnSlotMatch(
+                       expectedEquipment,
+                       mountAgent.SpawnEquipment,
+                       EquipmentIndex.Horse,
+                       out mismatch) &&
+                   DoesSallyOutExactPreSpawnSlotMatch(
+                       expectedEquipment,
+                       mountAgent.SpawnEquipment,
+                       EquipmentIndex.HorseHarness,
+                       out mismatch);
+        }
+
+        private static bool DoesSallyOutExactPreSpawnSlotMatch(
+            Equipment expectedEquipment,
+            Equipment actualEquipment,
+            EquipmentIndex slot,
+            out string mismatch)
+        {
+            string expectedItemId = expectedEquipment?[slot].Item?.StringId ?? string.Empty;
+            string actualItemId = actualEquipment?[slot].Item?.StringId ?? string.Empty;
+            if (string.Equals(expectedItemId, actualItemId, StringComparison.OrdinalIgnoreCase))
+            {
+                mismatch = "none";
+                return true;
+            }
+
+            mismatch =
+                slot +
+                " Expected=" + (string.IsNullOrWhiteSpace(expectedItemId) ? "empty" : expectedItemId) +
+                " Actual=" + (string.IsNullOrWhiteSpace(actualItemId) ? "empty" : actualItemId);
+            return false;
         }
 
         private static void TryConsumeBattlePhaseRequests(Mission mission)
@@ -14267,6 +14569,7 @@ namespace CoopSpectator.MissionBehaviors
             {
                 _battlePhaseHeldFormationKeys.Clear();
                 _battlePhaseHeldFormationUnitCounts.Clear();
+                _battlePhasePreviousFiringOrdersByFormationKey.Clear();
                 _lastAppliedFormationHoldPhase = null;
             }
 
@@ -14305,6 +14608,9 @@ namespace CoopSpectator.MissionBehaviors
                             wasHeld)
                             continue;
 
+                        if (!wasHeld)
+                            _battlePhasePreviousFiringOrdersByFormationKey[formationKey] = formation.FiringOrder;
+
                         formation.SetMovementOrder(MovementOrder.MovementOrderStop);
                         formation.SetFiringOrder(FiringOrder.FiringOrderHoldYourFire);
                         formation.SetControlledByAI(false, false);
@@ -14320,6 +14626,11 @@ namespace CoopSpectator.MissionBehaviors
                         // cannot rely on the held-key set alone.
                         bool wasHeld = _battlePhaseHeldFormationKeys.Remove(formationKey);
                         _battlePhaseHeldFormationUnitCounts.Remove(formationKey);
+                        bool hadPreviousFiringOrder =
+                            _battlePhasePreviousFiringOrdersByFormationKey.TryGetValue(
+                                formationKey,
+                                out FiringOrder previousFiringOrder);
+                        _battlePhasePreviousFiringOrdersByFormationKey.Remove(formationKey);
                         bool isPlayerOwnedFormation = formation.PlayerOwner != null;
                         int pulsedFormationAgents = 0;
                         if (useNativeLordsHallController)
@@ -14330,12 +14641,26 @@ namespace CoopSpectator.MissionBehaviors
                         }
                         else if (isPlayerOwnedFormation)
                         {
+                            if (wasHeld)
+                            {
+                                formation.SetFiringOrder(
+                                    hadPreviousFiringOrder
+                                        ? previousFiringOrder
+                                        : FiringOrder.FiringOrderFireAtWill);
+                            }
                             formation.SetControlledByAI(false, false);
                         }
                         else if (useNativeExactSiegeFormationAi)
                         {
                             // Exact campaign siege parity: enabling formation AI applies the
                             // active native behavior order. Do not replace it with a forced charge.
+                            if (wasHeld)
+                            {
+                                formation.SetFiringOrder(
+                                    hadPreviousFiringOrder
+                                        ? previousFiringOrder
+                                        : FiringOrder.FiringOrderFireAtWill);
+                            }
                             formation.SetControlledByAI(true, true);
                             ExactSiegeMoraleDiagnostics.RecordFormationAiHandoff(
                                 formation,
@@ -14391,6 +14716,11 @@ namespace CoopSpectator.MissionBehaviors
                 {
                     if (!currentFormationKeys.Contains(key))
                         _battlePhaseHeldFormationUnitCounts.Remove(key);
+                }
+                foreach (int key in _battlePhasePreviousFiringOrdersByFormationKey.Keys.ToArray())
+                {
+                    if (!currentFormationKeys.Contains(key))
+                        _battlePhasePreviousFiringOrdersByFormationKey.Remove(key);
                 }
             }
 
@@ -19663,14 +19993,14 @@ namespace CoopSpectator.MissionBehaviors
         {
             FormationClass fallbackFormationClass = troop?.DefaultFormationClass ?? FormationClass.Infantry;
             formationSource = "troop-default";
-            if (!IsCampaignMirrorAllCampaignAiRuntime())
-                return fallbackFormationClass;
-
             if (TryParseCampaignFormationClass(entryState?.CampaignFormationClass, out FormationClass snapshotFormationClass))
             {
                 formationSource = "snapshot-campaign";
                 return snapshotFormationClass;
             }
+
+            if (!IsCampaignMirrorAllCampaignAiRuntime())
+                return fallbackFormationClass;
 
             BasicCharacterObject originalCharacter = TryResolveCampaignMirrorOriginalCharacter(entryState);
             if (originalCharacter != null &&
@@ -19688,6 +20018,25 @@ namespace CoopSpectator.MissionBehaviors
 
             formationSource = "troop-default-fallback";
             return fallbackFormationClass;
+        }
+
+        internal static int ResolveExactCampaignFormationIndex(
+            RosterEntryState entryState,
+            Mission mission,
+            BattleSideEnum side)
+        {
+            BasicCharacterObject troop = BattleSnapshotRuntimeState.TryResolveCharacterObject(entryState?.EntryId);
+            if (troop == null)
+                return -1;
+
+            FormationClass formationClass = ResolveSiegeAwareFormationClass(
+                mission,
+                side,
+                troop,
+                entryState);
+            return IsRegularFormationClass(formationClass)
+                ? (int)formationClass
+                : -1;
         }
 
         private static bool TryParseCampaignFormationClass(string value, out FormationClass formationClass)
@@ -23169,9 +23518,12 @@ namespace CoopSpectator.MissionBehaviors
             ReconcileMaterializedBattleResultStateFromMission(mission, source);
 
             bool isLordsHallStage = LordsHallScenarioContract.IsLordsHallScenario(snapshot?.ScenarioContext);
+            bool isSallyOutStage = SallyOutScenarioContract.IsSallyOutScenario(snapshot?.ScenarioContext);
             string battleStage = isLordsHallStage
                 ? "LordsHall"
-                : snapshot?.ScenarioContext?.IsSiegeBattle == true ? "SiegeAssault" : "Battle";
+                : isSallyOutStage
+                    ? SallyOutScenarioContract.ResultStage
+                    : snapshot?.ScenarioContext?.IsSiegeBattle == true ? "SiegeAssault" : "Battle";
 
             var result = new CoopBattleResultBridgeFile.BattleResultSnapshot
             {
@@ -23249,6 +23601,7 @@ namespace CoopSpectator.MissionBehaviors
                     : 20;
             result.DefenderPushedBack =
                 !isLordsHallStage &&
+                !isSallyOutStage &&
                 snapshot?.ScenarioContext?.IsSiegeBattle == true &&
                 string.Equals(result.WinnerSide, BattleSideEnum.Attacker.ToString(), StringComparison.OrdinalIgnoreCase) &&
                 result.RoutedDefenderCount >= successfulPullBackCount;

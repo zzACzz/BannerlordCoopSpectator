@@ -1,4 +1,5 @@
 using System;
+using CoopSpectator.Infrastructure.SallyOut;
 using CoopSpectator.MissionBehaviors;
 using CoopSpectator.Network.Messages;
 using TaleWorlds.Core;
@@ -187,6 +188,11 @@ namespace CoopSpectator.Infrastructure
                 : includeWeapons || includeCape;
             if (useDedicatedSafeStringIdExactEquipmentPath)
             {
+                bool allowSallyOutFullExactPreSpawn =
+                    ShouldAllowSallyOutFullExactPreSpawnEquipmentInjectionOnDedicated(
+                        useContractDrivenPreSpawnPath,
+                        exactTransferContract,
+                        exactTransferValidation);
                 bool allowExactSiegePreSpawnEquipmentInjection =
                     ShouldAllowExactSiegePreSpawnEquipmentInjectionOnDedicated(
                         useContractDrivenPreSpawnPath,
@@ -198,6 +204,23 @@ namespace CoopSpectator.Infrastructure
                         useContractDrivenPreSpawnPath,
                         exactTransferContract,
                         exactTransferValidation);
+                if (allowSallyOutFullExactPreSpawn)
+                {
+                    ApplySallyOutFullExactPreSpawnProfile(
+                        exactTransferContract,
+                        payloadDiagnostic,
+                        ref includeWeapons,
+                        ref includeArmorVisuals,
+                        ref includeCape,
+                        ref includeMountVisuals,
+                        ref canInjectBodyPropertiesAtCreateAgentTime);
+                    weaponDecisionReason = includeWeapons
+                        ? "sally-out full exact pre-spawn weapon policy"
+                        : "sally-out full exact pre-spawn weapon policy disabled";
+                    capeDecisionReason = includeCape
+                        ? "sally-out full exact pre-spawn cape policy"
+                        : "sally-out full exact pre-spawn cape policy disabled";
+                }
                 if (allowExactSiegeWithDeploymentFullArmyPreSpawn)
                 {
                     ApplyExactSiegeWithDeploymentFullArmyPreSpawnProfile(
@@ -215,7 +238,12 @@ namespace CoopSpectator.Infrastructure
                         ? "exact campaign army pre-spawn cape policy"
                         : "exact campaign army pre-spawn cape policy disabled";
                 }
-                if (allowExactSiegePreSpawnEquipmentInjection)
+                if (allowSallyOutFullExactPreSpawn)
+                {
+                    injectEquipment = exactTransferContract?.SpawnPolicy?.RequirePreSpawnInjection == true &&
+                                      (includeWeapons || includeCape || includeArmorVisuals || includeMountVisuals);
+                }
+                else if (allowExactSiegePreSpawnEquipmentInjection)
                 {
                     injectEquipment = exactTransferContract?.SpawnPolicy?.RequirePreSpawnInjection == true &&
                                       (includeWeapons || includeCape || includeArmorVisuals || includeMountVisuals);
@@ -378,6 +406,32 @@ namespace CoopSpectator.Infrastructure
             return true;
         }
 
+        private static bool ShouldAllowSallyOutFullExactPreSpawnEquipmentInjectionOnDedicated(
+            bool useContractDrivenPreSpawnPath,
+            ExactTransferSpawnContract contract,
+            ExactTransferValidationResult validation)
+        {
+            if (!useContractDrivenPreSpawnPath ||
+                contract?.SpawnPolicy?.RequirePreSpawnInjection != true ||
+                validation?.IsValid != true)
+            {
+                return false;
+            }
+
+            Mission mission = Mission.Current;
+            if (mission == null || !ExactCampaignArmyBootstrap.IsActive(mission))
+                return false;
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            return SallyOutScenarioContract.IsValidatedScenario(
+                scenarioContext,
+                mission.SceneName ?? string.Empty,
+                out _);
+        }
+
         private static void ApplyExactSiegeWithDeploymentFullArmyPreSpawnProfile(
             ExactTransferSpawnContract contract,
             ExactCreateAgentPayloadDiagnosticDecision payloadDiagnostic,
@@ -407,6 +461,44 @@ namespace CoopSpectator.Infrastructure
             payloadDiagnostic.IncludeArmorVisuals = includeArmorVisuals;
             payloadDiagnostic.IncludeCape = includeCape;
             payloadDiagnostic.IncludeMountVisuals = false;
+            payloadDiagnostic.IncludeBodyProperties = includeBodyProperties;
+        }
+
+        private static void ApplySallyOutFullExactPreSpawnProfile(
+            ExactTransferSpawnContract contract,
+            ExactCreateAgentPayloadDiagnosticDecision payloadDiagnostic,
+            ref bool includeWeapons,
+            ref bool includeArmorVisuals,
+            ref bool includeCape,
+            ref bool includeMountVisuals,
+            ref bool includeBodyProperties)
+        {
+            includeWeapons = contract?.Equipment?.IncludeWeaponsInPreSpawn == true;
+            includeArmorVisuals = contract?.Equipment?.IncludeArmorVisualsInPreSpawn == true;
+            includeCape = contract?.Equipment?.IncludeCapeInPreSpawn == true;
+            includeMountVisuals = contract?.Equipment?.IncludeMountVisualsInPreSpawn == true;
+            includeBodyProperties = contract?.Body?.HasExactBodyProperties == true;
+
+            if (payloadDiagnostic == null)
+                return;
+
+            bool requiresServerSpawnBaseline =
+                payloadDiagnostic.RequiresServerSpawnBaselineOnClientCreateAgent ||
+                (includeWeapons && !payloadDiagnostic.WeaponLayoutMatchesNativeTemplate);
+            payloadDiagnostic.IsActive = true;
+            payloadDiagnostic.Reason = "sally-out-full-exact-pre-spawn";
+            payloadDiagnostic.RequestedProfile = ExactCreateAgentPayloadDiagnosticProfile.FullExact;
+            payloadDiagnostic.Profile = ExactCreateAgentPayloadDiagnosticProfile.FullExact;
+            payloadDiagnostic.RequestedProfileClientSafe = !requiresServerSpawnBaseline;
+            payloadDiagnostic.ClientCreateAgentSafe = !requiresServerSpawnBaseline;
+            payloadDiagnostic.ClientCreateAgentSafeReason = requiresServerSpawnBaseline
+                ? "sally-out-full-exact-server-spawn-baseline-required"
+                : "sally-out-full-exact-server-pre-spawn";
+            payloadDiagnostic.RequiresServerSpawnBaselineOnClientCreateAgent = requiresServerSpawnBaseline;
+            payloadDiagnostic.IncludeWeapons = includeWeapons;
+            payloadDiagnostic.IncludeArmorVisuals = includeArmorVisuals;
+            payloadDiagnostic.IncludeCape = includeCape;
+            payloadDiagnostic.IncludeMountVisuals = includeMountVisuals;
             payloadDiagnostic.IncludeBodyProperties = includeBodyProperties;
         }
 
