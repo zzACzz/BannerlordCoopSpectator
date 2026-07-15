@@ -329,6 +329,7 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                         ExactCampaignNetworkObjectBootstrapPatch.Apply(harmony);
                         ClientChangeCultureCanonicalizationPatch.Apply(harmony);
                         MultiplayerCharacterClassFallbackPatch.Apply(harmony);
+                        MultiplayerHeroClassOverridePatch.Apply(harmony);
                         CampaignCombatProfileAgentStatsPatch.Apply(harmony);
                         CoopBattleDisplayNameConsumerPatch.Apply(harmony);
                     }

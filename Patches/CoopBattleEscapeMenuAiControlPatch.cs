@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
-using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.MissionBehaviors;
 using HarmonyLib;
@@ -47,7 +46,7 @@ namespace CoopSpectator.Patches
             object __instance,
             ref List<EscapeMenuItemVM> __result)
         {
-            if (__instance == null || __result == null || !ShouldShowDelegateControlItem())
+            if (__instance == null || __result == null || !ShouldAddDelegateControlItem())
                 return;
 
             int insertIndex = Math.Min(1, __result.Count);
@@ -88,30 +87,9 @@ namespace CoopSpectator.Patches
                     false));
         }
 
-        private static bool ShouldShowDelegateControlItem()
+        private static bool ShouldAddDelegateControlItem()
         {
-            if (CoopBattleAgentControlRuntimeState.IsClientAiObservationOrTransitionActive() ||
-                !TryResolveLocalControlledAgent(out Mission mission, out _, out Agent controlledAgent))
-            {
-                return false;
-            }
-
-            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status =
-                CoopBattleEntryStatusBridgeFile.ReadStatus();
-            if (status == null ||
-                !string.Equals(
-                    status.BattlePhase,
-                    nameof(CoopBattlePhase.BattleActive),
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            string statusMissionName = status.MissionName ?? string.Empty;
-            string currentMissionName = mission.SceneName ?? string.Empty;
-            return (string.IsNullOrWhiteSpace(statusMissionName) ||
-                    string.Equals(statusMissionName, currentMissionName, StringComparison.OrdinalIgnoreCase)) &&
-                   controlledAgent.IsActive();
+            return TryResolveAgentControlMission(out _);
         }
 
         private static bool CanDelegateLocalAgentToAi(
@@ -127,7 +105,33 @@ namespace CoopSpectator.Patches
                 return false;
             }
 
-            if (!TryResolveLocalControlledAgent(out _, out MissionPeer missionPeer, out Agent candidate))
+            if (!TryResolveAgentControlMission(out Mission mission))
+            {
+                unavailableReason = new TextObject(
+                    "{=CoopDelegateControlMissionUnavailable}AI control is unavailable in the current mission.");
+                return false;
+            }
+
+            CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status =
+                CoopBattleEntryStatusBridgeFile.ReadStatus();
+            string statusMissionName = status?.MissionName ?? string.Empty;
+            string currentMissionName = mission.SceneName ?? string.Empty;
+            bool statusMatchesMission =
+                string.IsNullOrWhiteSpace(statusMissionName) ||
+                string.Equals(statusMissionName, currentMissionName, StringComparison.OrdinalIgnoreCase);
+            if (status == null ||
+                !statusMatchesMission ||
+                !string.Equals(
+                    status.BattlePhase,
+                    nameof(CoopBattlePhase.BattleActive),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                unavailableReason = new TextObject(
+                    "{=CoopDelegateControlBattleNotActive}AI control can be delegated after the battle starts.");
+                return false;
+            }
+
+            if (!TryResolveLocalControlledAgent(mission, out MissionPeer missionPeer, out Agent candidate))
             {
                 unavailableReason = new TextObject(
                     "{=CoopDelegateControlAgentUnavailable}The current fighter is not available for AI control.");
@@ -145,23 +149,26 @@ namespace CoopSpectator.Patches
             return true;
         }
 
-        private static bool TryResolveLocalControlledAgent(
-            out Mission mission,
-            out MissionPeer missionPeer,
-            out Agent controlledAgent)
+        private static bool TryResolveAgentControlMission(out Mission mission)
         {
             mission = null;
-            missionPeer = null;
-            controlledAgent = null;
             if (!GameNetwork.IsClient || !GameNetwork.IsSessionActive)
                 return false;
 
             mission = Mission.Current;
-            if (mission == null ||
-                !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
-            {
+            return mission != null &&
+                   mission.GetMissionBehavior<CoopMissionNetworkBridge>() != null;
+        }
+
+        private static bool TryResolveLocalControlledAgent(
+            Mission mission,
+            out MissionPeer missionPeer,
+            out Agent controlledAgent)
+        {
+            missionPeer = null;
+            controlledAgent = null;
+            if (mission == null)
                 return false;
-            }
 
             missionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
             controlledAgent = missionPeer?.ControlledAgent ?? Agent.Main;
