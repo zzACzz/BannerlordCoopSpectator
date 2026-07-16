@@ -56,6 +56,7 @@ namespace CoopSpectator.Patches
             PatchKillNotificationUiHandler(harmony);
             PatchKillFeedVm(harmony);
             PatchGeneralKillNotificationItemVm(harmony);
+            PatchCombatLogDataBuilder(harmony);
         }
 
         private static void PatchMissionFocusableObjectInformationProvider(Harmony harmony)
@@ -131,6 +132,18 @@ namespace CoopSpectator.Patches
                 nameof(MPGeneralKillNotificationItemVM_InitDeathProperties_Postfix),
                 prefix: false,
                 "MPGeneralKillNotificationItemVM.InitDeathProperties");
+        }
+
+        private static void PatchCombatLogDataBuilder(Harmony harmony)
+        {
+            TryPatch(
+                harmony,
+                typeof(Mission.MissionNetworkHelper),
+                "GetCombatLogDataForCombatLogNetworkMessage",
+                new[] { typeof(NetworkMessages.FromServer.CombatLogNetworkMessage) },
+                nameof(MissionNetworkHelper_GetCombatLogDataForCombatLogNetworkMessage_Postfix),
+                prefix: false,
+                "MissionNetworkHelper.GetCombatLogDataForCombatLogNetworkMessage");
         }
 
         private static Type ResolveTypeByName(string typeName)
@@ -591,6 +604,39 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static void MissionNetworkHelper_GetCombatLogDataForCombatLogNetworkMessage_Postfix(
+            NetworkMessages.FromServer.CombatLogNetworkMessage message,
+            ref CombatLogData __result)
+        {
+            try
+            {
+                Mission mission = Mission.Current;
+                if (!ShouldRunForCurrentMission(mission) || message == null)
+                    return;
+
+                Agent victimAgent = Mission.MissionNetworkHelper.GetAgentFromIndex(
+                    message.VictimAgentIndex,
+                    canBeNull: true);
+                if (victimAgent == null || victimAgent.IsMount)
+                    return;
+
+                if (CoopMissionSpawnLogic.TryResolveExactDisplayNameForAgent(
+                        victimAgent,
+                        out _,
+                        out TextObject exactName) &&
+                    exactName != null)
+                {
+                    string resolvedName = exactName.ToString();
+                    if (!string.IsNullOrWhiteSpace(resolvedName))
+                        __result.VictimAgentName = resolvedName;
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopBattleDisplayNameConsumerPatch: combat-log exact name postfix failed: " + ex.Message);
+            }
+        }
+
         private static bool ShouldRunForCurrentMission(Mission mission)
         {
             if (mission == null ||
@@ -651,6 +697,18 @@ namespace CoopSpectator.Patches
             {
                 exactResolutionReason = agent == null ? "AgentNull" : "MissionNotEligible";
                 return false;
+            }
+
+            if (CoopMissionSpawnLogic.TryResolveExactDisplayNameForAgent(
+                    agent,
+                    out entryId,
+                    out TextObject resolvedExactName) &&
+                resolvedExactName != null)
+            {
+                exactName = resolvedExactName.ToString();
+                exactResolutionReason = "ExactEntry";
+                entryResolutionSource = "CoopMissionSpawnLogic";
+                return !string.IsNullOrWhiteSpace(exactName);
             }
 
             bool entryResolved = TryResolveBattleOnlyEntryId(agent, out entryId, out entryResolutionSource);

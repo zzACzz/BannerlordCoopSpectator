@@ -282,12 +282,18 @@ namespace CoopSpectator.UI
             bool hasLocalControlledAgent,
             bool reconnectSelectionContractActive)
         {
+            BattleScenarioContextMessage scenarioContext = battleState?.ScenarioContext;
+            Mission mission = Mission.Current;
+            bool isFormationOnlyMountedScenario =
+                ExactCampaignCommanderDeploymentRuntime.IsFormationOnlyMountedScenario(
+                    mission,
+                    scenarioContext);
             if (!battleDataReady ||
                 hasLocalControlledAgent ||
                 reconnectSelectionContractActive ||
                 status == null ||
                 status.HasAgent ||
-                status.CanRespawn ||
+                (status.CanRespawn && !isFormationOnlyMountedScenario) ||
                 effectiveSide == BattleSideEnum.None ||
                 string.IsNullOrWhiteSpace(selectedEntryId) ||
                 effectiveSelectableEntryIds == null ||
@@ -296,9 +302,12 @@ namespace CoopSpectator.UI
                 return false;
             }
 
-            BattleScenarioContextMessage scenarioContext = battleState?.ScenarioContext;
-            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+            if (!ExactCampaignCommanderDeploymentRuntime.IsCommanderDeploymentScenario(
+                    mission,
+                    scenarioContext))
+            {
                 return false;
+            }
 
             string battlePhase = !string.IsNullOrWhiteSpace(status.BattlePhase)
                 ? status.BattlePhase
@@ -408,11 +417,11 @@ namespace CoopSpectator.UI
             if (!snapshot.BattleDataReady)
                 return string.Empty;
 
-            if (snapshot.CanSpawn)
-                return "Deploy into the selected living unit.";
+            if (snapshot.CanQueueSpawnAfterDeployment)
+                return "Confirm the selected unit and wait for deployment to finish.";
 
-            return snapshot.CanQueueSpawnAfterDeployment
-                ? "Confirm the selected unit and wait for deployment to finish."
+            return snapshot.CanSpawn
+                ? "Deploy into the selected living unit."
                 : "Choose a living unit, then deploy.";
         }
 

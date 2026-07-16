@@ -1099,6 +1099,12 @@ namespace CoopSpectator.MissionBehaviors
             BattleScenarioContextMessage scenarioContext =
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            if (ExactCampaignCommanderDeploymentRuntime
+                    .IsFormationOnlyMountedScenario(mission, scenarioContext))
+            {
+                return false;
+            }
+
             if (ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
                 return true;
 
@@ -1112,9 +1118,41 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
+        public static bool IsCoopCommanderDeploymentPlacementMission(Mission mission)
+        {
+            if (IsCoopSiegeDeploymentMission(mission))
+                return true;
+
+            if (mission == null ||
+                mission.Scene == null ||
+                !MissionMultiplayerCoopSiegeAssaultWithDeploymentMode.HasCoopSiegeRuntimeMarker(mission))
+            {
+                return false;
+            }
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            if (!ExactCampaignCommanderDeploymentRuntime
+                    .IsFormationOnlyMountedScenario(mission, scenarioContext))
+            {
+                return false;
+            }
+
+            if (GameNetwork.IsClient && !GameNetwork.IsServer)
+            {
+                return ExactCampaignCommanderDeploymentRuntime
+                    .IsClientManualFormationPlacementActive(mission);
+            }
+
+            return ExactCampaignCommanderDeploymentRuntime
+                .IsDeploymentRuntimeActive(mission);
+        }
+
         public static bool TryEnsureDeploymentPlanBoundaries(Mission mission, Team team, string source)
         {
-            if (!IsCoopSiegeDeploymentMission(mission) ||
+            if (!IsCoopCommanderDeploymentPlacementMission(mission) ||
                 team == null ||
                 team.Side == BattleSideEnum.None ||
                 !mission.GetDeploymentPlan<DefaultMissionDeploymentPlan>(out DefaultMissionDeploymentPlan deploymentPlan) ||
@@ -1198,7 +1236,7 @@ namespace CoopSpectator.MissionBehaviors
         {
             if (!GameNetwork.IsClient ||
                 GameNetwork.IsServer ||
-                !IsCoopSiegeDeploymentMission(mission) ||
+                !IsCoopCommanderDeploymentPlacementMission(mission) ||
                 team == null ||
                 team.Side == BattleSideEnum.None)
             {
@@ -5511,6 +5549,7 @@ namespace CoopSpectator.MissionBehaviors
                 if (!TryDecodeCommanderDeploymentFormationCompositionPayload(
                         assignmentBytes,
                         out List<CommanderDeploymentFormationComposition> compositionRecords,
+                        out bool preserveMountedClasses,
                         out string decodeError))
                 {
                     LogCommanderDeploymentAssignmentDiagnostics(
@@ -5535,7 +5574,8 @@ namespace CoopSpectator.MissionBehaviors
                     commanderAgent,
                     formationLayouts,
                     layoutFormations,
-                    compositionRecords);
+                    compositionRecords,
+                    preserveMountedClasses);
                 if (compositionApplied && hasCaptainAssignmentPayload)
                     ApplyDelegatedCaptainAssignmentSnapshot(mission, team, delegatedCaptainAssignments);
 
@@ -6363,9 +6403,11 @@ namespace CoopSpectator.MissionBehaviors
         private static bool TryDecodeCommanderDeploymentFormationCompositionPayload(
             byte[] assignmentBytes,
             out List<CommanderDeploymentFormationComposition> records,
+            out bool preserveMountedClasses,
             out string error)
         {
             records = new List<CommanderDeploymentFormationComposition>();
+            preserveMountedClasses = false;
             error = string.Empty;
 
             if (!IsCommanderDeploymentCompositionAssignmentPayload(assignmentBytes))
@@ -6376,16 +6418,32 @@ namespace CoopSpectator.MissionBehaviors
 
             byte payloadVersion = assignmentBytes[1];
             if (payloadVersion != CoopCommanderDeploymentFormationAssignmentsMessage.CompositionAssignmentPayloadVersion1 &&
-                payloadVersion != CoopCommanderDeploymentFormationAssignmentsMessage.CompositionAssignmentPayloadVersion)
+                payloadVersion != CoopCommanderDeploymentFormationAssignmentsMessage.CompositionAssignmentPayloadVersion &&
+                payloadVersion != CoopCommanderDeploymentFormationAssignmentsMessage.MountedCompositionAssignmentPayloadVersion)
             {
                 error = "unsupported-version:" + payloadVersion;
                 return false;
             }
 
             int recordCount = assignmentBytes[2];
-            int bytesPerRecord = payloadVersion == CoopCommanderDeploymentFormationAssignmentsMessage.CompositionAssignmentPayloadVersion1
-                ? CoopCommanderDeploymentFormationAssignmentsMessage.BytesPerCompositionAssignmentVersion1
-                : CoopCommanderDeploymentFormationAssignmentsMessage.BytesPerCompositionAssignment;
+            preserveMountedClasses =
+                payloadVersion == CoopCommanderDeploymentFormationAssignmentsMessage.MountedCompositionAssignmentPayloadVersion;
+            int bytesPerRecord;
+            if (payloadVersion == CoopCommanderDeploymentFormationAssignmentsMessage.CompositionAssignmentPayloadVersion1)
+            {
+                bytesPerRecord =
+                    CoopCommanderDeploymentFormationAssignmentsMessage.BytesPerCompositionAssignmentVersion1;
+            }
+            else if (preserveMountedClasses)
+            {
+                bytesPerRecord =
+                    CoopCommanderDeploymentFormationAssignmentsMessage.BytesPerMountedCompositionAssignment;
+            }
+            else
+            {
+                bytesPerRecord =
+                    CoopCommanderDeploymentFormationAssignmentsMessage.BytesPerCompositionAssignment;
+            }
             int expectedLength =
                 CoopCommanderDeploymentFormationAssignmentsMessage.CompositionAssignmentHeaderBytes +
                 recordCount * bytesPerRecord;
@@ -6401,12 +6459,25 @@ namespace CoopSpectator.MissionBehaviors
                 int formationIndex = assignmentBytes[offset++];
                 int infantryCount = ReadUInt16FromPayload(assignmentBytes, ref offset);
                 int rangedCount = ReadUInt16FromPayload(assignmentBytes, ref offset);
+                int cavalryCount = preserveMountedClasses
+                    ? ReadUInt16FromPayload(assignmentBytes, ref offset)
+                    : 0;
+                int horseArcherCount = preserveMountedClasses
+                    ? ReadUInt16FromPayload(assignmentBytes, ref offset)
+                    : 0;
                 TroopTraitsMask infantryFilter = TroopTraitsMask.Melee;
                 TroopTraitsMask rangedFilter = TroopTraitsMask.Ranged;
+                TroopTraitsMask cavalryFilter = TroopTraitsMask.Melee | TroopTraitsMask.Mount;
+                TroopTraitsMask horseArcherFilter = TroopTraitsMask.Ranged | TroopTraitsMask.Mount;
                 if (payloadVersion >= CoopCommanderDeploymentFormationAssignmentsMessage.CompositionAssignmentPayloadVersion)
                 {
                     infantryFilter = (TroopTraitsMask)ReadUInt16FromPayload(assignmentBytes, ref offset);
                     rangedFilter = (TroopTraitsMask)ReadUInt16FromPayload(assignmentBytes, ref offset);
+                    if (preserveMountedClasses)
+                    {
+                        cavalryFilter = (TroopTraitsMask)ReadUInt16FromPayload(assignmentBytes, ref offset);
+                        horseArcherFilter = (TroopTraitsMask)ReadUInt16FromPayload(assignmentBytes, ref offset);
+                    }
                 }
 
                 if (formationIndex < 0 ||
@@ -6419,8 +6490,12 @@ namespace CoopSpectator.MissionBehaviors
                     formationIndex,
                     infantryCount,
                     rangedCount,
+                    cavalryCount,
+                    horseArcherCount,
                     SanitizeCommanderDeploymentCompositionFilter(infantryFilter, FormationClass.Infantry),
-                    SanitizeCommanderDeploymentCompositionFilter(rangedFilter, FormationClass.Ranged)));
+                    SanitizeCommanderDeploymentCompositionFilter(rangedFilter, FormationClass.Ranged),
+                    SanitizeCommanderDeploymentCompositionFilter(cavalryFilter, FormationClass.Cavalry),
+                    SanitizeCommanderDeploymentCompositionFilter(horseArcherFilter, FormationClass.HorseArcher)));
             }
 
             if (records.Count <= 0)
@@ -6441,7 +6516,8 @@ namespace CoopSpectator.MissionBehaviors
             Agent commanderAgent,
             Dictionary<int, CommanderDeploymentFormationLayout> formationLayouts,
             HashSet<Formation> layoutFormations,
-            List<CommanderDeploymentFormationComposition> compositionRecords)
+            List<CommanderDeploymentFormationComposition> compositionRecords,
+            bool preserveMountedClasses)
         {
             if (mission == null ||
                 team == null ||
@@ -6451,10 +6527,37 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            bool scenarioPreservesMountedClasses =
+                ExactCampaignCommanderDeploymentRuntime
+                    .IsFormationOnlyMountedScenario(mission, scenarioContext);
+            if (preserveMountedClasses != scenarioPreservesMountedClasses)
+            {
+                LogCommanderDeploymentAssignmentDiagnostics(
+                    "skip-composition-policy-mismatch",
+                    peer,
+                    message,
+                    team,
+                    compositionRecords.Count,
+                    0,
+                    compositionRecords.Count,
+                    formationLayouts?.Count ?? 0,
+                    "PayloadPreservesMounted=" + preserveMountedClasses +
+                    " ScenarioPreservesMounted=" + scenarioPreservesMountedClasses);
+                return false;
+            }
+
             var infantryDesiredCounts = new Dictionary<Formation, int>();
             var rangedDesiredCounts = new Dictionary<Formation, int>();
+            var cavalryDesiredCounts = new Dictionary<Formation, int>();
+            var horseArcherDesiredCounts = new Dictionary<Formation, int>();
             var infantryFilters = new Dictionary<Formation, TroopTraitsMask>();
             var rangedFilters = new Dictionary<Formation, TroopTraitsMask>();
+            var cavalryFilters = new Dictionary<Formation, TroopTraitsMask>();
+            var horseArcherFilters = new Dictionary<Formation, TroopTraitsMask>();
             var compositionFormations = new HashSet<Formation>();
             int decodedRecords = 0;
             int rejectedRecords = 0;
@@ -6471,12 +6574,26 @@ namespace CoopSpectator.MissionBehaviors
                 compositionFormations.Add(formation);
                 infantryDesiredCounts[formation] = Math.Max(0, record.InfantryCount);
                 rangedDesiredCounts[formation] = Math.Max(0, record.RangedCount);
+                if (preserveMountedClasses)
+                {
+                    cavalryDesiredCounts[formation] = Math.Max(0, record.CavalryCount);
+                    horseArcherDesiredCounts[formation] = Math.Max(0, record.HorseArcherCount);
+                }
                 infantryFilters[formation] = SanitizeCommanderDeploymentCompositionFilter(
                     record.InfantryFilter,
                     FormationClass.Infantry);
                 rangedFilters[formation] = SanitizeCommanderDeploymentCompositionFilter(
                     record.RangedFilter,
                     FormationClass.Ranged);
+                if (preserveMountedClasses)
+                {
+                    cavalryFilters[formation] = SanitizeCommanderDeploymentCompositionFilter(
+                        record.CavalryFilter,
+                        FormationClass.Cavalry);
+                    horseArcherFilters[formation] = SanitizeCommanderDeploymentCompositionFilter(
+                        record.HorseArcherFilter,
+                        FormationClass.HorseArcher);
+                }
                 decodedRecords++;
             }
 
@@ -6495,10 +6612,33 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            List<Agent> infantryAgents = CollectCommanderDeploymentCompositionAgents(team, FormationClass.Infantry);
-            List<Agent> rangedAgents = CollectCommanderDeploymentCompositionAgents(team, FormationClass.Ranged);
+            List<Agent> infantryAgents = CollectCommanderDeploymentCompositionAgents(
+                team,
+                FormationClass.Infantry,
+                preserveMountedClasses);
+            List<Agent> rangedAgents = CollectCommanderDeploymentCompositionAgents(
+                team,
+                FormationClass.Ranged,
+                preserveMountedClasses);
+            List<Agent> cavalryAgents = preserveMountedClasses
+                ? CollectCommanderDeploymentCompositionAgents(
+                    team,
+                    FormationClass.Cavalry,
+                    preserveMountedClasses: true)
+                : new List<Agent>();
+            List<Agent> horseArcherAgents = preserveMountedClasses
+                ? CollectCommanderDeploymentCompositionAgents(
+                    team,
+                    FormationClass.HorseArcher,
+                    preserveMountedClasses: true)
+                : new List<Agent>();
             NormalizeCommanderDeploymentDesiredCounts(infantryDesiredCounts, infantryAgents.Count);
             NormalizeCommanderDeploymentDesiredCounts(rangedDesiredCounts, rangedAgents.Count);
+            if (preserveMountedClasses)
+            {
+                NormalizeCommanderDeploymentDesiredCounts(cavalryDesiredCounts, cavalryAgents.Count);
+                NormalizeCommanderDeploymentDesiredCounts(horseArcherDesiredCounts, horseArcherAgents.Count);
+            }
 
             var targetByAgent = new Dictionary<Agent, Formation>();
             int assignedInfantry = BuildCommanderDeploymentCompositionTargets(
@@ -6511,6 +6651,20 @@ namespace CoopSpectator.MissionBehaviors
                 rangedFilters,
                 rangedAgents,
                 targetByAgent);
+            int assignedCavalry = preserveMountedClasses
+                ? BuildCommanderDeploymentCompositionTargets(
+                    cavalryDesiredCounts,
+                    cavalryFilters,
+                    cavalryAgents,
+                    targetByAgent)
+                : 0;
+            int assignedHorseArchers = preserveMountedClasses
+                ? BuildCommanderDeploymentCompositionTargets(
+                    horseArcherDesiredCounts,
+                    horseArcherFilters,
+                    horseArcherAgents,
+                    targetByAgent)
+                : 0;
 
             var moves = new List<(Agent Agent, Formation TargetFormation)>();
             var impactedFormations = new HashSet<Formation>();
@@ -6540,6 +6694,8 @@ namespace CoopSpectator.MissionBehaviors
                     formationLayouts?.Count ?? 0,
                     "InfantryAgents=" + infantryAgents.Count +
                     " RangedAgents=" + rangedAgents.Count +
+                    " CavalryAgents=" + cavalryAgents.Count +
+                    " HorseArcherAgents=" + horseArcherAgents.Count +
                     " Before=[" + BuildCommanderDeploymentFormationSummary(team) + "]");
             }
 
@@ -6596,6 +6752,9 @@ namespace CoopSpectator.MissionBehaviors
                     " Records=" + decodedRecords +
                     " AssignedInfantry=" + assignedInfantry +
                     " AssignedRanged=" + assignedRanged +
+                    " AssignedCavalry=" + assignedCavalry +
+                    " AssignedHorseArchers=" + assignedHorseArchers +
+                    " PreserveMountedClasses=" + preserveMountedClasses +
                     " AppliedMoves=" + moves.Count +
                     " Layouts=" + (formationLayouts?.Count ?? 0) +
                     " RejectedRecords=" + rejectedRecords +
@@ -6695,9 +6854,15 @@ namespace CoopSpectator.MissionBehaviors
 
             TroopTraitsMask safeFilter = filter & TroopTraitsMask.All;
             safeFilter &= ~formationClassTraits;
-            safeFilter |= projectedClass == FormationClass.Ranged
+            bool isRanged = projectedClass == FormationClass.Ranged ||
+                            projectedClass == FormationClass.HorseArcher;
+            bool isMounted = projectedClass == FormationClass.Cavalry ||
+                             projectedClass == FormationClass.HorseArcher;
+            safeFilter |= isRanged
                 ? TroopTraitsMask.Ranged
                 : TroopTraitsMask.Melee;
+            if (isMounted)
+                safeFilter |= TroopTraitsMask.Mount;
             return safeFilter;
         }
 
@@ -6762,7 +6927,8 @@ namespace CoopSpectator.MissionBehaviors
 
         private static List<Agent> CollectCommanderDeploymentCompositionAgents(
             Team team,
-            FormationClass projectedClass)
+            FormationClass projectedClass,
+            bool preserveMountedClasses)
         {
             var agents = new List<Agent>();
             Mission mission = Mission.Current;
@@ -6778,7 +6944,7 @@ namespace CoopSpectator.MissionBehaviors
                     !ReferenceEquals(agent.Team, team) ||
                     agent.Formation == null ||
                     !ReferenceEquals(agent.Formation.Team, team) ||
-                    ResolveCommanderDeploymentProjectedAgentClass(agent) != projectedClass)
+                    ResolveCommanderDeploymentProjectedAgentClass(agent, preserveMountedClasses) != projectedClass)
                 {
                     continue;
                 }
@@ -6799,10 +6965,26 @@ namespace CoopSpectator.MissionBehaviors
             return agents;
         }
 
-        private static FormationClass ResolveCommanderDeploymentProjectedAgentClass(Agent agent)
+        private static FormationClass ResolveCommanderDeploymentProjectedAgentClass(
+            Agent agent,
+            bool preserveMountedClasses)
         {
             if (agent == null || agent.IsMount)
                 return FormationClass.NumberOfAllFormations;
+
+            if (preserveMountedClasses)
+            {
+                if (agent.HasMount)
+                {
+                    return agent.IsRangedCached
+                        ? FormationClass.HorseArcher
+                        : FormationClass.Cavalry;
+                }
+
+                return agent.IsRangedCached
+                    ? FormationClass.Ranged
+                    : FormationClass.Infantry;
+            }
 
             if (!agent.HasMount && agent.IsRangedCached)
                 return FormationClass.Ranged;
@@ -7109,19 +7291,50 @@ namespace CoopSpectator.MissionBehaviors
                 int rangedCount,
                 TroopTraitsMask infantryFilter,
                 TroopTraitsMask rangedFilter)
+                : this(
+                    formationIndex,
+                    infantryCount,
+                    rangedCount,
+                    0,
+                    0,
+                    infantryFilter,
+                    rangedFilter,
+                    TroopTraitsMask.Melee | TroopTraitsMask.Mount,
+                    TroopTraitsMask.Ranged | TroopTraitsMask.Mount)
+            {
+            }
+
+            public CommanderDeploymentFormationComposition(
+                int formationIndex,
+                int infantryCount,
+                int rangedCount,
+                int cavalryCount,
+                int horseArcherCount,
+                TroopTraitsMask infantryFilter,
+                TroopTraitsMask rangedFilter,
+                TroopTraitsMask cavalryFilter,
+                TroopTraitsMask horseArcherFilter)
             {
                 FormationIndex = formationIndex;
                 InfantryCount = Math.Max(0, infantryCount);
                 RangedCount = Math.Max(0, rangedCount);
+                CavalryCount = Math.Max(0, cavalryCount);
+                HorseArcherCount = Math.Max(0, horseArcherCount);
                 InfantryFilter = infantryFilter & TroopTraitsMask.All;
                 RangedFilter = rangedFilter & TroopTraitsMask.All;
+                CavalryFilter = cavalryFilter & TroopTraitsMask.All;
+                HorseArcherFilter = horseArcherFilter & TroopTraitsMask.All;
             }
 
             public int FormationIndex { get; }
             public int InfantryCount { get; }
             public int RangedCount { get; }
+            public int CavalryCount { get; }
+            public int HorseArcherCount { get; }
             public TroopTraitsMask InfantryFilter { get; }
             public TroopTraitsMask RangedFilter { get; }
+            public TroopTraitsMask CavalryFilter { get; }
+            public TroopTraitsMask HorseArcherFilter { get; }
         }
 
         private static bool IsCommanderDeploymentOrderOfBattleDiagnosticsEnabled()

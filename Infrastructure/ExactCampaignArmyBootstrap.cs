@@ -236,6 +236,11 @@ namespace CoopSpectator.Infrastructure
                     "ExactCampaignArmyBootstrap.ResetForMission");
 
             if (_activeMission != null)
+                ExactCampaignCommanderDeploymentRuntime.ResetRuntimeState(
+                    _activeMission,
+                    "ExactCampaignArmyBootstrap.ResetForMission");
+
+            if (_activeMission != null)
                 _activeMission.OnBeforeAgentRemoved -= OnMissionBeforeAgentRemoved;
 
             if (_activeSpawnLogic != null)

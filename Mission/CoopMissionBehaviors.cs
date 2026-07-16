@@ -3683,6 +3683,14 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly Dictionary<int, string> _materializedArmyEntryIdByAgentIndex = new Dictionary<int, string>();
         private static readonly Dictionary<int, BattleSideEnum> _materializedArmySideByAgentIndex = new Dictionary<int, BattleSideEnum>();
         private static readonly Dictionary<int, Agent> _materializedAgentInstanceByIndex = new Dictionary<int, Agent>();
+        private sealed class RemovedAgentExactDisplayNameState
+        {
+            public string EntryId;
+            public string ExactName;
+        }
+
+        private static readonly Dictionary<Agent, RemovedAgentExactDisplayNameState> _removedAgentExactDisplayNames =
+            new Dictionary<Agent, RemovedAgentExactDisplayNameState>();
         private static Mission _authoritativeMaterializedAgentEntryCacheMission;
         private static int _authoritativeMaterializedAgentEntryDirtyGeneration = 1;
         private static int _authoritativeMaterializedAgentEntryBuiltGeneration;
@@ -4916,6 +4924,7 @@ namespace CoopSpectator.MissionBehaviors
             MarkAuthoritativeMaterializedAgentEntryCacheDirty();
             _materializedArmySideByAgentIndex.Clear();
             _materializedAgentInstanceByIndex.Clear();
+            _removedAgentExactDisplayNames.Clear();
             _customAiTargetPulseStateByAgentIndex.Clear();
             _pendingExactCampaignNativeSpawnRegistrationsByAgentIndex.Clear();
             _clientAuthoritativeMaterializedEntryObservedAgentIndices.Clear();
@@ -6042,6 +6051,7 @@ namespace CoopSpectator.MissionBehaviors
         public override void OnAgentRemoved(Agent affectedAgent, Agent affectorAgent, AgentState agentState, KillingBlow blow)
         {
             _materializedBattleResultRawOnAgentRemovedCount++;
+            PreserveExactDisplayNameForRemovedAgent(affectedAgent);
             TraceServerExactHeroRemovalContract(affectedAgent, affectorAgent, agentState, "CoopMissionSpawnLogic.OnAgentRemoved");
             TrySyncExactCampaignNativeOriginRemoval(Mission, affectedAgent, affectorAgent, agentState);
             TryTrackMaterializedBattleResultRemoval(affectedAgent, affectorAgent, agentState);
@@ -6318,6 +6328,7 @@ namespace CoopSpectator.MissionBehaviors
             MarkAuthoritativeMaterializedAgentEntryCacheDirty();
             _materializedArmySideByAgentIndex.Clear();
             _materializedAgentInstanceByIndex.Clear();
+            _removedAgentExactDisplayNames.Clear();
             _customAiTargetPulseStateByAgentIndex.Clear();
             _pendingExactCampaignNativeSpawnRegistrationsByAgentIndex.Clear();
             _clientAuthoritativeMaterializedEntryObservedAgentIndices.Clear();
@@ -13797,7 +13808,7 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             bool exactSiegeDeploymentBlocksBattleStart =
-                ExactCampaignSiegeAssaultWithDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission);
+                ExactCampaignCommanderDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission);
 
             int assignedPeerCount = 0;
             int previewReadyPeerCount = 0;
@@ -13873,7 +13884,7 @@ namespace CoopSpectator.MissionBehaviors
             if (mission == null || GameNetwork.NetworkPeers == null)
                 return false;
 
-            if (ExactCampaignSiegeAssaultWithDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission))
+            if (ExactCampaignCommanderDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission))
                 return false;
 
             foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
@@ -14182,14 +14193,14 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
-            if (ExactCampaignSiegeAssaultWithDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission))
+            if (ExactCampaignCommanderDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission))
             {
                 bool forcedAutoDeploy =
-                    ExactCampaignSiegeAssaultWithDeploymentRuntime.TryForceAutoDeployAndFinishDeployment(
+                    ExactCampaignCommanderDeploymentRuntime.TryForceFinishForBattleStartRequest(
                         mission,
                         out string forceDeploymentDiagnostics);
                 bool deploymentStillBlocking =
-                    ExactCampaignSiegeAssaultWithDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission);
+                    ExactCampaignCommanderDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission);
                 ModLogger.Info(
                     "CoopMissionSpawnLogic: processed start battle request during exact siege deployment. " +
                     "CurrentPhase=" + currentPhase +
@@ -14200,7 +14211,16 @@ namespace CoopSpectator.MissionBehaviors
                 if (deploymentStillBlocking)
                     return;
 
-                currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+                TryPromoteDeferredDeploymentSpawnRequests(
+                    mission,
+                    "forced-deployment battle-start request");
+                TryUpdateBattlePhaseState(
+                    mission,
+                    "forced-deployment battle-start request");
+
+                // A request received while deployment is blocking is deployment-only.
+                // Starting the battle requires a separate request after possession is ready.
+                return;
             }
 
             bool battleStartReady = IsBattleStartReady(mission, out int assignedPeerCount, out int controlledPeerCount);
@@ -14223,7 +14243,7 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             bool siegeMachinesReady =
-                ExactCampaignSiegeAssaultWithDeploymentRuntime.TryEnsureAutoDeployedSiegeMachinesBeforeBattleStart(
+                ExactCampaignCommanderDeploymentRuntime.TryEnsureScenarioReadyBeforeBattleStart(
                     mission,
                     out string siegeMachineAutoDeployDiagnostics);
             ModLogger.Info(
@@ -35696,7 +35716,7 @@ namespace CoopSpectator.MissionBehaviors
                 return;
             }
 
-            if (ExactCampaignSiegeAssaultWithDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission))
+            if (ExactCampaignCommanderDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission))
                 return;
 
             foreach (DeferredDeploymentSpawnState deferredState in _deferredDeploymentSpawnsByPeer.Values.ToList())
@@ -35942,6 +35962,22 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
+            if (!ExactCampaignCommanderDeploymentRuntime.TryBeginManualFormationPlacement(
+                    mission,
+                    out string placementDiagnostics))
+            {
+                ClearCommanderDeploymentOrderLease(missionPeer, source + " placement-start-failed");
+                NetworkCommunicator peer = missionPeer.GetNetworkPeer();
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: rejected commander deployment request because manual placement could not start. " +
+                    "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "none") +
+                    " Side=" + authoritativeSide +
+                    " EntryId=" + (selectedEntryId ?? string.Empty) +
+                    " Diagnostics=" + (placementDiagnostics ?? string.Empty) +
+                    " Source=" + source);
+                return false;
+            }
+
             CoopBattlePeerLifecycleRuntimeState.MarkWaiting(
                 missionPeer,
                 authoritativeSide,
@@ -36089,6 +36125,7 @@ namespace CoopSpectator.MissionBehaviors
             if (mission == null || missionPeer == null || !GameNetwork.IsServer)
                 return false;
 
+            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
             bool selectionApplied = false;
             if (requestedSide != BattleSideEnum.None || !string.IsNullOrWhiteSpace(troopOrEntryId))
             {
@@ -36103,7 +36140,7 @@ namespace CoopSpectator.MissionBehaviors
             BattleSideEnum authoritativeSide = requestedSide != BattleSideEnum.None
                 ? requestedSide
                 : ResolveAuthoritativeSide(missionPeer, mission, source + " authoritative-side");
-            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+
             CoopBattlePeerSessionState.TryBuild(
                 mission,
                 missionPeer,
@@ -36132,7 +36169,7 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             bool autoDeployed =
-                ExactCampaignSiegeAssaultWithDeploymentRuntime.TryAutoDeployDeploymentOnly(
+                ExactCampaignCommanderDeploymentRuntime.TryAutoDeployDeploymentOnly(
                     mission,
                     authoritativeSide,
                     out string deploymentDiagnostics);
@@ -36192,6 +36229,7 @@ namespace CoopSpectator.MissionBehaviors
             if (mission == null || missionPeer == null || !GameNetwork.IsServer)
                 return false;
 
+            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
             bool selectionApplied = false;
             if (requestedSide != BattleSideEnum.None || !string.IsNullOrWhiteSpace(troopOrEntryId))
             {
@@ -36206,7 +36244,7 @@ namespace CoopSpectator.MissionBehaviors
             BattleSideEnum authoritativeSide = requestedSide != BattleSideEnum.None
                 ? requestedSide
                 : ResolveAuthoritativeSide(missionPeer, mission, source + " authoritative-side");
-            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+
             CoopBattlePeerSessionState.TryBuild(
                 mission,
                 missionPeer,
@@ -36235,15 +36273,15 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             string deploymentDiagnostics = string.Empty;
-            bool deploymentFinished = !ExactCampaignSiegeAssaultWithDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission);
+            bool deploymentFinished = !ExactCampaignCommanderDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission);
             if (!deploymentFinished && forceAutoDeploy)
             {
-                deploymentFinished = ExactCampaignSiegeAssaultWithDeploymentRuntime.TryForceAutoDeployAndFinishDeployment(
+                deploymentFinished = ExactCampaignCommanderDeploymentRuntime.TryFinishDeployment(
                     mission,
                     out deploymentDiagnostics);
             }
 
-            bool stillBlockingDeployment = ExactCampaignSiegeAssaultWithDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission);
+            bool stillBlockingDeployment = ExactCampaignCommanderDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission);
             if (!deploymentFinished || stillBlockingDeployment)
             {
                 NetworkCommunicator peer = missionPeer.GetNetworkPeer();
@@ -37262,7 +37300,7 @@ namespace CoopSpectator.MissionBehaviors
                 missionPeer == null ||
                 HasActiveControlledAgent(missionPeer) ||
                 !IsBattleStartAuthorityPeer(mission, missionPeer) ||
-                !ExactCampaignSiegeAssaultWithDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission) ||
+                !ExactCampaignCommanderDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission) ||
                 !IsExactSiegeCommanderDeploymentWindowActive(mission, currentPhase, out _))
             {
                 return false;
@@ -37737,8 +37775,8 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsDeploymentRuntimeActive(mission) ||
-                ExactCampaignSiegeAssaultWithDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission))
+            if (!ExactCampaignCommanderDeploymentRuntime.IsDeploymentRuntimeActive(mission) ||
+                ExactCampaignCommanderDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission))
             {
                 diagnostics = "deployment-not-finished";
                 return false;
@@ -37748,7 +37786,7 @@ namespace CoopSpectator.MissionBehaviors
                 BattleSnapshotRuntimeState.GetScenarioContext() ??
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
-            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+            if (!ExactCampaignCommanderDeploymentRuntime.IsCommanderDeploymentScenario(mission, scenarioContext))
             {
                 diagnostics = "not-exact-siege-assault";
                 return false;
@@ -37916,7 +37954,7 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsDeploymentRuntimeActive(mission))
+            if (!ExactCampaignCommanderDeploymentRuntime.IsDeploymentRuntimeActive(mission))
             {
                 diagnostics = "deployment-runtime-inactive";
                 return false;
@@ -37926,7 +37964,7 @@ namespace CoopSpectator.MissionBehaviors
                 BattleSnapshotRuntimeState.GetScenarioContext() ??
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
-            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+            if (!ExactCampaignCommanderDeploymentRuntime.IsCommanderDeploymentScenario(mission, scenarioContext))
             {
                 diagnostics = "not-exact-siege-assault";
                 return false;
@@ -37946,7 +37984,7 @@ namespace CoopSpectator.MissionBehaviors
                 mission != null &&
                 currentPhase >= CoopBattlePhase.SideSelection &&
                 currentPhase < CoopBattlePhase.BattleEnded &&
-                ExactCampaignSiegeAssaultWithDeploymentRuntime.IsDeploymentRuntimeActive(mission);
+                ExactCampaignCommanderDeploymentRuntime.IsDeploymentRuntimeActive(mission);
             if (string.IsNullOrWhiteSpace(selectableSource) ||
                 (currentPhase < CoopBattlePhase.PreBattleHold && !allowExactSiegeDeploymentSelectableReadiness) ||
                 currentPhase >= CoopBattlePhase.BattleEnded)
@@ -37971,7 +38009,7 @@ namespace CoopSpectator.MissionBehaviors
             if (allowSiegePrebattleAllowedFallback)
                 return true;
 
-            if (ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldTreatAllowedPrebattleSelectableSourceAsReady(
+            if (ExactCampaignCommanderDeploymentRuntime.ShouldTreatAllowedPrebattleSelectableSourceAsReady(
                     mission,
                     side,
                     currentPhase,
@@ -38682,6 +38720,16 @@ namespace CoopSpectator.MissionBehaviors
             if (agent == null)
                 return false;
 
+            if (_removedAgentExactDisplayNames.TryGetValue(agent, out RemovedAgentExactDisplayNameState removedState) &&
+                removedState != null &&
+                !string.IsNullOrWhiteSpace(removedState.EntryId) &&
+                !string.IsNullOrWhiteSpace(removedState.ExactName))
+            {
+                entryId = removedState.EntryId;
+                exactName = new TextObject(removedState.ExactName);
+                return true;
+            }
+
             if (!TryResolveSelectableEntryId(agent, out entryId) || string.IsNullOrWhiteSpace(entryId))
                 return false;
 
@@ -38695,6 +38743,30 @@ namespace CoopSpectator.MissionBehaviors
 
             exactName = new TextObject(resolvedDisplayName);
             return true;
+        }
+
+        private static void PreserveExactDisplayNameForRemovedAgent(Agent agent)
+        {
+            if (!GameNetwork.IsClient ||
+                agent == null ||
+                agent.IsMount ||
+                _removedAgentExactDisplayNames.ContainsKey(agent))
+            {
+                return;
+            }
+
+            if (!TryResolveExactDisplayNameForAgent(agent, out string entryId, out TextObject exactName))
+                return;
+
+            string resolvedName = exactName?.ToString();
+            if (string.IsNullOrWhiteSpace(entryId) || string.IsNullOrWhiteSpace(resolvedName))
+                return;
+
+            _removedAgentExactDisplayNames[agent] = new RemovedAgentExactDisplayNameState
+            {
+                EntryId = entryId,
+                ExactName = resolvedName
+            };
         }
 
         private static bool HasTrackedBattlefieldEntryStateForSide(Mission mission, BattleSideEnum side)

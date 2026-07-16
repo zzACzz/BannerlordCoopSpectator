@@ -83,6 +83,7 @@ namespace CoopSpectator.UI
         private object _commanderDeploymentOrderTroopPlacer;
         private Action _commanderDeploymentOnUnitDeployedHandler;
         private bool _commanderDeploymentOrderVmInitialized;
+        private bool _sallyOutManualFormationPlacementActive;
         private Camera _commanderDeploymentFreeCamera;
         private bool _commanderDeploymentFreeCameraActive;
         private float _commanderDeploymentFreeCameraYaw;
@@ -530,7 +531,9 @@ namespace CoopSpectator.UI
             }
 
             if (ShouldKeepOverlaySuppressedWhileAwaitingLocalSpawn(snapshot))
+            {
                 return CoopSelectionScreen.None;
+            }
 
             if (DateTime.UtcNow < _overlaySuppressedUntilUtc)
                 return CoopSelectionScreen.None;
@@ -574,7 +577,7 @@ namespace CoopSpectator.UI
                 _requestedScreen != CoopSelectionScreen.CommanderDeployment ||
                 _currentScreen != CoopSelectionScreen.CommanderDeployment ||
                 _commanderDeploymentViewModel == null ||
-                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(Mission?.SceneName ?? string.Empty))
+                !IsCurrentCommanderDeploymentScenario(Mission))
             {
                 return false;
             }
@@ -650,7 +653,7 @@ namespace CoopSpectator.UI
                    string.Equals(readinessStage, "RespawnSelection", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static bool IsCommanderDeploymentReady(CoopSelectionUiSnapshot snapshot)
+        private bool IsCommanderDeploymentReady(CoopSelectionUiSnapshot snapshot)
         {
             if (snapshot == null ||
                 !snapshot.BattleDataReady ||
@@ -677,10 +680,32 @@ namespace CoopSpectator.UI
             RosterEntryState entryState = CoopSelectionUiHelpers.ResolveEntryState(
                 snapshot.EffectiveSide,
                 snapshot.SelectedEntryId);
-            return CoopSelectionUiHelpers.IsCommanderEntry(
+            if (CoopSelectionUiHelpers.IsCommanderEntry(
                 snapshot.BattleState,
                 snapshot.EffectiveSide,
-                entryState);
+                entryState))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private static string ResolveCommanderDeploymentAuthorityEntryId(
+            CoopSelectionUiSnapshot snapshot)
+        {
+            BattleSideEnum side = snapshot?.EffectiveSide ?? BattleSideEnum.None;
+            if (side == BattleSideEnum.None)
+                return null;
+
+            BattleRuntimeState runtimeState =
+                snapshot?.BattleState ??
+                BattleSnapshotRuntimeState.GetState();
+            RosterEntryState commanderEntry =
+                BattleCommanderResolver.ResolveCommanderEntry(runtimeState, side);
+            return string.IsNullOrWhiteSpace(commanderEntry?.EntryId)
+                ? null
+                : commanderEntry.EntryId;
         }
 
         private static bool IsReconnectFinalizePendingWithAssignedSide(CoopSelectionUiSnapshot snapshot)
@@ -769,42 +794,94 @@ namespace CoopSpectator.UI
                 throw new InvalidOperationException("native-order-of-battle-prepare-failed " + prepareDiagnostics);
             }
 
-            string siegeUiDiagnostics = "coop-siege-machine-overlay";
+            string siegeUiDiagnostics = "not-required-formation-only";
             BattleScenarioContextMessage scenarioContext =
                 snapshot?.BattleState?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetScenarioContext();
             BattleSideEnum side = snapshot?.EffectiveSide ?? mission.PlayerTeam?.Side ?? BattleSideEnum.None;
             if (side == BattleSideEnum.None)
                 side = _selectedSideOverride;
-            ExactCampaignSiegeAssaultWithDeploymentRuntime.TryEnsureCommanderDeploymentUiContract(
-                mission,
-                scenarioContext,
-                side,
-                out siegeUiDiagnostics);
+            bool useMountedFormationClasses =
+                ExactCampaignCommanderDeploymentRuntime.IsFormationOnlyMountedScenario(
+                    mission,
+                    scenarioContext);
+            if (!useMountedFormationClasses)
+            {
+                ExactCampaignSiegeAssaultWithDeploymentRuntime.TryEnsureCommanderDeploymentUiContract(
+                    mission,
+                    scenarioContext,
+                    side,
+                    out siegeUiDiagnostics);
+            }
 
             Camera missionCamera = ResolveMissionScreenCombatCamera();
             if (missionCamera == null)
                 throw new InvalidOperationException("combat-camera-null");
 
-            var commanderVm = new CoopSiegeOrderOfBattleVM();
-            commanderVm.Initialize(
-                mission,
-                missionCamera,
-                SelectNativeCommanderFormationAtIndex,
-                DeselectNativeCommanderFormationAtIndex,
-                ClearNativeCommanderFormationSelection,
-                HandleCommanderAutoDeployRequested,
-                HandleCommanderReadyRequested,
-                new Dictionary<int, Agent>());
-            commanderVm.EnableReusableCompanionCaptainAssignments();
-            commanderVm.IsEnabled = true;
-            commanderVm.AreCameraControlsEnabled = false;
-            commanderVm.CanStartMission = true;
-            commanderVm.AutoDeployText = GameTexts.FindText("str_auto_deploy").ToString();
-            TryRegisterOrderOfBattleHotKeys(commanderVm);
-            TryCreateCommanderDeploymentOrderBridge(mission, missionCamera);
-            TryAttachCommanderDeploymentOrderTroopPlacerCallback(commanderVm);
-            TryRefreshNativeCommanderOrderOfBattleCounts(commanderVm, mission, "post-initialize");
+            if (useMountedFormationClasses)
+            {
+                if (!ExactCampaignCommanderDeploymentRuntime.TryBeginClientManualFormationPlacement(
+                        mission,
+                        out string placementDiagnostics))
+                {
+                    throw new InvalidOperationException(
+                        "manual-formation-placement-start-failed " + placementDiagnostics);
+                }
+
+                _sallyOutManualFormationPlacementActive = true;
+                CoopSiegeOrderOfBattleVM.BeginInitialMountedConfiguration();
+            }
+
+            CoopSiegeOrderOfBattleVM commanderVm = null;
+            try
+            {
+                commanderVm = new CoopSiegeOrderOfBattleVM(
+                    projectMountedClassesToSiegeFootClasses: !useMountedFormationClasses);
+                commanderVm.Initialize(
+                    mission,
+                    missionCamera,
+                    SelectNativeCommanderFormationAtIndex,
+                    DeselectNativeCommanderFormationAtIndex,
+                    ClearNativeCommanderFormationSelection,
+                    HandleCommanderAutoDeployRequested,
+                    HandleCommanderReadyRequested,
+                    new Dictionary<int, Agent>());
+                if (useMountedFormationClasses)
+                    commanderVm.NormalizeMountedFormationComposition();
+                commanderVm.EnableReusableCompanionCaptainAssignments();
+                commanderVm.IsEnabled = true;
+                commanderVm.AreCameraControlsEnabled = false;
+                commanderVm.CanStartMission = true;
+                commanderVm.AutoDeployText = GameTexts.FindText("str_auto_deploy").ToString();
+                TryRegisterOrderOfBattleHotKeys(commanderVm);
+                TryCreateCommanderDeploymentOrderBridge(mission, missionCamera);
+                TryAttachCommanderDeploymentOrderTroopPlacerCallback(commanderVm);
+                TryRefreshNativeCommanderOrderOfBattleCounts(commanderVm, mission, "post-initialize");
+            }
+            catch
+            {
+                if (_sallyOutManualFormationPlacementActive)
+                {
+                    ExactCampaignCommanderDeploymentRuntime.EndManualFormationPlacement(
+                        mission,
+                        "commander-deployment-initialization-failed");
+                    _sallyOutManualFormationPlacementActive = false;
+                }
+
+                throw;
+            }
+            finally
+            {
+                if (useMountedFormationClasses)
+                    CoopSiegeOrderOfBattleVM.EndInitialMountedConfiguration();
+            }
+
+            if (useMountedFormationClasses)
+            {
+                OrderOfBattleSiegeProjectedCountsPatch.TrySyncCommanderDeploymentFormationAssignmentsForTeam(
+                    mission.PlayerTeam,
+                    "CoopMissionSelectionView mounted initialization completed");
+            }
 
             ModLogger.Info(
                 "CoopMissionSelectionView: prepared native OrderOfBattle commander deployment. " +
@@ -877,7 +954,7 @@ namespace CoopSpectator.UI
         {
             if (commanderVm == null ||
                 mission == null ||
-                !IsCommanderDeploymentOrderOfBattleActive())
+                !IsCommanderDeploymentSiegeProjectionActive())
             {
                 return false;
             }
@@ -1425,14 +1502,20 @@ namespace CoopSpectator.UI
                 return false;
             }
 
-            if (!TryResolveCameraPreviewAgent(snapshot, out Agent selectedCommanderAgent) ||
+            string commanderAuthorityEntryId =
+                ResolveCommanderDeploymentAuthorityEntryId(snapshot);
+            if (!TryResolveCameraPreviewAgentForEntry(
+                    side,
+                    commanderAuthorityEntryId,
+                    out Agent selectedCommanderAgent) ||
                 selectedCommanderAgent?.Team == null ||
                 selectedCommanderAgent.Team.Side != side)
             {
                 diagnostics =
                     "selected-commander-agent-null" +
                     " Side=" + side +
-                    " EntryId=" + (snapshot?.SelectedEntryId ?? string.Empty) +
+                    " SelectedEntryId=" + (snapshot?.SelectedEntryId ?? string.Empty) +
+                    " CommanderEntryId=" + (commanderAuthorityEntryId ?? string.Empty) +
                     " Team=" + playerTeam.Side + "#" + playerTeam.TeamIndex +
                     " Refresh={" + refreshDiagnostics + "}";
                 return false;
@@ -1450,7 +1533,8 @@ namespace CoopSpectator.UI
                     "player-order-owner-set-failed " +
                     ex.GetType().Name + ":" + ex.Message +
                     " Side=" + side +
-                    " EntryId=" + (snapshot?.SelectedEntryId ?? string.Empty) +
+                    " SelectedEntryId=" + (snapshot?.SelectedEntryId ?? string.Empty) +
+                    " CommanderEntryId=" + (commanderAuthorityEntryId ?? string.Empty) +
                     " AgentIndex=" + selectedCommanderAgent.Index +
                     " Refresh={" + refreshDiagnostics + "}";
                 return false;
@@ -1465,7 +1549,8 @@ namespace CoopSpectator.UI
                 diagnostics =
                     "formation-contract-prepare-failed" +
                     " Side=" + side +
-                    " EntryId=" + (snapshot?.SelectedEntryId ?? string.Empty) +
+                    " SelectedEntryId=" + (snapshot?.SelectedEntryId ?? string.Empty) +
+                    " CommanderEntryId=" + (commanderAuthorityEntryId ?? string.Empty) +
                     " AgentIndex=" + selectedCommanderAgent.Index +
                     " FormationContract={" + formationContractDiagnostics + "}" +
                     " Refresh={" + refreshDiagnostics + "}";
@@ -1483,7 +1568,8 @@ namespace CoopSpectator.UI
                 " OrderOwnerAssigned=" + orderOwnerAssigned +
                 " OrderOwnerAgentIndex=" + selectedCommanderAgent.Index +
                 " FormationContract={" + formationContractDiagnostics + "}" +
-                " EntryId=" + (snapshot?.SelectedEntryId ?? string.Empty) +
+                " SelectedEntryId=" + (snapshot?.SelectedEntryId ?? string.Empty) +
+                " CommanderEntryId=" + (commanderAuthorityEntryId ?? string.Empty) +
                 " Refresh={" + refreshDiagnostics + "}";
             return ReferenceEquals(mission.PlayerTeam, playerTeam);
         }
@@ -1714,6 +1800,14 @@ namespace CoopSpectator.UI
             if (_commanderSiegeMachineDeploymentMovie != null)
                 return true;
 
+            BattleScenarioContextMessage activeScenarioContext =
+                snapshot?.BattleState?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(activeScenarioContext))
+                return false;
+
             Mission mission = Mission;
             Camera missionCamera = ResolveMissionScreenCombatCamera();
             BattleSideEnum side = snapshot?.EffectiveSide ?? mission?.PlayerTeam?.Side ?? BattleSideEnum.None;
@@ -1722,12 +1816,9 @@ namespace CoopSpectator.UI
 
             try
             {
-                BattleScenarioContextMessage scenarioContext =
-                    snapshot?.BattleState?.ScenarioContext ??
-                    BattleSnapshotRuntimeState.GetScenarioContext();
                 ExactCampaignSiegeAssaultWithDeploymentRuntime.TryEnsureCommanderDeploymentUiContract(
                     mission,
-                    scenarioContext,
+                    activeScenarioContext,
                     side,
                     out string _);
 
@@ -1946,7 +2037,7 @@ namespace CoopSpectator.UI
             mission = Mission;
             if (mission == null ||
                 !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
-                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+                !IsCurrentCommanderDeploymentScenario(mission))
             {
                 unavailableReason = "not-exact-siege";
                 return false;
@@ -2106,6 +2197,16 @@ namespace CoopSpectator.UI
             string controlledEntryId,
             string commanderEntryId)
         {
+            if (IsCurrentFormationOnlyMountedCommanderDeploymentScenario(mission))
+            {
+                return TryEnsureFormationOnlyMountedCommanderBattleOrderProvider(
+                    mission,
+                    team,
+                    mainAgent,
+                    controlledEntryId,
+                    commanderEntryId);
+            }
+
             if (_commanderBattleOrderVm != null && _commanderBattleOrderVmInitialized)
                 return true;
 
@@ -2177,6 +2278,52 @@ namespace CoopSpectator.UI
                 ReleaseCommanderBattleOrderBridge("create-failed");
                 return false;
             }
+        }
+
+        private bool TryEnsureFormationOnlyMountedCommanderBattleOrderProvider(
+            Mission mission,
+            Team team,
+            Agent mainAgent,
+            string controlledEntryId,
+            string commanderEntryId)
+        {
+            if (_commanderBattleOrderActive &&
+                _commanderBattleOrderVm == null &&
+                _commanderDeploymentVisualOrderProviderRegistered)
+            {
+                return true;
+            }
+
+            ReleaseCommanderBattleOrderBridge("formation-only-native-recreate");
+
+            _commanderBattleOrderActive = true;
+            TryEnsureCommanderDeploymentVisualOrderProviderRegistered();
+            if (!_commanderDeploymentVisualOrderProviderRegistered)
+            {
+                _commanderBattleOrderActive = false;
+                return false;
+            }
+
+            string logKey =
+                "formation-only-native|" +
+                (team?.TeamIndex.ToString() ?? "null") + "|" +
+                (mainAgent?.Index.ToString() ?? "null") + "|" +
+                (controlledEntryId ?? "null") + "|" +
+                (commanderEntryId ?? "null");
+            if (!string.Equals(_lastCommanderBattleOrderBridgeContextKey, logKey, StringComparison.Ordinal))
+            {
+                _lastCommanderBattleOrderBridgeContextKey = logKey;
+                ModLogger.Info(
+                    "CoopMissionSelectionView: prepared formation-only native commander battle order provider. " +
+                    "TeamIndex=" + (team?.TeamIndex.ToString() ?? "null") +
+                    " Side=" + (team?.Side.ToString() ?? "null") +
+                    " AgentMainIndex=" + (mainAgent?.Index.ToString() ?? "null") +
+                    " ControlledEntryId=" + (controlledEntryId ?? "null") +
+                    " CommanderEntryId=" + (commanderEntryId ?? "null") +
+                    " Mission=" + (mission?.SceneName ?? "null"));
+            }
+
+            return true;
         }
 
         private bool TryEnsureCommanderBattleOrderMovie()
@@ -3707,7 +3854,7 @@ namespace CoopSpectator.UI
         private string ResolveInitialExactSiegeSelectedEntryId(BattleSideEnum side, bool hasLocalControlledAgent)
         {
             if (side == BattleSideEnum.None ||
-                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(Mission?.SceneName ?? string.Empty))
+                !IsCurrentCommanderDeploymentScenario(Mission))
             {
                 return null;
             }
@@ -3809,14 +3956,14 @@ namespace CoopSpectator.UI
             {
                 MarkLocalSpawnPending(snapshot, waitsForDeployment: true);
                 _overlaySuppressedUntilUtc = DateTime.UtcNow + LocalSpawnOverlaySuppressionDuration;
-                if (!CoopBattleNetworkRequestTransport.TryQueueSpawnAfterDeployment(
+                bool queued = CoopBattleNetworkRequestTransport.TryQueueSpawnAfterDeployment(
                         snapshot.EffectiveSide,
                         snapshot.SelectedEntryId,
-                        "CoopClassLoadoutUI DeploymentWait"))
+                        "CoopClassLoadoutUI DeploymentWait");
+                if (!queued)
                 {
                     ClearLocalSpawnPending("deployment-wait-request-write-failed");
                 }
-
                 RefreshOverlay(force: true, hasLocalControlledAgent);
                 return;
             }
@@ -3846,7 +3993,7 @@ namespace CoopSpectator.UI
             BattleScenarioContextMessage scenarioContext =
                 snapshot.BattleState?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetScenarioContext();
-            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+            if (!ExactCampaignCommanderDeploymentRuntime.IsCommanderDeploymentScenario(Mission, scenarioContext))
                 return false;
 
             string readinessStage = snapshot.BattleDataReadinessStage ?? string.Empty;
@@ -3969,6 +4116,9 @@ namespace CoopSpectator.UI
                     _commanderDeploymentViewModel,
                     Mission,
                     "mission-order-ready");
+                OrderOfBattleSiegeProjectedCountsPatch.TrySyncCommanderDeploymentFormationAssignmentsForTeam(
+                    Mission?.PlayerTeam,
+                    "CoopMissionSelectionView mission-order-ready");
                 ModLogger.Info("CoopMissionSelectionView: applied safe MissionOrderVM ready deployment. Handled=" + handled);
             }
             catch (Exception ex)
@@ -3993,13 +4143,29 @@ namespace CoopSpectator.UI
             _requestedScreen = CoopSelectionScreen.CommanderDeployment;
             _spectatorOverlayHidden = false;
 
+            string commanderAuthorityEntryId =
+                ResolveCommanderDeploymentAuthorityEntryId(snapshot);
+            if (string.IsNullOrWhiteSpace(commanderAuthorityEntryId))
+            {
+                InformationManager.DisplayMessage(
+                    new InformationMessage("Coop Battle: commander deployment authority is unavailable."));
+                RefreshOverlay(force: true, hasLocalControlledAgent);
+                return false;
+            }
+
             CoopSiegeOrderOfBattleVM reusableCaptainVm =
                 autoDeploy ? _commanderDeploymentViewModel as CoopSiegeOrderOfBattleVM : null;
             reusableCaptainVm?.BeginAutoDeployCaptainAssignmentPreservation(Mission?.PlayerTeam);
 
             bool queued = autoDeploy
-                ? CoopBattleNetworkRequestTransport.TryAutoDeployCommanderDeployment(snapshot.EffectiveSide, snapshot.SelectedEntryId, source)
-                : CoopBattleNetworkRequestTransport.TryFinishCommanderDeployment(snapshot.EffectiveSide, snapshot.SelectedEntryId, source);
+                ? CoopBattleNetworkRequestTransport.TryAutoDeployCommanderDeployment(
+                    snapshot.EffectiveSide,
+                    commanderAuthorityEntryId,
+                    source)
+                : CoopBattleNetworkRequestTransport.TryFinishCommanderDeployment(
+                    snapshot.EffectiveSide,
+                    commanderAuthorityEntryId,
+                    source);
             if (autoDeploy && !queued)
                 reusableCaptainVm?.CancelAutoDeployCaptainAssignmentPreservation();
             if (queued && !autoDeploy)
@@ -4024,7 +4190,8 @@ namespace CoopSpectator.UI
                 "Queued=" + queued +
                 " AutoDeploy=" + autoDeploy +
                 " Side=" + snapshot.EffectiveSide +
-                " EntryId=" + (snapshot.SelectedEntryId ?? string.Empty) +
+                " SelectedEntryId=" + (snapshot.SelectedEntryId ?? string.Empty) +
+                " CommanderEntryId=" + commanderAuthorityEntryId +
                 " Source=" + (source ?? "unknown"));
             if (autoDeploy || !queued)
             {
@@ -5064,6 +5231,14 @@ namespace CoopSpectator.UI
 
         private void ReleaseCurrentMovie()
         {
+            if (_sallyOutManualFormationPlacementActive)
+            {
+                ExactCampaignCommanderDeploymentRuntime.EndManualFormationPlacement(
+                    Mission,
+                    "release-current-movie");
+                _sallyOutManualFormationPlacementActive = false;
+            }
+
             bool hadPresentation =
                 _movie != null ||
                 _viewModel != null ||
@@ -5160,12 +5335,30 @@ namespace CoopSpectator.UI
 
         private bool TryResolveCameraPreviewAgent(CoopSelectionUiSnapshot snapshot, out Agent previewAgent)
         {
-            previewAgent = null;
-            Mission mission = Mission;
             if (snapshot == null ||
-                mission?.AllAgents == null ||
                 snapshot.EffectiveSide == BattleSideEnum.None ||
                 string.IsNullOrWhiteSpace(snapshot.SelectedEntryId))
+            {
+                previewAgent = null;
+                return false;
+            }
+
+            return TryResolveCameraPreviewAgentForEntry(
+                snapshot.EffectiveSide,
+                snapshot.SelectedEntryId,
+                out previewAgent);
+        }
+
+        private bool TryResolveCameraPreviewAgentForEntry(
+            BattleSideEnum side,
+            string entryId,
+            out Agent previewAgent)
+        {
+            previewAgent = null;
+            Mission mission = Mission;
+            if (mission?.AllAgents == null ||
+                side == BattleSideEnum.None ||
+                string.IsNullOrWhiteSpace(entryId))
             {
                 return false;
             }
@@ -5173,11 +5366,11 @@ namespace CoopSpectator.UI
             for (int agentIndex = 0; agentIndex < mission.AllAgents.Count; agentIndex++)
             {
                 Agent candidate = mission.AllAgents[agentIndex];
-                if (!IsCameraPreviewCandidate(candidate, snapshot.EffectiveSide))
+                if (!IsCameraPreviewCandidate(candidate, side))
                     continue;
 
                 if (!CoopMissionSpawnLogic.TryResolveSelectableEntryId(candidate, out string candidateEntryId) ||
-                    !string.Equals(candidateEntryId, snapshot.SelectedEntryId, StringComparison.OrdinalIgnoreCase))
+                    !string.Equals(candidateEntryId, entryId, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
@@ -5352,6 +5545,27 @@ namespace CoopSpectator.UI
             return true;
         }
 
+        internal static bool IsCommanderDeploymentSiegeProjectionActive()
+        {
+            if (!IsCommanderDeploymentOrderOfBattleActive())
+                return false;
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            return ExactCampaignSiegeAssaultWithDeploymentRuntime
+                .IsSiegeAssaultScenario(scenarioContext);
+        }
+
+        internal static bool IsCommanderDeploymentMountedFormationScenarioActive()
+        {
+            if (!IsCommanderDeploymentOrderOfBattleActive())
+                return false;
+
+            return IsCurrentFormationOnlyMountedCommanderDeploymentScenario(Mission.Current);
+        }
+
         internal static bool IsCommanderBattleOrderActive()
         {
             if (!_commanderBattleOrderActive)
@@ -5364,7 +5578,39 @@ namespace CoopSpectator.UI
             return GameNetwork.IsClient &&
                    GameNetwork.IsSessionActive &&
                    MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) &&
-                   SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty);
+                   IsCurrentCommanderDeploymentScenario(mission);
+        }
+
+        private static bool IsCurrentCommanderDeploymentScenario(Mission mission)
+        {
+            if (mission == null ||
+                !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+            {
+                return false;
+            }
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            return ExactCampaignCommanderDeploymentRuntime
+                .IsCommanderDeploymentScenario(mission, scenarioContext);
+        }
+
+        private static bool IsCurrentFormationOnlyMountedCommanderDeploymentScenario(Mission mission)
+        {
+            if (mission == null ||
+                !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+            {
+                return false;
+            }
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            return ExactCampaignCommanderDeploymentRuntime
+                .IsFormationOnlyMountedScenario(mission, scenarioContext);
         }
 
         internal static bool ShouldSuppressLocalPreviewFollowedAgentEcho(MissionPeer missionPeer, Agent followedAgent)

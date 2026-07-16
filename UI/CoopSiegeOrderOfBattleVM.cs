@@ -20,6 +20,7 @@ namespace CoopSpectator.UI
         private static Mission _autoDeployPreservedMission;
         private static BattleSideEnum _autoDeployPreservedSide = BattleSideEnum.None;
         private static DateTime _autoDeployPreservationLastMutationUtc = DateTime.MinValue;
+        private static int _mountedFormationInitializationDepth;
         private static readonly Dictionary<int, string> AutoDeployPreservedCaptainEntryIdByFormationIndex =
             new Dictionary<int, string>();
         private static readonly TimeSpan AutoDeployCaptainAssignmentStabilityDelay = TimeSpan.FromMilliseconds(400);
@@ -32,6 +33,7 @@ namespace CoopSpectator.UI
             new Dictionary<int, string>();
         private readonly HashSet<OrderOfBattleHeroItemVM> _autoDeployPreservedVirtualCaptains =
             new HashSet<OrderOfBattleHeroItemVM>();
+        private readonly bool _projectMountedClassesToSiegeFootClasses;
 
         private Action<OrderOfBattleFormationItemVM> _nativeAcceptCaptain;
         private Action<OrderOfBattleHeroItemVM> _nativeHeroAssignedFormationChanged;
@@ -39,6 +41,24 @@ namespace CoopSpectator.UI
         private bool _isPreservingReusableCaptainsForAutoDeploy;
 
         internal static bool IsApplyingInitialProjectedConfiguration { get; private set; }
+        internal static bool IsApplyingInitialMountedConfiguration =>
+            _mountedFormationInitializationDepth > 0;
+
+        internal static void BeginInitialMountedConfiguration()
+        {
+            _mountedFormationInitializationDepth++;
+        }
+
+        internal static void EndInitialMountedConfiguration()
+        {
+            if (_mountedFormationInitializationDepth > 0)
+                _mountedFormationInitializationDepth--;
+        }
+
+        internal CoopSiegeOrderOfBattleVM(bool projectMountedClassesToSiegeFootClasses)
+        {
+            _projectMountedClassesToSiegeFootClasses = projectMountedClassesToSiegeFootClasses;
+        }
 
         internal void EnableReusableCompanionCaptainAssignments()
         {
@@ -67,6 +87,69 @@ namespace CoopSpectator.UI
             OrderOfBattleSiegeProjectedCountsPatch.TrySyncCommanderDeploymentFormationAssignmentsForTeam(
                 team,
                 "CoopSiegeOrderOfBattleVM reusable captain initialization");
+        }
+
+        internal void NormalizeMountedFormationComposition()
+        {
+            if (_projectMountedClassesToSiegeFootClasses || _allFormations == null)
+                return;
+
+            MethodInfo transferMethod = typeof(OrderOfBattleVM).GetMethod(
+                "TransferAllAvailableTroopsToFormation",
+                BindingFlags.Instance | BindingFlags.NonPublic,
+                null,
+                new[] { typeof(OrderOfBattleFormationItemVM), typeof(FormationClass) },
+                null);
+            if (transferMethod == null)
+                return;
+
+            for (FormationClass formationClass = FormationClass.Infantry;
+                 formationClass < FormationClass.NumberOfDefaultFormations;
+                 formationClass++)
+            {
+                List<OrderOfBattleFormationItemVM> targetItems = _allFormations
+                    .Where(item =>
+                        item?.Formation != null &&
+                        item.Classes != null &&
+                        item.Classes.Any(classVm => classVm?.Class == formationClass))
+                    .ToList();
+                if (targetItems.Count != 1)
+                    continue;
+
+                try
+                {
+                    transferMethod.Invoke(this, new object[] { targetItems[0], formationClass });
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Info(
+                        "CoopSiegeOrderOfBattleVM: mounted formation normalization failed open. " +
+                        "Class=" + formationClass +
+                        " Error=" + ex.GetType().Name + ":" + ex.Message);
+                }
+            }
+
+            foreach (OrderOfBattleFormationItemVM formationItem in _allFormations)
+            {
+                formationItem?.OnSizeChanged();
+                formationItem?.UpdateAdjustable();
+            }
+        }
+
+        internal void RestoreMountedFormationPresentationAfterAutoDeploy()
+        {
+            if (_projectMountedClassesToSiegeFootClasses || _allFormations == null)
+                return;
+
+            BeginInitialMountedConfiguration();
+            try
+            {
+                LoadMountedFormationConfiguration();
+            }
+            finally
+            {
+                EndInitialMountedConfiguration();
+            }
         }
 
         internal void BeginAutoDeployCaptainAssignmentPreservation(Team team)
@@ -578,6 +661,13 @@ namespace CoopSpectator.UI
 
         protected override void LoadConfiguration()
         {
+            if (!_projectMountedClassesToSiegeFootClasses)
+            {
+                base.LoadConfiguration();
+                LoadMountedFormationConfiguration();
+                return;
+            }
+
             IsApplyingInitialProjectedConfiguration = true;
 
             try
@@ -605,6 +695,183 @@ namespace CoopSpectator.UI
             finally
             {
                 IsApplyingInitialProjectedConfiguration = false;
+            }
+        }
+
+        private void LoadMountedFormationConfiguration()
+        {
+            if (_allFormations == null || _allFormations.Count <= 0)
+                return;
+
+            var usedFormationItems = new HashSet<OrderOfBattleFormationItemVM>();
+            SeedMountedClass(FormationClass.Infantry, usedFormationItems);
+            SeedMountedClass(FormationClass.Ranged, usedFormationItems);
+            SeedMountedClass(FormationClass.Cavalry, usedFormationItems);
+            SeedMountedClass(FormationClass.HorseArcher, usedFormationItems);
+            ClearUnusedMountedFormationSlots(usedFormationItems);
+        }
+
+        private void SeedMountedClass(
+            FormationClass formationClass,
+            ISet<OrderOfBattleFormationItemVM> usedFormationItems)
+        {
+            int totalCount = CountMountedUnitsInClass(formationClass);
+            if (totalCount <= 0)
+                return;
+
+            List<OrderOfBattleFormationItemVM> formationItems = CollectDominantMountedFormationItems(
+                formationClass,
+                usedFormationItems);
+            if (formationItems.Count <= 0)
+            {
+                OrderOfBattleFormationItemVM canonicalItem = _allFormations.FirstOrDefault(item =>
+                    item?.Formation != null &&
+                    item.Formation.Index == (int)formationClass &&
+                    usedFormationItems?.Contains(item) != true);
+                OrderOfBattleFormationItemVM fallbackItem =
+                    canonicalItem ?? FindUnusedFormationItem(usedFormationItems, preferEmpty: true);
+                if (fallbackItem != null)
+                    formationItems.Add(fallbackItem);
+            }
+
+            if (formationItems.Count <= 0)
+                return;
+
+            int representedCount = formationItems.Sum(item =>
+                CountMountedUnitsInClass(item?.Formation, formationClass));
+            int remainingWeight = 100;
+            int remainingCount = representedCount;
+            for (int i = 0; i < formationItems.Count; i++)
+            {
+                OrderOfBattleFormationItemVM formationItem = formationItems[i];
+                int weight;
+                if (i == formationItems.Count - 1)
+                {
+                    weight = remainingWeight;
+                }
+                else if (remainingCount > 0)
+                {
+                    int itemCount = CountMountedUnitsInClass(formationItem?.Formation, formationClass);
+                    weight = TaleWorlds.Library.MathF.Round(
+                        (float)itemCount / remainingCount * remainingWeight);
+                    weight = Math.Max(0, Math.Min(remainingWeight, weight));
+                    remainingCount -= itemCount;
+                    remainingWeight -= weight;
+                }
+                else
+                {
+                    int remainingItems = formationItems.Count - i;
+                    weight = remainingWeight / remainingItems;
+                    remainingWeight -= weight;
+                }
+
+                RefreshMountedFormationSlot(formationItem, formationClass, weight);
+                usedFormationItems?.Add(formationItem);
+            }
+        }
+
+        private List<OrderOfBattleFormationItemVM> CollectDominantMountedFormationItems(
+            FormationClass formationClass,
+            ISet<OrderOfBattleFormationItemVM> usedFormationItems)
+        {
+            var formationItems = new List<OrderOfBattleFormationItemVM>();
+            foreach (OrderOfBattleFormationItemVM formationItem in _allFormations)
+            {
+                if (formationItem?.Formation == null || usedFormationItems?.Contains(formationItem) == true)
+                    continue;
+
+                if (ResolveDominantMountedFormationClass(formationItem.Formation) == formationClass)
+                    formationItems.Add(formationItem);
+            }
+
+            return formationItems;
+        }
+
+        private static FormationClass ResolveDominantMountedFormationClass(Formation formation)
+        {
+            FormationClass dominantClass = FormationClass.NumberOfAllFormations;
+            int dominantCount = 0;
+            for (FormationClass formationClass = FormationClass.Infantry;
+                 formationClass < FormationClass.NumberOfDefaultFormations;
+                 formationClass++)
+            {
+                int count = CountMountedUnitsInClass(formation, formationClass);
+                bool isCanonicalTie =
+                    count > 0 &&
+                    count == dominantCount &&
+                    formation?.Index == (int)formationClass;
+                if (count > dominantCount || isCanonicalTie)
+                {
+                    dominantClass = formationClass;
+                    dominantCount = count;
+                }
+            }
+
+            return dominantClass;
+        }
+
+        private void RefreshMountedFormationSlot(
+            OrderOfBattleFormationItemVM formationItem,
+            FormationClass formationClass,
+            int weight)
+        {
+            if (formationItem?.Formation == null)
+                return;
+
+            DeploymentFormationClass deploymentClass;
+            switch (formationClass)
+            {
+                case FormationClass.Infantry:
+                    deploymentClass = DeploymentFormationClass.Infantry;
+                    break;
+                case FormationClass.Ranged:
+                    deploymentClass = DeploymentFormationClass.Ranged;
+                    break;
+                case FormationClass.Cavalry:
+                    deploymentClass = DeploymentFormationClass.Cavalry;
+                    break;
+                case FormationClass.HorseArcher:
+                    deploymentClass = DeploymentFormationClass.HorseArcher;
+                    break;
+                default:
+                    return;
+            }
+
+            formationItem.RefreshFormation(formationItem.Formation, deploymentClass, true);
+            SetPrimaryClassWeight(formationItem, weight);
+            formationItem.OnSizeChanged();
+            formationItem.UpdateAdjustable();
+        }
+
+        private int CountMountedUnitsInClass(FormationClass formationClass)
+        {
+            int count = 0;
+            foreach (OrderOfBattleFormationItemVM formationItem in _allFormations)
+                count += CountMountedUnitsInClass(formationItem?.Formation, formationClass);
+            return count;
+        }
+
+        private static int CountMountedUnitsInClass(
+            Formation formation,
+            FormationClass formationClass)
+        {
+            return OrderOfBattleSiegeProjectedCountsPatch.CountMountedCommanderDeploymentUnitsInClass(
+                formation,
+                formationClass);
+        }
+
+        private void ClearUnusedMountedFormationSlots(
+            ISet<OrderOfBattleFormationItemVM> usedFormationItems)
+        {
+            if (usedFormationItems == null || _allFormations == null)
+                return;
+
+            foreach (OrderOfBattleFormationItemVM formationItem in _allFormations)
+            {
+                if (formationItem?.Formation == null || usedFormationItems.Contains(formationItem))
+                    continue;
+
+                ClearFormationSlot(formationItem, restrictToSiegeClasses: false);
             }
         }
 
@@ -725,17 +992,20 @@ namespace CoopSpectator.UI
                 if (formationItem?.Formation == null || usedFormationItems.Contains(formationItem))
                     continue;
 
-                ClearFormationSlot(formationItem);
+                ClearFormationSlot(formationItem, restrictToSiegeClasses: true);
             }
         }
 
-        private static void ClearFormationSlot(OrderOfBattleFormationItemVM formationItem)
+        private static void ClearFormationSlot(
+            OrderOfBattleFormationItemVM formationItem,
+            bool restrictToSiegeClasses)
         {
             if (formationItem?.Formation == null)
                 return;
 
             formationItem.RefreshFormation(formationItem.Formation, DeploymentFormationClass.Unset, false);
-            RestrictFormationClassSelectorToSiegeClasses(formationItem);
+            if (restrictToSiegeClasses)
+                RestrictFormationClassSelectorToSiegeClasses(formationItem);
             TrySetFormationClassSelectorIndex(formationItem, 0);
 
             if (formationItem.Classes != null)

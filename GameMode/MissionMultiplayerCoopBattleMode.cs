@@ -2,6 +2,7 @@ using System;
 using CoopSpectator.Campaign;
 using System.Collections.Generic;
 using CoopSpectator.Network.Messages;
+using CoopSpectator.Infrastructure.SallyOut;
 using CoopSpectator.Infrastructure; // Підключаємо ModLogger для діагностики
 using CoopSpectator.MissionBehaviors; // Етап 3.3: логування spectator/agent/spawn
 using TaleWorlds.Core; // Підключаємо MissionInitializerRecord
@@ -273,6 +274,7 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 list.Add(new MissionBehaviorDiagnostic());
                 list.Add(new CoopMissionSpawnLogic());
             }
+            AppendSallyOutCommanderDeploymentSupport(list, mission, "server");
             return list;
         }
 
@@ -406,7 +408,42 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                     ModLogger.Info("CoopBattle client: re-enabled custom coop selection overlay for battle-map runtime while retaining native bootstrap behaviors.");
             }
 #endif
+            AppendSallyOutCommanderDeploymentSupport(list, mission, "client");
             return list;
+        }
+
+        internal static void AppendSallyOutCommanderDeploymentSupport(
+            List<MissionBehavior> list,
+            Mission mission,
+            string peerRole)
+        {
+            if (list == null || mission == null)
+                return;
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            if (!SallyOutScenarioContract.IsValidatedScenario(
+                    scenarioContext,
+                    mission.SceneName,
+                    out string diagnostics))
+            {
+                return;
+            }
+
+            if (MissionBehaviorHelpers.ListContainsBehaviorType(list, "BannerBearerLogic") ||
+                mission.GetMissionBehavior<BannerBearerLogic>() != null)
+            {
+                return;
+            }
+
+            list.Add(new BannerBearerLogic());
+            ModLogger.Info(
+                "CoopBattle " + (peerRole ?? "unknown") +
+                ": appended BannerBearerLogic for SallyOut commander deployment. " +
+                "Scene=" + (mission.SceneName ?? "null") +
+                " Diagnostics={" + (diagnostics ?? string.Empty) + "}.");
         }
 
         private static void ValidateServerStackSanity(List<MissionBehavior> list)

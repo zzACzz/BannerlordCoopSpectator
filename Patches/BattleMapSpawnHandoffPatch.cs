@@ -21092,6 +21092,9 @@ namespace CoopSpectator.Patches
                 entryId: null,
                 ref dataSource);
 
+            if (ShouldUseNativeFormationOnlyCommanderOrderInput(orderUiHandler, mission, dataSource))
+                return;
+
             bool backspacePressed = Input.IsKeyPressed(InputKey.BackSpace);
             int orderHotkeyIndex = GetPressedExactCommanderOrderHotkeyIndex();
             int formationHotkeyIndex = GetPressedExactCommanderFormationHotkeyIndex();
@@ -21276,6 +21279,27 @@ namespace CoopSpectator.Patches
                 " IsToggleOrderShown=" + TryGetInstanceBool(dataSource, "IsToggleOrderShown") +
                 " SelectedFormationCount=" + (playerOrderController.SelectedFormations?.Count.ToString() ?? "null") +
                 " Mission=" + (mission.SceneName ?? "null"));
+        }
+
+        private static bool ShouldUseNativeFormationOnlyCommanderOrderInput(
+            object orderUiHandler,
+            Mission mission,
+            object dataSource)
+        {
+            if (orderUiHandler == null || mission == null || dataSource == null)
+                return false;
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            if (!ExactCampaignCommanderDeploymentRuntime.IsFormationOnlyMountedScenario(mission, scenarioContext))
+                return false;
+
+            object gauntletLayer = TryGetInstanceMemberValue(orderUiHandler, "_gauntletLayer");
+            return gauntletLayer != null &&
+                   TryGetInstanceBool(gauntletLayer, "IsActive") &&
+                   TryGetInstanceBool(orderUiHandler, "IsValidForTick");
         }
 
         private static void TryLogExactCommanderOrderVmState(

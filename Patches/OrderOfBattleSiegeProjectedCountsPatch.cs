@@ -29,6 +29,13 @@ namespace CoopSpectator.Patches
         private static bool _isApplyingProjectedWeightDistribution;
         private static bool _isFinalizingProjectedFilterDistribution;
 
+        private sealed class MountedCompositionAssignment
+        {
+            public int FormationIndex;
+            public readonly int[] Counts = new int[4];
+            public readonly TroopTraitsMask[] Filters = new TroopTraitsMask[4];
+        }
+
         public static void Apply(Harmony harmony)
         {
             PatchTotalCountOfUnitsInClass(harmony);
@@ -40,8 +47,50 @@ namespace CoopSpectator.Patches
             PatchOrderOfBattleWeightAdjusted(harmony);
             PatchOrderOfBattleFilterUseToggled(harmony);
             PatchOrderOfBattleFormationClassChanged(harmony);
+            PatchOrderOfBattleAutoDeployPresentation(harmony);
             PatchCommanderDeploymentSiegeMachineSelection(harmony);
             PatchExactCampaignHeroInformationRefresh(harmony);
+        }
+
+        private static void PatchOrderOfBattleAutoDeployPresentation(Harmony harmony)
+        {
+            MethodInfo target = AccessTools.Method(
+                typeof(OrderOfBattleVM),
+                nameof(OrderOfBattleVM.ExecuteAutoDeploy));
+            MethodInfo postfix = typeof(OrderOfBattleSiegeProjectedCountsPatch).GetMethod(
+                nameof(OrderOfBattleVM_ExecuteAutoDeploy_Postfix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+
+            if (target == null || postfix == null)
+            {
+                ModLogger.Info(
+                    "OrderOfBattleSiegeProjectedCountsPatch: " +
+                    "OrderOfBattleVM.ExecuteAutoDeploy not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, postfix: new HarmonyMethod(postfix));
+            ModLogger.Info(
+                "OrderOfBattleSiegeProjectedCountsPatch: postfix applied to " +
+                "OrderOfBattleVM.ExecuteAutoDeploy.");
+        }
+
+        private static void OrderOfBattleVM_ExecuteAutoDeploy_Postfix(OrderOfBattleVM __instance)
+        {
+            try
+            {
+                if (__instance is CoopSiegeOrderOfBattleVM coopViewModel &&
+                    CoopMissionSelectionView.IsCommanderDeploymentMountedFormationScenarioActive())
+                {
+                    coopViewModel.RestoreMountedFormationPresentationAfterAutoDeploy();
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "OrderOfBattleSiegeProjectedCountsPatch: mounted auto-deploy presentation restore failed open: " +
+                    ex.GetType().Name + ":" + ex.Message);
+            }
         }
 
         private static void PatchExactCampaignHeroInformationRefresh(Harmony harmony)
@@ -333,12 +382,19 @@ namespace CoopSpectator.Patches
         {
             try
             {
-                if (!ShouldProjectSiegeOrderOfBattleCounts() ||
-                    formation == null ||
-                    !IsDefaultFormationClass(fc))
+                if (formation == null || !IsDefaultFormationClass(fc))
                 {
                     return true;
                 }
+
+                if (CoopMissionSelectionView.IsCommanderDeploymentMountedFormationScenarioActive())
+                {
+                    __result = CountMountedCommanderDeploymentUnitsInClass(formation, fc);
+                    return false;
+                }
+
+                if (!ShouldProjectSiegeOrderOfBattleCounts())
+                    return true;
 
                 __result = CountProjectedUnitsInClass(formation, fc);
                 return false;
@@ -605,7 +661,9 @@ namespace CoopSpectator.Patches
         {
             try
             {
-                if (!ShouldProjectSiegeOrderOfBattleCounts())
+                bool mountedScenario =
+                    CoopMissionSelectionView.IsCommanderDeploymentMountedFormationScenarioActive();
+                if (!mountedScenario && !ShouldProjectSiegeOrderOfBattleCounts())
                     return;
 
                 if (!(VisibleTroopTypeCountLookupField.GetValue(__instance) is IDictionary<FormationClass, int> lookup) ||
@@ -615,22 +673,47 @@ namespace CoopSpectator.Patches
                 }
 
                 var formationItems = new List<OrderOfBattleFormationItemVM>();
-                int infantryCount = 0;
-                int rangedCount = 0;
+                var counts = new int[4];
                 foreach (object item in allFormations)
                 {
                     if (!(item is OrderOfBattleFormationItemVM formationItem) || formationItem.Formation == null)
                         continue;
 
                     formationItems.Add(formationItem);
-                    infantryCount += CountProjectedUnitsInClass(formationItem.Formation, FormationClass.Infantry);
-                    rangedCount += CountProjectedUnitsInClass(formationItem.Formation, FormationClass.Ranged);
+                    if (mountedScenario)
+                    {
+                        for (FormationClass formationClass = FormationClass.Infantry;
+                             formationClass < FormationClass.NumberOfDefaultFormations;
+                             formationClass++)
+                        {
+                            counts[(int)formationClass] += CountMountedCommanderDeploymentUnitsInClass(
+                                formationItem.Formation,
+                                formationClass);
+                        }
+                    }
+                    else
+                    {
+                        counts[(int)FormationClass.Infantry] += CountProjectedUnitsInClass(
+                            formationItem.Formation,
+                            FormationClass.Infantry);
+                        counts[(int)FormationClass.Ranged] += CountProjectedUnitsInClass(
+                            formationItem.Formation,
+                            FormationClass.Ranged);
+                    }
                 }
 
-                lookup[FormationClass.Infantry] = infantryCount;
-                lookup[FormationClass.Ranged] = rangedCount;
-                lookup[FormationClass.Cavalry] = infantryCount;
-                lookup[FormationClass.HorseArcher] = rangedCount;
+                if (!mountedScenario)
+                {
+                    counts[(int)FormationClass.Cavalry] = counts[(int)FormationClass.Infantry];
+                    counts[(int)FormationClass.HorseArcher] = counts[(int)FormationClass.Ranged];
+                }
+
+                for (FormationClass formationClass = FormationClass.Infantry;
+                     formationClass < FormationClass.NumberOfDefaultFormations;
+                     formationClass++)
+                {
+                    lookup[formationClass] = counts[(int)formationClass];
+                }
 
                 foreach (OrderOfBattleFormationItemVM formationItem in formationItems)
                     formationItem.OnSizeChanged();
@@ -647,6 +730,15 @@ namespace CoopSpectator.Patches
         {
             try
             {
+                if (CoopMissionSelectionView.IsCommanderDeploymentMountedFormationScenarioActive())
+                {
+                    Team mountedTeam = formationClass?.BelongedFormationItem?.Formation?.Team;
+                    TrySyncCommanderDeploymentFormationAssignmentsForTeam(
+                        mountedTeam,
+                        "OrderOfBattleSiegeProjectedCountsPatch.OnWeightAdjusted mounted");
+                    return;
+                }
+
                 LogProjectedWeightAdjustmentDiagnostics(
                     "entry",
                     __instance,
@@ -711,7 +803,7 @@ namespace CoopSpectator.Patches
         {
             try
             {
-                if (!ShouldProjectSiegeOrderOfBattleCounts() ||
+                if (!CoopMissionSelectionView.IsCommanderDeploymentOrderOfBattleActive() ||
                     !GameNetwork.IsClient ||
                     !GameNetwork.IsSessionActive)
                 {
@@ -742,6 +834,14 @@ namespace CoopSpectator.Patches
         {
             try
             {
+                if (CoopMissionSelectionView.IsCommanderDeploymentMountedFormationScenarioActive())
+                {
+                    TrySyncCommanderDeploymentFormationAssignmentsForTeam(
+                        __instance?.Formation?.Team,
+                        "OrderOfBattleSiegeProjectedCountsPatch.OnClassChanged mounted");
+                    return;
+                }
+
                 LogProjectedClassChangedDiagnostics(
                     "entry",
                     __instance,
@@ -831,7 +931,7 @@ namespace CoopSpectator.Patches
         {
             try
             {
-                if (!CoopMissionSelectionView.IsCommanderDeploymentOrderOfBattleActive() ||
+                if (!CoopMissionSelectionView.IsCommanderDeploymentSiegeProjectionActive() ||
                     !GameNetwork.IsClient ||
                     !GameNetwork.IsSessionActive ||
                     item?.DeploymentPoint == null)
@@ -1903,8 +2003,19 @@ namespace CoopSpectator.Patches
 
         internal static bool TrySyncCommanderDeploymentFormationAssignmentsForTeam(Team team, string source)
         {
+            if (CoopSiegeOrderOfBattleVM.IsApplyingInitialMountedConfiguration)
+            {
+                LogCommanderDeploymentAssignmentSyncDiagnostics(
+                    "skip-mounted-initialization",
+                    team,
+                    source,
+                    string.Empty);
+                return false;
+            }
+
             if (!GameNetwork.IsClient ||
                 !GameNetwork.IsSessionActive ||
+                !CoopMissionSelectionView.IsCommanderDeploymentOrderOfBattleActive() ||
                 team == null ||
                 team.Side == BattleSideEnum.None)
             {
@@ -2039,7 +2150,7 @@ namespace CoopSpectator.Patches
         {
             try
             {
-                if (!ShouldProjectSiegeOrderOfBattleCounts() ||
+                if (!CoopMissionSelectionView.IsCommanderDeploymentOrderOfBattleActive() ||
                     !GameNetwork.IsClient ||
                     !GameNetwork.IsSessionActive)
                 {
@@ -2050,7 +2161,8 @@ namespace CoopSpectator.Patches
                 if (targetTeam == null || targetTeam.Side == BattleSideEnum.None)
                     return;
 
-                TryFinalizeProjectedFilterDistributionForTeam(targetTeam);
+                if (ShouldProjectSiegeOrderOfBattleCounts())
+                    TryFinalizeProjectedFilterDistributionForTeam(targetTeam);
 
                 TrySyncCommanderDeploymentFormationAssignmentsForTeam(
                     targetTeam,
@@ -2129,6 +2241,18 @@ namespace CoopSpectator.Patches
             assignmentKey = string.Empty;
 
             if (team == null)
+                return false;
+
+            if (CoopMissionSelectionView.IsCommanderDeploymentMountedFormationScenarioActive())
+            {
+                return TryBuildMountedCommanderDeploymentFormationAssignmentPayload(
+                    team,
+                    out assignmentBytes,
+                    out formationLayoutBytes,
+                    out assignmentKey);
+            }
+
+            if (!ShouldProjectSiegeOrderOfBattleCounts())
                 return false;
 
             Mission mission = Mission.Current;
@@ -2224,6 +2348,150 @@ namespace CoopSpectator.Patches
             return true;
         }
 
+        private static bool TryBuildMountedCommanderDeploymentFormationAssignmentPayload(
+            Team team,
+            out byte[] assignmentBytes,
+            out byte[] formationLayoutBytes,
+            out string assignmentKey)
+        {
+            assignmentBytes = Array.Empty<byte>();
+            formationLayoutBytes = Array.Empty<byte>();
+            assignmentKey = string.Empty;
+            if (team == null || Mission.Current?.AllAgents == null)
+                return false;
+
+            List<OrderOfBattleFormationItemVM> formationItems = GetActiveOrderOfBattleFormationItems();
+            var assignments = new List<MountedCompositionAssignment>();
+            int totalUnits = 0;
+            foreach (Formation formation in team.FormationsIncludingEmpty)
+            {
+                if (formation == null ||
+                    !ReferenceEquals(formation.Team, team) ||
+                    formation.Index < 0 ||
+                    formation.Index >= (int)FormationClass.NumberOfRegularFormations)
+                {
+                    continue;
+                }
+
+                var assignment = new MountedCompositionAssignment
+                {
+                    FormationIndex = formation.Index
+                };
+                OrderOfBattleFormationItemVM formationItem =
+                    FindOrderOfBattleFormationItem(formationItems, formation);
+                for (FormationClass formationClass = FormationClass.Infantry;
+                     formationClass < FormationClass.NumberOfDefaultFormations;
+                     formationClass++)
+                {
+                    int classIndex = (int)formationClass;
+                    int count = Math.Max(0, CountMountedCommanderDeploymentUnitsInClass(
+                        formation,
+                        formationClass));
+                    assignment.Counts[classIndex] = Math.Min(ushort.MaxValue, count);
+                    assignment.Filters[classIndex] = BuildMountedCommanderDeploymentTroopFilter(
+                        formationItem,
+                        formationClass);
+                    totalUnits += count;
+                }
+
+                assignments.Add(assignment);
+            }
+
+            if (assignments.Count <= 0 || totalUnits <= 0)
+                return false;
+
+            TryBuildCommanderDeploymentFormationLayoutPayload(team, out formationLayoutBytes);
+            int maxAssignments =
+                (CoopCommanderDeploymentFormationAssignmentsMessage.MaxAssignmentBytes -
+                 CoopCommanderDeploymentFormationAssignmentsMessage.CompositionAssignmentHeaderBytes) /
+                CoopCommanderDeploymentFormationAssignmentsMessage.BytesPerMountedCompositionAssignment;
+            if (assignments.Count > maxAssignments)
+                return false;
+
+            assignments.Sort((left, right) => left.FormationIndex.CompareTo(right.FormationIndex));
+            assignmentBytes = new byte[
+                CoopCommanderDeploymentFormationAssignmentsMessage.CompositionAssignmentHeaderBytes +
+                assignments.Count *
+                CoopCommanderDeploymentFormationAssignmentsMessage.BytesPerMountedCompositionAssignment];
+            int offset = 0;
+            assignmentBytes[offset++] =
+                CoopCommanderDeploymentFormationAssignmentsMessage.CompositionAssignmentPayloadMarker;
+            assignmentBytes[offset++] =
+                CoopCommanderDeploymentFormationAssignmentsMessage.MountedCompositionAssignmentPayloadVersion;
+            assignmentBytes[offset++] = (byte)(assignments.Count & 0xFF);
+            foreach (MountedCompositionAssignment assignment in assignments)
+            {
+                assignmentBytes[offset++] = (byte)(assignment.FormationIndex & 0xFF);
+                for (int classIndex = 0; classIndex < 4; classIndex++)
+                    WriteUInt16ToPayload(assignmentBytes, ref offset, assignment.Counts[classIndex]);
+                for (int classIndex = 0; classIndex < 4; classIndex++)
+                    WriteUInt16ToPayload(assignmentBytes, ref offset, (int)assignment.Filters[classIndex]);
+            }
+
+            assignmentKey =
+                team.TeamIndex +
+                "|" +
+                team.Side +
+                "|Mounted=True" +
+                "|A=" + Convert.ToBase64String(assignmentBytes) +
+                "|L=" + Convert.ToBase64String(formationLayoutBytes);
+            return true;
+        }
+
+        internal static int CountMountedCommanderDeploymentUnitsInClass(
+            Formation formation,
+            FormationClass formationClass)
+        {
+            if (formation == null || !IsDefaultFormationClass(formationClass))
+                return 0;
+
+            return formation.GetCountOfUnitsWithCondition(agent =>
+                ResolveMountedCommanderDeploymentAgentClass(agent) == formationClass);
+        }
+
+        private static FormationClass ResolveMountedCommanderDeploymentAgentClass(Agent agent)
+        {
+            if (agent == null || agent.IsMount)
+                return FormationClass.NumberOfAllFormations;
+
+            if (agent.HasMount)
+            {
+                return agent.IsRangedCached
+                    ? FormationClass.HorseArcher
+                    : FormationClass.Cavalry;
+            }
+
+            return agent.IsRangedCached
+                ? FormationClass.Ranged
+                : FormationClass.Infantry;
+        }
+
+        private static TroopTraitsMask BuildMountedCommanderDeploymentTroopFilter(
+            OrderOfBattleFormationItemVM formationItem,
+            FormationClass formationClass)
+        {
+            bool isRanged = formationClass == FormationClass.Ranged ||
+                            formationClass == FormationClass.HorseArcher;
+            bool isMounted = formationClass == FormationClass.Cavalry ||
+                             formationClass == FormationClass.HorseArcher;
+            TroopTraitsMask filter = isRanged
+                ? TroopTraitsMask.Ranged
+                : TroopTraitsMask.Melee;
+            if (isMounted)
+                filter |= TroopTraitsMask.Mount;
+
+            if (formationItem?.FilterItems == null)
+                return filter;
+
+            foreach (OrderOfBattleFormationFilterSelectorItemVM filterItem in formationItem.FilterItems)
+            {
+                if (filterItem != null && filterItem.IsActive)
+                    filter |= TroopFilteringUtilities.GetFilter(filterItem.FilterType);
+            }
+
+            return filter;
+        }
+
         private static OrderOfBattleFormationItemVM FindOrderOfBattleFormationItem(
             List<OrderOfBattleFormationItemVM> formationItems,
             Formation formation)
@@ -2315,7 +2583,7 @@ namespace CoopSpectator.Patches
 
         private static bool ShouldProjectSiegeOrderOfBattleCounts()
         {
-            return CoopMissionSelectionView.IsCommanderDeploymentOrderOfBattleActive();
+            return CoopMissionSelectionView.IsCommanderDeploymentSiegeProjectionActive();
         }
 
         private static int CountProjectedUnitsInClass(Formation formation, FormationClass formationClass)
