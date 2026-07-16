@@ -64,6 +64,7 @@ namespace CoopSpectator.MissionModels
             TryApplyExactMeleeDrivenPropertyOverrides(agent, agentDrivenProperties);
             if (!exactRangedDrivenPropertiesApplied)
                 TryApplyExactRangedDrivenPropertyOverrides(agent, agentDrivenProperties);
+            TryApplyExactPersonalDrivenPropertyOverrides(agent, agentDrivenProperties);
             TryApplyGlobalCaptainDrivenProperties(agent, agentDrivenProperties);
         }
 
@@ -130,11 +131,38 @@ namespace CoopSpectator.MissionModels
 
         public override float GetInteractionDistance(Agent agent)
         {
+            if (agent != null &&
+                (agent.HasMount || agent.MountAgent != null) &&
+                HasExactHeroPerk(agent, "ThrowingLongReach"))
+            {
+                return 3f;
+            }
+
             return _baseModel.GetInteractionDistance(agent);
         }
 
         public override float GetMaxCameraZoom(Agent agent)
         {
+            WeaponComponentData weapon = ResolveCurrentWeapon(agent);
+            string skillId = ResolveWeaponDamageRelevantSkill(weapon)?.StringId ?? string.Empty;
+            if (string.Equals(skillId, "Bow", StringComparison.OrdinalIgnoreCase) &&
+                HasExactHeroPerk(agent, "BowEagleEye"))
+            {
+                return 1.5f;
+            }
+
+            if (string.Equals(skillId, "Crossbow", StringComparison.OrdinalIgnoreCase) &&
+                HasExactHeroPerk(agent, "CrossbowLongShots"))
+            {
+                return 2f;
+            }
+
+            if (string.Equals(skillId, "Throwing", StringComparison.OrdinalIgnoreCase) &&
+                HasExactHeroPerk(agent, "ThrowingFocus"))
+            {
+                return 1.25f;
+            }
+
             return _baseModel.GetMaxCameraZoom(agent);
         }
 
@@ -265,7 +293,7 @@ namespace CoopSpectator.MissionModels
             }
             else if (string.Equals(skillId, "Riding", StringComparison.OrdinalIgnoreCase) && isMounted)
             {
-                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "RidingNimbleSteed", accumulator);
+                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "RidingNimbleStead", accumulator);
             }
 
             if (!isMounted)
@@ -939,10 +967,44 @@ namespace CoopSpectator.MissionModels
             if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
                 return false;
 
-            if (!CoopMissionSpawnLogic.TryGetExactHeroCombatProfileBaseHitPoints(agent, out int exactBaseHitPoints, out entryId))
+            Agent humanAgent = agent.IsMount ? agent.RiderAgent : agent;
+            if (humanAgent == null ||
+                !CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(humanAgent, out entryId))
+            {
+                return false;
+            }
+
+            RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+            if (entryState == null)
                 return false;
 
-            float candidateHealth = Math.Max(1f, exactBaseHitPoints);
+            BattlePartyState partyState = null;
+            BattleRuntimeState runtimeState = BattleSnapshotRuntimeState.GetState();
+            if (runtimeState?.PartiesById != null && !string.IsNullOrWhiteSpace(entryState.PartyId))
+                runtimeState.PartiesById.TryGetValue(entryState.PartyId, out partyState);
+
+            float candidateHealth;
+            if (agent.IsMount)
+            {
+                candidateHealth = ResolveExactCampaignMountHealth(baseHealth, humanAgent, partyState);
+            }
+            else if (CoopMissionSpawnLogic.TryGetExactHeroCombatProfileBaseHitPoints(
+                         humanAgent,
+                         out int exactBaseHitPoints,
+                         out _))
+            {
+                candidateHealth = exactBaseHitPoints;
+            }
+            else
+            {
+                candidateHealth = ResolveExactCampaignRegularTroopHealth(
+                    baseHealth,
+                    agent,
+                    entryState,
+                    partyState);
+            }
+
+            candidateHealth = Math.Max(1f, candidateHealth);
             if (Math.Abs(candidateHealth - baseHealth) < 0.0001f)
                 return false;
 
@@ -1238,6 +1300,235 @@ namespace CoopSpectator.MissionModels
             return 0f;
         }
 
+        private static void TryApplyExactPersonalDrivenPropertyOverrides(
+            Agent agent,
+            AgentDrivenProperties agentDrivenProperties)
+        {
+            if (agent == null || agentDrivenProperties == null)
+                return;
+
+            Mission mission = agent.Mission;
+            if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                return;
+
+            if (agent.IsMount)
+            {
+                TryApplyExactPersonalMountDrivenPropertyOverrides(agent, agentDrivenProperties);
+                return;
+            }
+
+            if (!agent.IsHuman)
+                return;
+
+            WeaponComponentData currentWeapon = ResolveCurrentWeapon(agent);
+            SkillObject relevantSkill = ResolveWeaponDamageRelevantSkill(currentWeapon);
+            string skillId = relevantSkill?.StringId ?? string.Empty;
+            bool isMounted = agent.HasMount || agent.MountAgent != null;
+
+            if (!isMounted)
+            {
+                float combatSpeedFactor = 0f;
+                if (HasExactHeroPerk(agent, "OneHandedFleetOfFoot"))
+                    combatSpeedFactor += 0.04f;
+                if (string.Equals(skillId, "Polearm", StringComparison.OrdinalIgnoreCase) &&
+                    HasExactHeroPerk(agent, "PolearmFootwork"))
+                {
+                    combatSpeedFactor += 0.02f;
+                }
+                if (combatSpeedFactor > 0f)
+                    agentDrivenProperties.CombatMaxSpeedMultiplier *= 1f + combatSpeedFactor;
+
+                float movementSpeedFactor = 0f;
+                if (HasExactHeroPerk(agent, "AthleticsMorningExercise"))
+                    movementSpeedFactor += 0.03f;
+                if (HasExactHeroPerk(agent, "MedicineSelfMedication"))
+                    movementSpeedFactor += 0.02f;
+
+                WeaponComponentData offhandWeapon = ResolveOffhandWeapon(agent);
+                bool hasWieldedShield = offhandWeapon?.IsShield == true;
+                bool hasCurrentRangedWeapon = currentWeapon?.IsRangedWeapon == true;
+                if (!hasWieldedShield && !hasCurrentRangedWeapon && HasExactHeroPerk(agent, "AthleticsSprint"))
+                    movementSpeedFactor += 0.05f;
+                if (currentWeapon == null && offhandWeapon == null && HasExactHeroPerk(agent, "RogueryFleetFooted"))
+                    movementSpeedFactor += 0.1f;
+                if (movementSpeedFactor > 0f)
+                    agentDrivenProperties.MaxSpeedMultiplier *= 1f + movementSpeedFactor;
+
+            }
+
+            if (HasExactHeroPerk(agent, "RogueryDirtyFighting"))
+                agentDrivenProperties.KickStunDurationMultiplier *= 1.5f;
+
+            TryApplyExactPersonalMeleePerkDrivenProperties(
+                agent,
+                agentDrivenProperties,
+                currentWeapon,
+                relevantSkill,
+                skillId);
+            TryApplyExactPersonalShieldDrivenProperties(agent, agentDrivenProperties);
+            TryRemoveExactPersonalRangedWeaponEncumbrance(agent, agentDrivenProperties);
+        }
+
+        private static void TryApplyExactPersonalMountDrivenPropertyOverrides(
+            Agent mountAgent,
+            AgentDrivenProperties agentDrivenProperties)
+        {
+            Agent riderAgent = mountAgent?.RiderAgent;
+            if (riderAgent == null)
+                return;
+
+            float maneuverFactor = HasExactHeroPerk(riderAgent, "RidingNimbleStead") ? 0.1f : 0f;
+            float maneuverAddition = 0f;
+            if (HasExactHeroPerk(riderAgent, "RidingTheWayOfTheSaddle") &&
+                CoopMissionSpawnLogic.TryGetExactHeroCombatProfileSkillValue(
+                    riderAgent,
+                    DefaultSkills.Riding,
+                    out int ridingSkill,
+                    out _))
+            {
+                maneuverAddition = Math.Max(0, ridingSkill - 250) * 0.3f;
+            }
+
+            if (maneuverFactor > 0f || maneuverAddition > 0f)
+            {
+                agentDrivenProperties.MountManeuver =
+                    agentDrivenProperties.MountManeuver * (1f + maneuverFactor) + maneuverAddition;
+            }
+
+            if (HasExactHeroPerk(riderAgent, "RidingSweepingWind"))
+                agentDrivenProperties.MountSpeed *= 1.05f;
+        }
+
+        private static void TryApplyExactPersonalMeleePerkDrivenProperties(
+            Agent agent,
+            AgentDrivenProperties agentDrivenProperties,
+            WeaponComponentData currentWeapon,
+            SkillObject relevantSkill,
+            string skillId)
+        {
+            if (currentWeapon?.IsMeleeWeapon != true || relevantSkill == null)
+                return;
+
+            int exactSkill = 0;
+            CoopMissionSpawnLogic.TryGetExactHeroCombatProfileSkillValue(agent, relevantSkill, out exactSkill, out _);
+            float swingFactor = 0f;
+            float readyFactor = 0f;
+            float handlingFactor = 0f;
+            if (!(agent.HasMount || agent.MountAgent != null) && HasExactHeroPerk(agent, "AthleticsFury"))
+                handlingFactor += 0.1f;
+
+            if (string.Equals(skillId, "OneHanded", StringComparison.OrdinalIgnoreCase))
+            {
+                if (HasExactHeroPerk(agent, "OneHandedSwiftStrike"))
+                    swingFactor += 0.02f;
+                if (HasExactHeroPerk(agent, "OneHandedWrappedHandles"))
+                    handlingFactor += 0.2f;
+                if (exactSkill > 250 && HasExactHeroPerk(agent, "OneHandedWayOfTheSword"))
+                {
+                    float epicFactor = (exactSkill - 250) * 0.002f;
+                    swingFactor += epicFactor;
+                    readyFactor += epicFactor;
+                }
+            }
+            else if (string.Equals(skillId, "TwoHanded", StringComparison.OrdinalIgnoreCase))
+            {
+                if (HasExactHeroPerk(agent, "TwoHandedOnTheEdge"))
+                    swingFactor += 0.03f;
+                if (HasExactHeroPerk(agent, "TwoHandedStrongGrip"))
+                    handlingFactor += 0.1f;
+                if (exactSkill > 250 && HasExactHeroPerk(agent, "TwoHandedWayOfTheGreatAxe"))
+                {
+                    float epicFactor = (exactSkill - 250) * 0.002f;
+                    swingFactor += epicFactor;
+                    readyFactor += epicFactor;
+                }
+            }
+            else if (string.Equals(skillId, "Polearm", StringComparison.OrdinalIgnoreCase))
+            {
+                if (HasExactHeroPerk(agent, "PolearmSwiftSwing"))
+                    swingFactor += 0.05f;
+                if ((int)currentWeapon.SwingDamageType != -1 && HasExactHeroPerk(agent, "PolearmCounterWeight"))
+                    handlingFactor += 0.15f;
+                if (exactSkill > 250 && HasExactHeroPerk(agent, "PolearmWayOfTheSpear"))
+                {
+                    float epicFactor = (exactSkill - 250) * 0.002f;
+                    swingFactor += epicFactor;
+                    readyFactor += epicFactor;
+                }
+            }
+
+            if (swingFactor > 0f)
+                agentDrivenProperties.SwingSpeedMultiplier *= 1f + swingFactor;
+            if (readyFactor > 0f)
+                agentDrivenProperties.ThrustOrRangedReadySpeedMultiplier *= 1f + readyFactor;
+            if (handlingFactor > 0f)
+                agentDrivenProperties.HandlingMultiplier *= 1f + handlingFactor;
+        }
+
+        private static void TryApplyExactPersonalShieldDrivenProperties(
+            Agent agent,
+            AgentDrivenProperties agentDrivenProperties)
+        {
+            WeaponComponentData offhandWeapon = ResolveOffhandWeapon(agent);
+            if (offhandWeapon?.IsShield != true)
+                return;
+
+            if (HasExactHeroPerk(agent, "OneHandedArrowCatcher"))
+                agentDrivenProperties.AttributeShieldMissileCollisionBodySizeAdder += 0.01f;
+            if (HasExactHeroPerk(agent, "OneHandedBasher"))
+                agentDrivenProperties.ShieldBashStunDurationMultiplier *= 1.5f;
+        }
+
+        private static void TryRemoveExactPersonalRangedWeaponEncumbrance(
+            Agent agent,
+            AgentDrivenProperties agentDrivenProperties)
+        {
+            bool ignoreBowEncumbrance = HasExactHeroPerk(agent, "BowRangersSwiftness");
+            bool ignoreCrossbowEncumbrance = HasExactHeroPerk(agent, "CrossbowLooseAndMove");
+            if (!ignoreBowEncumbrance && !ignoreCrossbowEncumbrance)
+                return;
+
+            MissionEquipment equipment = agent.Equipment;
+            if (equipment == null)
+                return;
+
+            float ignoredEncumbrance = 0f;
+            for (EquipmentIndex index = EquipmentIndex.Weapon0; index <= EquipmentIndex.Weapon3; index++)
+            {
+                MissionWeapon missionWeapon = equipment[index];
+                ItemObject item = missionWeapon.Item;
+                WeaponComponentData usage = missionWeapon.CurrentUsageItem ?? item?.PrimaryWeapon;
+                SkillObject relevantSkill = ResolveWeaponDamageRelevantSkill(usage);
+                string skillId = relevantSkill?.StringId ?? string.Empty;
+                bool ignored =
+                    (ignoreBowEncumbrance && string.Equals(skillId, "Bow", StringComparison.OrdinalIgnoreCase)) ||
+                    (ignoreCrossbowEncumbrance && string.Equals(skillId, "Crossbow", StringComparison.OrdinalIgnoreCase));
+                if (!ignored || item == null || usage == null)
+                    continue;
+
+                ignoredEncumbrance += 4f * MathF.Sqrt(Math.Max(0f, usage.GetRealWeaponLength())) * item.Weight;
+            }
+
+            if (ignoredEncumbrance > 0f)
+            {
+                agentDrivenProperties.WeaponsEncumbrance =
+                    Math.Max(0f, agentDrivenProperties.WeaponsEncumbrance - ignoredEncumbrance);
+            }
+        }
+
+        private static WeaponComponentData ResolveOffhandWeapon(Agent agent)
+        {
+            if (agent?.Equipment == null)
+                return null;
+
+            EquipmentIndex offhandIndex = agent.GetOffhandWieldedItemIndex();
+            if (offhandIndex == EquipmentIndex.None)
+                return null;
+
+            MissionWeapon missionWeapon = agent.Equipment[offhandIndex];
+            return missionWeapon.CurrentUsageItem ?? missionWeapon.Item?.PrimaryWeapon;
+        }
+
         private static int TryGetCharacterSkillValue(BasicCharacterObject character, SkillObject skillObject)
         {
             if (character == null || skillObject == null)
@@ -1268,6 +1559,94 @@ namespace CoopSpectator.MissionModels
 
             agentDrivenProperties.SetStat(property, updatedValue);
             return true;
+        }
+
+        private static float ResolveExactCampaignRegularTroopHealth(
+            float fallbackHealth,
+            Agent agent,
+            RosterEntryState entryState,
+            BattlePartyState partyState)
+        {
+            float health = entryState?.BaseHitPoints > 0
+                ? entryState.BaseHitPoints
+                : fallbackHealth;
+            BattlePartyModifierState modifiers = partyState?.Modifiers;
+            if (modifiers == null)
+                return health;
+
+            bool isMounted = agent?.HasMount == true ||
+                agent?.MountAgent != null ||
+                entryState?.IsMounted == true;
+            bool isRanged = entryState?.IsRanged == true || agent?.Character?.IsRanged == true;
+            bool isInfantry = agent?.Character?.IsInfantry == true;
+
+            if (HasPerkId(modifiers.PartyLeaderPerkIds, "TwoHandedThickHides"))
+                health += 5f;
+            if (HasPerkId(modifiers.PartyLeaderPerkIds, "PolearmHardyFrontline"))
+                health += 5f;
+            if (isRanged && HasPerkId(modifiers.PartyLeaderPerkIds, "CrossbowBoltenGuard"))
+                health += 5f;
+            if (!isMounted && HasPerkId(modifiers.PartyLeaderPerkIds, "AthleticsWellBuilt"))
+                health += 5f;
+            if (!isMounted && HasPerkId(modifiers.PartyLeaderPerkIds, "PolearmHardKnock"))
+                health += 3f;
+            if (!isMounted && isInfantry && HasPerkId(modifiers.PartyLeaderPerkIds, "OneHandedUnwaveringDefense"))
+                health += 10f;
+
+            RosterEntryState leaderEntry = ResolvePartyLeaderEntry(partyState);
+            if (leaderEntry != null && HasPerkId(leaderEntry.PerkIds, "MedicineMinisterOfHealth"))
+                health += Math.Max(0, modifiers.LeaderMedicineSkill - 250);
+
+            return health;
+        }
+
+        private static float ResolveExactCampaignMountHealth(
+            float baseHealth,
+            Agent riderAgent,
+            BattlePartyState partyState)
+        {
+            float additiveHealth = HasPerkId(partyState?.Modifiers?.PartyLeaderPerkIds, "MedicineSledges")
+                ? 15f
+                : 0f;
+            float healthFactor = 1f;
+            if (HasExactHeroPerk(riderAgent, "RidingVeterinary"))
+                healthFactor += 0.2f;
+            if (HasPerkId(partyState?.Modifiers?.PartyLeaderPerkIds, "RidingVeterinary"))
+                healthFactor += 0.1f;
+
+            return Math.Max(1f, (baseHealth + additiveHealth) * healthFactor);
+        }
+
+        private static RosterEntryState ResolvePartyLeaderEntry(BattlePartyState partyState)
+        {
+            string leaderHeroId = partyState?.Modifiers?.LeaderHeroId;
+            if (string.IsNullOrWhiteSpace(leaderHeroId) || partyState?.Entries == null)
+                return null;
+
+            foreach (RosterEntryState entry in partyState.Entries)
+            {
+                if (entry != null &&
+                    string.Equals(entry.HeroId, leaderHeroId, StringComparison.OrdinalIgnoreCase))
+                {
+                    return entry;
+                }
+            }
+
+            return null;
+        }
+
+        private static bool HasPerkId(IEnumerable<string> perkIds, string perkId)
+        {
+            if (perkIds == null || string.IsNullOrWhiteSpace(perkId))
+                return false;
+
+            foreach (string candidate in perkIds)
+            {
+                if (string.Equals(candidate, perkId, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+
+            return false;
         }
 
         private static bool TrySetDrivenProperty(

@@ -88,6 +88,7 @@ namespace CoopSpectator.Infrastructure
         public int ScoutScoutingSkill { get; set; }
         public int QuartermasterStewardSkill { get; set; }
         public int EngineerEngineeringSkill { get; set; }
+        public int LeaderMedicineSkill { get; set; }
         public int SurgeonMedicineSkill { get; set; }
         public int SurvivalMedicineSkill { get; set; }
         public List<string> PartyLeaderPerkIds { get; set; } = new List<string>();
@@ -233,6 +234,7 @@ namespace CoopSpectator.Infrastructure
         public int ScoutScoutingSkill { get; set; }
         public int QuartermasterStewardSkill { get; set; }
         public int EngineerEngineeringSkill { get; set; }
+        public int LeaderMedicineSkill { get; set; }
         public int SurgeonMedicineSkill { get; set; }
         public int SurvivalMedicineSkill { get; set; }
         public List<string> PartyLeaderPerkIds { get; set; } = new List<string>();
@@ -1955,6 +1957,7 @@ namespace CoopSpectator.Infrastructure
                 ScoutScoutingSkill = modifierSnapshot.ScoutScoutingSkill,
                 QuartermasterStewardSkill = modifierSnapshot.QuartermasterStewardSkill,
                 EngineerEngineeringSkill = modifierSnapshot.EngineerEngineeringSkill,
+                LeaderMedicineSkill = modifierSnapshot.LeaderMedicineSkill,
                 SurgeonMedicineSkill = modifierSnapshot.SurgeonMedicineSkill,
                 SurvivalMedicineSkill = modifierSnapshot.SurvivalMedicineSkill,
                 PartyLeaderPerkIds = modifierSnapshot.PartyLeaderPerkIds != null ? new List<string>(modifierSnapshot.PartyLeaderPerkIds) : new List<string>(),
@@ -1989,6 +1992,7 @@ namespace CoopSpectator.Infrastructure
                 ScoutScoutingSkill = modifierProjection.ScoutScoutingSkill,
                 QuartermasterStewardSkill = modifierProjection.QuartermasterStewardSkill,
                 EngineerEngineeringSkill = modifierProjection.EngineerEngineeringSkill,
+                LeaderMedicineSkill = modifierProjection.LeaderMedicineSkill,
                 SurgeonMedicineSkill = modifierProjection.SurgeonMedicineSkill,
                 SurvivalMedicineSkill = modifierProjection.SurvivalMedicineSkill,
                 PartyLeaderPerkIds = modifierProjection.PartyLeaderPerkIds != null ? new List<string>(modifierProjection.PartyLeaderPerkIds) : new List<string>(),

@@ -258,16 +258,39 @@ namespace CoopSpectator.MissionModels
         {
             float threshold = _baseModel.CalculateStaggerThresholdDamage(defenderAgent, blow);
             Agent humanDefender = ResolveHumanAgent(defenderAgent);
-            if (humanDefender == null || !TryResolveGlobalCaptainEntryId(humanDefender, out string entryId))
+            if (humanDefender == null)
                 return threshold;
 
-            WeaponComponentData currentWeapon = ResolveCurrentWeapon(humanDefender);
-            if (currentWeapon == null || !IsCrossbowSkill(ResolveRelevantSkill(currentWeapon)?.StringId))
-                return threshold;
+            float factor = 0f;
+            if (IsAgentMounted(humanDefender))
+            {
+                if (HasExactPersonalPerk(humanDefender, "RidingDauntlessSteed"))
+                    factor += 0.5f;
+            }
+            else if (HasExactPersonalPerk(humanDefender, "AthleticsSpartan"))
+            {
+                factor += 0.5f;
+            }
 
-            var accumulator = new CaptainPerkBonusAccumulator(threshold);
-            GlobalCaptainPerkRuntimeState.AddEffect(entryId, "CrossbowDeftHands", accumulator);
-            return accumulator.HasEffects ? MathF.Max(0f, accumulator.Result) : threshold;
+            MissionWeapon wieldedWeapon = humanDefender.WieldedWeapon;
+            WeaponComponentData currentWeapon = wieldedWeapon.CurrentUsageItem;
+            if (currentWeapon != null &&
+                IsCrossbowSkill(ResolveRelevantSkill(currentWeapon)?.StringId) &&
+                wieldedWeapon.IsReloading)
+            {
+                if (HasExactPersonalPerk(humanDefender, "CrossbowDeftHands"))
+                    factor += 0.5f;
+
+                if (TryResolveGlobalCaptainEntryId(humanDefender, out string entryId))
+                {
+                    var captainAccumulator = new CaptainPerkBonusAccumulator(1f);
+                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "CrossbowDeftHands", captainAccumulator);
+                    if (captainAccumulator.HasEffects)
+                        factor += MathF.Max(0f, captainAccumulator.Result - 1f);
+                }
+            }
+
+            return MathF.Max(0f, threshold * (1f + factor));
         }
 
         public override float CalculateAlternativeAttackDamage(in AttackInformation attackInformation, in AttackCollisionData collisionData, WeaponComponentData weapon)
@@ -282,7 +305,17 @@ namespace CoopSpectator.MissionModels
 
         public override MeleeCollisionReaction DecidePassiveAttackCollisionReaction(Agent attacker, Agent defender, bool isFatalHit)
         {
-            return _baseModel.DecidePassiveAttackCollisionReaction(attacker, defender, isFatalHit);
+            MeleeCollisionReaction reaction = _baseModel.DecidePassiveAttackCollisionReaction(attacker, defender, isFatalHit);
+            if (!isFatalHit || !IsAgentMounted(attacker))
+                return reaction;
+
+            float slicedThroughChance = 0.05f;
+            if (HasExactPersonalPerk(attacker, "PolearmSkewer"))
+                slicedThroughChance += 0.3f;
+
+            return MBRandom.RandomFloat < slicedThroughChance
+                ? MeleeCollisionReaction.SlicedThrough
+                : reaction;
         }
 
         public override void DecideWeaponCollisionReaction(
@@ -656,7 +689,7 @@ namespace CoopSpectator.MissionModels
                 }
 
                 if (attackInformation.IsVictimAgentMount &&
-                    TryHasExactPerk(attackerAgent, "PolearmSteedKiller", ref entryId))
+                    TryHasExactPerk(attackerAgent, "PolearmSteadKiller", ref entryId))
                 {
                     totalFactor *= 1.7f;
                     factorSummary = AppendFactorSummary(factorSummary, "SteedKiller=1.7");
@@ -929,7 +962,7 @@ namespace CoopSpectator.MissionModels
             else if (string.Equals(skillId, "Polearm", StringComparison.OrdinalIgnoreCase))
             {
                 if (victimIsMount)
-                    TryAddTrackedCaptainEffect(entryId, "PolearmSteedKiller", accumulator, appliedEffects);
+                    TryAddTrackedCaptainEffect(entryId, "PolearmSteadKiller", accumulator, appliedEffects);
                 TryAddTrackedCaptainEffect(entryId, "PolearmPhalanx", accumulator, appliedEffects);
                 if (isMounted)
                     TryAddTrackedCaptainEffect(entryId, "PolearmCavalry", accumulator, appliedEffects);

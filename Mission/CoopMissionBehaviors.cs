@@ -22092,6 +22092,10 @@ namespace CoopSpectator.MissionBehaviors
                 float targetHitPoints = Math.Max(1f, entryState.BaseHitPoints);
                 try
                 {
+                    AgentStatCalculateModel statModel = MissionGameModels.Current?.AgentStatCalculateModel;
+                    if (statModel != null)
+                        targetHitPoints = Math.Max(1f, statModel.GetEffectiveMaxHealth(agent));
+
                     agent.HealthLimit = targetHitPoints;
                     agent.Health = targetHitPoints;
                     parts.Add("Hp=" + targetHitPoints.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture));
@@ -22108,6 +22112,11 @@ namespace CoopSpectator.MissionBehaviors
                 try
                 {
                     float targetMountHitPoints = Math.Max(1f, mountAgent.HealthLimit);
+                    AgentStatCalculateModel statModel = MissionGameModels.Current?.AgentStatCalculateModel;
+                    if (statModel != null)
+                        targetMountHitPoints = Math.Max(1f, statModel.GetEffectiveMaxHealth(mountAgent));
+
+                    mountAgent.HealthLimit = targetMountHitPoints;
                     mountAgent.Health = targetMountHitPoints;
                     parts.Add("MountHp=" + targetMountHitPoints.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture));
                 }
@@ -24523,6 +24532,9 @@ namespace CoopSpectator.MissionBehaviors
             int adjustedRangedPerkCount = profile.PerkRangedCount;
             bool suppressApproximateHeroRangedBallistics =
                 ShouldSuppressApproximateHeroRangedBallistics(profile, agent, primaryWeapon);
+            bool lowLevelExactPersonalPerksActive =
+                IsHeroProfileEligibleForExactPersonalPerks(profile) &&
+                CoopCampaignDerivedAgentStatCalculateModel.IsActiveForMission(agent.Mission);
 
             if (TryApplyExactPersonalPerkDrivenStats(agent, profile, agentDrivenProperties, primaryWeapon, relevantSkill))
             {
@@ -24537,7 +24549,9 @@ namespace CoopSpectator.MissionBehaviors
                 }
             }
 
-            if (profile.PerkMeleeCount > 0 && AgentLoadoutContainsRelevantSkill(agent, "OneHanded", "TwoHanded", "Polearm"))
+            if (!lowLevelExactPersonalPerksActive &&
+                profile.PerkMeleeCount > 0 &&
+                AgentLoadoutContainsRelevantSkill(agent, "OneHanded", "TwoHanded", "Polearm"))
             {
                 if (TryApplyMeleePerkDrivenStats(agentDrivenProperties, profile.PerkMeleeCount))
                 {
@@ -24557,7 +24571,10 @@ namespace CoopSpectator.MissionBehaviors
                 }
             }
 
-            if (profile.PerkAthleticsCount > 0 && !agent.IsMount && !(agent.HasMount || agent.MountAgent != null))
+            if (!lowLevelExactPersonalPerksActive &&
+                profile.PerkAthleticsCount > 0 &&
+                !agent.IsMount &&
+                !(agent.HasMount || agent.MountAgent != null))
             {
                 if (TryApplyAthleticsPerkDrivenStats(agentDrivenProperties, profile.PerkAthleticsCount))
                 {
@@ -24566,7 +24583,8 @@ namespace CoopSpectator.MissionBehaviors
                 }
             }
 
-            if (profile.PerkRidingCount > 0 &&
+            if (!lowLevelExactPersonalPerksActive &&
+                profile.PerkRidingCount > 0 &&
                 (agent.HasMount || agent.MountAgent != null) &&
                 !suppressApproximateHeroRangedBallistics)
             {
@@ -24997,7 +25015,7 @@ namespace CoopSpectator.MissionBehaviors
                 if (applied)
                     CountMaterializedCombatProfileApply(profile, "mount", ref profile.CountedMountStatAdjustment);
 
-                if (TryApplyMountPerkDrivenStats(profile, agentDrivenProperties))
+                if (TryApplyMountPerkDrivenStats(mountAgent, profile, agentDrivenProperties))
                 {
                     applied = true;
                     CountMaterializedCombatProfileApply(profile, "perk-mount", ref profile.CountedPerkMountAdjustment);
@@ -25012,11 +25030,18 @@ namespace CoopSpectator.MissionBehaviors
         }
 
         private static bool TryApplyMountPerkDrivenStats(
+            Agent mountAgent,
             MaterializedCombatProfileRuntimeState profile,
             AgentDrivenProperties agentDrivenProperties)
         {
             if (profile == null || agentDrivenProperties == null || profile.PerkRidingCount <= 0)
                 return false;
+
+            if (IsHeroProfileEligibleForExactPersonalPerks(profile) &&
+                CoopCampaignDerivedAgentStatCalculateModel.IsActiveForMission(mountAgent?.Mission))
+            {
+                return false;
+            }
 
             float factor = ComputePerkPositiveFactor(profile.PerkRidingCount, 0.005f, 0.08f);
             bool applied = false;

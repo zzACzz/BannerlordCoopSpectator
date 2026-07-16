@@ -321,6 +321,7 @@ namespace CoopSpectator.Network.Messages
         public int ScoutScoutingSkill { get; set; }
         public int QuartermasterStewardSkill { get; set; }
         public int EngineerEngineeringSkill { get; set; }
+        public int LeaderMedicineSkill { get; set; }
         public int SurgeonMedicineSkill { get; set; }
         public int SurvivalMedicineSkill { get; set; }
         public List<string> PartyLeaderPerkIds { get; set; } = new List<string>();
