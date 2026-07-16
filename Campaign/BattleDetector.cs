@@ -770,6 +770,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     string.Equals(_cachedHostAftermathRewardAuditResultKey, resultKey, StringComparison.Ordinal)
                         ? CloneRewardStateAuditSnapshot(_cachedHostAftermathRewardAuditSnapshot)
                         : null;
+                bool nativeFinalSallyOutAftermathConsumed =
+                    SallyOutCampaignBattleAdapter.WasFinalEncounterCompletionConsumed(resultKey);
 
                 BattleResultWritebackSummary writebackSummary = ApplyBattleResultWriteback(
                     result,
@@ -780,7 +782,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         ? CloneLootAftermathSummary(_cachedHostAftermathLootSummary)
                         : null,
                     string.Equals(_cachedHostAftermathMainPartyPreviewResultKey, resultKey, StringComparison.Ordinal) &&
-                    _cachedHostAftermathMainPartyPreviewHeroHpApplied);
+                    _cachedHostAftermathMainPartyPreviewHeroHpApplied,
+                    nativeFinalSallyOutAftermathConsumed);
                 if (ShouldDeferFinalBattleAftermath(result))
                 {
                     CapturePendingLordsHallStageState(result);
@@ -908,7 +911,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             CoopBattleResultBridgeFile.BattleResultSnapshot result,
             BattleResultWritebackSummary.RewardProjectionSummary cachedRewardProjection = null,
             BattleResultWritebackSummary.LootAftermathSummary cachedLootAftermath = null,
-            bool skipMainPartyHeroHitPointWriteback = false)
+            bool skipMainPartyHeroHitPointWriteback = false,
+            bool nativeFinalSallyOutAftermathConsumed = false)
         {
             var summary = new BattleResultWritebackSummary();
             if (result?.Entries == null || result.Entries.Count == 0 || TaleWorlds.CampaignSystem.Campaign.Current == null)
@@ -955,6 +959,11 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             if (ShouldUseNativeFinalLordsHallAftermath(result))
             {
                 AddWritebackSample(summary.AdjustedSamples, "FinalLordsHall:native-map-event-aftermath");
+                return summary;
+            }
+            if (nativeFinalSallyOutAftermathConsumed)
+            {
+                AddWritebackSample(summary.AdjustedSamples, "FinalSallyOut:native-map-event-aftermath");
                 return summary;
             }
             TryBuildMainPartyRewardProjection(result, encounterParties, summary, cachedRewardProjection);

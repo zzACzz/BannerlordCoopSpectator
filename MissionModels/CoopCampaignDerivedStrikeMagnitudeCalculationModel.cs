@@ -19,7 +19,11 @@ namespace CoopSpectator.MissionModels
     {
         private readonly StrikeMagnitudeCalculationModel _baseModel;
         private readonly HashSet<string> _loggedMissileMagnitudeKeys = new HashSet<string>(StringComparer.Ordinal);
+        private readonly HashSet<string> _loggedArmorAdjustmentKeys = new HashSet<string>(StringComparer.Ordinal);
+        private readonly HashSet<string> _loggedMountedLinearSpeedKeys = new HashSet<string>(StringComparer.Ordinal);
         private bool _hasLoggedBattleActivation;
+        private const int ArmorAdjustmentDiagnosticBudget = 96;
+        private const int MountedLinearSpeedDiagnosticBudget = 64;
 
         public CoopCampaignDerivedStrikeMagnitudeCalculationModel(StrikeMagnitudeCalculationModel baseModel)
         {
@@ -127,22 +131,40 @@ namespace CoopSpectator.MissionModels
             }
 
             float adjustedArmor = baseArmor;
-            if (TryApplyExactPersonalArmorPenetration(attackInformation.AttackerAgent, collisionData, baseArmor, adjustedArmor, weaponComponent, out float exactPersonalArmor))
+            bool personalApplied = TryApplyExactPersonalArmorPenetration(
+                attackInformation.AttackerAgent,
+                collisionData,
+                baseArmor,
+                adjustedArmor,
+                weaponComponent,
+                out float exactPersonalArmor);
+            if (personalApplied)
                 adjustedArmor = exactPersonalArmor;
-            if (TryApplyGlobalCaptainArmorPenetration(
+            float personalAdjustedArmor = adjustedArmor;
+            bool captainApplied = TryApplyGlobalCaptainArmorPenetration(
                     attackInformation.AttackerAgent,
                     baseArmor,
                     adjustedArmor,
                     weaponComponent,
-                    out float exactGlobalCaptainArmor))
+                    out float exactGlobalCaptainArmor);
+            if (captainApplied)
             {
                 adjustedArmor = exactGlobalCaptainArmor;
             }
 
+            TryLogArmorAdjustmentSample(
+                attackInformation,
+                collisionData,
+                weaponComponent,
+                baseArmor,
+                personalAdjustedArmor,
+                adjustedArmor,
+                personalApplied,
+                captainApplied);
             return adjustedArmor;
         }
 
-        private static float ApplyGlobalCaptainLinearSpeedEffects(
+        private float ApplyGlobalCaptainLinearSpeedEffects(
             in AttackInformation attackInformation,
             WeaponComponentData weaponComponent,
             float extraLinearSpeed)
@@ -159,22 +181,38 @@ namespace CoopSpectator.MissionModels
             }
 
             var accumulator = new CaptainPerkBonusAccumulator(extraLinearSpeed);
+            List<string> appliedEffects = CoopDebugConfig.CombatModelDiagnostics
+                ? new List<string>()
+                : null;
             bool isMounted = attackInformation.DoesAttackerHaveMountAgent ||
                 attackerAgent.HasMount ||
                 attackerAgent.MountAgent != null;
             if (isMounted)
-                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "RidingNomadicTraditions", accumulator);
+                TryAddTrackedCaptainEffect(entryId, "RidingNomadicTraditions", accumulator, appliedEffects);
             else
-                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "AthleticsSurgingBlow", accumulator);
+                TryAddTrackedCaptainEffect(entryId, "AthleticsSurgingBlow", accumulator, appliedEffects);
 
             if (ResolveRelevantSkill(weaponComponent) == DefaultSkills.Polearm)
             {
-                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "PolearmLancer", accumulator);
+                TryAddTrackedCaptainEffect(entryId, "PolearmLancer", accumulator, appliedEffects);
                 if (isMounted)
-                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "PolearmUnstoppableForce", accumulator);
+                    TryAddTrackedCaptainEffect(entryId, "PolearmUnstoppableForce", accumulator, appliedEffects);
             }
 
-            return accumulator.HasEffects ? Math.Max(0f, accumulator.Result) : extraLinearSpeed;
+            float adjustedExtraLinearSpeed = accumulator.HasEffects
+                ? Math.Max(0f, accumulator.Result)
+                : extraLinearSpeed;
+            if (isMounted)
+            {
+                TryLogMountedLinearSpeedSample(
+                    attackerAgent,
+                    entryId,
+                    weaponComponent,
+                    extraLinearSpeed,
+                    adjustedExtraLinearSpeed,
+                    appliedEffects);
+            }
+            return adjustedExtraLinearSpeed;
         }
 
         private static bool TryApplyGlobalCaptainArmorPenetration(
@@ -208,6 +246,150 @@ namespace CoopSpectator.MissionModels
             float armorReduction = accumulator.Result - baseArmor;
             exactAdjustedArmor = Math.Max(0f, adjustedArmor - armorReduction);
             return Math.Abs(exactAdjustedArmor - adjustedArmor) > 0.0001f;
+        }
+
+        private void TryLogArmorAdjustmentSample(
+            in AttackInformation attackInformation,
+            in AttackCollisionData collisionData,
+            WeaponComponentData weaponComponent,
+            float baseArmor,
+            float personalAdjustedArmor,
+            float finalAdjustedArmor,
+            bool personalApplied,
+            bool captainApplied)
+        {
+            if (!CoopDebugConfig.CombatModelDiagnostics)
+                return;
+
+            Agent attackerAgent = attackInformation.AttackerAgent;
+            Agent victimAgent = attackInformation.VictimAgent;
+            Mission mission = attackerAgent?.Mission ?? victimAgent?.Mission;
+            if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                return;
+
+            bool attackerMounted =
+                attackInformation.DoesAttackerHaveMountAgent ||
+                attackInformation.IsAttackerAgentMount ||
+                attackerAgent?.HasMount == true ||
+                attackerAgent?.MountAgent != null;
+            bool mountedInteraction =
+                attackerMounted ||
+                attackInformation.IsVictimAgentMount ||
+                victimAgent?.IsMount == true ||
+                victimAgent?.HasMount == true ||
+                collisionData.IsHorseCharge;
+            if (!mountedInteraction)
+                return;
+
+            Agent attackerHuman = ResolveHumanAgent(attackerAgent);
+            Agent victimHuman = ResolveHumanAgent(victimAgent);
+            CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(attackerHuman, out string attackerEntryId);
+            CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(victimHuman, out string victimEntryId);
+            string skillId = ResolveRelevantSkill(weaponComponent)?.StringId ?? "null";
+            string logKey =
+                (attackerAgent?.Index ?? -1) + "|" +
+                (victimAgent?.Index ?? -1) + "|" +
+                skillId + "|" +
+                (weaponComponent?.WeaponClass.ToString() ?? "None") + "|" +
+                collisionData.VictimHitBodyPart + "|" +
+                FormatDiagnosticFloat(baseArmor) + "|" +
+                FormatDiagnosticFloat(personalAdjustedArmor) + "|" +
+                FormatDiagnosticFloat(finalAdjustedArmor) + "|" +
+                personalApplied + "|" + captainApplied + "|" + collisionData.IsHorseCharge;
+            if (_loggedArmorAdjustmentKeys.Count >= ArmorAdjustmentDiagnosticBudget ||
+                !_loggedArmorAdjustmentKeys.Add(logKey))
+            {
+                return;
+            }
+
+            TryLogBattleActivation(attackerHuman ?? victimHuman);
+            ModLogger.Info(
+                "CoopCampaignDerivedStrikeMagnitudeCalculationModel: mounted armor adjustment sample. " +
+                "Attacker=" + (attackerAgent?.Index ?? -1) +
+                " AttackerEntryId=" + (string.IsNullOrWhiteSpace(attackerEntryId) ? "unknown" : attackerEntryId) +
+                " Victim=" + (victimAgent?.Index ?? -1) +
+                " VictimEntryId=" + (string.IsNullOrWhiteSpace(victimEntryId) ? "unknown" : victimEntryId) +
+                " VictimKind=" + (attackInformation.IsVictimAgentMount || victimAgent?.IsMount == true ? "Mount" : "Human") +
+                " Skill=" + skillId +
+                " WeaponClass=" + (weaponComponent?.WeaponClass.ToString() ?? "None") +
+                " BodyPart=" + collisionData.VictimHitBodyPart +
+                " DamageType=" + ((DamageTypes)collisionData.DamageType) +
+                " BaseArmor=" + FormatDiagnosticFloat(baseArmor) +
+                " PersonalAdjustedArmor=" + FormatDiagnosticFloat(personalAdjustedArmor) +
+                " FinalAdjustedArmor=" + FormatDiagnosticFloat(finalAdjustedArmor) +
+                " PersonalPenetrationApplied=" + personalApplied +
+                " CaptainPenetrationApplied=" + captainApplied +
+                " AttackerMounted=" + attackerMounted +
+                " HorseCharge=" + collisionData.IsHorseCharge +
+                " Mission=" + mission.SceneName + ".");
+        }
+
+        private void TryLogMountedLinearSpeedSample(
+            Agent attackerAgent,
+            string entryId,
+            WeaponComponentData weaponComponent,
+            float baseExtraLinearSpeed,
+            float adjustedExtraLinearSpeed,
+            ICollection<string> appliedEffects)
+        {
+            if (!CoopDebugConfig.CombatModelDiagnostics || attackerAgent == null)
+                return;
+
+            string effectSummary = appliedEffects != null && appliedEffects.Count > 0
+                ? string.Join(",", appliedEffects)
+                : "none";
+            string skillId = ResolveRelevantSkill(weaponComponent)?.StringId ?? "null";
+            string logKey =
+                attackerAgent.Index + "|" + (entryId ?? string.Empty) + "|" + skillId + "|" +
+                (weaponComponent?.WeaponClass.ToString() ?? "None") + "|" +
+                FormatDiagnosticFloat(baseExtraLinearSpeed) + "|" +
+                FormatDiagnosticFloat(adjustedExtraLinearSpeed) + "|" + effectSummary;
+            if (_loggedMountedLinearSpeedKeys.Count >= MountedLinearSpeedDiagnosticBudget ||
+                !_loggedMountedLinearSpeedKeys.Add(logKey))
+            {
+                return;
+            }
+
+            TryLogBattleActivation(attackerAgent);
+            ModLogger.Info(
+                "CoopCampaignDerivedStrikeMagnitudeCalculationModel: mounted linear speed sample. " +
+                "Attacker=" + attackerAgent.Index +
+                " EntryId=" + (string.IsNullOrWhiteSpace(entryId) ? "unknown" : entryId) +
+                " Skill=" + skillId +
+                " WeaponClass=" + (weaponComponent?.WeaponClass.ToString() ?? "None") +
+                " BaseExtraLinearSpeed=" + FormatDiagnosticFloat(baseExtraLinearSpeed) +
+                " AdjustedExtraLinearSpeed=" + FormatDiagnosticFloat(adjustedExtraLinearSpeed) +
+                " CaptainPerks=" + effectSummary +
+                " Mission=" + (attackerAgent.Mission?.SceneName ?? "null") + ".");
+        }
+
+        private static bool TryAddTrackedCaptainEffect(
+            string entryId,
+            string perkId,
+            CaptainPerkBonusAccumulator accumulator,
+            ICollection<string> appliedEffects)
+        {
+            if (!GlobalCaptainPerkRuntimeState.AddEffect(entryId, perkId, accumulator))
+                return false;
+
+            if (appliedEffects != null)
+            {
+                string effectSummary = perkId;
+                if (GlobalCaptainPerkRuntimeState.TryGetEffect(entryId, perkId, out var effect))
+                {
+                    effectSummary +=
+                        "=" + FormatDiagnosticFloat(effect.Bonus) +
+                        "(" + (string.IsNullOrWhiteSpace(effect.IncrementType) ? "additive" : effect.IncrementType) + ")";
+                }
+                appliedEffects.Add(effectSummary);
+            }
+
+            return true;
+        }
+
+        private static string FormatDiagnosticFloat(float value)
+        {
+            return value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
         }
 
         private void TryLogMissileMagnitude(

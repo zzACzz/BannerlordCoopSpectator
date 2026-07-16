@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.MissionBehaviors;
@@ -18,7 +19,9 @@ namespace CoopSpectator.MissionModels
     public sealed class CoopCampaignDerivedAgentApplyDamageModel : AgentApplyDamageModel
     {
         private readonly AgentApplyDamageModel _baseModel;
+        private readonly HashSet<string> _loggedDamageAmplificationKeys = new HashSet<string>(StringComparer.Ordinal);
         private bool _hasLoggedBattleActivation;
+        private const int DamageAmplificationDiagnosticBudget = 96;
 
         public CoopCampaignDerivedAgentApplyDamageModel(AgentApplyDamageModel baseModel)
         {
@@ -57,30 +60,34 @@ namespace CoopSpectator.MissionModels
                     out string factorSummary);
             if (!personalApplied)
                 updatedDamage = amplifiedDamage;
+            float personalDamage = updatedDamage;
 
             bool captainApplied = TryApplyGlobalCaptainDamageAmplifications(
                 attackInformation,
                 collisionData,
                 updatedDamage,
-                out float captainUpdatedDamage);
+                out float captainUpdatedDamage,
+                out string captainEntryId,
+                out string captainFactorSummary);
             if (captainApplied)
                 updatedDamage = captainUpdatedDamage;
 
             if (!personalApplied && !captainApplied)
                 return amplifiedDamage;
 
-            if (personalApplied)
-            {
-                TryLogBattleActivation(attackInformation.AttackerAgent);
-                TryLogDamageAmplificationSample(
-                    attackInformation,
-                    collisionData,
-                    entryId,
-                    skillId,
-                    amplifiedDamage,
-                    updatedDamage,
-                    factorSummary);
-            }
+            TryLogBattleActivation(attackInformation.AttackerAgent);
+            TryLogDamageAmplificationSample(
+                attackInformation,
+                collisionData,
+                string.IsNullOrWhiteSpace(entryId) ? captainEntryId : entryId,
+                skillId,
+                amplifiedDamage,
+                personalDamage,
+                updatedDamage,
+                personalApplied,
+                captainApplied,
+                factorSummary,
+                captainFactorSummary);
             return updatedDamage;
         }
 
@@ -871,11 +878,15 @@ namespace CoopSpectator.MissionModels
             in AttackInformation attackInformation,
             in AttackCollisionData collisionData,
             float baseDamage,
-            out float updatedDamage)
+            out float updatedDamage,
+            out string entryId,
+            out string factorSummary)
         {
             updatedDamage = baseDamage;
+            entryId = null;
+            factorSummary = "none";
             Agent attackerAgent = ResolveExactAttackerHumanAgent(attackInformation);
-            if (attackerAgent == null || !TryResolveGlobalCaptainEntryId(attackerAgent, out string entryId))
+            if (attackerAgent == null || !TryResolveGlobalCaptainEntryId(attackerAgent, out entryId))
                 return false;
 
             WeaponComponentData weapon = attackInformation.AttackerWeapon.CurrentUsageItem;
@@ -888,111 +899,142 @@ namespace CoopSpectator.MissionModels
             bool victimIsMount = attackInformation.IsVictimAgentMount;
             Agent victimAgent = ResolveExactVictimHumanAgent(attackInformation);
             var accumulator = new CaptainPerkBonusAccumulator(baseDamage);
+            List<string> appliedEffects = CoopDebugConfig.CombatModelDiagnostics
+                ? new List<string>()
+                : null;
 
             if (string.Equals(skillId, "OneHanded", StringComparison.OrdinalIgnoreCase))
             {
-                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "RogueryCarver", accumulator);
-                GlobalCaptainPerkRuntimeState.AddEffect(
+                TryAddTrackedCaptainEffect(entryId, "RogueryCarver", accumulator, appliedEffects);
+                TryAddTrackedCaptainEffect(
                     entryId,
                     isMounted ? "OneHandedCavalry" : "OneHandedDeadlyPurpose",
-                    accumulator);
+                    accumulator,
+                    appliedEffects);
             }
             else if (string.Equals(skillId, "TwoHanded", StringComparison.OrdinalIgnoreCase))
             {
                 if (isShieldHit)
                 {
-                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "TwoHandedWoodChopper", accumulator);
-                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "TwoHandedShieldBreaker", accumulator);
+                    TryAddTrackedCaptainEffect(entryId, "TwoHandedWoodChopper", accumulator, appliedEffects);
+                    TryAddTrackedCaptainEffect(entryId, "TwoHandedShieldBreaker", accumulator, appliedEffects);
                 }
                 if (victimIsMount)
-                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "TwoHandedBeastSlayer", accumulator);
+                    TryAddTrackedCaptainEffect(entryId, "TwoHandedBeastSlayer", accumulator, appliedEffects);
                 if (!isMounted)
-                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "TwoHandedRecklessCharge", accumulator);
-                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "TwoHandedHeadBasher", accumulator);
-                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "RogueryDashAndSlash", accumulator);
+                    TryAddTrackedCaptainEffect(entryId, "TwoHandedRecklessCharge", accumulator, appliedEffects);
+                TryAddTrackedCaptainEffect(entryId, "TwoHandedHeadBasher", accumulator, appliedEffects);
+                TryAddTrackedCaptainEffect(entryId, "RogueryDashAndSlash", accumulator, appliedEffects);
             }
             else if (string.Equals(skillId, "Polearm", StringComparison.OrdinalIgnoreCase))
             {
                 if (victimIsMount)
-                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "PolearmSteedKiller", accumulator);
-                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "PolearmPhalanx", accumulator);
+                    TryAddTrackedCaptainEffect(entryId, "PolearmSteedKiller", accumulator, appliedEffects);
+                TryAddTrackedCaptainEffect(entryId, "PolearmPhalanx", accumulator, appliedEffects);
                 if (isMounted)
-                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "PolearmCavalry", accumulator);
+                    TryAddTrackedCaptainEffect(entryId, "PolearmCavalry", accumulator, appliedEffects);
                 else
                 {
-                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "PolearmPikeman", accumulator);
+                    TryAddTrackedCaptainEffect(entryId, "PolearmPikeman", accumulator, appliedEffects);
                     if (IsThrustCollision(collisionData))
                     {
-                        GlobalCaptainPerkRuntimeState.AddEffect(entryId, "PolearmBraced", accumulator);
-                        GlobalCaptainPerkRuntimeState.AddEffect(entryId, "PolearmSharpenTheTip", accumulator);
+                        TryAddTrackedCaptainEffect(entryId, "PolearmBraced", accumulator, appliedEffects);
+                        TryAddTrackedCaptainEffect(entryId, "PolearmSharpenTheTip", accumulator, appliedEffects);
                     }
                 }
             }
             else if (string.Equals(skillId, "Bow", StringComparison.OrdinalIgnoreCase) && weapon?.IsConsumable == true)
             {
-                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "BowBowControl", accumulator);
+                TryAddTrackedCaptainEffect(entryId, "BowBowControl", accumulator, appliedEffects);
                 if ((BattleSnapshotRuntimeState.GetEntryState(entryId)?.Tier ?? 0) >= 3)
-                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "BowStrongBows", accumulator);
+                    TryAddTrackedCaptainEffect(entryId, "BowStrongBows", accumulator, appliedEffects);
             }
             else if (IsCrossbowSkill(skillId) && weapon?.IsConsumable == true)
             {
                 if (victimIsMount)
-                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "CrossbowUnhorser", accumulator);
+                    TryAddTrackedCaptainEffect(entryId, "CrossbowUnhorser", accumulator, appliedEffects);
                 if (victimAgent?.Character?.IsInfantry == true)
-                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "CrossbowSheriff", accumulator);
-                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "CrossbowHammerBolts", accumulator);
-                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "EngineeringDreadfulSieger", accumulator);
+                    TryAddTrackedCaptainEffect(entryId, "CrossbowSheriff", accumulator, appliedEffects);
+                TryAddTrackedCaptainEffect(entryId, "CrossbowHammerBolts", accumulator, appliedEffects);
+                TryAddTrackedCaptainEffect(entryId, "EngineeringDreadfulSieger", accumulator, appliedEffects);
             }
             else if (string.Equals(skillId, "Throwing", StringComparison.OrdinalIgnoreCase))
             {
                 if (isShieldHit)
                 {
-                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "ThrowingShieldBreaker", accumulator);
-                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "ThrowingSplinters", accumulator);
+                    TryAddTrackedCaptainEffect(entryId, "ThrowingShieldBreaker", accumulator, appliedEffects);
+                    TryAddTrackedCaptainEffect(entryId, "ThrowingSplinters", accumulator, appliedEffects);
                 }
                 if (victimIsMount)
                 {
-                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "ThrowingHunter", accumulator);
-                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "ThrowingKnockOff", accumulator);
+                    TryAddTrackedCaptainEffect(entryId, "ThrowingHunter", accumulator, appliedEffects);
+                    TryAddTrackedCaptainEffect(entryId, "ThrowingKnockOff", accumulator, appliedEffects);
                 }
                 if (isMounted)
-                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "ThrowingMountedSkirmisher", accumulator);
-                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "ThrowingImpale", accumulator);
+                    TryAddTrackedCaptainEffect(entryId, "ThrowingMountedSkirmisher", accumulator, appliedEffects);
+                TryAddTrackedCaptainEffect(entryId, "ThrowingImpale", accumulator, appliedEffects);
             }
 
             if (weapon?.IsMeleeWeapon == true)
             {
-                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "AthleticsPowerful", accumulator);
-                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "EngineeringImprovedTools", accumulator);
+                TryAddTrackedCaptainEffect(entryId, "AthleticsPowerful", accumulator, appliedEffects);
+                TryAddTrackedCaptainEffect(entryId, "EngineeringImprovedTools", accumulator, appliedEffects);
                 if (isMounted)
-                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "RidingMountedWarrior", accumulator);
+                    TryAddTrackedCaptainEffect(entryId, "RidingMountedWarrior", accumulator, appliedEffects);
             }
 
             if (weapon?.IsConsumable == true && isMounted)
-                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "RidingHorseArcher", accumulator);
+                TryAddTrackedCaptainEffect(entryId, "RidingHorseArcher", accumulator, appliedEffects);
             if (collisionData.IsHorseCharge)
-                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "RidingFullSpeed", accumulator);
+                TryAddTrackedCaptainEffect(entryId, "RidingFullSpeed", accumulator, appliedEffects);
             if (isShieldHit)
-                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "EngineeringWallBreaker", accumulator);
+                TryAddTrackedCaptainEffect(entryId, "EngineeringWallBreaker", accumulator, appliedEffects);
             if (collisionData.EntityExists)
-                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "TwoHandedVandal", accumulator);
+                TryAddTrackedCaptainEffect(entryId, "TwoHandedVandal", accumulator, appliedEffects);
 
             if (victimAgent?.Character != null)
             {
-                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "TacticsCoaching", accumulator);
+                TryAddTrackedCaptainEffect(entryId, "TacticsCoaching", accumulator, appliedEffects);
                 if (victimAgent.Character.Culture?.IsBandit == true)
-                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "TacticsLawKeeper", accumulator);
+                    TryAddTrackedCaptainEffect(entryId, "TacticsLawKeeper", accumulator, appliedEffects);
                 if (isMounted && victimAgent.Character.IsInfantry)
-                    GlobalCaptainPerkRuntimeState.AddEffect(entryId, "TacticsGensdarmes", accumulator);
+                    TryAddTrackedCaptainEffect(entryId, "TacticsGensdarmes", accumulator, appliedEffects);
             }
             if (attackerAgent.Character?.Culture?.IsBandit == true)
-                GlobalCaptainPerkRuntimeState.AddEffect(entryId, "RogueryPartnersInCrime", accumulator);
+                TryAddTrackedCaptainEffect(entryId, "RogueryPartnersInCrime", accumulator, appliedEffects);
 
             if (!accumulator.HasEffects)
                 return false;
 
+            factorSummary = appliedEffects != null && appliedEffects.Count > 0
+                ? string.Join(",", appliedEffects)
+                : "none";
             updatedDamage = MathF.Max(0f, accumulator.Result);
             return Math.Abs(updatedDamage - baseDamage) > 0.0001f;
+        }
+
+        private static bool TryAddTrackedCaptainEffect(
+            string entryId,
+            string perkId,
+            CaptainPerkBonusAccumulator accumulator,
+            ICollection<string> appliedEffects)
+        {
+            if (!GlobalCaptainPerkRuntimeState.AddEffect(entryId, perkId, accumulator))
+                return false;
+
+            if (appliedEffects != null)
+            {
+                string effectSummary = perkId;
+                if (GlobalCaptainPerkRuntimeState.TryGetEffect(entryId, perkId, out var effect))
+                {
+                    effectSummary +=
+                        "=" + effect.Bonus.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                        "(" + (string.IsNullOrWhiteSpace(effect.IncrementType) ? "additive" : effect.IncrementType) + ")";
+                }
+                appliedEffects.Add(effectSummary);
+            }
+
+            return true;
         }
 
         private static bool TryResolveGlobalCaptainEntryId(Agent agent, out string entryId)
@@ -1026,14 +1068,18 @@ namespace CoopSpectator.MissionModels
                 " BaseModel=" + _baseModel.GetType().FullName + ".");
         }
 
-        private static void TryLogDamageAmplificationSample(
+        private void TryLogDamageAmplificationSample(
             in AttackInformation attackInformation,
             in AttackCollisionData collisionData,
             string entryId,
             string skillId,
             float baseDamage,
-            float updatedDamage,
-            string factorSummary)
+            float personalDamage,
+            float finalDamage,
+            bool personalApplied,
+            bool captainApplied,
+            string personalFactorSummary,
+            string captainFactorSummary)
         {
             if (!CoopDebugConfig.CombatModelDiagnostics)
                 return;
@@ -1041,6 +1087,24 @@ namespace CoopSpectator.MissionModels
             Agent attackerAgent = attackInformation.AttackerAgent;
             Agent victimAgent = attackInformation.VictimAgent;
             WeaponComponentData weapon = attackInformation.AttackerWeapon.CurrentUsageItem;
+            string logKey =
+                (attackerAgent?.Index ?? -1) + "|" +
+                (victimAgent?.Index ?? -1) + "|" +
+                (entryId ?? string.Empty) + "|" +
+                (skillId ?? string.Empty) + "|" +
+                (weapon?.WeaponClass.ToString() ?? "None") + "|" +
+                collisionData.VictimHitBodyPart + "|" +
+                collisionData.IsHorseCharge + "|" +
+                Math.Round(baseDamage, 1).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "|" +
+                Math.Round(personalDamage, 1).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "|" +
+                Math.Round(finalDamage, 1).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "|" +
+                (personalFactorSummary ?? string.Empty) + "|" +
+                (captainFactorSummary ?? string.Empty);
+            if (_loggedDamageAmplificationKeys.Count >= DamageAmplificationDiagnosticBudget ||
+                !_loggedDamageAmplificationKeys.Add(logKey))
+            {
+                return;
+            }
 
             ModLogger.Info(
                 "CoopCampaignDerivedAgentApplyDamageModel: exact damage amplification applied. " +
@@ -1050,11 +1114,18 @@ namespace CoopSpectator.MissionModels
                 " Skill=" + (string.IsNullOrWhiteSpace(skillId) ? "null" : skillId) +
                 " WeaponClass=" + (weapon?.WeaponClass.ToString() ?? "None") +
                 " BaseDamage=" + baseDamage.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
-                " ExactDamage=" + updatedDamage.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
-                " Factors=" + (string.IsNullOrWhiteSpace(factorSummary) ? "none" : factorSummary) +
+                " PersonalDamage=" + personalDamage.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                " FinalDamage=" + finalDamage.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                " PersonalApplied=" + personalApplied +
+                " CaptainApplied=" + captainApplied +
+                " PersonalFactors=" + (string.IsNullOrWhiteSpace(personalFactorSummary) ? "none" : personalFactorSummary) +
+                " CaptainFactors=" + (string.IsNullOrWhiteSpace(captainFactorSummary) ? "none" : captainFactorSummary) +
                 " HeadShot=" + attackInformation.IsHeadShot +
                 " VictimHpRate=" + attackInformation.VictimHitPointRate.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
-                " Mounted=" + (attackInformation.DoesAttackerHaveMountAgent || attackInformation.IsAttackerAgentMount) +
+                " AttackerMounted=" + (attackInformation.DoesAttackerHaveMountAgent || attackerAgent?.HasMount == true || attackerAgent?.MountAgent != null) +
+                " AttackerIsMount=" + attackInformation.IsAttackerAgentMount +
+                " VictimIsMount=" + attackInformation.IsVictimAgentMount +
+                " HorseCharge=" + collisionData.IsHorseCharge +
                 " BodyPart=" + collisionData.VictimHitBodyPart +
                 " Mission=" + (attackerAgent?.Mission?.SceneName ?? "null") + ".");
         }

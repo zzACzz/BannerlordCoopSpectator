@@ -25,6 +25,7 @@ namespace CoopSpectator.MissionModels
         private readonly HashSet<string> _loggedExactMaxHealthKeys = new HashSet<string>(StringComparer.Ordinal);
         private readonly HashSet<string> _loggedExactDefenseDrivenKeys = new HashSet<string>(StringComparer.Ordinal);
         private readonly HashSet<string> _loggedExactMeleeDrivenKeys = new HashSet<string>(StringComparer.Ordinal);
+        private readonly HashSet<string> _loggedCampaignArmorKeys = new HashSet<string>(StringComparer.Ordinal);
         private readonly Dictionary<string, float> _exactDefenseDrivenPropertyBaselines = new Dictionary<string, float>(StringComparer.Ordinal);
         private bool _hasLoggedBattleActivation;
 
@@ -429,7 +430,7 @@ namespace CoopSpectator.MissionModels
                 !string.IsNullOrWhiteSpace(entryId);
         }
 
-        private static void TryApplyCampaignEquipmentArmor(
+        private void TryApplyCampaignEquipmentArmor(
             Agent agent,
             Equipment spawnEquipment,
             AgentDrivenProperties agentDrivenProperties)
@@ -451,26 +452,48 @@ namespace CoopSpectator.MissionModels
                 string entryId = null;
                 TryResolveGlobalCaptainEntryId(agent, out entryId);
 
-                agentDrivenProperties.ArmorHead = ResolveCampaignHumanArmor(
-                    spawnEquipment.GetHeadArmorSum(),
+                float baseHeadArmor = spawnEquipment.GetHeadArmorSum();
+                float baseTorsoArmor = spawnEquipment.GetHumanBodyArmorSum();
+                float baseArmArmor = spawnEquipment.GetArmArmorSum();
+                float baseLegArmor = spawnEquipment.GetLegArmorSum();
+                float finalHeadArmor = ResolveCampaignHumanArmor(
+                    baseHeadArmor,
                     entryId,
                     isMounted,
                     personalArmorFactor);
-                agentDrivenProperties.ArmorTorso = ResolveCampaignHumanArmor(
-                    spawnEquipment.GetHumanBodyArmorSum(),
+                float finalTorsoArmor = ResolveCampaignHumanArmor(
+                    baseTorsoArmor,
                     entryId,
                     isMounted,
                     personalArmorFactor);
-                agentDrivenProperties.ArmorArms = ResolveCampaignHumanArmor(
-                    spawnEquipment.GetArmArmorSum(),
+                float finalArmArmor = ResolveCampaignHumanArmor(
+                    baseArmArmor,
                     entryId,
                     isMounted,
                     personalArmorFactor);
-                agentDrivenProperties.ArmorLegs = ResolveCampaignHumanArmor(
-                    spawnEquipment.GetLegArmorSum(),
+                float finalLegArmor = ResolveCampaignHumanArmor(
+                    baseLegArmor,
                     entryId,
                     isMounted,
                     personalArmorFactor);
+
+                agentDrivenProperties.ArmorHead = finalHeadArmor;
+                agentDrivenProperties.ArmorTorso = finalTorsoArmor;
+                agentDrivenProperties.ArmorArms = finalArmArmor;
+                agentDrivenProperties.ArmorLegs = finalLegArmor;
+                TryLogCampaignHumanArmor(
+                    agent,
+                    entryId,
+                    isMounted,
+                    hasPersonalIgnorePain,
+                    baseHeadArmor,
+                    baseTorsoArmor,
+                    baseArmArmor,
+                    baseLegArmor,
+                    finalHeadArmor,
+                    finalTorsoArmor,
+                    finalArmArmor,
+                    finalLegArmor);
                 return;
             }
 
@@ -485,22 +508,41 @@ namespace CoopSpectator.MissionModels
                     mountArmor += equipmentElement.GetModifiedMountBodyArmor();
             }
 
+            float baseMountArmor = mountArmor;
             Agent riderAgent = agent.RiderAgent;
+            string riderEntryId = null;
+            bool captainToughSteedApplied = false;
+            bool personalToughSteedApplied = false;
             if (riderAgent != null)
             {
-                if (TryResolveGlobalCaptainEntryId(riderAgent, out string riderEntryId))
+                if (TryResolveGlobalCaptainEntryId(riderAgent, out riderEntryId))
                 {
                     var captainAccumulator = new CaptainPerkBonusAccumulator(mountArmor);
-                    GlobalCaptainPerkRuntimeState.AddEffect(riderEntryId, "RidingToughSteed", captainAccumulator);
+                    captainToughSteedApplied = GlobalCaptainPerkRuntimeState.AddEffect(
+                        riderEntryId,
+                        "RidingToughSteed",
+                        captainAccumulator);
                     if (captainAccumulator.HasEffects)
                         mountArmor = captainAccumulator.Result;
                 }
 
-                if (CoopMissionSpawnLogic.HasExactHeroCombatProfilePerk(riderAgent, "RidingToughSteed", out _))
+                personalToughSteedApplied =
+                    CoopMissionSpawnLogic.HasExactHeroCombatProfilePerk(riderAgent, "RidingToughSteed", out _);
+                if (personalToughSteedApplied)
                     mountArmor *= 1.2f;
             }
 
-            agentDrivenProperties.ArmorTorso = Math.Max(0f, mountArmor);
+            float finalMountArmor = Math.Max(0f, mountArmor);
+            agentDrivenProperties.ArmorTorso = finalMountArmor;
+            TryLogCampaignMountArmor(
+                agent,
+                riderAgent,
+                riderEntryId,
+                spawnEquipment,
+                baseMountArmor,
+                finalMountArmor,
+                captainToughSteedApplied,
+                personalToughSteedApplied);
         }
 
         private static float ResolveCampaignHumanArmor(
@@ -523,6 +565,118 @@ namespace CoopSpectator.MissionModels
             }
 
             return Math.Max(0f, armor * Math.Max(0f, personalArmorFactor));
+        }
+
+        private void TryLogCampaignHumanArmor(
+            Agent agent,
+            string entryId,
+            bool isMounted,
+            bool hasPersonalIgnorePain,
+            float baseHeadArmor,
+            float baseTorsoArmor,
+            float baseArmArmor,
+            float baseLegArmor,
+            float finalHeadArmor,
+            float finalTorsoArmor,
+            float finalArmArmor,
+            float finalLegArmor)
+        {
+            if (!CoopDebugConfig.CombatModelDiagnostics || agent == null)
+                return;
+
+            string captainPerks = BuildCaptainArmorEffectSummary(
+                entryId,
+                isMounted ? "RidingDauntlessSteed" : "AthleticsIgnorePain",
+                "EngineeringMetallurgy");
+            string logKey =
+                "human|" + agent.Index + "|" + (entryId ?? string.Empty) + "|" + isMounted + "|" +
+                FormatDiagnosticFloat(baseHeadArmor) + "|" + FormatDiagnosticFloat(baseTorsoArmor) + "|" +
+                FormatDiagnosticFloat(baseArmArmor) + "|" + FormatDiagnosticFloat(baseLegArmor) + "|" +
+                FormatDiagnosticFloat(finalHeadArmor) + "|" + FormatDiagnosticFloat(finalTorsoArmor) + "|" +
+                FormatDiagnosticFloat(finalArmArmor) + "|" + FormatDiagnosticFloat(finalLegArmor) + "|" +
+                captainPerks + "|" + hasPersonalIgnorePain;
+            if (!_loggedCampaignArmorKeys.Add(logKey))
+                return;
+
+            ModLogger.Info(
+                "CoopCampaignDerivedAgentStatCalculateModel: campaign human armor sample. " +
+                "Agent=" + agent.Index +
+                " EntryId=" + (string.IsNullOrWhiteSpace(entryId) ? "unknown" : entryId) +
+                " Mounted=" + isMounted +
+                " BaseHead=" + FormatDiagnosticFloat(baseHeadArmor) +
+                " BaseTorso=" + FormatDiagnosticFloat(baseTorsoArmor) +
+                " BaseArms=" + FormatDiagnosticFloat(baseArmArmor) +
+                " BaseLegs=" + FormatDiagnosticFloat(baseLegArmor) +
+                " FinalHead=" + FormatDiagnosticFloat(finalHeadArmor) +
+                " FinalTorso=" + FormatDiagnosticFloat(finalTorsoArmor) +
+                " FinalArms=" + FormatDiagnosticFloat(finalArmArmor) +
+                " FinalLegs=" + FormatDiagnosticFloat(finalLegArmor) +
+                " PersonalPerks=" + (hasPersonalIgnorePain ? "AthleticsIgnorePain=1.1" : "none") +
+                " CaptainPerks=" + captainPerks +
+                " Mission=" + (agent.Mission?.SceneName ?? "null") + ".");
+        }
+
+        private void TryLogCampaignMountArmor(
+            Agent mountAgent,
+            Agent riderAgent,
+            string riderEntryId,
+            Equipment spawnEquipment,
+            float baseMountArmor,
+            float finalMountArmor,
+            bool captainToughSteedApplied,
+            bool personalToughSteedApplied)
+        {
+            if (!CoopDebugConfig.CombatModelDiagnostics || mountAgent == null)
+                return;
+
+            string horseId = spawnEquipment?[EquipmentIndex.Horse].Item?.StringId ?? "none";
+            string harnessId = spawnEquipment?[EquipmentIndex.HorseHarness].Item?.StringId ?? "none";
+            string captainPerk = captainToughSteedApplied
+                ? BuildCaptainArmorEffectSummary(riderEntryId, "RidingToughSteed")
+                : "none";
+            string logKey =
+                "mount|" + mountAgent.Index + "|" + (riderEntryId ?? string.Empty) + "|" + horseId + "|" + harnessId + "|" +
+                FormatDiagnosticFloat(baseMountArmor) + "|" + FormatDiagnosticFloat(finalMountArmor) + "|" +
+                captainPerk + "|" + personalToughSteedApplied;
+            if (!_loggedCampaignArmorKeys.Add(logKey))
+                return;
+
+            ModLogger.Info(
+                "CoopCampaignDerivedAgentStatCalculateModel: campaign mount armor sample. " +
+                "MountAgent=" + mountAgent.Index +
+                " RiderAgent=" + (riderAgent?.Index ?? -1) +
+                " RiderEntryId=" + (string.IsNullOrWhiteSpace(riderEntryId) ? "unknown" : riderEntryId) +
+                " Horse=" + horseId +
+                " Harness=" + harnessId +
+                " BaseArmor=" + FormatDiagnosticFloat(baseMountArmor) +
+                " FinalArmor=" + FormatDiagnosticFloat(finalMountArmor) +
+                " PersonalPerks=" + (personalToughSteedApplied ? "RidingToughSteed=1.2" : "none") +
+                " CaptainPerks=" + captainPerk +
+                " Mission=" + (mountAgent.Mission?.SceneName ?? "null") + ".");
+        }
+
+        private static string BuildCaptainArmorEffectSummary(string entryId, params string[] perkIds)
+        {
+            if (string.IsNullOrWhiteSpace(entryId) || perkIds == null || perkIds.Length == 0)
+                return "none";
+
+            var summaries = new List<string>();
+            foreach (string perkId in perkIds)
+            {
+                if (GlobalCaptainPerkRuntimeState.TryGetEffect(entryId, perkId, out var effect))
+                {
+                    summaries.Add(
+                        perkId + "=" + FormatDiagnosticFloat(effect.Bonus) +
+                        "(" + (string.IsNullOrWhiteSpace(effect.IncrementType) ? "additive" : effect.IncrementType) + ")");
+                }
+            }
+
+            return summaries.Count > 0 ? string.Join(",", summaries) : "none";
+        }
+
+        private static string FormatDiagnosticFloat(float value)
+        {
+            return value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
         }
 
         private static WeaponComponentData ResolveCurrentWeapon(Agent agent)

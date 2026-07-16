@@ -249,7 +249,11 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MissionMatchHistoryComponent"));
                 AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.EquipmentControllerLeaveLogic"));
                 AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MultiplayerPreloadHelper"));
-                AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MissionAgentPanicHandler"));
+                AddIfNotNull(
+                    list,
+                    MissionBehaviorHelpers.TryCreateBehaviorFromMountAndBlade(
+                        "TaleWorlds.MountAndBlade.MissionAgentPanicHandler"));
+                AppendSallyOutMoraleInteractionSupport(list, mission);
                 AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.AgentHumanAILogic"));
             }
             else
@@ -257,7 +261,11 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MissionMatchHistoryComponent"));
                 AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.EquipmentControllerLeaveLogic"));
                 AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MultiplayerPreloadHelper"));
-                AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MissionAgentPanicHandler"));
+                AddIfNotNull(
+                    list,
+                    MissionBehaviorHelpers.TryCreateBehaviorFromMountAndBlade(
+                        "TaleWorlds.MountAndBlade.MissionAgentPanicHandler"));
+                AppendSallyOutMoraleInteractionSupport(list, mission);
                 AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.AgentHumanAILogic"));
                 ModLogger.Info("CoopBattle server: retained recent players, match history, equipment leave logic, preload helper, panic handler, and human AI for battle-map native peer-sync compatibility.");
             }
@@ -410,6 +418,45 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
 #endif
             AppendSallyOutCommanderDeploymentSupport(list, mission, "client");
             return list;
+        }
+
+        private static void AppendSallyOutMoraleInteractionSupport(
+            List<MissionBehavior> list,
+            Mission mission)
+        {
+            if (list == null || mission == null)
+                return;
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            if (!SallyOutScenarioContract.IsValidatedScenario(
+                    scenarioContext,
+                    mission.SceneName,
+                    out string diagnostics))
+            {
+                return;
+            }
+
+            const string behaviorName = "AgentMoraleInteractionLogic";
+            if (MissionBehaviorHelpers.ListContainsBehaviorType(list, behaviorName) ||
+                MissionBehaviorHelpers.ListContainsBehaviorType(mission.MissionBehaviors, behaviorName))
+            {
+                return;
+            }
+
+            MissionBehavior moraleInteraction =
+                MissionBehaviorHelpers.TryCreateBehaviorFromLoadedAssemblies(
+                    "TaleWorlds.MountAndBlade.Source.Missions.Handlers.Logic.AgentMoraleInteractionLogic");
+            AddOptional(list, moraleInteraction, behaviorName);
+            if (moraleInteraction != null)
+            {
+                ModLogger.Info(
+                    "CoopBattle server: appended AgentMoraleInteractionLogic for SallyOut campaign morale and fleeing. " +
+                    "Scene=" + (mission.SceneName ?? "null") +
+                    " Diagnostics={" + (diagnostics ?? string.Empty) + "}.");
+            }
         }
 
         internal static void AppendSallyOutCommanderDeploymentSupport(

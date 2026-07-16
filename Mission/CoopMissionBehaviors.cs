@@ -3661,6 +3661,7 @@ namespace CoopSpectator.MissionBehaviors
         private const float ServerLogIntervalSeconds = 8f;
         private float _timeUntilNextPeerLog;
         private static Mission _lastDedicatedObservedMission;
+        private static Mission _lastDedicatedSallyOutMoraleSupportAttemptMission;
         private static Mission _lastServerRuntimeInitializedMission;
         private static string _lastServerRuntimeInitializationSource = string.Empty;
         private static Mission _lastDiagnosticSpawnMission;
@@ -4248,10 +4249,13 @@ namespace CoopSpectator.MissionBehaviors
         private static int _materializedBattleResultOnScoreHitCount;
         private static int _materializedBattleResultOnAgentRemovedCount;
         private static int _materializedBattleResultRemovalDebugLogCount;
+        private static int _mountedCombatDamageDiagnosticLogCount;
+        private static bool _hasLoggedMountedCombatDamageDiagnosticFailure;
         private static string _lastLoggedSelectableEntryUniverseKey;
         private static readonly List<string> _materializedBattleResultOnScoreHitSamples = new List<string>();
         private static readonly List<string> _materializedBattleResultOnAgentRemovedSamples = new List<string>();
         private static readonly List<string> _materializedBattleResultReconcileRemovedSamples = new List<string>();
+        private static readonly HashSet<string> _mountedCombatDamageDiagnosticKeys = new HashSet<string>(StringComparer.Ordinal);
         private static PropertyInfo _agentDrivenPropertiesProperty;
         private static bool _agentDrivenPropertiesPropertyResolved;
         private static bool _loggedMissingAgentDrivenPropertiesAccessor;
@@ -4260,6 +4264,7 @@ namespace CoopSpectator.MissionBehaviors
         private static bool _drivenPropertyBaselineMountContext;
         private const int MaxRecordedBattleResultCombatEvents = 16384;
         private const int MaxBattleResultDebugSampleCount = 24;
+        private const int MountedCombatDamageDiagnosticBudget = 96;
         private const int AgentFlagHorseMasterBit = 0x1000000;
         private const int AgentFlagMountedCrossbowmanBit = 0x2000000;
         private const int AgentFlagProjectileDeflectionBit = 0x4000000;
@@ -5676,6 +5681,17 @@ namespace CoopSpectator.MissionBehaviors
                 blow,
                 collisionData,
                 ref authoritativeDamagedHp);
+            TryLogMountedCombatDamageDiagnostics(
+                affectedAgent,
+                affectorAgent,
+                attackerWeapon,
+                isBlocked,
+                isSiegeEngineHit,
+                blow,
+                collisionData,
+                authoritativeDamagedHp,
+                hitDistance,
+                shotDifficulty);
 
             _materializedBattleResultRawOnScoreHitCount++;
             TryTrackMaterializedBattleResultScoreHit(
@@ -5690,6 +5706,115 @@ namespace CoopSpectator.MissionBehaviors
                 hitDistance,
                 shotDifficulty);
             base.OnScoreHit(affectedAgent, affectorAgent, attackerWeapon, isBlocked, isSiegeEngineHit, blow, collisionData, authoritativeDamagedHp, hitDistance, shotDifficulty);
+        }
+
+        private static void TryLogMountedCombatDamageDiagnostics(
+            Agent affectedAgent,
+            Agent affectorAgent,
+            WeaponComponentData attackerWeapon,
+            bool isBlocked,
+            bool isSiegeEngineHit,
+            in Blow blow,
+            in AttackCollisionData collisionData,
+            float damagedHp,
+            float hitDistance,
+            float shotDifficulty)
+        {
+            if (!CoopDebugConfig.CombatModelDiagnostics ||
+                !GameNetwork.IsServerOrRecorder ||
+                affectedAgent == null ||
+                affectorAgent == null ||
+                _mountedCombatDamageDiagnosticLogCount >= MountedCombatDamageDiagnosticBudget)
+            {
+                return;
+            }
+
+            try
+            {
+                Mission mission = affectorAgent.Mission ?? affectedAgent.Mission;
+                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                    return;
+
+                CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+                if (currentPhase < CoopBattlePhase.BattleActive || currentPhase >= CoopBattlePhase.BattleEnded)
+                    return;
+
+                Agent normalizedAffectorAgent = NormalizeBattleResultCombatAffectorAgent(affectorAgent) ?? affectorAgent;
+                bool attackerMounted =
+                    affectorAgent.IsMount ||
+                    normalizedAffectorAgent.HasMount ||
+                    normalizedAffectorAgent.MountAgent != null;
+                bool victimMounted =
+                    affectedAgent.IsMount ||
+                    affectedAgent.HasMount ||
+                    affectedAgent.MountAgent != null;
+                if (!attackerMounted && !victimMounted && !collisionData.IsHorseCharge)
+                    return;
+
+                Agent attackerEntryAgent = normalizedAffectorAgent.IsMount
+                    ? normalizedAffectorAgent.RiderAgent
+                    : normalizedAffectorAgent;
+                Agent victimEntryAgent = affectedAgent.IsMount
+                    ? affectedAgent.RiderAgent
+                    : affectedAgent;
+                TryResolveAuthoritativeTrackedEntryId(attackerEntryAgent, out string attackerEntryId);
+                TryResolveAuthoritativeTrackedEntryId(victimEntryAgent, out string victimEntryId);
+                string weaponItemId = ResolveCombatEventWeaponItemId(normalizedAffectorAgent, attackerWeapon);
+                string skillId = attackerWeapon?.RelevantSkill?.StringId ?? "null";
+                string logKey =
+                    normalizedAffectorAgent.Index + "|" + affectedAgent.Index + "|" +
+                    (weaponItemId ?? string.Empty) + "|" + skillId + "|" +
+                    collisionData.VictimHitBodyPart + "|" + collisionData.IsHorseCharge + "|" +
+                    Math.Round(damagedHp, 1).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "|" +
+                    Math.Round((double)collisionData.AbsorbedByArmor, 1).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "|" +
+                    Math.Round(collisionData.BaseMagnitude, 1).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
+                if (!_mountedCombatDamageDiagnosticKeys.Add(logKey))
+                    return;
+
+                _mountedCombatDamageDiagnosticLogCount++;
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: mounted combat damage sample. " +
+                    "RawAffector=" + affectorAgent.Index +
+                    " Attacker=" + normalizedAffectorAgent.Index +
+                    " AttackerEntryId=" + (string.IsNullOrWhiteSpace(attackerEntryId) ? "unknown" : attackerEntryId) +
+                    " AttackerMounted=" + attackerMounted +
+                    " AttackerMount=" + (normalizedAffectorAgent.MountAgent?.Index ?? (affectorAgent.IsMount ? affectorAgent.Index : -1)) +
+                    " Victim=" + affectedAgent.Index +
+                    " VictimEntryId=" + (string.IsNullOrWhiteSpace(victimEntryId) ? "unknown" : victimEntryId) +
+                    " VictimKind=" + (affectedAgent.IsMount ? "Mount" : "Human") +
+                    " VictimMounted=" + victimMounted +
+                    " VictimMount=" + (affectedAgent.IsMount ? affectedAgent.Index : affectedAgent.MountAgent?.Index ?? -1) +
+                    " Weapon=" + (string.IsNullOrWhiteSpace(weaponItemId) ? "none" : weaponItemId) +
+                    " Skill=" + skillId +
+                    " WeaponClass=" + (attackerWeapon?.WeaponClass.ToString() ?? "None") +
+                    " DamageType=" + ((DamageTypes)collisionData.DamageType) +
+                    " BodyPart=" + collisionData.VictimHitBodyPart +
+                    " BlowDamage=" + blow.InflictedDamage +
+                    " DamagedHp=" + damagedHp.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                    " BlowBaseMagnitude=" + blow.BaseMagnitude.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                    " CollisionBaseMagnitude=" + collisionData.BaseMagnitude.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                    " BlowAbsorbedByArmor=" + blow.AbsorbedByArmor.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                    " CollisionAbsorbedByArmor=" + collisionData.AbsorbedByArmor.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                    " MovementSpeedModifier=" + collisionData.MovementSpeedDamageModifier.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                    " HorseCharge=" + collisionData.IsHorseCharge +
+                    " Missile=" + collisionData.IsMissile +
+                    " Blocked=" + isBlocked +
+                    " SiegeEngineHit=" + isSiegeEngineHit +
+                    " HitDistance=" + hitDistance.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                    " ShotDifficulty=" + shotDifficulty.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                    " VictimHealth=" + affectedAgent.Health.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+                    " Mission=" + mission.SceneName + ".");
+            }
+            catch (Exception ex)
+            {
+                if (_hasLoggedMountedCombatDamageDiagnosticFailure)
+                    return;
+
+                _hasLoggedMountedCombatDamageDiagnosticFailure = true;
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: mounted combat damage diagnostics failed. " +
+                    ex.GetType().Name + ":" + ex.Message);
+            }
         }
 
         public override void OnAgentShootMissile(
@@ -6400,6 +6525,8 @@ namespace CoopSpectator.MissionBehaviors
             }
             if (ReferenceEquals(_lastDedicatedObservedMission, Mission))
                 _lastDedicatedObservedMission = null;
+            if (ReferenceEquals(_lastDedicatedSallyOutMoraleSupportAttemptMission, Mission))
+                _lastDedicatedSallyOutMoraleSupportAttemptMission = null;
             TryWriteEntryStatusSnapshot(Mission, "server behavior end-mission", force: true);
             base.OnEndMission();
         }
@@ -6697,6 +6824,8 @@ namespace CoopSpectator.MissionBehaviors
                 CoopBattlePhaseRuntimeState.AdvanceToAtLeast(CoopBattlePhase.SideSelection, "dedicated observer mission detected", mission);
             }
 
+            TryEnsureDedicatedObserverSallyOutMoraleBehaviors(mission);
+
             bool dedicatedObserverOwnsExactSiegeLifecycle =
                 ShouldDedicatedObserverOwnExactSiegeLifecycle(mission);
             if (!dedicatedObserverOwnsExactSiegeLifecycle &&
@@ -6783,6 +6912,96 @@ namespace CoopSpectator.MissionBehaviors
             catch (Exception ex)
             {
                 ModLogger.Info("CoopMissionSpawnLogic: dedicated observer failed to attach mission behavior: " + ex.Message);
+                return false;
+            }
+        }
+
+        private static void TryEnsureDedicatedObserverSallyOutMoraleBehaviors(Mission mission)
+        {
+            if (mission == null ||
+                !GameNetwork.IsServer ||
+                ReferenceEquals(_lastDedicatedSallyOutMoraleSupportAttemptMission, mission))
+            {
+                return;
+            }
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            if (!SallyOutScenarioContract.IsValidatedScenario(
+                    scenarioContext,
+                    mission.SceneName,
+                    out string diagnostics))
+            {
+                return;
+            }
+
+            _lastDedicatedSallyOutMoraleSupportAttemptMission = mission;
+
+            const string panicHandlerName = "MissionAgentPanicHandler";
+            if (!MissionBehaviorHelpers.ListContainsBehaviorType(mission.MissionBehaviors, panicHandlerName))
+            {
+                MissionBehavior panicHandler =
+                    MissionBehaviorHelpers.TryCreateBehaviorFromMountAndBlade(
+                        "TaleWorlds.MountAndBlade.MissionAgentPanicHandler");
+                TryAttachDedicatedObserverSallyOutMoraleBehavior(
+                    mission,
+                    panicHandler,
+                    panicHandlerName,
+                    diagnostics);
+            }
+
+            const string moraleInteractionName = "AgentMoraleInteractionLogic";
+            if (!MissionBehaviorHelpers.ListContainsBehaviorType(mission.MissionBehaviors, moraleInteractionName))
+            {
+                MissionBehavior moraleInteraction =
+                    MissionBehaviorHelpers.TryCreateBehaviorFromLoadedAssemblies(
+                        "TaleWorlds.MountAndBlade.Source.Missions.Handlers.Logic.AgentMoraleInteractionLogic");
+                TryAttachDedicatedObserverSallyOutMoraleBehavior(
+                    mission,
+                    moraleInteraction,
+                    moraleInteractionName,
+                    diagnostics);
+            }
+        }
+
+        private static bool TryAttachDedicatedObserverSallyOutMoraleBehavior(
+            Mission mission,
+            MissionBehavior behavior,
+            string behaviorName,
+            string diagnostics)
+        {
+            if (mission == null || behavior == null)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: dedicated observer could not create SallyOut morale behavior. " +
+                    "Behavior=" + (behaviorName ?? "unknown") +
+                    " Mission=" + (mission?.SceneName ?? "null") +
+                    " Diagnostics={" + (diagnostics ?? string.Empty) + "}.");
+                return false;
+            }
+
+            try
+            {
+                mission.AddMissionBehavior(behavior);
+                behavior.OnAfterMissionCreated();
+                behavior.OnBehaviorInitialize();
+                behavior.AfterStart();
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: dedicated observer attached SallyOut morale behavior to active mission. " +
+                    "Behavior=" + (behaviorName ?? behavior.GetType().Name) +
+                    " Mission=" + (mission.SceneName ?? "null") +
+                    " Diagnostics={" + (diagnostics ?? string.Empty) + "}.");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: dedicated observer failed to attach SallyOut morale behavior. " +
+                    "Behavior=" + (behaviorName ?? behavior.GetType().Name) +
+                    " Mission=" + (mission.SceneName ?? "null") +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message + ".");
                 return false;
             }
         }
@@ -22201,6 +22420,9 @@ namespace CoopSpectator.MissionBehaviors
             _materializedBattleResultOnScoreHitCount = 0;
             _materializedBattleResultOnAgentRemovedCount = 0;
             _materializedBattleResultRemovalDebugLogCount = 0;
+            _mountedCombatDamageDiagnosticLogCount = 0;
+            _hasLoggedMountedCombatDamageDiagnosticFailure = false;
+            _mountedCombatDamageDiagnosticKeys.Clear();
             _materializedBattleResultOnScoreHitSamples.Clear();
             _materializedBattleResultOnAgentRemovedSamples.Clear();
             _materializedBattleResultReconcileRemovedSamples.Clear();
@@ -22241,6 +22463,9 @@ namespace CoopSpectator.MissionBehaviors
             _materializedBattleResultOnScoreHitCount = 0;
             _materializedBattleResultOnAgentRemovedCount = 0;
             _materializedBattleResultRemovalDebugLogCount = 0;
+            _mountedCombatDamageDiagnosticLogCount = 0;
+            _hasLoggedMountedCombatDamageDiagnosticFailure = false;
+            _mountedCombatDamageDiagnosticKeys.Clear();
             _materializedBattleResultOnScoreHitSamples.Clear();
             _materializedBattleResultOnAgentRemovedSamples.Clear();
             _materializedBattleResultReconcileRemovedSamples.Clear();

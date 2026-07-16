@@ -18,6 +18,7 @@ namespace CoopSpectator.Campaign.SallyOut
         private static MapEvent _pendingFinalEncounterBattle;
         private static string _pendingFinalEncounterResultId;
         private static string _pendingFinalEncounterWinnerSide;
+        private static string _lastConsumedFinalEncounterResultId;
         private static readonly Dictionary<Hero, int> PendingFinalEncounterHeroHitPoints =
             new Dictionary<Hero, int>();
 
@@ -161,6 +162,7 @@ namespace CoopSpectator.Campaign.SallyOut
             string resultId = ResolveResultId(result);
             lock (FinalEncounterCompletionSync)
             {
+                _lastConsumedFinalEncounterResultId = null;
                 ClearFinalEncounterCompletionNoLock();
                 _pendingFinalEncounterBattle = battle;
                 _pendingFinalEncounterResultId = resultId;
@@ -247,7 +249,25 @@ namespace CoopSpectator.Campaign.SallyOut
                 " ReappliedHeroHp=" + reappliedHeroHitPoints +
                 " SkippedDeadHeroes=" + skippedDeadHeroes +
                 " ReappliedSamples=[" + string.Join("; ", reappliedSamples) + "]";
+            lock (FinalEncounterCompletionSync)
+            {
+                _lastConsumedFinalEncounterResultId = resultId;
+            }
             return true;
+        }
+
+        public static bool WasFinalEncounterCompletionConsumed(string resultId)
+        {
+            if (string.IsNullOrWhiteSpace(resultId))
+                return false;
+
+            lock (FinalEncounterCompletionSync)
+            {
+                return string.Equals(
+                    _lastConsumedFinalEncounterResultId,
+                    resultId,
+                    StringComparison.Ordinal);
+            }
         }
 
         private static bool TryGetMissionInitializerRecord(
