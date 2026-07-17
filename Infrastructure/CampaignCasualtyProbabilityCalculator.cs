@@ -13,6 +13,13 @@ namespace CoopSpectator.Infrastructure
         private const string PhysicianOfPeoplePerkId = "MedicinePhysicianOfPeople";
         private const string CheatDeathPerkId = "MedicineCheatDeath";
 
+        public static bool SupportsScenario(BattleSnapshotMessage snapshot)
+        {
+            return snapshot?.ScenarioContext != null &&
+                   (snapshot.ScenarioContext.IsSiegeBattle ||
+                    ExactLandBattleScenarioContract.IsLandBattleScenario(snapshot.ScenarioContext));
+        }
+
         public static bool TryCalculateDeathProbability(
             BattleSnapshotMessage snapshot,
             BattleRuntimeState runtimeState,
@@ -25,7 +32,7 @@ namespace CoopSpectator.Infrastructure
             deathProbability = 1f;
             if (snapshot == null || runtimeState == null || victimEntry == null ||
                 snapshot.CasualtyRulesVersion != CurrentRulesVersion ||
-                snapshot.ScenarioContext?.IsSiegeBattle != true)
+                !SupportsScenario(snapshot))
             {
                 return false;
             }

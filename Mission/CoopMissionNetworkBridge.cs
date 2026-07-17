@@ -1100,7 +1100,7 @@ namespace CoopSpectator.MissionBehaviors
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
             if (ExactCampaignCommanderDeploymentRuntime
-                    .IsFormationOnlyMountedScenario(mission, scenarioContext))
+                    .IsExactLandBattleScenario(mission, scenarioContext))
             {
                 return false;
             }
@@ -1135,7 +1135,7 @@ namespace CoopSpectator.MissionBehaviors
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
             if (!ExactCampaignCommanderDeploymentRuntime
-                    .IsFormationOnlyMountedScenario(mission, scenarioContext))
+                    .IsExactLandBattleScenario(mission, scenarioContext))
             {
                 return false;
             }
@@ -6533,7 +6533,7 @@ namespace CoopSpectator.MissionBehaviors
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
             bool scenarioPreservesMountedClasses =
                 ExactCampaignCommanderDeploymentRuntime
-                    .IsFormationOnlyMountedScenario(mission, scenarioContext);
+                    .IsExactLandBattleScenario(mission, scenarioContext);
             if (preserveMountedClasses != scenarioPreservesMountedClasses)
             {
                 LogCommanderDeploymentAssignmentDiagnostics(

@@ -21293,7 +21293,7 @@ namespace CoopSpectator.Patches
                 BattleSnapshotRuntimeState.GetScenarioContext() ??
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
-            if (!ExactCampaignCommanderDeploymentRuntime.IsFormationOnlyMountedScenario(mission, scenarioContext))
+            if (!ExactCampaignCommanderDeploymentRuntime.IsExactLandBattleScenario(mission, scenarioContext))
                 return false;
 
             object gauntletLayer = TryGetInstanceMemberValue(orderUiHandler, "_gauntletLayer");

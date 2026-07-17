@@ -319,7 +319,7 @@ namespace CoopSpectator.Patches
             {
                 InjectBattleMapClientUiParityViews(mission, list);
                 InjectExactSiegeAssaultClientBehaviors(mission, list);
-                MissionMultiplayerCoopBattleMode.AppendSallyOutCommanderDeploymentSupport(
+                MissionMultiplayerCoopBattleMode.AppendExactLandBattleCommanderDeploymentSupport(
                     list,
                     mission,
                     "wrapped-client");

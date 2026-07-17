@@ -5,9 +5,9 @@ using TaleWorlds.Engine;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
 
-namespace CoopSpectator.Infrastructure.SallyOut
+namespace CoopSpectator.Infrastructure
 {
-    internal static class SallyOutCommanderDeploymentRuntime
+    internal static class ExactLandBattleCommanderDeploymentRuntime
     {
         private static readonly object Sync = new object();
 
@@ -348,7 +348,7 @@ namespace CoopSpectator.Infrastructure.SallyOut
                 BattleSnapshotRuntimeState.GetScenarioContext() ??
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
-            return SallyOutScenarioContract.IsValidatedScenario(
+            return ExactLandBattleScenarioContract.IsValidatedScenario(
                 scenarioContext,
                 mission.SceneName,
                 out diagnostics);
@@ -376,7 +376,7 @@ namespace CoopSpectator.Infrastructure.SallyOut
                 BattleSnapshotRuntimeState.GetScenarioContext() ??
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
-            return SallyOutScenarioContract.IsValidatedScenario(
+            return ExactLandBattleScenarioContract.IsValidatedScenario(
                 scenarioContext,
                 mission.SceneName,
                 out diagnostics);

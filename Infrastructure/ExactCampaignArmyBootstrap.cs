@@ -3890,10 +3890,10 @@ namespace CoopSpectator.Infrastructure
                 "Defender=" + defenderTotal + "(" + defenderDiagnostics + ")" +
                 " Attacker=" + attackerTotal + "(" + attackerDiagnostics + ")";
 
-            if (SallyOutScenarioContract.IsSallyOutScenario(scenarioContext) &&
+            if (ExactLandBattleScenarioContract.IsLandBattleScenario(scenarioContext) &&
                 (defenderTotal <= 0 || attackerTotal <= 0))
             {
-                diagnostics += " Rejected=terminal-sally-out-side-empty";
+                diagnostics += " Rejected=terminal-land-battle-side-empty";
                 return false;
             }
 

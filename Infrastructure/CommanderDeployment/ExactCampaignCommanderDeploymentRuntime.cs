@@ -1,4 +1,3 @@
-using CoopSpectator.Infrastructure.SallyOut;
 using CoopSpectator.Network.Messages;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
@@ -7,12 +6,12 @@ namespace CoopSpectator.Infrastructure
 {
     internal static class ExactCampaignCommanderDeploymentRuntime
     {
-        public static bool IsFormationOnlyMountedScenario(
+        public static bool IsExactLandBattleScenario(
             Mission mission,
             BattleScenarioContextMessage scenarioContext)
         {
             return mission != null &&
-                   SallyOutScenarioContract.IsValidatedScenario(
+                   ExactLandBattleScenarioContract.IsValidatedScenario(
                        scenarioContext,
                        mission.SceneName,
                        out _);
@@ -23,7 +22,7 @@ namespace CoopSpectator.Infrastructure
             BattleScenarioContextMessage scenarioContext)
         {
             return ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext) ||
-                   IsFormationOnlyMountedScenario(mission, scenarioContext);
+                   IsExactLandBattleScenario(mission, scenarioContext);
         }
 
         public static bool IsDeploymentRuntimeActive(Mission mission)
@@ -31,7 +30,7 @@ namespace CoopSpectator.Infrastructure
             if (ExactCampaignSiegeAssaultWithDeploymentRuntime.IsDeploymentRuntimeActive(mission))
                 return true;
 
-            return SallyOutCommanderDeploymentRuntime.IsDeploymentRuntimeActive(mission);
+            return ExactLandBattleCommanderDeploymentRuntime.IsDeploymentRuntimeActive(mission);
         }
 
         public static bool IsDeploymentPhaseBlockingBattleStart(Mission mission)
@@ -42,7 +41,7 @@ namespace CoopSpectator.Infrastructure
                     .IsDeploymentPhaseBlockingBattleStart(mission);
             }
 
-            return SallyOutCommanderDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission);
+            return ExactLandBattleCommanderDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission);
         }
 
         public static bool TryAutoDeployDeploymentOnly(
@@ -58,7 +57,7 @@ namespace CoopSpectator.Infrastructure
                     out diagnostics);
             }
 
-            return SallyOutCommanderDeploymentRuntime.TryAutoDeploySide(
+            return ExactLandBattleCommanderDeploymentRuntime.TryAutoDeploySide(
                 mission,
                 side,
                 out diagnostics);
@@ -72,24 +71,24 @@ namespace CoopSpectator.Infrastructure
                 return true;
             }
 
-            return SallyOutCommanderDeploymentRuntime.TryBeginManualPlacement(mission, out diagnostics);
+            return ExactLandBattleCommanderDeploymentRuntime.TryBeginManualPlacement(mission, out diagnostics);
         }
 
         public static bool TryBeginClientManualFormationPlacement(Mission mission, out string diagnostics)
         {
-            return SallyOutCommanderDeploymentRuntime.TryBeginClientManualPlacement(
+            return ExactLandBattleCommanderDeploymentRuntime.TryBeginClientManualPlacement(
                 mission,
                 out diagnostics);
         }
 
         public static bool IsClientManualFormationPlacementActive(Mission mission)
         {
-            return SallyOutCommanderDeploymentRuntime.IsClientManualPlacementActive(mission);
+            return ExactLandBattleCommanderDeploymentRuntime.IsClientManualPlacementActive(mission);
         }
 
         public static void EndManualFormationPlacement(Mission mission, string source)
         {
-            SallyOutCommanderDeploymentRuntime.EndManualPlacement(mission, source);
+            ExactLandBattleCommanderDeploymentRuntime.EndManualPlacement(mission, source);
         }
 
         public static bool TryFinishDeployment(Mission mission, out string diagnostics)
@@ -101,7 +100,7 @@ namespace CoopSpectator.Infrastructure
                     out diagnostics);
             }
 
-            return SallyOutCommanderDeploymentRuntime.TryFinishDeployment(mission, out diagnostics);
+            return ExactLandBattleCommanderDeploymentRuntime.TryFinishDeployment(mission, out diagnostics);
         }
 
         public static bool TryForceFinishForBattleStartRequest(
@@ -115,9 +114,9 @@ namespace CoopSpectator.Infrastructure
                     out diagnostics);
             }
 
-            if (SallyOutCommanderDeploymentRuntime.IsDeploymentRuntimeActive(mission))
+            if (ExactLandBattleCommanderDeploymentRuntime.IsDeploymentRuntimeActive(mission))
             {
-                return SallyOutCommanderDeploymentRuntime.TryForceAutoDeployBothSidesAndFinish(
+                return ExactLandBattleCommanderDeploymentRuntime.TryForceAutoDeployBothSidesAndFinish(
                     mission,
                     out diagnostics);
             }
@@ -136,7 +135,7 @@ namespace CoopSpectator.Infrastructure
                     .TryEnsureAutoDeployedSiegeMachinesBeforeBattleStart(mission, out diagnostics);
             }
 
-            diagnostics = "not-required-formation-only-sally-out";
+            diagnostics = "not-required-exact-land-battle";
             return true;
         }
 
@@ -156,7 +155,7 @@ namespace CoopSpectator.Infrastructure
                         selectableSource);
             }
 
-            return SallyOutCommanderDeploymentRuntime.IsDeploymentRuntimeActive(mission) &&
+            return ExactLandBattleCommanderDeploymentRuntime.IsDeploymentRuntimeActive(mission) &&
                    side != BattleSideEnum.None &&
                    currentPhase >= CoopBattlePhase.SideSelection &&
                    currentPhase < CoopBattlePhase.BattleActive &&
@@ -166,7 +165,7 @@ namespace CoopSpectator.Infrastructure
 
         public static void ResetRuntimeState(Mission mission, string source)
         {
-            SallyOutCommanderDeploymentRuntime.ResetRuntimeState(mission, source);
+            ExactLandBattleCommanderDeploymentRuntime.ResetRuntimeState(mission, source);
         }
     }
 }

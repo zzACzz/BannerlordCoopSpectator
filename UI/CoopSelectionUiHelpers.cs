@@ -284,8 +284,8 @@ namespace CoopSpectator.UI
         {
             BattleScenarioContextMessage scenarioContext = battleState?.ScenarioContext;
             Mission mission = Mission.Current;
-            bool isFormationOnlyMountedScenario =
-                ExactCampaignCommanderDeploymentRuntime.IsFormationOnlyMountedScenario(
+            bool isExactLandBattleScenario =
+                ExactCampaignCommanderDeploymentRuntime.IsExactLandBattleScenario(
                     mission,
                     scenarioContext);
             if (!battleDataReady ||
@@ -293,7 +293,7 @@ namespace CoopSpectator.UI
                 reconnectSelectionContractActive ||
                 status == null ||
                 status.HasAgent ||
-                (status.CanRespawn && !isFormationOnlyMountedScenario) ||
+                (status.CanRespawn && !isExactLandBattleScenario) ||
                 effectiveSide == BattleSideEnum.None ||
                 string.IsNullOrWhiteSpace(selectedEntryId) ||
                 effectiveSelectableEntryIds == null ||

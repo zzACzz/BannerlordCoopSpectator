@@ -110,7 +110,7 @@ namespace CoopSpectator.DedicatedServer.MissionOverrides
 
             string missionMode = mission.Mode.ToString();
             if (string.Equals(missionMode, "StartUp", StringComparison.OrdinalIgnoreCase) &&
-                !IsExactSiegeStartupCasualtyContext())
+                !IsExactCampaignStartupCasualtyContext())
             {
                 return false;
             }
@@ -118,11 +118,11 @@ namespace CoopSpectator.DedicatedServer.MissionOverrides
             return true;
         }
 
-        private static bool IsExactSiegeStartupCasualtyContext()
+        private static bool IsExactCampaignStartupCasualtyContext()
         {
             BattleSnapshotMessage snapshot = BattleSnapshotRuntimeState.GetCurrent();
             return snapshot?.CasualtyRulesVersion == CampaignCasualtyProbabilityCalculator.CurrentRulesVersion &&
-                   snapshot.ScenarioContext?.IsSiegeBattle == true &&
+                   CampaignCasualtyProbabilityCalculator.SupportsScenario(snapshot) &&
                    BattleSnapshotRuntimeState.GetState() != null;
         }
 
@@ -137,8 +137,8 @@ namespace CoopSpectator.DedicatedServer.MissionOverrides
             string missionMode = mission.Mode.ToString();
             if (string.Equals(missionMode, "StartUp", StringComparison.OrdinalIgnoreCase))
             {
-                return "MissionMode=StartUp ExactSiegeCasualtyContext=" +
-                       IsExactSiegeStartupCasualtyContext();
+                return "MissionMode=StartUp ExactCampaignCasualtyContext=" +
+                       IsExactCampaignStartupCasualtyContext();
             }
 
             return "unknown";
@@ -247,7 +247,7 @@ namespace CoopSpectator.DedicatedServer.MissionOverrides
                 }
 
                 if (snapshot?.CasualtyRulesVersion != CampaignCasualtyProbabilityCalculator.CurrentRulesVersion ||
-                    snapshot.ScenarioContext?.IsSiegeBattle != true ||
+                    !CampaignCasualtyProbabilityCalculator.SupportsScenario(snapshot) ||
                     runtimeState == null ||
                     !CoopMissionSpawnLogic.TryGetMaterializedBattleResultEntryId(affectedAgent, out string victimEntryId))
                 {

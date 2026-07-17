@@ -79,7 +79,8 @@
     <Compile Include="..\Infrastructure\CampaignMissionShellRuntimeState.cs" Link="Infrastructure\CampaignMissionShellRuntimeState.cs" />
     <Compile Include="..\Infrastructure\LordsHall\LordsHallScenarioContract.cs" Link="Infrastructure\LordsHall\LordsHallScenarioContract.cs" />
     <Compile Include="..\Infrastructure\SallyOut\SallyOutScenarioContract.cs" Link="Infrastructure\SallyOut\SallyOutScenarioContract.cs" />
-    <Compile Include="..\Infrastructure\SallyOut\SallyOutCommanderDeploymentRuntime.cs" Link="Infrastructure\SallyOut\SallyOutCommanderDeploymentRuntime.cs" />
+    <Compile Include="..\Infrastructure\LandBattle\ExactLandBattleScenarioContract.cs" Link="Infrastructure\LandBattle\ExactLandBattleScenarioContract.cs" />
+    <Compile Include="..\Infrastructure\CommanderDeployment\ExactLandBattleCommanderDeploymentRuntime.cs" Link="Infrastructure\CommanderDeployment\ExactLandBattleCommanderDeploymentRuntime.cs" />
     <Compile Include="..\Infrastructure\CommanderDeployment\ExactCampaignCommanderDeploymentRuntime.cs" Link="Infrastructure\CommanderDeployment\ExactCampaignCommanderDeploymentRuntime.cs" />
     <Compile Include="..\Infrastructure\CampaignMapPatchMissionInit.cs" Link="Infrastructure\CampaignMapPatchMissionInit.cs" />
     <Compile Include="..\Infrastructure\CampaignMultiplayerHeroClassResolver.cs" Link="Infrastructure\CampaignMultiplayerHeroClassResolver.cs" />

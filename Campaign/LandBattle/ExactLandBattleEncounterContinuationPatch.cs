@@ -4,10 +4,10 @@ using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Encounters;
 using TaleWorlds.CampaignSystem.MapEvents;
 
-namespace CoopSpectator.Campaign.SallyOut
+namespace CoopSpectator.Campaign.LandBattle
 {
     [HarmonyPatch(typeof(PlayerEncounter), "CheckIfBattleShouldContinueAfterBattleMission")]
-    internal static class SallyOutEncounterContinuationPatch
+    internal static class ExactLandBattleEncounterContinuationPatch
     {
         private static bool Prefix(ref bool __result)
         {
@@ -18,7 +18,7 @@ namespace CoopSpectator.Campaign.SallyOut
                     return true;
 
                 MapEvent battle = PlayerEncounter.Battle;
-                if (!SallyOutCampaignBattleAdapter.TryConsumeFinalEncounterCompletion(
+                if (!ExactLandBattleCampaignBattleAdapter.TryConsumeFinalEncounterCompletion(
                         battle,
                         out string diagnostics))
                 {
@@ -27,7 +27,7 @@ namespace CoopSpectator.Campaign.SallyOut
 
                 __result = false;
                 ModLogger.Info(
-                    "SallyOutEncounterContinuationPatch: consumed final encounter completion contract. " +
+                    "ExactLandBattleEncounterContinuationPatch: consumed final encounter completion contract. " +
                     diagnostics +
                     " Action=force-terminal-native-aftermath.");
                 return false;
@@ -35,7 +35,7 @@ namespace CoopSpectator.Campaign.SallyOut
             catch (System.Exception ex)
             {
                 ModLogger.Info(
-                    "SallyOutEncounterContinuationPatch: failed to evaluate final encounter completion contract; " +
+                    "ExactLandBattleEncounterContinuationPatch: failed to evaluate final encounter completion contract; " +
                     "native continuation check will run. Error=" + ex.Message);
                 return true;
             }

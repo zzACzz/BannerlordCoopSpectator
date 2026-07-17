@@ -83,7 +83,7 @@ namespace CoopSpectator.UI
         private object _commanderDeploymentOrderTroopPlacer;
         private Action _commanderDeploymentOnUnitDeployedHandler;
         private bool _commanderDeploymentOrderVmInitialized;
-        private bool _sallyOutManualFormationPlacementActive;
+        private bool _landBattleManualFormationPlacementActive;
         private Camera _commanderDeploymentFreeCamera;
         private bool _commanderDeploymentFreeCameraActive;
         private float _commanderDeploymentFreeCameraYaw;
@@ -802,7 +802,7 @@ namespace CoopSpectator.UI
             if (side == BattleSideEnum.None)
                 side = _selectedSideOverride;
             bool useMountedFormationClasses =
-                ExactCampaignCommanderDeploymentRuntime.IsFormationOnlyMountedScenario(
+                ExactCampaignCommanderDeploymentRuntime.IsExactLandBattleScenario(
                     mission,
                     scenarioContext);
             if (!useMountedFormationClasses)
@@ -828,7 +828,7 @@ namespace CoopSpectator.UI
                         "manual-formation-placement-start-failed " + placementDiagnostics);
                 }
 
-                _sallyOutManualFormationPlacementActive = true;
+                _landBattleManualFormationPlacementActive = true;
                 CoopSiegeOrderOfBattleVM.BeginInitialMountedConfiguration();
             }
 
@@ -860,12 +860,12 @@ namespace CoopSpectator.UI
             }
             catch
             {
-                if (_sallyOutManualFormationPlacementActive)
+                if (_landBattleManualFormationPlacementActive)
                 {
                     ExactCampaignCommanderDeploymentRuntime.EndManualFormationPlacement(
                         mission,
                         "commander-deployment-initialization-failed");
-                    _sallyOutManualFormationPlacementActive = false;
+                    _landBattleManualFormationPlacementActive = false;
                 }
 
                 throw;
@@ -2197,9 +2197,9 @@ namespace CoopSpectator.UI
             string controlledEntryId,
             string commanderEntryId)
         {
-            if (IsCurrentFormationOnlyMountedCommanderDeploymentScenario(mission))
+            if (IsCurrentExactLandBattleCommanderDeploymentScenario(mission))
             {
-                return TryEnsureFormationOnlyMountedCommanderBattleOrderProvider(
+                return TryEnsureExactLandBattleCommanderBattleOrderProvider(
                     mission,
                     team,
                     mainAgent,
@@ -2280,7 +2280,7 @@ namespace CoopSpectator.UI
             }
         }
 
-        private bool TryEnsureFormationOnlyMountedCommanderBattleOrderProvider(
+        private bool TryEnsureExactLandBattleCommanderBattleOrderProvider(
             Mission mission,
             Team team,
             Agent mainAgent,
@@ -5231,12 +5231,12 @@ namespace CoopSpectator.UI
 
         private void ReleaseCurrentMovie()
         {
-            if (_sallyOutManualFormationPlacementActive)
+            if (_landBattleManualFormationPlacementActive)
             {
                 ExactCampaignCommanderDeploymentRuntime.EndManualFormationPlacement(
                     Mission,
                     "release-current-movie");
-                _sallyOutManualFormationPlacementActive = false;
+                _landBattleManualFormationPlacementActive = false;
             }
 
             bool hadPresentation =
@@ -5563,7 +5563,7 @@ namespace CoopSpectator.UI
             if (!IsCommanderDeploymentOrderOfBattleActive())
                 return false;
 
-            return IsCurrentFormationOnlyMountedCommanderDeploymentScenario(Mission.Current);
+            return IsCurrentExactLandBattleCommanderDeploymentScenario(Mission.Current);
         }
 
         internal static bool IsCommanderBattleOrderActive()
@@ -5597,7 +5597,7 @@ namespace CoopSpectator.UI
                 .IsCommanderDeploymentScenario(mission, scenarioContext);
         }
 
-        private static bool IsCurrentFormationOnlyMountedCommanderDeploymentScenario(Mission mission)
+        private static bool IsCurrentExactLandBattleCommanderDeploymentScenario(Mission mission)
         {
             if (mission == null ||
                 !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
@@ -5610,7 +5610,7 @@ namespace CoopSpectator.UI
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
             return ExactCampaignCommanderDeploymentRuntime
-                .IsFormationOnlyMountedScenario(mission, scenarioContext);
+                .IsExactLandBattleScenario(mission, scenarioContext);
         }
 
         internal static bool ShouldSuppressLocalPreviewFollowedAgentEcho(MissionPeer missionPeer, Agent followedAgent)

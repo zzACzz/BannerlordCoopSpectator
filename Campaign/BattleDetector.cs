@@ -24,6 +24,7 @@ using TaleWorlds.Core;
 using TaleWorlds.Library;
 using Helpers;
 using TaleWorlds.ObjectSystem;
+using CoopSpectator.Campaign.LandBattle;
 using CoopSpectator.Campaign.LordsHall;
 using CoopSpectator.Campaign.SallyOut;
 using CoopSpectator.Infrastructure.LordsHall;
@@ -56,11 +57,11 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         private BattleResultWritebackSummary.LootAftermathSummary _cachedHostAftermathLootSummary;
         private string _cachedHostAftermathMainPartyPreviewResultKey;
         private string _cachedHostAftermathFinalSiegeDefenderPreviewResultKey;
-        private string _cachedHostAftermathFinalSallyOutDefeatedSidePreviewResultKey;
+        private string _cachedHostAftermathFinalLandBattleDefeatedSidePreviewResultKey;
         private bool _cachedHostAftermathMainPartyPreviewHeroHpApplied;
         private readonly Dictionary<string, int> _cachedHostAftermathMainPartyPreviewHeroHitPointsByHeroId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        private string _cachedFinalSallyOutBattleEndHealingResultKey;
-        private readonly Dictionary<string, int> _cachedFinalSallyOutBattleEndHealingByHeroId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        private string _cachedFinalLandBattleEndHealingResultKey;
+        private readonly Dictionary<string, int> _cachedFinalLandBattleEndHealingByHeroId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private DateTime _missionEnteredUtc;
         private DateTime _nextMissionBattleResultPollUtc;
         private DateTime _nextBattleStartAttemptUtc;
@@ -498,11 +499,11 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             _cachedHostAftermathLootSummary = null;
             _cachedHostAftermathMainPartyPreviewResultKey = null;
             _cachedHostAftermathFinalSiegeDefenderPreviewResultKey = null;
-            _cachedHostAftermathFinalSallyOutDefeatedSidePreviewResultKey = null;
+            _cachedHostAftermathFinalLandBattleDefeatedSidePreviewResultKey = null;
             _cachedHostAftermathMainPartyPreviewHeroHpApplied = false;
             _cachedHostAftermathMainPartyPreviewHeroHitPointsByHeroId.Clear();
-            _cachedFinalSallyOutBattleEndHealingResultKey = null;
-            _cachedFinalSallyOutBattleEndHealingByHeroId.Clear();
+            _cachedFinalLandBattleEndHealingResultKey = null;
+            _cachedFinalLandBattleEndHealingByHeroId.Clear();
             _nextMissionBattleResultPollUtc = DateTime.MinValue;
             _nextBattleStartAttemptUtc = DateTime.MinValue;
             _nextBattleStartWaitLogUtc = DateTime.MinValue;
@@ -776,8 +777,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     string.Equals(_cachedHostAftermathRewardAuditResultKey, resultKey, StringComparison.Ordinal)
                         ? CloneRewardStateAuditSnapshot(_cachedHostAftermathRewardAuditSnapshot)
                         : null;
-                bool nativeFinalSallyOutAftermathConsumed =
-                    SallyOutCampaignBattleAdapter.WasFinalEncounterCompletionConsumed(resultKey);
+                bool nativeFinalLandBattleAftermathConsumed =
+                    ExactLandBattleCampaignBattleAdapter.WasFinalEncounterCompletionConsumed(resultKey);
 
                 BattleResultWritebackSummary writebackSummary = ApplyBattleResultWriteback(
                     result,
@@ -789,7 +790,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         : null,
                     string.Equals(_cachedHostAftermathMainPartyPreviewResultKey, resultKey, StringComparison.Ordinal) &&
                     _cachedHostAftermathMainPartyPreviewHeroHpApplied,
-                    nativeFinalSallyOutAftermathConsumed);
+                    nativeFinalLandBattleAftermathConsumed);
                 if (ShouldDeferFinalBattleAftermath(result))
                 {
                     CapturePendingLordsHallStageState(result);
@@ -918,7 +919,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             BattleResultWritebackSummary.RewardProjectionSummary cachedRewardProjection = null,
             BattleResultWritebackSummary.LootAftermathSummary cachedLootAftermath = null,
             bool skipMainPartyHeroHitPointWriteback = false,
-            bool nativeFinalSallyOutAftermathConsumed = false)
+            bool nativeFinalLandBattleAftermathConsumed = false)
         {
             var summary = new BattleResultWritebackSummary();
             if (result?.Entries == null || result.Entries.Count == 0 || TaleWorlds.CampaignSystem.Campaign.Current == null)
@@ -967,9 +968,9 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 AddWritebackSample(summary.AdjustedSamples, "FinalLordsHall:native-map-event-aftermath");
                 return summary;
             }
-            if (nativeFinalSallyOutAftermathConsumed)
+            if (nativeFinalLandBattleAftermathConsumed)
             {
-                AddWritebackSample(summary.AdjustedSamples, "FinalSallyOut:native-map-event-aftermath");
+                AddWritebackSample(summary.AdjustedSamples, "FinalLandBattle:native-map-event-aftermath");
                 return summary;
             }
             TryBuildMainPartyRewardProjection(result, encounterParties, summary, cachedRewardProjection);
@@ -3251,11 +3252,11 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             bool deferFinalAftermath = ShouldDeferFinalBattleAftermath(result);
             bool useNativeFinalLordsHallAftermath = ShouldUseNativeFinalLordsHallAftermath(result);
-            bool useNativeFinalSallyOutAftermath = ShouldUseNativeFinalSallyOutAftermath(result);
+            bool useNativeFinalLandBattleAftermath = ShouldUseNativeFinalLandBattleAftermath(result);
             if (!deferFinalAftermath)
             {
                 TryCacheHostAftermathRewardAuditSnapshot(resultKey);
-                if (!useNativeFinalLordsHallAftermath && !useNativeFinalSallyOutAftermath)
+                if (!useNativeFinalLordsHallAftermath && !useNativeFinalLandBattleAftermath)
                 {
                     TryCacheHostAftermathRewardProjection(result, resultKey);
                     TryCacheHostAftermathLootSummary(result, resultKey);
@@ -3263,20 +3264,20 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
             TryInjectMainPartyBattleResultPreviewIntoLiveEncounter(result, resultKey);
             TryInjectFinalSiegeDefenderBattleResultPreviewIntoLiveEncounter(result, resultKey);
-            TryInjectFinalSallyOutDefeatedSideBattleResultPreviewIntoLiveEncounter(result, resultKey);
+            TryInjectFinalLandBattleDefeatedSideBattleResultPreviewIntoLiveEncounter(result, resultKey);
             if (!deferFinalAftermath &&
                 !useNativeFinalLordsHallAftermath &&
-                !useNativeFinalSallyOutAftermath)
+                !useNativeFinalLandBattleAftermath)
             {
                 TryInjectMainPartyPrisonerAftermathIntoLiveMapEvent(result);
             }
 
             bool encounterPrepared = TryPrepareAuthoritativeEncounterResultBridge(result);
-            bool finalSallyOutCompletionArmed = false;
-            string finalSallyOutCompletionDiagnostics = "not-requested";
-            if (encounterPrepared && ShouldCommitFinalSallyOutWinner(result))
+            bool finalLandBattleCompletionArmed = false;
+            string finalLandBattleCompletionDiagnostics = "not-requested";
+            if (encounterPrepared && ShouldCommitFinalLandBattleWinner(result))
             {
-                TryCacheFinalSallyOutBattleEndHealing(result, resultKey);
+                TryCacheFinalLandBattleEndHealing(result, resultKey);
                 List<KeyValuePair<Hero, int>> finalHeroHitPoints =
                     _cachedHostAftermathMainPartyPreviewHeroHitPointsByHeroId
                         .Select(pair => new KeyValuePair<Hero, int>(
@@ -3284,12 +3285,12 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                             pair.Value))
                         .Where(pair => pair.Key != null)
                         .ToList();
-                finalSallyOutCompletionArmed =
-                    SallyOutCampaignBattleAdapter.TryArmFinalEncounterCompletion(
+                finalLandBattleCompletionArmed =
+                    ExactLandBattleCampaignBattleAdapter.TryArmFinalEncounterCompletion(
                         PlayerEncounter.Battle,
                         result,
                         finalHeroHitPoints,
-                        out finalSallyOutCompletionDiagnostics);
+                        out finalLandBattleCompletionDiagnostics);
             }
             bool exitRequested = TryRequestLocalMissionExit(mission, "campaign battle_result bridge");
             if (exitRequested)
@@ -3314,8 +3315,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     "Requested local mission exit. " +
                     "DedicatedEndMissionRequested=" + dedicatedEndMissionRequested + " " +
                     "EncounterPrepared=" + encounterPrepared + " " +
-                    "FinalSallyOutCompletionArmed=" + finalSallyOutCompletionArmed + " " +
-                    "FinalSallyOutCompletionDiagnostics=[" + finalSallyOutCompletionDiagnostics + "] " +
+                    "FinalLandBattleCompletionArmed=" + finalLandBattleCompletionArmed + " " +
+                    "FinalLandBattleCompletionDiagnostics=[" + finalLandBattleCompletionDiagnostics + "] " +
                     "BattleId=" + (result.BattleId ?? "null") +
                     " WinnerSide=" + (result.WinnerSide ?? "none") +
                     " MissionScene=" + SafeMissionSceneName(mission) + ".");
@@ -3699,19 +3700,19 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
         }
 
-        private void TryInjectFinalSallyOutDefeatedSideBattleResultPreviewIntoLiveEncounter(
+        private void TryInjectFinalLandBattleDefeatedSideBattleResultPreviewIntoLiveEncounter(
             CoopBattleResultBridgeFile.BattleResultSnapshot result,
             string resultKey)
         {
             if (result?.Entries == null ||
                 string.IsNullOrWhiteSpace(resultKey) ||
-                !ShouldUseNativeFinalSallyOutAftermath(result))
+                !ShouldUseNativeFinalLandBattleAftermath(result))
             {
                 return;
             }
 
             if (string.Equals(
-                    _cachedHostAftermathFinalSallyOutDefeatedSidePreviewResultKey,
+                    _cachedHostAftermathFinalLandBattleDefeatedSidePreviewResultKey,
                     resultKey,
                     StringComparison.Ordinal))
             {
@@ -3761,7 +3762,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         summary.UnresolvedPartyAggregates++;
                         AddWritebackSample(
                             summary.UnresolvedSamples,
-                            "MissingSallyOutDefeatedParty:" +
+                            "MissingLandBattleDefeatedParty:" +
                             (aggregate.PartyId ?? "null") + "/" +
                             (aggregate.TroopName ?? aggregate.IdentityKey ?? "entry"));
                         continue;
@@ -3779,9 +3780,9 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     TryApplyAggregateToPartyRoster(partyState, aggregate, summary);
                 }
 
-                _cachedHostAftermathFinalSallyOutDefeatedSidePreviewResultKey = resultKey;
+                _cachedHostAftermathFinalLandBattleDefeatedSidePreviewResultKey = resultKey;
                 ModLogger.Info(
-                    "BattleDetector: injected final SallyOut defeated-side battle_result preview before mission exit. " +
+                    "BattleDetector: injected final land-battle defeated-side battle_result preview before mission exit. " +
                     "BattleId=" + (result.BattleId ?? "null") +
                     " ResultKey=" + resultKey +
                     " WinnerSide=" + winnerSide +
@@ -3797,7 +3798,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             catch (Exception ex)
             {
                 ModLogger.Info(
-                    "BattleDetector: failed to inject final SallyOut defeated-side battle_result preview before mission exit: " +
+                    "BattleDetector: failed to inject final land-battle defeated-side battle_result preview before mission exit: " +
                     ex.Message);
             }
         }
@@ -3821,11 +3822,11 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
                     int battleEndHealing = 0;
                     if (string.Equals(
-                            _cachedFinalSallyOutBattleEndHealingResultKey,
+                            _cachedFinalLandBattleEndHealingResultKey,
                             _cachedHostAftermathMainPartyPreviewResultKey,
                             StringComparison.Ordinal))
                     {
-                        _cachedFinalSallyOutBattleEndHealingByHeroId.TryGetValue(pair.Key, out battleEndHealing);
+                        _cachedFinalLandBattleEndHealingByHeroId.TryGetValue(pair.Key, out battleEndHealing);
                     }
 
                     int desiredHitPoints = Math.Min(
@@ -3912,15 +3913,15 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         finalLordsHallWinnerOverridden = true;
                     }
                 }
-                bool sallyOutWinnerOverridden = false;
-                if (ShouldCommitFinalSallyOutWinner(result) && winnerSide != BattleSideEnum.None)
+                bool landBattleWinnerOverridden = false;
+                if (ShouldCommitFinalLandBattleWinner(result) && winnerSide != BattleSideEnum.None)
                 {
-                    // A land sally-out uses the field-battle mission shell, so Bannerlord does not
+                    // Exact land battles use the field-battle mission shell, so Bannerlord does not
                     // necessarily commit the terminal battle state before PlayerEncounter.DoWait.
                     // Commit it here; otherwise the native continuation check can reopen the same
-                    // encounter even when the defeated side has no healthy troops left.
+                    // encounter from rosters that have not received the authoritative result yet.
                     PlayerEncounter.Battle.SetOverrideWinner(winnerSide);
-                    sallyOutWinnerOverridden = true;
+                    landBattleWinnerOverridden = true;
                 }
                 string settlementId = BattleSnapshotRuntimeState.GetCurrent()?
                     .ScenarioContext?
@@ -3939,7 +3940,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     " EnemyPulledBack=" + campaignBattleResult.EnemyPulledBack +
                     " EnemyRetreated=" + campaignBattleResult.EnemyRetreated + "] " +
                     "FinalLordsHallWinnerOverridden=" + finalLordsHallWinnerOverridden + " " +
-                    "SallyOutWinnerOverridden=" + sallyOutWinnerOverridden + " " +
+                    "LandBattleWinnerOverridden=" + landBattleWinnerOverridden + " " +
                     "ContinueReset=" + continueReset + ".");
                 return true;
             }
@@ -4062,23 +4063,19 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                    TryResolveWinnerSideEnum(result.WinnerSide) != BattleSideEnum.None;
         }
 
-        private static bool ShouldUseNativeFinalSallyOutAftermath(
+        private static bool ShouldUseNativeFinalLandBattleAftermath(
             CoopBattleResultBridgeFile.BattleResultSnapshot result)
         {
-            return ShouldCommitFinalSallyOutWinner(result) &&
+            return ShouldCommitFinalLandBattleWinner(result) &&
                    TryResolveWinnerSideEnum(result?.WinnerSide) != BattleSideEnum.None;
         }
 
-        private static bool ShouldCommitFinalSallyOutWinner(
+        private static bool ShouldCommitFinalLandBattleWinner(
             CoopBattleResultBridgeFile.BattleResultSnapshot result)
         {
-            return result?.IsFinalStage == true &&
-                   !result.DefenderPushedBack &&
-                   string.Equals(
-                       result.BattleStage,
-                       SallyOutScenarioContract.ResultStage,
-                       StringComparison.OrdinalIgnoreCase) &&
-                   SallyOutCampaignBattleAdapter.IsCampaignBattle(PlayerEncounter.Battle);
+            return ExactLandBattleCampaignBattleAdapter.IsFinalEncounterResult(
+                PlayerEncounter.Battle,
+                result);
         }
 
         private static void CapturePendingLordsHallStageState(
@@ -4125,13 +4122,13 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
         }
 
-        private void TryCacheFinalSallyOutBattleEndHealing(
+        private void TryCacheFinalLandBattleEndHealing(
             CoopBattleResultBridgeFile.BattleResultSnapshot result,
             string resultKey)
         {
-            _cachedFinalSallyOutBattleEndHealingResultKey = null;
-            _cachedFinalSallyOutBattleEndHealingByHeroId.Clear();
-            if (!ShouldCommitFinalSallyOutWinner(result) ||
+            _cachedFinalLandBattleEndHealingResultKey = null;
+            _cachedFinalLandBattleEndHealingByHeroId.Clear();
+            if (!ShouldCommitFinalLandBattleWinner(result) ||
                 string.IsNullOrWhiteSpace(resultKey) ||
                 _cachedHostAftermathMainPartyPreviewHeroHitPointsByHeroId.Count == 0)
             {
@@ -4154,16 +4151,16 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         .GetBattleEndHealingAmount(mainParty, hero)
                         .RoundedResultNumber;
                     if (healing > 0)
-                        _cachedFinalSallyOutBattleEndHealingByHeroId[pair.Key] = healing;
+                        _cachedFinalLandBattleEndHealingByHeroId[pair.Key] = healing;
                 }
 
-                _cachedFinalSallyOutBattleEndHealingResultKey = resultKey;
+                _cachedFinalLandBattleEndHealingResultKey = resultKey;
             }
             catch (Exception ex)
             {
-                _cachedFinalSallyOutBattleEndHealingResultKey = null;
-                _cachedFinalSallyOutBattleEndHealingByHeroId.Clear();
-                ModLogger.Info("BattleDetector: failed to cache final SallyOut battle-end healing: " + ex.Message);
+                _cachedFinalLandBattleEndHealingResultKey = null;
+                _cachedFinalLandBattleEndHealingByHeroId.Clear();
+                ModLogger.Info("BattleDetector: failed to cache final land-battle end healing: " + ex.Message);
             }
         }
 
@@ -4255,11 +4252,11 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             _cachedHostAftermathLootSummary = null;
             _cachedHostAftermathMainPartyPreviewResultKey = null;
             _cachedHostAftermathFinalSiegeDefenderPreviewResultKey = null;
-            _cachedHostAftermathFinalSallyOutDefeatedSidePreviewResultKey = null;
+            _cachedHostAftermathFinalLandBattleDefeatedSidePreviewResultKey = null;
             _cachedHostAftermathMainPartyPreviewHeroHpApplied = false;
             _cachedHostAftermathMainPartyPreviewHeroHitPointsByHeroId.Clear();
-            _cachedFinalSallyOutBattleEndHealingResultKey = null;
-            _cachedFinalSallyOutBattleEndHealingByHeroId.Clear();
+            _cachedFinalLandBattleEndHealingResultKey = null;
+            _cachedFinalLandBattleEndHealingByHeroId.Clear();
             _nextMissionBattleResultPollUtc = DateTime.MinValue;
         }
 
@@ -4396,10 +4393,10 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 : isCampaignMirrorHeroesSnapshot
                     ? sides.Count >= 2 && populatedSideCount >= 1 && (payload?.Troops?.Count ?? 0) > 0
                     : sides.Count >= 2 && populatedSideCount >= 2 && hasAttacker && hasDefender;
-            bool sallyOutHasTwoHealthySides =
-                !SallyOutScenarioContract.IsSallyOutScenario(snapshot?.ScenarioContext) ||
+            bool landBattleHasTwoHealthySides =
+                !ExactLandBattleScenarioContract.IsLandBattleScenario(snapshot?.ScenarioContext) ||
                 (attackerHealthyCount > 0 && defenderHealthyCount > 0);
-            bool ready = hasRequiredSides && sallyOutHasTwoHealthySides;
+            bool ready = hasRequiredSides && landBattleHasTwoHealthySides;
             if (!ready && DateTime.UtcNow >= _nextBattleStartWaitLogUtc)
             {
                 _nextBattleStartWaitLogUtc = DateTime.UtcNow.AddSeconds(2);

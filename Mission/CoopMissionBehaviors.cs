@@ -3661,7 +3661,7 @@ namespace CoopSpectator.MissionBehaviors
         private const float ServerLogIntervalSeconds = 8f;
         private float _timeUntilNextPeerLog;
         private static Mission _lastDedicatedObservedMission;
-        private static Mission _lastDedicatedSallyOutMoraleSupportAttemptMission;
+        private static Mission _lastDedicatedLandBattleMoraleSupportAttemptMission;
         private static Mission _lastServerRuntimeInitializedMission;
         private static string _lastServerRuntimeInitializationSource = string.Empty;
         private static Mission _lastDiagnosticSpawnMission;
@@ -3762,7 +3762,7 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly HashSet<string> _loggedManualMaterializedSiegeRespawnRejectKeys = new HashSet<string>(StringComparer.Ordinal);
         private static readonly HashSet<string> _projectileLaunchDiagnosticKeys = new HashSet<string>(StringComparer.Ordinal);
         private const int ProjectileLaunchDiagnosticBudget = 64;
-        private static readonly EquipmentIndex[] SallyOutExactPreSpawnWeaponSlots =
+        private static readonly EquipmentIndex[] LandBattleExactPreSpawnWeaponSlots =
         {
             EquipmentIndex.Weapon0,
             EquipmentIndex.Weapon1,
@@ -3770,8 +3770,8 @@ namespace CoopSpectator.MissionBehaviors
             EquipmentIndex.Weapon3
         };
         private static Mission _lastBattlePhaseAiHoldMission;
-        private static Mission _validatedSallyOutExactInitialMaterializationMission;
-        private static string _validatedSallyOutExactInitialMaterializationSummary = string.Empty;
+        private static Mission _validatedLandBattleExactInitialMaterializationMission;
+        private static string _validatedLandBattleExactInitialMaterializationSummary = string.Empty;
         private static Mission _lastMaterializedArmyMission;
         private static Mission _lastClientBattleSnapshotRefreshMission;
         private static string _lastClientMountedHeroRuntimeBundleMissionKey = string.Empty;
@@ -6525,8 +6525,8 @@ namespace CoopSpectator.MissionBehaviors
             }
             if (ReferenceEquals(_lastDedicatedObservedMission, Mission))
                 _lastDedicatedObservedMission = null;
-            if (ReferenceEquals(_lastDedicatedSallyOutMoraleSupportAttemptMission, Mission))
-                _lastDedicatedSallyOutMoraleSupportAttemptMission = null;
+            if (ReferenceEquals(_lastDedicatedLandBattleMoraleSupportAttemptMission, Mission))
+                _lastDedicatedLandBattleMoraleSupportAttemptMission = null;
             TryWriteEntryStatusSnapshot(Mission, "server behavior end-mission", force: true);
             base.OnEndMission();
         }
@@ -6824,7 +6824,7 @@ namespace CoopSpectator.MissionBehaviors
                 CoopBattlePhaseRuntimeState.AdvanceToAtLeast(CoopBattlePhase.SideSelection, "dedicated observer mission detected", mission);
             }
 
-            TryEnsureDedicatedObserverSallyOutMoraleBehaviors(mission);
+            TryEnsureDedicatedObserverLandBattleMoraleBehaviors(mission);
 
             bool dedicatedObserverOwnsExactSiegeLifecycle =
                 ShouldDedicatedObserverOwnExactSiegeLifecycle(mission);
@@ -6916,11 +6916,11 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        private static void TryEnsureDedicatedObserverSallyOutMoraleBehaviors(Mission mission)
+        private static void TryEnsureDedicatedObserverLandBattleMoraleBehaviors(Mission mission)
         {
             if (mission == null ||
                 !GameNetwork.IsServer ||
-                ReferenceEquals(_lastDedicatedSallyOutMoraleSupportAttemptMission, mission))
+                ReferenceEquals(_lastDedicatedLandBattleMoraleSupportAttemptMission, mission))
             {
                 return;
             }
@@ -6929,7 +6929,7 @@ namespace CoopSpectator.MissionBehaviors
                 BattleSnapshotRuntimeState.GetScenarioContext() ??
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
-            if (!SallyOutScenarioContract.IsValidatedScenario(
+            if (!ExactLandBattleScenarioContract.IsValidatedScenario(
                     scenarioContext,
                     mission.SceneName,
                     out string diagnostics))
@@ -6937,7 +6937,7 @@ namespace CoopSpectator.MissionBehaviors
                 return;
             }
 
-            _lastDedicatedSallyOutMoraleSupportAttemptMission = mission;
+            _lastDedicatedLandBattleMoraleSupportAttemptMission = mission;
 
             const string panicHandlerName = "MissionAgentPanicHandler";
             if (!MissionBehaviorHelpers.ListContainsBehaviorType(mission.MissionBehaviors, panicHandlerName))
@@ -6945,7 +6945,7 @@ namespace CoopSpectator.MissionBehaviors
                 MissionBehavior panicHandler =
                     MissionBehaviorHelpers.TryCreateBehaviorFromMountAndBlade(
                         "TaleWorlds.MountAndBlade.MissionAgentPanicHandler");
-                TryAttachDedicatedObserverSallyOutMoraleBehavior(
+                TryAttachDedicatedObserverLandBattleMoraleBehavior(
                     mission,
                     panicHandler,
                     panicHandlerName,
@@ -6958,7 +6958,7 @@ namespace CoopSpectator.MissionBehaviors
                 MissionBehavior moraleInteraction =
                     MissionBehaviorHelpers.TryCreateBehaviorFromLoadedAssemblies(
                         "TaleWorlds.MountAndBlade.Source.Missions.Handlers.Logic.AgentMoraleInteractionLogic");
-                TryAttachDedicatedObserverSallyOutMoraleBehavior(
+                TryAttachDedicatedObserverLandBattleMoraleBehavior(
                     mission,
                     moraleInteraction,
                     moraleInteractionName,
@@ -6966,7 +6966,7 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        private static bool TryAttachDedicatedObserverSallyOutMoraleBehavior(
+        private static bool TryAttachDedicatedObserverLandBattleMoraleBehavior(
             Mission mission,
             MissionBehavior behavior,
             string behaviorName,
@@ -6975,7 +6975,7 @@ namespace CoopSpectator.MissionBehaviors
             if (mission == null || behavior == null)
             {
                 ModLogger.Info(
-                    "CoopMissionSpawnLogic: dedicated observer could not create SallyOut morale behavior. " +
+                    "CoopMissionSpawnLogic: dedicated observer could not create land-battle morale behavior. " +
                     "Behavior=" + (behaviorName ?? "unknown") +
                     " Mission=" + (mission?.SceneName ?? "null") +
                     " Diagnostics={" + (diagnostics ?? string.Empty) + "}.");
@@ -6989,7 +6989,7 @@ namespace CoopSpectator.MissionBehaviors
                 behavior.OnBehaviorInitialize();
                 behavior.AfterStart();
                 ModLogger.Info(
-                    "CoopMissionSpawnLogic: dedicated observer attached SallyOut morale behavior to active mission. " +
+                    "CoopMissionSpawnLogic: dedicated observer attached land-battle morale behavior to active mission. " +
                     "Behavior=" + (behaviorName ?? behavior.GetType().Name) +
                     " Mission=" + (mission.SceneName ?? "null") +
                     " Diagnostics={" + (diagnostics ?? string.Empty) + "}.");
@@ -6998,7 +6998,7 @@ namespace CoopSpectator.MissionBehaviors
             catch (Exception ex)
             {
                 ModLogger.Info(
-                    "CoopMissionSpawnLogic: dedicated observer failed to attach SallyOut morale behavior. " +
+                    "CoopMissionSpawnLogic: dedicated observer failed to attach land-battle morale behavior. " +
                     "Behavior=" + (behaviorName ?? behavior.GetType().Name) +
                     " Mission=" + (mission.SceneName ?? "null") +
                     " Error=" + ex.GetType().Name + ":" + ex.Message + ".");
@@ -14154,21 +14154,21 @@ namespace CoopSpectator.MissionBehaviors
                 BattleSnapshotRuntimeState.GetScenarioContext() ??
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
-            if (SallyOutScenarioContract.IsSallyOutScenario(scenarioContext))
+            if (ExactLandBattleScenarioContract.IsLandBattleScenario(scenarioContext))
             {
                 if (!ExactCampaignArmyBootstrap.IsInitialSpawnMaterializationComplete(
                         mission,
                         out string initialSpawnDiagnostics))
                 {
-                    readinessSource = "sally-out-initial-spawn-pending " + initialSpawnDiagnostics;
+                    readinessSource = "land-battle-initial-spawn-pending " + initialSpawnDiagnostics;
                     return false;
                 }
 
-                if (!TryValidateSallyOutExactInitialMaterialization(
+                if (!TryValidateLandBattleExactInitialMaterialization(
                         mission,
                         out string exactMaterializationDiagnostics))
                 {
-                    readinessSource = "sally-out-exact-materialization-pending " + exactMaterializationDiagnostics;
+                    readinessSource = "land-battle-exact-materialization-pending " + exactMaterializationDiagnostics;
                     return false;
                 }
             }
@@ -14182,7 +14182,7 @@ namespace CoopSpectator.MissionBehaviors
             return attackerActive > 0 && defenderActive > 0;
         }
 
-        private static bool TryValidateSallyOutExactInitialMaterialization(
+        private static bool TryValidateLandBattleExactInitialMaterialization(
             Mission mission,
             out string diagnostics)
         {
@@ -14192,9 +14192,9 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            if (ReferenceEquals(_validatedSallyOutExactInitialMaterializationMission, mission))
+            if (ReferenceEquals(_validatedLandBattleExactInitialMaterializationMission, mission))
             {
-                diagnostics = _validatedSallyOutExactInitialMaterializationSummary;
+                diagnostics = _validatedLandBattleExactInitialMaterializationSummary;
                 return true;
             }
 
@@ -14256,7 +14256,7 @@ namespace CoopSpectator.MissionBehaviors
                         return false;
                     }
 
-                    if (!TryValidateSallyOutExactPreSpawnEquipment(
+                    if (!TryValidateLandBattleExactPreSpawnEquipment(
                             agent,
                             contract,
                             out string equipmentMismatch))
@@ -14288,18 +14288,18 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            _validatedSallyOutExactInitialMaterializationMission = mission;
-            _validatedSallyOutExactInitialMaterializationSummary =
+            _validatedLandBattleExactInitialMaterializationMission = mission;
+            _validatedLandBattleExactInitialMaterializationSummary =
                 "validated" +
                 " Total=" + validatedAgentCount +
                 " Mounted=" + validatedMountedAgentCount +
                 " Attacker=" + attackerAgentCount +
                 " Defender=" + defenderAgentCount;
-            diagnostics = _validatedSallyOutExactInitialMaterializationSummary;
+            diagnostics = _validatedLandBattleExactInitialMaterializationSummary;
             return true;
         }
 
-        private static bool TryValidateSallyOutExactPreSpawnEquipment(
+        private static bool TryValidateLandBattleExactPreSpawnEquipment(
             Agent agent,
             ExactTransferSpawnContract contract,
             out string mismatch)
@@ -14317,24 +14317,24 @@ namespace CoopSpectator.MissionBehaviors
 
             if (contract.Equipment.IncludeWeaponsInPreSpawn)
             {
-                foreach (EquipmentIndex slot in SallyOutExactPreSpawnWeaponSlots)
+                foreach (EquipmentIndex slot in LandBattleExactPreSpawnWeaponSlots)
                 {
-                    if (!DoesSallyOutExactPreSpawnSlotMatch(expectedEquipment, actualEquipment, slot, out mismatch))
+                    if (!DoesLandBattleExactPreSpawnSlotMatch(expectedEquipment, actualEquipment, slot, out mismatch))
                         return false;
                 }
             }
 
             if (contract.Equipment.IncludeArmorVisualsInPreSpawn &&
-                (!DoesSallyOutExactPreSpawnSlotMatch(expectedEquipment, actualEquipment, EquipmentIndex.Head, out mismatch) ||
-                 !DoesSallyOutExactPreSpawnSlotMatch(expectedEquipment, actualEquipment, EquipmentIndex.Body, out mismatch) ||
-                 !DoesSallyOutExactPreSpawnSlotMatch(expectedEquipment, actualEquipment, EquipmentIndex.Leg, out mismatch) ||
-                 !DoesSallyOutExactPreSpawnSlotMatch(expectedEquipment, actualEquipment, EquipmentIndex.Gloves, out mismatch)))
+                (!DoesLandBattleExactPreSpawnSlotMatch(expectedEquipment, actualEquipment, EquipmentIndex.Head, out mismatch) ||
+                 !DoesLandBattleExactPreSpawnSlotMatch(expectedEquipment, actualEquipment, EquipmentIndex.Body, out mismatch) ||
+                 !DoesLandBattleExactPreSpawnSlotMatch(expectedEquipment, actualEquipment, EquipmentIndex.Leg, out mismatch) ||
+                 !DoesLandBattleExactPreSpawnSlotMatch(expectedEquipment, actualEquipment, EquipmentIndex.Gloves, out mismatch)))
             {
                 return false;
             }
 
             if (contract.Equipment.IncludeCapeInPreSpawn &&
-                !DoesSallyOutExactPreSpawnSlotMatch(
+                !DoesLandBattleExactPreSpawnSlotMatch(
                     expectedEquipment,
                     actualEquipment,
                     EquipmentIndex.Cape,
@@ -14346,12 +14346,12 @@ namespace CoopSpectator.MissionBehaviors
             if (!contract.Equipment.IncludeMountVisualsInPreSpawn)
                 return true;
 
-            if (!DoesSallyOutExactPreSpawnSlotMatch(
+            if (!DoesLandBattleExactPreSpawnSlotMatch(
                     expectedEquipment,
                     actualEquipment,
                     EquipmentIndex.Horse,
                     out mismatch) ||
-                !DoesSallyOutExactPreSpawnSlotMatch(
+                !DoesLandBattleExactPreSpawnSlotMatch(
                     expectedEquipment,
                     actualEquipment,
                     EquipmentIndex.HorseHarness,
@@ -14370,19 +14370,19 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            return DoesSallyOutExactPreSpawnSlotMatch(
+            return DoesLandBattleExactPreSpawnSlotMatch(
                        expectedEquipment,
                        mountAgent.SpawnEquipment,
                        EquipmentIndex.Horse,
                        out mismatch) &&
-                   DoesSallyOutExactPreSpawnSlotMatch(
+                   DoesLandBattleExactPreSpawnSlotMatch(
                        expectedEquipment,
                        mountAgent.SpawnEquipment,
                        EquipmentIndex.HorseHarness,
                        out mismatch);
         }
 
-        private static bool DoesSallyOutExactPreSpawnSlotMatch(
+        private static bool DoesLandBattleExactPreSpawnSlotMatch(
             Equipment expectedEquipment,
             Equipment actualEquipment,
             EquipmentIndex slot,

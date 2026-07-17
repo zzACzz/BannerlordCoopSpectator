@@ -282,7 +282,7 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 list.Add(new MissionBehaviorDiagnostic());
                 list.Add(new CoopMissionSpawnLogic());
             }
-            AppendSallyOutCommanderDeploymentSupport(list, mission, "server");
+            AppendExactLandBattleCommanderDeploymentSupport(list, mission, "server");
             return list;
         }
 
@@ -416,7 +416,7 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                     ModLogger.Info("CoopBattle client: re-enabled custom coop selection overlay for battle-map runtime while retaining native bootstrap behaviors.");
             }
 #endif
-            AppendSallyOutCommanderDeploymentSupport(list, mission, "client");
+            AppendExactLandBattleCommanderDeploymentSupport(list, mission, "client");
             return list;
         }
 
@@ -459,7 +459,7 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
             }
         }
 
-        internal static void AppendSallyOutCommanderDeploymentSupport(
+        internal static void AppendExactLandBattleCommanderDeploymentSupport(
             List<MissionBehavior> list,
             Mission mission,
             string peerRole)
@@ -471,7 +471,7 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 BattleSnapshotRuntimeState.GetScenarioContext() ??
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
-            if (!SallyOutScenarioContract.IsValidatedScenario(
+            if (!ExactLandBattleScenarioContract.IsValidatedScenario(
                     scenarioContext,
                     mission.SceneName,
                     out string diagnostics))
@@ -488,7 +488,7 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
             list.Add(new BannerBearerLogic());
             ModLogger.Info(
                 "CoopBattle " + (peerRole ?? "unknown") +
-                ": appended BannerBearerLogic for SallyOut commander deployment. " +
+                ": appended BannerBearerLogic for exact land-battle commander deployment. " +
                 "Scene=" + (mission.SceneName ?? "null") +
                 " Diagnostics={" + (diagnostics ?? string.Empty) + "}.");
         }
