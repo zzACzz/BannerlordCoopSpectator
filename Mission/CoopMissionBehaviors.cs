@@ -27418,17 +27418,22 @@ namespace CoopSpectator.MissionBehaviors
                 !string.Equals(slot.ResolutionSource, "direct", StringComparison.Ordinal));
             diagnostic.HasEquipmentMisses = diagnostic.Slots.Any(slot => slot != null && slot.Missing);
 
+            BattleSideEnum entrySide;
+            if (!TryParseBattleSide(entryState.SideId, out entrySide))
+                entrySide = BattleSideEnum.None;
+
+            int entrySideIndex = (int)entrySide;
             ExactTransferSpawnContract contract = ExactTransferContractBuilder.Build(
                 entryState,
                 isPlayerControlledOrigin: false,
-                teamIndex: 0,
+                teamIndex: entrySideIndex,
                 formationIndex: 0,
                 buildMode: ExactTransferContractBuilder.BuildMode.Diagnostic);
             List<ExactEntryEquipmentSlotDiagnostic> weaponSlots = diagnostic.Slots
                 .Where(slot => slot != null && slot.SourceSlotLabel != null && slot.SourceSlotLabel.StartsWith("Item", StringComparison.Ordinal))
                 .ToList();
             diagnostic.HasMountedRangedSequentialLayout =
-                ExactTransferContractBuilder.ShouldApplyMountedWeaponLayoutPolicy(entryState, -1) &&
+                ExactTransferContractBuilder.ShouldApplyMountedWeaponLayoutPolicy(entryState, entrySideIndex) &&
                 weaponSlots.Any(slot => string.Equals(slot.ItemRole, "ranged", StringComparison.OrdinalIgnoreCase)) &&
                 weaponSlots.Any(slot => string.Equals(slot.ItemRole, "ammo", StringComparison.OrdinalIgnoreCase)) &&
                 contract?.Equipment?.MountedWeaponLayoutNormalized != true;

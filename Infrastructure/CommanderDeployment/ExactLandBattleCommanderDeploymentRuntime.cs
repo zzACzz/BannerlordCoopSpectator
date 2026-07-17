@@ -49,7 +49,17 @@ namespace CoopSpectator.Infrastructure
             if (!TryValidateClientManualPlacement(mission, out diagnostics))
                 return false;
 
-            return TryBeginValidatedManualPlacement(mission, out diagnostics);
+            Mission.MissionTeamAITypeEnum previousMissionTeamAiType = mission.MissionTeamAIType;
+            mission.MissionTeamAIType = Mission.MissionTeamAITypeEnum.FieldBattle;
+
+            bool placementStarted = TryBeginValidatedManualPlacement(
+                mission,
+                out string placementDiagnostics);
+            diagnostics =
+                placementDiagnostics +
+                " PreviousMissionTeamAIType=" + previousMissionTeamAiType +
+                " CurrentMissionTeamAIType=" + mission.MissionTeamAIType;
+            return placementStarted;
         }
 
         public static bool IsClientManualPlacementActive(Mission mission)

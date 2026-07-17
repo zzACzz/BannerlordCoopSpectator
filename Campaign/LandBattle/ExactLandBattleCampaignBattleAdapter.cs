@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
 using CoopSpectator.Campaign.SallyOut;
+using CoopSpectator.Campaign.VillageBattle;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.Infrastructure.SallyOut;
+using CoopSpectator.Infrastructure.VillageBattle;
 using CoopSpectator.Network.Messages;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.MapEvents;
@@ -207,6 +209,22 @@ namespace CoopSpectator.Campaign.LandBattle
             BattleSnapshotMessage snapshot =
                 BattleSnapshotRuntimeState.GetCurrent() ??
                 BattleSnapshotRuntimeState.GetState()?.Snapshot;
+            if (ExactVillageBattleCampaignBattleAdapter.IsCampaignBattle(battle))
+            {
+                if (!ExactVillageBattleCampaignBattleAdapter
+                        .TryValidateFinalEncounterResult(
+                            battle,
+                            snapshot,
+                            result,
+                            out diagnostics))
+                {
+                    return false;
+                }
+
+                mode = ExactVillageBattleScenarioContract.Mode;
+                return true;
+            }
+
             if (battle.IsFieldBattle != true ||
                 !ExactLandBattleScenarioContract.IsFieldBattleScenario(snapshot?.ScenarioContext))
             {

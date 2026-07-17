@@ -1168,12 +1168,29 @@ namespace CoopSpectator.MissionBehaviors
 
                 if (!TryHasDeploymentBoundaries(deploymentPlan, team))
                 {
-                    try
+                    BattleScenarioContextMessage scenarioContext =
+                        BattleSnapshotRuntimeState.GetScenarioContext() ??
+                        BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                        BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+                    bool isClientExactLandBattlePlacement =
+                        GameNetwork.IsClient &&
+                        !GameNetwork.IsServer &&
+                        ExactCampaignCommanderDeploymentRuntime.IsExactLandBattleScenario(
+                            mission,
+                            scenarioContext);
+
+                    if (isClientExactLandBattlePlacement)
+                    {
+                        if (deploymentPlan.IsPlanMade(team))
+                            deploymentPlan.ClearDeploymentPlan(team);
+
+                        deploymentPlan.RemakeDeploymentPlan(team);
+                        if (!deploymentPlan.IsPlanMade(team))
+                            deploymentPlan.MakeDeploymentPlan(team);
+                    }
+                    else
                     {
                         deploymentPlan.MakeDeploymentPlan(team);
-                    }
-                    catch
-                    {
                     }
                 }
 

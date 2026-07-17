@@ -1,5 +1,6 @@
 using System;
 using CoopSpectator.Infrastructure.SallyOut;
+using CoopSpectator.Infrastructure.VillageBattle;
 using CoopSpectator.Network.Messages;
 
 namespace CoopSpectator.Infrastructure
@@ -9,7 +10,14 @@ namespace CoopSpectator.Infrastructure
         public static bool IsLandBattleScenario(BattleScenarioContextMessage scenarioContext)
         {
             return SallyOutScenarioContract.IsSallyOutScenario(scenarioContext) ||
+                   IsVillageBattleScenario(scenarioContext) ||
                    IsFieldBattleScenario(scenarioContext);
+        }
+
+        public static bool IsVillageBattleScenario(BattleScenarioContextMessage scenarioContext)
+        {
+            return ExactVillageBattleScenarioContract.IsVillageBattleScenario(
+                scenarioContext);
         }
 
         public static bool IsFieldBattleScenario(BattleScenarioContextMessage scenarioContext)
@@ -42,6 +50,14 @@ namespace CoopSpectator.Infrastructure
                 return validated;
             }
 
+            if (IsVillageBattleScenario(scenarioContext))
+            {
+                return ExactVillageBattleScenarioContract.IsValidatedScenario(
+                    scenarioContext,
+                    runtimeScene,
+                    out diagnostics);
+            }
+
             return IsValidatedFieldBattleScenario(
                 ResolveCurrentSnapshot(),
                 scenarioContext,
@@ -64,6 +80,14 @@ namespace CoopSpectator.Infrastructure
                 if (validated)
                     diagnostics = "Mode=SallyOut " + diagnostics;
                 return validated;
+            }
+
+            if (IsVillageBattleScenario(scenarioContext))
+            {
+                return ExactVillageBattleScenarioContract.IsValidatedScenario(
+                    snapshot,
+                    runtimeScene,
+                    out diagnostics);
             }
 
             return IsValidatedFieldBattleScenario(
