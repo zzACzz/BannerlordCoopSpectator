@@ -381,6 +381,11 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                             CoopBattleDisplayNameConsumerPatch.Apply(harmony);
                         }
 
+                        if (loadedAssemblyName == "TaleWorlds.MountAndBlade.GauntletUI")
+                        {
+                            CoopBattleDisplayNameConsumerPatch.Apply(harmony);
+                        }
+
                         if (loadedAssemblyName == "TaleWorlds.MountAndBlade.Multiplayer.GauntletUI")
                         {
                             CoopBattleEscapeMenuAiControlPatch.Apply(harmony);

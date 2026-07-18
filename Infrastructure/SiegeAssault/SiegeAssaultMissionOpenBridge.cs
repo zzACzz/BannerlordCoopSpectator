@@ -1,5 +1,6 @@
 using System;
 using CoopSpectator.Campaign;
+using CoopSpectator.Infrastructure.SiegeAmbush;
 using CoopSpectator.Network.Messages;
 using TaleWorlds.MountAndBlade;
 
@@ -61,8 +62,19 @@ namespace CoopSpectator.Infrastructure
                 string.Equals(SiegeSubtype, "SiegeAssault", StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(RequestedMissionShell, SiegeMissionWithDeploymentShell, StringComparison.Ordinal);
 
+            public bool IsExactSiegeWithDeployment =>
+                (IsSiegeAssaultWithDeployment ||
+                 string.Equals(
+                     SiegeSubtype,
+                     SiegeAmbushScenarioContract.SiegeSubtype,
+                     StringComparison.OrdinalIgnoreCase)) &&
+                string.Equals(
+                    RequestedMissionShell,
+                    SiegeMissionWithDeploymentShell,
+                    StringComparison.Ordinal);
+
             public bool UsesFallbackLiveShell =>
-                IsSiegeAssaultWithDeployment &&
+                IsExactSiegeWithDeployment &&
                 !string.Equals(LiveMissionShell, RequestedMissionShell, StringComparison.Ordinal);
 
             public string Describe()
@@ -127,7 +139,16 @@ namespace CoopSpectator.Infrastructure
                     diagnostics: "official-multiplayer-battle-scene");
             }
 
-            if (!string.Equals(siegeSubtype, "SiegeAssault", StringComparison.OrdinalIgnoreCase))
+            bool isExactSiegeWithDeploymentSubtype =
+                string.Equals(
+                    siegeSubtype,
+                    "SiegeAssault",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    siegeSubtype,
+                    SiegeAmbushScenarioContract.SiegeSubtype,
+                    StringComparison.OrdinalIgnoreCase);
+            if (!isExactSiegeWithDeploymentSubtype)
             {
                 return new PreOpenContract(
                     normalizedScene,
@@ -137,7 +158,7 @@ namespace CoopSpectator.Infrastructure
                     normalizedDefaultMissionShell,
                     disableHybridBattleShellDeploymentBridge: false,
                     enableLiveDeploymentControllers: false,
-                    diagnostics: "non-siege-assault-subtype");
+                    diagnostics: "non-exact-siege-with-deployment-subtype");
             }
 
             bool withDeploymentShell =
@@ -188,7 +209,7 @@ namespace CoopSpectator.Infrastructure
             }
 
             PreOpenContract resolvedContract = Resolve(runtimeScene, MultiplayerBattleShell);
-            if (!resolvedContract.IsSiegeAssaultWithDeployment)
+            if (!resolvedContract.IsExactSiegeWithDeployment)
             {
                 diagnostics = "not-siege-assault-with-deployment " + resolvedContract.Describe();
                 return false;
@@ -275,8 +296,8 @@ namespace CoopSpectator.Infrastructure
 
             string siegeSubtype = scenarioContext.SiegeContext?.SiegeSubtype ?? string.Empty;
             string requestedMissionShell = scenarioContext.SiegeContext?.MissionShell ?? string.Empty;
-            if (!string.Equals(siegeSubtype, "SiegeAssault", StringComparison.OrdinalIgnoreCase) ||
-                !CampaignMissionShellRuntimeState.IsWithDeploymentMissionShell(requestedMissionShell))
+            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime
+                    .IsExactSiegeWithDeploymentScenario(scenarioContext))
             {
                 diagnostics = "not-siege-assault-with-deployment";
                 return false;
@@ -288,7 +309,7 @@ namespace CoopSpectator.Infrastructure
                 return false;
             }
 
-            if (!contract.IsSiegeAssaultWithDeployment)
+            if (!contract.IsExactSiegeWithDeployment)
             {
                 diagnostics = "suppressed-active-contract-not-siege-assault-with-deployment " + activeContractDiagnostics;
                 return false;
@@ -322,7 +343,7 @@ namespace CoopSpectator.Infrastructure
                 return false;
             }
 
-            if (!contract.IsSiegeAssaultWithDeployment)
+            if (!contract.IsExactSiegeWithDeployment)
             {
                 diagnostics = "suppressed-active-contract-not-siege-assault-with-deployment " + activeContractDiagnostics;
                 return false;

@@ -27,8 +27,10 @@ using TaleWorlds.ObjectSystem;
 using CoopSpectator.Campaign.LandBattle;
 using CoopSpectator.Campaign.LordsHall;
 using CoopSpectator.Campaign.SallyOut;
+using CoopSpectator.Campaign.SiegeAmbush;
 using CoopSpectator.Infrastructure.LordsHall;
 using CoopSpectator.Infrastructure.SallyOut;
+using CoopSpectator.Infrastructure.SiegeAmbush;
 
 namespace CoopSpectator.Campaign // Тримаємо battle/campaign логіку в одному namespace
 { // Починаємо блок простору імен
@@ -638,6 +640,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 bool isHideoutBattle = battle?.IsHideoutBattle ?? false;
                 bool isHideoutSettlement = encounterSettlement?.IsHideout ?? false;
                 bool isSiegeAssault = battle?.IsSiegeAssault ?? false;
+                bool isSiegeAmbush = battle?.IsSiegeAmbush ?? false;
                 bool isBlockadeBattle = battle?.IsBlockade ?? false;
                 bool isBlockadeSallyOutBattle = battle?.IsBlockadeSallyOut ?? false;
 
@@ -647,6 +650,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     " IsHideoutBattle=" + isHideoutBattle +
                     " IsHideoutSettlement=" + isHideoutSettlement +
                     " IsSiegeAssault=" + isSiegeAssault +
+                    " IsSiegeAmbush=" + isSiegeAmbush +
                     " IsBlockade=" + isBlockadeBattle +
                     " IsBlockadeSallyOut=" + isBlockadeSallyOutBattle +
                     " SiegeState=" + (encounterSettlement?.CurrentSiegeState.ToString() ?? "none") +
@@ -675,6 +679,21 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 {
                     reason = "sally-out-contract-invalid";
                     summary += " SallyOutDiagnostics={" + sallyOutDiagnostics + "}";
+                    return true;
+                }
+
+                if (SiegeAmbushCampaignBattleAdapter.IsCampaignBattle(battle) &&
+                    !SiegeAmbushCampaignBattleAdapter.TryValidateActiveMission(
+                        battle,
+                        encounterSettlement,
+                        mission,
+                        out _,
+                        out string siegeAmbushDiagnostics))
+                {
+                    reason = "siege-ambush-contract-invalid";
+                    summary +=
+                        " SiegeAmbushDiagnostics={" +
+                        siegeAmbushDiagnostics + "}";
                     return true;
                 }
 
@@ -958,6 +977,13 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
 
             TryApplyCombatXpWriteback(result, encounterParties, summary);
+            if (SiegeAmbushScenarioContract.IsSiegeAmbushResult(result))
+            {
+                AddWritebackSample(
+                    summary.AdjustedSamples,
+                    "SiegeAmbush:native-siege-continuation-no-standard-aftermath");
+                return summary;
+            }
             if (ShouldDeferFinalBattleAftermath(result))
             {
                 AddWritebackSample(summary.AdjustedSamples, "IntermediateSiegeStage:final-aftermath-deferred");
@@ -3253,21 +3279,53 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             bool deferFinalAftermath = ShouldDeferFinalBattleAftermath(result);
             bool useNativeFinalLordsHallAftermath = ShouldUseNativeFinalLordsHallAftermath(result);
             bool useNativeFinalLandBattleAftermath = ShouldUseNativeFinalLandBattleAftermath(result);
+            bool useNativeSiegeAmbushAftermath = ShouldUseNativeSiegeAmbushAftermath(result);
+            if (useNativeSiegeAmbushAftermath)
+            {
+                if (!SiegeAmbushCampaignBattleAdapter.TryApplyMissionSiegeEngineResult(
+                        mission,
+                        result,
+                        out string siegeAmbushEngineDiagnostics))
+                {
+                    if (!string.Equals(
+                            _lastMissionExitFailedBattleResultKey,
+                            resultKey,
+                            StringComparison.Ordinal))
+                    {
+                        _lastMissionExitFailedBattleResultKey = resultKey;
+                        ModLogger.Info(
+                            "BattleDetector: siege-ambush mission exit deferred because siege-engine result could not be applied. " +
+                            "BattleId=" + (result.BattleId ?? "null") +
+                            " Diagnostics={" + siegeAmbushEngineDiagnostics + "}.");
+                    }
+
+                    return;
+                }
+
+                TryApplySiegeAmbushWritebackBeforeMissionExit(result, resultKey);
+            }
+
             if (!deferFinalAftermath)
             {
                 TryCacheHostAftermathRewardAuditSnapshot(resultKey);
-                if (!useNativeFinalLordsHallAftermath && !useNativeFinalLandBattleAftermath)
+                if (!useNativeFinalLordsHallAftermath &&
+                    !useNativeFinalLandBattleAftermath &&
+                    !useNativeSiegeAmbushAftermath)
                 {
                     TryCacheHostAftermathRewardProjection(result, resultKey);
                     TryCacheHostAftermathLootSummary(result, resultKey);
                 }
             }
-            TryInjectMainPartyBattleResultPreviewIntoLiveEncounter(result, resultKey);
-            TryInjectFinalSiegeDefenderBattleResultPreviewIntoLiveEncounter(result, resultKey);
-            TryInjectFinalLandBattleDefeatedSideBattleResultPreviewIntoLiveEncounter(result, resultKey);
+            if (!useNativeSiegeAmbushAftermath)
+            {
+                TryInjectMainPartyBattleResultPreviewIntoLiveEncounter(result, resultKey);
+                TryInjectFinalSiegeDefenderBattleResultPreviewIntoLiveEncounter(result, resultKey);
+                TryInjectFinalLandBattleDefeatedSideBattleResultPreviewIntoLiveEncounter(result, resultKey);
+            }
             if (!deferFinalAftermath &&
                 !useNativeFinalLordsHallAftermath &&
-                !useNativeFinalLandBattleAftermath)
+                !useNativeFinalLandBattleAftermath &&
+                !useNativeSiegeAmbushAftermath)
             {
                 TryInjectMainPartyPrisonerAftermathIntoLiveMapEvent(result);
             }
@@ -3317,6 +3375,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     "EncounterPrepared=" + encounterPrepared + " " +
                     "FinalLandBattleCompletionArmed=" + finalLandBattleCompletionArmed + " " +
                     "FinalLandBattleCompletionDiagnostics=[" + finalLandBattleCompletionDiagnostics + "] " +
+                    "NativeSiegeAmbushAftermath=" + useNativeSiegeAmbushAftermath + " " +
                     "BattleId=" + (result.BattleId ?? "null") +
                     " WinnerSide=" + (result.WinnerSide ?? "none") +
                     " MissionScene=" + SafeMissionSceneName(mission) + ".");
@@ -4070,6 +4129,54 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                    TryResolveWinnerSideEnum(result?.WinnerSide) != BattleSideEnum.None;
         }
 
+        private static bool ShouldUseNativeSiegeAmbushAftermath(
+            CoopBattleResultBridgeFile.BattleResultSnapshot result)
+        {
+            if (!SiegeAmbushScenarioContract.IsSiegeAmbushResult(result))
+                return false;
+
+            MapEvent battle =
+                PlayerEncounter.Battle ??
+                PlayerEncounter.EncounteredBattle;
+            Settlement settlement =
+                PlayerEncounter.EncounterSettlement ??
+                battle?.MapEventSettlement ??
+                MobileParty.MainParty?.CurrentSettlement;
+            return SiegeAmbushCampaignBattleAdapter.IsCampaignStage(
+                battle,
+                settlement);
+        }
+
+        private void TryApplySiegeAmbushWritebackBeforeMissionExit(
+            CoopBattleResultBridgeFile.BattleResultSnapshot result,
+            string resultKey)
+        {
+            if (result == null || string.IsNullOrWhiteSpace(resultKey))
+                return;
+
+            if (BattleResultWritebackJournalBehavior.IsConsumed(resultKey))
+                return;
+
+            BattleResultWritebackSummary summary =
+                ApplyBattleResultWriteback(result);
+            BattleResultWritebackJournalBehavior.MarkConsumed(resultKey);
+            _lastConsumedBattleResultKey = resultKey;
+            ModLogger.Info(
+                "BattleDetector: applied siege-ambush casualty and combat progression writeback before native mission exit. " +
+                "BattleId=" + (result.BattleId ?? "null") +
+                " Aggregates=" + summary.Aggregates +
+                " Resolved=" + summary.ResolvedPartyAggregates +
+                " TroopsAdjusted=" + summary.RegularTroopsAdjusted +
+                " HeroDeaths=" + summary.HeroDeathsApplied +
+                " HeroWounds=" + summary.HeroWoundsApplied +
+                " HeroHpAdjusted=" + summary.HeroHitPointsAdjusted +
+                " TroopXp=" + summary.TroopXpApplied +
+                " HeroSkillXp=" +
+                summary.HeroSkillXpApplied.ToString(
+                    "0.#",
+                    CultureInfo.InvariantCulture) + ".");
+        }
+
         private static bool ShouldCommitFinalLandBattleWinner(
             CoopBattleResultBridgeFile.BattleResultSnapshot result)
         {
@@ -4707,6 +4814,9 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             if (battle?.IsBlockadeSallyOut == true)
                 return "BlockadeSallyOut";
 
+            if (SiegeAmbushCampaignBattleAdapter.IsCampaignBattle(battle))
+                return SiegeAmbushScenarioContract.SiegeSubtype;
+
             if (LordsHallCampaignBattleAdapter.IsCampaignStage(battle, encounterSettlement))
                 return LordsHallScenarioContract.SiegeSubtype;
 
@@ -4812,6 +4922,14 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             if (string.Equals(siegeSubtype, "SiegeAssault", StringComparison.OrdinalIgnoreCase))
             {
                 return "center";
+            }
+
+            if (string.Equals(
+                    siegeSubtype,
+                    SiegeAmbushScenarioContract.SiegeSubtype,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return SiegeAmbushScenarioContract.SceneLocationId;
             }
 
             return string.Empty;
@@ -9032,6 +9150,35 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         ? " UnmatchedSamples=[" + string.Join("; ", unmatchedSamples) + "]"
                         : string.Empty) +
                     ".");
+
+                if (string.Equals(
+                        sideId,
+                        "defender",
+                        StringComparison.OrdinalIgnoreCase) &&
+                    SiegeAmbushCampaignBattleAdapter.IsCampaignStage(
+                        battle,
+                        encounterSettlement))
+                {
+                    bool priorityOrderBuilt =
+                        SiegeAmbushCampaignBattleAdapter.TryBuildPriorityDefenderEntryOrder(
+                            battle,
+                            encounterSettlement,
+                            sideSnapshot,
+                            out List<string> priorityEntryOrder,
+                            out string priorityOrderDiagnostics);
+                    if (priorityOrderBuilt)
+                    {
+                        orderedEntryIds = MergePriorityEntryOrder(
+                            priorityEntryOrder,
+                            orderedEntryIds);
+                    }
+
+                    ModLogger.Info(
+                        "BattleDetector: siege-ambush defender priority order resolved. " +
+                        "Success=" + priorityOrderBuilt +
+                        " FinalOrder=" + orderedEntryIds.Count +
+                        " Diagnostics={" + priorityOrderDiagnostics + "}.");
+                }
             }
             catch (Exception ex)
             {
@@ -9043,6 +9190,35 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
 
             return orderedEntryIds;
+        }
+
+        private static List<string> MergePriorityEntryOrder(
+            IEnumerable<string> priorityEntryOrder,
+            IEnumerable<string> missionReadyEntryOrder)
+        {
+            var mergedOrder = new List<string>();
+            var remainingMissionReadyOrder = missionReadyEntryOrder?
+                .Where(entryId => !string.IsNullOrWhiteSpace(entryId))
+                .ToList() ?? new List<string>();
+
+            foreach (string priorityEntryId in priorityEntryOrder ??
+                                                     Enumerable.Empty<string>())
+            {
+                if (string.IsNullOrWhiteSpace(priorityEntryId))
+                    continue;
+
+                mergedOrder.Add(priorityEntryId);
+                int matchingIndex = remainingMissionReadyOrder.FindIndex(
+                    entryId => string.Equals(
+                        entryId,
+                        priorityEntryId,
+                        StringComparison.OrdinalIgnoreCase));
+                if (matchingIndex >= 0)
+                    remainingMissionReadyOrder.RemoveAt(matchingIndex);
+            }
+
+            mergedOrder.AddRange(remainingMissionReadyOrder);
+            return mergedOrder;
         }
 
         private static List<object> TryGetMissionReadyTroopDescriptors(object sideObject)
@@ -10434,6 +10610,28 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     context.Source = contractValid
                         ? "native-lords-hall-mission-scene"
                         : "lords-hall-contract-invalid:" + lordsHallDiagnostics;
+                    return context;
+                }
+
+                if (SiegeAmbushCampaignBattleAdapter.IsCampaignStage(
+                        battle,
+                        encounterSettlement))
+                {
+                    bool contractValid =
+                        SiegeAmbushCampaignBattleAdapter.TryValidateActiveMission(
+                            battle,
+                            encounterSettlement,
+                            mission,
+                            out string expectedScene,
+                            out string siegeAmbushDiagnostics);
+                    context.BattleSceneName =
+                        !string.IsNullOrWhiteSpace(expectedScene)
+                            ? expectedScene
+                            : missionSceneName;
+                    context.Source = contractValid
+                        ? "native-siege-ambush-mission-scene"
+                        : "siege-ambush-contract-invalid:" +
+                          siegeAmbushDiagnostics;
                     return context;
                 }
 

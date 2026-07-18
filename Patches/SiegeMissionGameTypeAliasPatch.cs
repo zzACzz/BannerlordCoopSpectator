@@ -121,7 +121,7 @@ namespace CoopSpectator.Patches
             if (!string.Equals(value, SiegeMissionWithDeploymentShell, StringComparison.Ordinal))
                 return false;
 
-            return ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(
+            return ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(
                 BattleSnapshotRuntimeState.GetScenarioContext());
         }
     }

@@ -68,6 +68,11 @@ namespace CoopSpectator.Infrastructure
 
         public static bool IsExactSiegeAssaultWithDeploymentScene(string sceneName)
         {
+            return IsExactSiegeWithDeploymentScene(sceneName);
+        }
+
+        public static bool IsExactSiegeWithDeploymentScene(string sceneName)
+        {
             if (!IsExactCampaignBattleScene(sceneName))
                 return false;
 
@@ -82,7 +87,8 @@ namespace CoopSpectator.Infrastructure
             {
             }
 
-            return ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext);
+            return ExactCampaignSiegeAssaultWithDeploymentRuntime
+                .IsExactSiegeWithDeploymentScenario(scenarioContext);
         }
 
         public static bool IsValidatedLordsHallScene(string sceneName)

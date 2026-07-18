@@ -389,6 +389,7 @@ namespace CoopSpectator
                     TryApplyGameModeOverridePatch();
                     TryApplyMissionStateOpenNewPatches();
                     TryApplyExactCampaignArmyBootstrapPatch();
+                    TryApplyExactSiegeAmbushDeploymentControllerPatch();
                     TryApplyExactCampaignPreSpawnLoadoutPatch();
                     TryApplyExactCampaignNetworkObjectBootstrapPatch();
                     TryApplyBattleMapSpawnHandoffPatch();
@@ -504,6 +505,22 @@ namespace CoopSpectator
             catch (Exception ex)
             {
                 ModLogger.Info("CoopSpectatorDedicated: ExactCampaignArmyBootstrap patch apply failed: " + ex.Message);
+            }
+        }
+
+        private static void TryApplyExactSiegeAmbushDeploymentControllerPatch()
+        {
+            try
+            {
+                if (_harmony == null)
+                    _harmony = new Harmony("com.coopspectator.dedicated");
+                ExactSiegeAmbushDeploymentControllerPatch.Apply(_harmony);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopSpectatorDedicated: ExactSiegeAmbushDeploymentController patch apply failed: " +
+                    ex.Message);
             }
         }
 

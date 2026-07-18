@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -36,11 +37,20 @@ namespace CoopSpectator.Patches
         private const string KillNotificationUiHandlerTypeName =
             "TaleWorlds.MountAndBlade.Multiplayer.View.MissionViews.MissionMultiplayerKillNotificationUIHandler";
 
+        private const string GauntletKillNotificationUiHandlerTypeName =
+            "TaleWorlds.MountAndBlade.Multiplayer.GauntletUI.Mission.MissionGauntletKillNotificationUIHandler";
+
         private const string KillFeedVmTypeName =
             "TaleWorlds.MountAndBlade.Multiplayer.ViewModelCollection.KillFeed.MPKillFeedVM";
 
         private const string GeneralKillNotificationItemVmTypeName =
             "TaleWorlds.MountAndBlade.Multiplayer.ViewModelCollection.KillFeed.General.MPGeneralKillNotificationItemVM";
+
+        private const string SingleplayerGauntletKillNotificationUiHandlerTypeName =
+            "TaleWorlds.MountAndBlade.GauntletUI.Mission.Singleplayer.MissionGauntletKillNotificationSingleplayerUIHandler";
+
+        private const string SingleplayerGeneralKillNotificationItemVmTypeName =
+            "TaleWorlds.MountAndBlade.ViewModelCollection.HUD.KillFeed.General.SPGeneralKillNotificationItemVM";
 
         private static readonly HashSet<string> LoggedOverrideKeys =
             new HashSet<string>(StringComparer.Ordinal);
@@ -54,8 +64,11 @@ namespace CoopSpectator.Patches
             PatchMissionFocusableObjectInformationProvider(harmony);
             PatchSpectatorHudFocusIn(harmony);
             PatchKillNotificationUiHandler(harmony);
+            PatchGauntletKillNotificationUiHandler(harmony);
             PatchKillFeedVm(harmony);
             PatchGeneralKillNotificationItemVm(harmony);
+            PatchSingleplayerKillNotificationUiHandler(harmony);
+            PatchSingleplayerGeneralKillNotificationItemVm(harmony);
             PatchCombatLogDataBuilder(harmony);
         }
 
@@ -101,6 +114,18 @@ namespace CoopSpectator.Patches
                 "MissionMultiplayerKillNotificationUIHandler.OnAgentRemoved");
         }
 
+        private static void PatchGauntletKillNotificationUiHandler(Harmony harmony)
+        {
+            TryPatch(
+                harmony,
+                ResolveTypeByName(GauntletKillNotificationUiHandlerTypeName),
+                "OnAgentRemoved",
+                new[] { typeof(Agent), typeof(Agent), typeof(AgentState), typeof(KillingBlow) },
+                nameof(MissionGauntletKillNotificationUIHandler_OnAgentRemoved_Prefix),
+                prefix: true,
+                "MissionGauntletKillNotificationUIHandler.OnAgentRemoved");
+        }
+
         private static void PatchKillFeedVm(Harmony harmony)
         {
             TryPatch(
@@ -132,6 +157,37 @@ namespace CoopSpectator.Patches
                 nameof(MPGeneralKillNotificationItemVM_InitDeathProperties_Postfix),
                 prefix: false,
                 "MPGeneralKillNotificationItemVM.InitDeathProperties");
+        }
+
+        private static void PatchSingleplayerKillNotificationUiHandler(Harmony harmony)
+        {
+            TryPatch(
+                harmony,
+                ResolveTypeByName(SingleplayerGauntletKillNotificationUiHandlerTypeName),
+                "OnAgentRemoved",
+                new[] { typeof(Agent), typeof(Agent), typeof(AgentState), typeof(KillingBlow) },
+                nameof(MissionGauntletKillNotificationSingleplayerUIHandler_OnAgentRemoved_Postfix),
+                prefix: false,
+                "MissionGauntletKillNotificationSingleplayerUIHandler.OnAgentRemoved");
+        }
+
+        private static void PatchSingleplayerGeneralKillNotificationItemVm(Harmony harmony)
+        {
+            TryPatch(
+                harmony,
+                ResolveTypeByName(SingleplayerGeneralKillNotificationItemVmTypeName),
+                "InitProperties",
+                new[]
+                {
+                    typeof(Agent),
+                    typeof(Agent),
+                    typeof(bool),
+                    typeof(bool),
+                    typeof(bool)
+                },
+                nameof(SPGeneralKillNotificationItemVM_InitProperties_Postfix),
+                prefix: false,
+                "SPGeneralKillNotificationItemVM.InitProperties");
         }
 
         private static void PatchCombatLogDataBuilder(Harmony harmony)
@@ -467,6 +523,25 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static void MissionGauntletKillNotificationUIHandler_OnAgentRemoved_Prefix(
+            Agent affectedAgent,
+            Agent affectorAgent)
+        {
+            try
+            {
+                Mission mission = Mission.Current;
+                if (!ShouldRunForCurrentMission(mission) || GameNetwork.IsDedicatedServer)
+                    return;
+
+                PrimeExactDisplayNameCacheForAgent(affectedAgent);
+                PrimeExactDisplayNameCacheForAgent(affectorAgent);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopBattleDisplayNameConsumerPatch: Gauntlet kill-notification cache prefix failed open: " + ex.Message);
+            }
+        }
+
         private static bool MPKillFeedVM_OnAgentRemoved_Prefix(object __instance, Agent affectedAgent, Agent affectorAgent, bool isPersonalFeedEnabled)
         {
             try
@@ -604,6 +679,161 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static void MissionGauntletKillNotificationSingleplayerUIHandler_OnAgentRemoved_Postfix(
+            object __instance,
+            Agent affectedAgent,
+            Agent affectorAgent,
+            AgentState agentState)
+        {
+            try
+            {
+                Mission mission = Mission.Current;
+                if (!ShouldRunForCurrentMission(mission) ||
+                    GameNetwork.IsDedicatedServer ||
+                    __instance == null ||
+                    affectedAgent == null ||
+                    !affectedAgent.IsHuman ||
+                    affectorAgent == null ||
+                    !ReferenceEquals(affectorAgent, Agent.Main) ||
+                    (agentState != AgentState.Killed &&
+                     agentState != AgentState.Unconscious))
+                {
+                    return;
+                }
+
+                FieldInfo personalFeedEnabledField =
+                    AccessTools.Field(__instance.GetType(), "_isPersonalFeedEnabled");
+                if (personalFeedEnabledField?.GetValue(__instance) is bool personalFeedEnabled &&
+                    !personalFeedEnabled)
+                {
+                    return;
+                }
+
+                DisplayNameResolutionState victimState =
+                    ResolvePreferredCoopBattleDisplayNameState(affectedAgent);
+                if (!victimState.ExactResolved ||
+                    string.IsNullOrWhiteSpace(victimState.PreferredName))
+                {
+                    return;
+                }
+
+                FieldInfo dataSourceField = AccessTools.Field(__instance.GetType(), "_dataSource");
+                object dataSource = dataSourceField?.GetValue(__instance);
+                object personalFeed =
+                    AccessTools.Property(dataSource?.GetType(), "PersonalFeed")
+                        ?.GetValue(dataSource);
+                object notificationList =
+                    AccessTools.Property(personalFeed?.GetType(), "NotificationList")
+                        ?.GetValue(personalFeed);
+                object latestItem = GetLastNotificationItem(notificationList);
+                PropertyInfo messageProperty =
+                    AccessTools.Property(latestItem?.GetType(), "Message");
+                if (latestItem == null || messageProperty == null)
+                    return;
+
+                messageProperty.SetValue(latestItem, victimState.PreferredName);
+                LogOverride(
+                    "singleplayer-personal-killfeed",
+                    affectedAgent,
+                    victimState.EntryId,
+                    victimState.PreferredName);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopBattleDisplayNameConsumerPatch: singleplayer personal kill-feed postfix failed: " +
+                    ex.Message);
+            }
+        }
+
+        private static void SPGeneralKillNotificationItemVM_InitProperties_Postfix(
+            object __instance,
+            Agent affectedAgent,
+            Agent affectorAgent)
+        {
+            try
+            {
+                Mission mission = Mission.Current;
+                if (!ShouldRunForCurrentMission(mission) ||
+                    GameNetwork.IsDedicatedServer ||
+                    __instance == null)
+                {
+                    return;
+                }
+
+                PropertyInfo murdererNameProperty =
+                    AccessTools.Property(__instance.GetType(), "MurdererName");
+                PropertyInfo victimNameProperty =
+                    AccessTools.Property(__instance.GetType(), "VictimName");
+                string currentMurdererName =
+                    murdererNameProperty?.GetValue(__instance)?.ToString();
+                string currentVictimName =
+                    victimNameProperty?.GetValue(__instance)?.ToString();
+
+                DisplayNameResolutionState killerState =
+                    ResolvePreferredCoopBattleDisplayNameState(affectorAgent);
+                if (!string.IsNullOrWhiteSpace(currentMurdererName) &&
+                    killerState.ExactResolved &&
+                    !string.IsNullOrWhiteSpace(killerState.PreferredName))
+                {
+                    murdererNameProperty?.SetValue(
+                        __instance,
+                        killerState.PreferredName);
+                    LogOverride(
+                        "singleplayer-general-killfeed-killer",
+                        affectorAgent,
+                        killerState.EntryId,
+                        killerState.PreferredName);
+                }
+
+                DisplayNameResolutionState victimState =
+                    ResolvePreferredCoopBattleDisplayNameState(affectedAgent);
+                if (!string.IsNullOrWhiteSpace(currentVictimName) &&
+                    victimState.ExactResolved &&
+                    !string.IsNullOrWhiteSpace(victimState.PreferredName))
+                {
+                    victimNameProperty?.SetValue(
+                        __instance,
+                        victimState.PreferredName);
+                    LogOverride(
+                        "singleplayer-general-killfeed-victim",
+                        affectedAgent,
+                        victimState.EntryId,
+                        victimState.PreferredName);
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopBattleDisplayNameConsumerPatch: singleplayer general kill-feed postfix failed: " +
+                    ex.Message);
+            }
+        }
+
+        private static object GetLastNotificationItem(object notificationList)
+        {
+            if (notificationList == null)
+                return null;
+
+            if (notificationList is IList list)
+                return list.Count > 0 ? list[list.Count - 1] : null;
+
+            PropertyInfo countProperty =
+                AccessTools.Property(notificationList.GetType(), "Count");
+            PropertyInfo itemProperty =
+                AccessTools.Property(notificationList.GetType(), "Item");
+            if (!(countProperty?.GetValue(notificationList) is int count) ||
+                count <= 0 ||
+                itemProperty == null)
+            {
+                return null;
+            }
+
+            return itemProperty.GetValue(
+                notificationList,
+                new object[] { count - 1 });
+        }
+
         private static void MissionNetworkHelper_GetCombatLogDataForCombatLogNetworkMessage_Postfix(
             NetworkMessages.FromServer.CombatLogNetworkMessage message,
             ref CombatLogData __result)
@@ -620,15 +850,16 @@ namespace CoopSpectator.Patches
                 if (victimAgent == null || victimAgent.IsMount)
                     return;
 
-                if (CoopMissionSpawnLogic.TryResolveExactDisplayNameForAgent(
+                if (TryResolveBattleOnlyExactDisplayNameForAgent(
                         victimAgent,
-                        out _,
-                        out TextObject exactName) &&
-                    exactName != null)
+                        out string entryId,
+                        out string resolvedName))
                 {
-                    string resolvedName = exactName.ToString();
                     if (!string.IsNullOrWhiteSpace(resolvedName))
+                    {
                         __result.VictimAgentName = resolvedName;
+                        LogOverride("personal-combat-log", victimAgent, entryId, resolvedName);
+                    }
                 }
             }
             catch (Exception ex)
@@ -765,6 +996,17 @@ namespace CoopSpectator.Patches
             return false;
         }
 
+        private static void PrimeExactDisplayNameCacheForAgent(Agent agent)
+        {
+            if (agent == null || agent.IsMount)
+                return;
+
+            CoopMissionSpawnLogic.TryResolveExactDisplayNameForAgent(
+                agent,
+                out _,
+                out _);
+        }
+
         private static Agent GetAssistedAgent(Agent affectedAgent, Agent affectorAgent)
         {
             if (affectedAgent == null)
@@ -777,8 +1019,13 @@ namespace CoopSpectator.Patches
 
         private static void LogOverride(string consumer, Agent agent, string entryId, string exactName)
         {
-            if (agent == null || string.IsNullOrWhiteSpace(entryId) || string.IsNullOrWhiteSpace(exactName))
+            if (!ExperimentalFeatures.EnableBattleSelectionDisplayNameDiagnostics ||
+                agent == null ||
+                string.IsNullOrWhiteSpace(entryId) ||
+                string.IsNullOrWhiteSpace(exactName))
+            {
                 return;
+            }
 
             string key = consumer + "|" + agent.Index + "|" + entryId + "|" + exactName;
             if (!LoggedOverrideKeys.Add(key))

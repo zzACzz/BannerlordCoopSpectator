@@ -1,3 +1,4 @@
+using System;
 using CoopSpectator.Infrastructure;
 using TaleWorlds.MountAndBlade;
 
@@ -5,11 +6,37 @@ namespace CoopSpectator.GameMode
 {
     public sealed class MissionMultiplayerCoopSiegeAssaultWithDeploymentClient : MissionMultiplayerGameModeBaseClient
     {
+        private readonly bool _disableSceneOcclusion;
         private bool _hasLoggedFirstMissionTick;
+
+        public MissionMultiplayerCoopSiegeAssaultWithDeploymentClient(
+            bool disableSceneOcclusion = false)
+        {
+            _disableSceneOcclusion = disableSceneOcclusion;
+        }
 
         public override void OnBehaviorInitialize()
         {
             _hasLoggedFirstMissionTick = false;
+            if (_disableSceneOcclusion && Mission?.Scene != null)
+            {
+                try
+                {
+                    Mission.Scene.SetOcclusionMode(false);
+                    ModLogger.Info(
+                        "MissionMultiplayerCoopSiegeAssaultWithDeploymentClient: disabled scene occlusion " +
+                        "before renderer activation for SiegeAmbush. Scene=" +
+                        (Mission.SceneName ?? "null") + ".");
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Error(
+                        "MissionMultiplayerCoopSiegeAssaultWithDeploymentClient: failed to disable scene occlusion " +
+                        "for SiegeAmbush before renderer activation.",
+                        ex);
+                }
+            }
+
             ModLogger.Info("MissionMultiplayerCoopSiegeAssaultWithDeploymentClient OnBehaviorInitialize. Scene=" + (Mission?.SceneName ?? "null"));
             base.OnBehaviorInitialize();
         }

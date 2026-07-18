@@ -7,6 +7,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.Infrastructure.SiegeAmbush;
 using CoopSpectator.MissionBehaviors;
 using CoopSpectator.Network.Messages;
 using HarmonyLib;
@@ -43,6 +44,8 @@ namespace CoopSpectator.Patches
         private const int ProjectileLaunchDiagnosticBudget = 64;
         private static readonly HashSet<string> LoggedClientProjectileVisualGraceKeys = new HashSet<string>();
         private const int ClientProjectileVisualGraceDiagnosticBudget = 64;
+        private static readonly TimeSpan MaxDeferredClientStandardMissileCollisionAge =
+            TimeSpan.FromSeconds(3d);
         private const string ClientThrownProjectileVisualGraceDeferralReasonPrefix = "player-thrown-projectile-visual-grace";
         private const string ClientSiegeEngineProjectileVisualGraceDeferralReasonPrefix = "siege-engine-projectile-visual-grace";
         private static int _clientProjectileVisualGraceReplayDepth;
@@ -52,6 +55,8 @@ namespace CoopSpectator.Patches
         private static MethodInfo _missionNetworkComponentHandleServerEventSynchronizeAgentEquipmentMethod;
         private static MethodInfo _missionNetworkComponentHandleServerEventSynchronizeMissionObjectMethod;
         private static MethodInfo _missionNetworkComponentHandleServerEventSetMissionObjectVisibilityMethod;
+        private static MethodInfo _missionNetworkComponentHandleServerEventSetMissionObjectDisabledMethod;
+        private static MethodInfo _missionNetworkComponentHandleServerEventHitSynchronizeObjectHitpointsMethod;
         private static MethodInfo _missionNetworkComponentHandleServerEventSpawnWeaponWithNewEntityMethod;
         private static MethodInfo _missionNetworkComponentHandleServerEventAttachWeaponToSpawnedWeaponMethod;
         private static MethodInfo _missionNetworkComponentHandleServerEventSpawnAttachedWeaponOnSpawnedWeaponMethod;
@@ -136,6 +141,8 @@ namespace CoopSpectator.Patches
             new List<DeferredClientSynchronizeMissionObjectPayload>();
         private static readonly List<DeferredClientSetMissionObjectVisibilityPayload> DeferredClientSetMissionObjectVisibilityPayloads =
             new List<DeferredClientSetMissionObjectVisibilityPayload>();
+        private static readonly List<DeferredClientExactSiegeMissionObjectMessagePayload> DeferredClientExactSiegeMissionObjectMessagePayloads =
+            new List<DeferredClientExactSiegeMissionObjectMessagePayload>();
         private static readonly List<DeferredClientSpawnWeaponWithNewEntityPayload> DeferredClientSpawnWeaponWithNewEntityPayloads =
             new List<DeferredClientSpawnWeaponWithNewEntityPayload>();
         private static readonly List<DeferredClientAttachWeaponToSpawnedWeaponPayload> DeferredClientAttachWeaponToSpawnedWeaponPayloads =
@@ -162,6 +169,8 @@ namespace CoopSpectator.Patches
             new List<DeferredClientCreateMissilePayload>();
         private static readonly List<DeferredClientHandleMissileCollisionReactionPayload> DeferredClientHandleMissileCollisionReactionPayloads =
             new List<DeferredClientHandleMissileCollisionReactionPayload>();
+        private static readonly HashSet<int> ClientMissileIndicesAwaitingReuseRemoval =
+            new HashSet<int>();
         private static readonly List<DeferredClientSetWieldedItemIndexPayload> DeferredClientSetWieldedItemIndexPayloads =
             new List<DeferredClientSetWieldedItemIndexPayload>();
         private static readonly List<DeferredClientSetAgentHealthPayload> DeferredClientSetAgentHealthPayloads =
@@ -197,6 +206,7 @@ namespace CoopSpectator.Patches
         private static long _nextDeferredClientSynchronizeAgentEquipmentSequence;
         private static long _nextDeferredClientSynchronizeMissionObjectSequence;
         private static long _nextDeferredClientSetMissionObjectVisibilitySequence;
+        private static long _nextDeferredClientExactSiegeMissionObjectMessageSequence;
         private static long _nextDeferredClientSpawnWeaponWithNewEntitySequence;
         private static long _nextDeferredClientAttachWeaponToSpawnedWeaponSequence;
         private static long _nextDeferredClientSpawnAttachedWeaponOnSpawnedWeaponSequence;
@@ -399,6 +409,19 @@ namespace CoopSpectator.Patches
             public string DeferralReason;
         }
 
+        private sealed class DeferredClientExactSiegeMissionObjectMessagePayload
+        {
+            public long Sequence;
+            public GameNetworkMessage Message;
+            public string MissionObjectIdMemberName;
+            public SiegeMissionObjectIdBridgeTarget Target;
+            public string MessageName;
+            public MethodInfo HandlerMethod;
+            public DateTime DeferredUtc;
+            public DateTime LastAttemptUtc;
+            public int Attempts;
+        }
+
         private sealed class DelayedLocalControlledWeaponStatePayload
         {
             public long Sequence;
@@ -528,6 +551,7 @@ namespace CoopSpectator.Patches
 
         public static void Apply(Harmony harmony)
         {
+            TryApplyPatchStep(nameof(CoopBotsControlledCountPatch), () => CoopBotsControlledCountPatch.Apply(harmony));
             TryApplyPatchStep(nameof(PatchBattleSnapshotRuntimeStateFiveModeWeaponUsageProtocol), () => PatchBattleSnapshotRuntimeStateFiveModeWeaponUsageProtocol(harmony));
             TryApplyPatchStep(nameof(PatchMissionPeerFollowedAgent), () => PatchMissionPeerFollowedAgent(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentCreateAgent), () => PatchMissionNetworkComponentCreateAgent(harmony));
@@ -536,6 +560,7 @@ namespace CoopSpectator.Patches
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSynchronizeAgentEquipment), () => PatchMissionNetworkComponentSynchronizeAgentEquipment(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSynchronizeMissionObject), () => PatchMissionNetworkComponentSynchronizeMissionObject(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetMissionObjectVisibility), () => PatchMissionNetworkComponentSetMissionObjectVisibility(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetMissionObjectDisabled), () => PatchMissionNetworkComponentSetMissionObjectDisabled(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetRangedSiegeWeaponState), () => PatchMissionNetworkComponentSetRangedSiegeWeaponState(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetRangedSiegeWeaponAmmo), () => PatchMissionNetworkComponentSetRangedSiegeWeaponAmmo(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentRangedSiegeWeaponChangeProjectile), () => PatchMissionNetworkComponentRangedSiegeWeaponChangeProjectile(harmony));
@@ -565,6 +590,7 @@ namespace CoopSpectator.Patches
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSpawnAttachedWeaponOnCorpse), () => PatchMissionNetworkComponentSpawnAttachedWeaponOnCorpse(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentAttachWeaponToAgent), () => PatchMissionNetworkComponentAttachWeaponToAgent(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentAttachWeaponToWeaponInAgentEquipmentSlot), () => PatchMissionNetworkComponentAttachWeaponToWeaponInAgentEquipmentSlot(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentRemoveEquippedWeapon), () => PatchMissionNetworkComponentRemoveEquippedWeapon(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetWeaponNetworkData), () => PatchMissionNetworkComponentSetWeaponNetworkData(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetWeaponAmmoData), () => PatchMissionNetworkComponentSetWeaponAmmoData(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetWeaponReloadPhase), () => PatchMissionNetworkComponentSetWeaponReloadPhase(harmony));
@@ -611,129 +637,144 @@ namespace CoopSpectator.Patches
             }
         }
 
-        public static void ResetRuntimeState(string source, bool preserveCommanderOrderControlState = false)
+        public static void ResetRuntimeState(
+            string source,
+            bool preserveCommanderOrderControlState = false,
+            bool preserveDeferredClientBootstrapState = false)
         {
             ExactCreateAgentCorridorDiagnostics.ResetRuntimeState(source);
-            SiegeMissionObjectIdBridge.Reset(source);
-            lock (DeferredMountedHeroCreateAgentPayloads)
+            if (!preserveDeferredClientBootstrapState)
             {
-                DeferredMountedHeroCreateAgentPayloads.Clear();
+                SiegeMissionObjectIdBridge.Reset(source);
+                lock (DeferredMountedHeroCreateAgentPayloads)
+                {
+                    DeferredMountedHeroCreateAgentPayloads.Clear();
+                }
+                lock (DeferredClientCreateAgentPayloads)
+                {
+                    DeferredClientCreateAgentPayloads.Clear();
+                }
+                lock (DeferredClientAgentSetFormationPayloads)
+                {
+                    DeferredClientAgentSetFormationPayloads.Clear();
+                }
+                lock (DeferredClientSetAgentActionSetPayloads)
+                {
+                    DeferredClientSetAgentActionSetPayloads.Clear();
+                }
+                lock (DeferredClientSynchronizeAgentEquipmentPayloads)
+                {
+                    DeferredClientSynchronizeAgentEquipmentPayloads.Clear();
+                }
+                lock (DeferredClientSynchronizeMissionObjectPayloads)
+                {
+                    DeferredClientSynchronizeMissionObjectPayloads.Clear();
+                }
+                lock (DeferredClientSetMissionObjectVisibilityPayloads)
+                {
+                    DeferredClientSetMissionObjectVisibilityPayloads.Clear();
+                }
+                lock (DeferredClientExactSiegeMissionObjectMessagePayloads)
+                {
+                    DeferredClientExactSiegeMissionObjectMessagePayloads.Clear();
+                }
+                lock (DeferredClientSpawnWeaponWithNewEntityPayloads)
+                {
+                    DeferredClientSpawnWeaponWithNewEntityPayloads.Clear();
+                }
+                lock (DeferredClientAttachWeaponToSpawnedWeaponPayloads)
+                {
+                    DeferredClientAttachWeaponToSpawnedWeaponPayloads.Clear();
+                }
+                lock (DeferredClientSpawnAttachedWeaponOnSpawnedWeaponPayloads)
+                {
+                    DeferredClientSpawnAttachedWeaponOnSpawnedWeaponPayloads.Clear();
+                }
+                lock (DeferredClientSpawnAttachedWeaponOnCorpsePayloads)
+                {
+                    DeferredClientSpawnAttachedWeaponOnCorpsePayloads.Clear();
+                }
+                lock (DeferredClientAttachWeaponToAgentPayloads)
+                {
+                    DeferredClientAttachWeaponToAgentPayloads.Clear();
+                }
+                lock (DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads)
+                {
+                    DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads.Clear();
+                }
+                lock (DeferredClientSetWeaponNetworkDataPayloads)
+                {
+                    DeferredClientSetWeaponNetworkDataPayloads.Clear();
+                }
+                lock (DeferredClientSetWeaponAmmoDataPayloads)
+                {
+                    DeferredClientSetWeaponAmmoDataPayloads.Clear();
+                }
+                lock (DeferredClientSetWeaponReloadPhasePayloads)
+                {
+                    DeferredClientSetWeaponReloadPhasePayloads.Clear();
+                }
+                lock (DeferredClientStartSwitchingWeaponUsageIndexPayloads)
+                {
+                    DeferredClientStartSwitchingWeaponUsageIndexPayloads.Clear();
+                }
+                lock (DeferredClientWeaponUsageIndexChangePayloads)
+                {
+                    DeferredClientWeaponUsageIndexChangePayloads.Clear();
+                }
+                lock (DeferredClientCreateMissilePayloads)
+                {
+                    DeferredClientCreateMissilePayloads.Clear();
+                }
+                lock (DeferredClientHandleMissileCollisionReactionPayloads)
+                {
+                    DeferredClientHandleMissileCollisionReactionPayloads.Clear();
+                }
+                lock (ClientMissileIndicesAwaitingReuseRemoval)
+                {
+                    ClientMissileIndicesAwaitingReuseRemoval.Clear();
+                }
+                lock (DeferredClientSetWieldedItemIndexPayloads)
+                {
+                    DeferredClientSetWieldedItemIndexPayloads.Clear();
+                }
+                lock (DeferredClientSetAgentHealthPayloads)
+                {
+                    DeferredClientSetAgentHealthPayloads.Clear();
+                }
+                lock (DeferredClientMakeAgentDeadPayloads)
+                {
+                    DeferredClientMakeAgentDeadPayloads.Clear();
+                }
+                lock (DelayedLocalControlledWeaponStatePayloads)
+                {
+                    DelayedLocalControlledWeaponStatePayloads.Clear();
+                }
+                _nextDeferredClientCreateAgentSequence = 0;
+                _nextDeferredClientAgentSetFormationSequence = 0;
+                _nextDeferredClientSetAgentActionSetSequence = 0;
+                _nextDeferredClientSynchronizeAgentEquipmentSequence = 0;
+                _nextDeferredClientSynchronizeMissionObjectSequence = 0;
+                _nextDeferredClientSetMissionObjectVisibilitySequence = 0;
+                _nextDeferredClientExactSiegeMissionObjectMessageSequence = 0;
+                _nextDeferredClientSpawnWeaponWithNewEntitySequence = 0;
+                _nextDeferredClientAttachWeaponToSpawnedWeaponSequence = 0;
+                _nextDeferredClientSpawnAttachedWeaponOnSpawnedWeaponSequence = 0;
+                _nextDeferredClientSpawnAttachedWeaponOnCorpseSequence = 0;
+                _nextDeferredClientAttachWeaponToAgentSequence = 0;
+                _nextDeferredClientAttachWeaponToWeaponInAgentEquipmentSlotSequence = 0;
+                _nextDeferredClientSetWeaponNetworkDataSequence = 0;
+                _nextDeferredClientSetWeaponAmmoDataSequence = 0;
+                _nextDeferredClientSetWeaponReloadPhaseSequence = 0;
+                _nextDeferredClientStartSwitchingWeaponUsageIndexSequence = 0;
+                _nextDeferredClientWeaponUsageIndexChangeSequence = 0;
+                _nextDeferredClientCreateMissileSequence = 0;
+                _nextDeferredClientHandleMissileCollisionReactionSequence = 0;
+                _nextDeferredClientSetWieldedItemIndexSequence = 0;
+                _nextDeferredClientSetAgentHealthSequence = 0;
+                _nextDeferredClientMakeAgentDeadSequence = 0;
+                _nextDelayedLocalControlledWeaponStateSequence = 0;
             }
-            lock (DeferredClientCreateAgentPayloads)
-            {
-                DeferredClientCreateAgentPayloads.Clear();
-            }
-            lock (DeferredClientAgentSetFormationPayloads)
-            {
-                DeferredClientAgentSetFormationPayloads.Clear();
-            }
-            lock (DeferredClientSetAgentActionSetPayloads)
-            {
-                DeferredClientSetAgentActionSetPayloads.Clear();
-            }
-            lock (DeferredClientSynchronizeAgentEquipmentPayloads)
-            {
-                DeferredClientSynchronizeAgentEquipmentPayloads.Clear();
-            }
-            lock (DeferredClientSynchronizeMissionObjectPayloads)
-            {
-                DeferredClientSynchronizeMissionObjectPayloads.Clear();
-            }
-            lock (DeferredClientSetMissionObjectVisibilityPayloads)
-            {
-                DeferredClientSetMissionObjectVisibilityPayloads.Clear();
-            }
-            lock (DeferredClientSpawnWeaponWithNewEntityPayloads)
-            {
-                DeferredClientSpawnWeaponWithNewEntityPayloads.Clear();
-            }
-            lock (DeferredClientAttachWeaponToSpawnedWeaponPayloads)
-            {
-                DeferredClientAttachWeaponToSpawnedWeaponPayloads.Clear();
-            }
-            lock (DeferredClientSpawnAttachedWeaponOnSpawnedWeaponPayloads)
-            {
-                DeferredClientSpawnAttachedWeaponOnSpawnedWeaponPayloads.Clear();
-            }
-            lock (DeferredClientSpawnAttachedWeaponOnCorpsePayloads)
-            {
-                DeferredClientSpawnAttachedWeaponOnCorpsePayloads.Clear();
-            }
-            lock (DeferredClientAttachWeaponToAgentPayloads)
-            {
-                DeferredClientAttachWeaponToAgentPayloads.Clear();
-            }
-            lock (DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads)
-            {
-                DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads.Clear();
-            }
-            lock (DeferredClientSetWeaponNetworkDataPayloads)
-            {
-                DeferredClientSetWeaponNetworkDataPayloads.Clear();
-            }
-            lock (DeferredClientSetWeaponAmmoDataPayloads)
-            {
-                DeferredClientSetWeaponAmmoDataPayloads.Clear();
-            }
-            lock (DeferredClientSetWeaponReloadPhasePayloads)
-            {
-                DeferredClientSetWeaponReloadPhasePayloads.Clear();
-            }
-            lock (DeferredClientStartSwitchingWeaponUsageIndexPayloads)
-            {
-                DeferredClientStartSwitchingWeaponUsageIndexPayloads.Clear();
-            }
-            lock (DeferredClientWeaponUsageIndexChangePayloads)
-            {
-                DeferredClientWeaponUsageIndexChangePayloads.Clear();
-            }
-            lock (DeferredClientCreateMissilePayloads)
-            {
-                DeferredClientCreateMissilePayloads.Clear();
-            }
-            lock (DeferredClientHandleMissileCollisionReactionPayloads)
-            {
-                DeferredClientHandleMissileCollisionReactionPayloads.Clear();
-            }
-            lock (DeferredClientSetWieldedItemIndexPayloads)
-            {
-                DeferredClientSetWieldedItemIndexPayloads.Clear();
-            }
-            lock (DeferredClientSetAgentHealthPayloads)
-            {
-                DeferredClientSetAgentHealthPayloads.Clear();
-            }
-            lock (DeferredClientMakeAgentDeadPayloads)
-            {
-                DeferredClientMakeAgentDeadPayloads.Clear();
-            }
-            lock (DelayedLocalControlledWeaponStatePayloads)
-            {
-                DelayedLocalControlledWeaponStatePayloads.Clear();
-            }
-            _nextDeferredClientCreateAgentSequence = 0;
-            _nextDeferredClientAgentSetFormationSequence = 0;
-            _nextDeferredClientSetAgentActionSetSequence = 0;
-            _nextDeferredClientSynchronizeAgentEquipmentSequence = 0;
-            _nextDeferredClientSynchronizeMissionObjectSequence = 0;
-            _nextDeferredClientSetMissionObjectVisibilitySequence = 0;
-            _nextDeferredClientSpawnWeaponWithNewEntitySequence = 0;
-            _nextDeferredClientAttachWeaponToSpawnedWeaponSequence = 0;
-            _nextDeferredClientSpawnAttachedWeaponOnSpawnedWeaponSequence = 0;
-            _nextDeferredClientSpawnAttachedWeaponOnCorpseSequence = 0;
-            _nextDeferredClientAttachWeaponToAgentSequence = 0;
-            _nextDeferredClientAttachWeaponToWeaponInAgentEquipmentSlotSequence = 0;
-            _nextDeferredClientSetWeaponNetworkDataSequence = 0;
-            _nextDeferredClientSetWeaponAmmoDataSequence = 0;
-            _nextDeferredClientSetWeaponReloadPhaseSequence = 0;
-            _nextDeferredClientStartSwitchingWeaponUsageIndexSequence = 0;
-            _nextDeferredClientWeaponUsageIndexChangeSequence = 0;
-            _nextDeferredClientCreateMissileSequence = 0;
-            _nextDeferredClientHandleMissileCollisionReactionSequence = 0;
-            _nextDeferredClientSetWieldedItemIndexSequence = 0;
-            _nextDeferredClientSetAgentHealthSequence = 0;
-            _nextDeferredClientMakeAgentDeadSequence = 0;
-            _nextDelayedLocalControlledWeaponStateSequence = 0;
             _delayedLocalControlledWeaponStateReplayDepth = 0;
             _unsafeImmediateClientAgentBaselineMaterializationDepth = 0;
             _forcedNativeClientCreateAgentReplayDepth = 0;
@@ -803,7 +844,8 @@ namespace CoopSpectator.Patches
             ModLogger.Info(
                 "BattleMapSpawnHandoffPatch: reset runtime state. " +
                 "Source=" + (source ?? "unknown") +
-                " PreserveCommanderOrderControlState=" + preserveCommanderOrderControlState);
+                " PreserveCommanderOrderControlState=" + preserveCommanderOrderControlState +
+                " PreserveDeferredClientBootstrapState=" + preserveDeferredClientBootstrapState);
         }
 
         internal static void RegisterActiveExactCommanderMissionOrderVm(object missionOrderVm, string source)
@@ -1086,6 +1128,25 @@ namespace CoopSpectator.Patches
                 prefix: new HarmonyMethod(prefix),
                 finalizer: new HarmonyMethod(finalizer));
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix/finalizer applied to MissionNetworkComponent.HandleServerEventSetMissionObjectVisibility.");
+        }
+
+        private static void PatchMissionNetworkComponentSetMissionObjectDisabled(Harmony harmony)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                "HandleServerEventSetMissionObjectDisabled",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventSetMissionObjectDisabled_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventSetMissionObjectDisabled not found. Skip.");
+                return;
+            }
+
+            _missionNetworkComponentHandleServerEventSetMissionObjectDisabledMethod = target;
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventSetMissionObjectDisabled.");
         }
 
         private static void PatchMissionNetworkComponentSetRangedSiegeWeaponState(Harmony harmony)
@@ -1580,6 +1641,27 @@ namespace CoopSpectator.Patches
             _missionNetworkComponentHandleServerEventSetWeaponNetworkDataMethod = target;
             harmony.Patch(target, prefix: new HarmonyMethod(prefix));
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventSetWeaponNetworkData.");
+        }
+
+        private static void PatchMissionNetworkComponentRemoveEquippedWeapon(Harmony harmony)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                "HandleServerEventRemoveEquippedWeapon",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventRemoveEquippedWeapon_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventRemoveEquippedWeapon not found. Skip.");
+                return;
+            }
+
+            _missionNetworkComponentHandleServerEventHitSynchronizeObjectHitpointsMethod = target;
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventRemoveEquippedWeapon.");
         }
 
         private static void PatchMissionNetworkComponentSetWeaponAmmoData(Harmony harmony)
@@ -2368,6 +2450,13 @@ namespace CoopSpectator.Patches
                         preferredEntryId,
                         "battle-map handoff SetAgentPeer local",
                         out string postPossessionLiveWeaponRefreshReason);
+                bool strictHeroInitialWieldApplied =
+                    CoopMissionSpawnLogic.TryApplyStrictExactHeroLocalInitialWield(
+                        agent,
+                        preferredEntryId,
+                        "battle-map handoff SetAgentPeer local post-bind",
+                        out string strictHeroInitialWieldRefresh,
+                        out string strictHeroInitialWieldIssue);
 
                 _lastLocalVisualFinalizeKey = logKey;
                 ModLogger.Info(
@@ -2382,6 +2471,9 @@ namespace CoopSpectator.Patches
                     " PostPossessionWeaponStateWindow=" + (postPossessionWeaponStateWindowReason ?? "none") +
                     " PostPossessionLiveWeaponRefreshed=" + postPossessionLiveWeaponRefreshed +
                     " PostPossessionLiveWeaponRefresh=" + (postPossessionLiveWeaponRefreshReason ?? "none") +
+                    " StrictHeroInitialWieldApplied=" + strictHeroInitialWieldApplied +
+                    " StrictHeroInitialWieldRefresh=" + (strictHeroInitialWieldRefresh ?? "none") +
+                    " StrictHeroInitialWieldIssue=" + (strictHeroInitialWieldIssue ?? "none") +
                     " PreferredEntryId=" + (preferredEntryId ?? "null") +
                     " EntryResolutionSource=" + (entryResolutionSource ?? "null") +
                     " BridgeTroop=" + (entryPolicy.BridgeTroopOrEntryId ?? "null") +
@@ -2398,7 +2490,10 @@ namespace CoopSpectator.Patches
                     " PostPossessionWeaponStateWindowArmed=" + postPossessionWeaponStateWindowArmed +
                     " PostPossessionWeaponStateWindow=" + (postPossessionWeaponStateWindowReason ?? "none") +
                     " PostPossessionLiveWeaponRefreshed=" + postPossessionLiveWeaponRefreshed +
-                    " PostPossessionLiveWeaponRefresh=" + (postPossessionLiveWeaponRefreshReason ?? "none"));
+                    " PostPossessionLiveWeaponRefresh=" + (postPossessionLiveWeaponRefreshReason ?? "none") +
+                    " StrictHeroInitialWieldApplied=" + strictHeroInitialWieldApplied +
+                    " StrictHeroInitialWieldRefresh=" + (strictHeroInitialWieldRefresh ?? "none") +
+                    " StrictHeroInitialWieldIssue=" + (strictHeroInitialWieldIssue ?? "none"));
             }
             catch (Exception ex)
             {
@@ -2600,10 +2695,13 @@ namespace CoopSpectator.Patches
                     out int createAgentFormationIndex);
                 if (hasDeferredCreateAgent && createAgentFormationIndex == agentSetFormation.FormationIndex)
                 {
+                    RegisterDeferredClientAgentSetFormationPayload(
+                        agentSetFormation,
+                        "create-agent-deferred-matching-payload-formation");
                     if (ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
                     {
                         ModLogger.Info(
-                            "BattleMapSpawnHandoffPatch: suppressed redundant client AgentSetFormation while CreateAgent is deferred. " +
+                            "BattleMapSpawnHandoffPatch: retained client AgentSetFormation until the matching deferred CreateAgent materializes. " +
                             "AgentIndex=" + agentSetFormation.AgentIndex +
                             " FormationIndex=" + agentSetFormation.FormationIndex);
                     }
@@ -2900,6 +2998,101 @@ namespace CoopSpectator.Patches
                 " Source=" + (source ?? "unknown"));
         }
 
+        internal static void ClearDeferredClientAgentPayloadsOnRemoval(
+            int agentIndex,
+            string source)
+        {
+            if (agentIndex < 0 || GameNetwork.IsServer)
+                return;
+
+            int removedCount = 0;
+            lock (DeferredMountedHeroCreateAgentPayloads)
+            {
+                if (DeferredMountedHeroCreateAgentPayloads.Remove(agentIndex))
+                    removedCount++;
+            }
+
+            removedCount += RemoveDeferredAgentPayloads(
+                DeferredClientCreateAgentPayloads,
+                payload => payload?.Message?.AgentIndex == agentIndex);
+            removedCount += RemoveDeferredAgentPayloads(
+                DeferredClientAgentSetFormationPayloads,
+                payload => payload?.Message?.AgentIndex == agentIndex);
+            removedCount += RemoveDeferredAgentPayloads(
+                DeferredClientSetAgentActionSetPayloads,
+                payload => payload?.Message?.AgentIndex == agentIndex);
+            removedCount += RemoveDeferredAgentPayloads(
+                DeferredClientSynchronizeAgentEquipmentPayloads,
+                payload => payload?.Message?.AgentIndex == agentIndex);
+            removedCount += RemoveDeferredAgentPayloads(
+                DeferredClientSpawnAttachedWeaponOnCorpsePayloads,
+                payload => payload?.Message?.AgentIndex == agentIndex);
+            removedCount += RemoveDeferredAgentPayloads(
+                DeferredClientAttachWeaponToAgentPayloads,
+                payload => payload?.Message?.AgentIndex == agentIndex);
+            removedCount += RemoveDeferredAgentPayloads(
+                DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads,
+                payload => payload?.Message?.AgentIndex == agentIndex);
+            removedCount += RemoveDeferredAgentPayloads(
+                DeferredClientSetWeaponNetworkDataPayloads,
+                payload => payload?.Message?.AgentIndex == agentIndex);
+            removedCount += RemoveDeferredAgentPayloads(
+                DeferredClientSetWeaponAmmoDataPayloads,
+                payload => payload?.Message?.AgentIndex == agentIndex);
+            removedCount += RemoveDeferredAgentPayloads(
+                DeferredClientSetWeaponReloadPhasePayloads,
+                payload => payload?.Message?.AgentIndex == agentIndex);
+            removedCount += RemoveDeferredAgentPayloads(
+                DeferredClientStartSwitchingWeaponUsageIndexPayloads,
+                payload => payload?.Message?.AgentIndex == agentIndex);
+            removedCount += RemoveDeferredAgentPayloads(
+                DeferredClientWeaponUsageIndexChangePayloads,
+                payload => payload?.Message?.AgentIndex == agentIndex);
+            removedCount += RemoveDeferredAgentPayloads(
+                DeferredClientCreateMissilePayloads,
+                payload => payload?.Message?.AgentIndex == agentIndex);
+            removedCount += RemoveDeferredAgentPayloads(
+                DeferredClientHandleMissileCollisionReactionPayloads,
+                payload =>
+                    payload?.Message != null &&
+                    (payload.Message.AttackerAgentIndex == agentIndex ||
+                     payload.Message.AttachedAgentIndex == agentIndex));
+            removedCount += RemoveDeferredAgentPayloads(
+                DeferredClientSetWieldedItemIndexPayloads,
+                payload => payload?.Message?.AgentIndex == agentIndex);
+            removedCount += RemoveDeferredAgentPayloads(
+                DeferredClientSetAgentHealthPayloads,
+                payload => payload?.Message?.AgentIndex == agentIndex);
+            removedCount += RemoveDeferredAgentPayloads(
+                DeferredClientMakeAgentDeadPayloads,
+                payload => payload?.Message?.AgentIndex == agentIndex);
+
+            if (removedCount > 0 &&
+                ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+            {
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: cleared deferred client payloads for removed agent. " +
+                    "AgentIndex=" + agentIndex +
+                    " RemovedPayloads=" + removedCount +
+                    " Source=" + (source ?? "unknown"));
+            }
+        }
+
+        private static int RemoveDeferredAgentPayloads<TPayload>(
+            List<TPayload> payloads,
+            Predicate<TPayload> predicate)
+        {
+            if (payloads == null || predicate == null)
+                return 0;
+
+            lock (payloads)
+            {
+                int before = payloads.Count;
+                payloads.RemoveAll(predicate);
+                return before - payloads.Count;
+            }
+        }
+
         internal static int GetDeferredClientRecoveryPendingCount(out string summary)
         {
             int mountedHeroCreateAgentCount = DeferredMountedHeroCreateAgentPayloads.Count;
@@ -2908,6 +3101,7 @@ namespace CoopSpectator.Patches
             int synchronizeAgentEquipmentCount = DeferredClientSynchronizeAgentEquipmentPayloads.Count;
             int synchronizeMissionObjectCount = DeferredClientSynchronizeMissionObjectPayloads.Count;
             int setMissionObjectVisibilityCount = DeferredClientSetMissionObjectVisibilityPayloads.Count;
+            int exactSiegeMissionObjectMessageCount = DeferredClientExactSiegeMissionObjectMessagePayloads.Count;
             int spawnWeaponCount = DeferredClientSpawnWeaponWithNewEntityPayloads.Count;
             int attachWeaponToSpawnedWeaponCount = DeferredClientAttachWeaponToSpawnedWeaponPayloads.Count;
             int spawnAttachedWeaponOnSpawnedWeaponCount = DeferredClientSpawnAttachedWeaponOnSpawnedWeaponPayloads.Count;
@@ -2932,6 +3126,7 @@ namespace CoopSpectator.Patches
                 synchronizeAgentEquipmentCount +
                 synchronizeMissionObjectCount +
                 setMissionObjectVisibilityCount +
+                exactSiegeMissionObjectMessageCount +
                 spawnWeaponCount +
                 attachWeaponToSpawnedWeaponCount +
                 spawnAttachedWeaponOnSpawnedWeaponCount +
@@ -2957,6 +3152,7 @@ namespace CoopSpectator.Patches
                 " SynchronizeAgentEquipment=" + synchronizeAgentEquipmentCount +
                 " SynchronizeMissionObject=" + synchronizeMissionObjectCount +
                 " SetMissionObjectVisibility=" + setMissionObjectVisibilityCount +
+                " ExactSiegeMissionObjectMessages=" + exactSiegeMissionObjectMessageCount +
                 " SpawnWeaponWithNewEntity=" + spawnWeaponCount +
                 " AttachWeaponToSpawnedWeapon=" + attachWeaponToSpawnedWeaponCount +
                 " SpawnAttachedWeaponOnSpawnedWeapon=" + spawnAttachedWeaponOnSpawnedWeaponCount +
@@ -3050,6 +3246,7 @@ namespace CoopSpectator.Patches
             TryReplayDeferredClientSpawnAttachedWeaponOnCorpse(mission, source, snapshotReadinessSummary);
             TryReplayDeferredClientSynchronizeMissionObject(mission, source, snapshotReadinessSummary);
             TryReplayDeferredClientSetMissionObjectVisibility(mission, source, snapshotReadinessSummary);
+            TryReplayDeferredClientExactSiegeMissionObjectMessages(mission, source);
             TryReplayDeferredClientAttachWeaponToAgent(mission, source, snapshotReadinessSummary);
             TryReplayDeferredClientAttachWeaponToWeaponInAgentEquipmentSlot(mission, source, snapshotReadinessSummary);
             TryReplayDeferredClientSetWeaponNetworkData(mission, source, snapshotReadinessSummary);
@@ -3584,6 +3781,69 @@ namespace CoopSpectator.Patches
                         LastAttemptUtc = DateTime.MinValue,
                         Attempts = 0,
                         DeferralReason = deferralReason
+                });
+            }
+        }
+
+        private static void RegisterDeferredClientExactSiegeMissionObjectMessage(
+            GameNetworkMessage message,
+            string missionObjectIdMemberName,
+            SiegeMissionObjectIdBridgeTarget target,
+            string messageName,
+            MethodInfo handlerMethod)
+        {
+            if (message == null ||
+                string.IsNullOrWhiteSpace(missionObjectIdMemberName) ||
+                string.IsNullOrWhiteSpace(messageName) ||
+                handlerMethod == null)
+            {
+                return;
+            }
+
+            if (!TryGetMissionObjectIdMemberValue(
+                    message,
+                    missionObjectIdMemberName,
+                    out MissionObjectId missionObjectId,
+                    out _))
+            {
+                return;
+            }
+
+            int missionObjectIdValue = GetMissionObjectIdValue(missionObjectId);
+            lock (DeferredClientExactSiegeMissionObjectMessagePayloads)
+            {
+                DeferredClientExactSiegeMissionObjectMessagePayload existingPayload =
+                    DeferredClientExactSiegeMissionObjectMessagePayloads.FirstOrDefault(
+                        candidate =>
+                            candidate?.Message != null &&
+                            string.Equals(candidate.MessageName, messageName, StringComparison.Ordinal) &&
+                            TryGetMissionObjectIdMemberValue(
+                                candidate.Message,
+                                candidate.MissionObjectIdMemberName,
+                                out MissionObjectId candidateMissionObjectId,
+                                out _) &&
+                            GetMissionObjectIdValue(candidateMissionObjectId) == missionObjectIdValue);
+                if (existingPayload != null)
+                {
+                    existingPayload.Message = message;
+                    existingPayload.Target = target;
+                    existingPayload.HandlerMethod = handlerMethod;
+                    existingPayload.DeferredUtc = DateTime.UtcNow;
+                    return;
+                }
+
+                DeferredClientExactSiegeMissionObjectMessagePayloads.Add(
+                    new DeferredClientExactSiegeMissionObjectMessagePayload
+                    {
+                        Sequence = ++_nextDeferredClientExactSiegeMissionObjectMessageSequence,
+                        Message = message,
+                        MissionObjectIdMemberName = missionObjectIdMemberName,
+                        Target = target,
+                        MessageName = messageName,
+                        HandlerMethod = handlerMethod,
+                        DeferredUtc = DateTime.UtcNow,
+                        LastAttemptUtc = DateTime.MinValue,
+                        Attempts = 0
                     });
             }
         }
@@ -4576,7 +4836,7 @@ namespace CoopSpectator.Patches
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
             if (!SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty) ||
-                !ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+                !ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(scenarioContext))
             {
                 return;
             }
@@ -5025,6 +5285,138 @@ namespace CoopSpectator.Patches
             }
 
             return false;
+        }
+
+        private static bool TryDeferExactSiegeAmbushClientCreateMissileForIndexReuse(
+            Mission mission,
+            CreateMissile createMissile,
+            bool registerDeferredPayload)
+        {
+            if (mission == null ||
+                createMissile == null ||
+                createMissile.MissileIndex < 0 ||
+                !GameNetwork.IsClient)
+            {
+                return false;
+            }
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            if (!SiegeAmbushScenarioContract.IsSiegeAmbushScenario(scenarioContext))
+                return false;
+
+            int missileIndex = createMissile.MissileIndex;
+            if (!MissionHasLocalMissile(missileIndex))
+            {
+                lock (ClientMissileIndicesAwaitingReuseRemoval)
+                {
+                    ClientMissileIndicesAwaitingReuseRemoval.Remove(missileIndex);
+                }
+
+                return false;
+            }
+
+            RemoveDeferredClientMissileCollisionPayloadsForIndex(missileIndex);
+            if (registerDeferredPayload)
+            {
+                RegisterDeferredClientCreateMissilePayload(
+                    createMissile,
+                    "reused-index-awaiting-local-removal");
+            }
+
+            bool shouldRequestRemoval;
+            lock (ClientMissileIndicesAwaitingReuseRemoval)
+            {
+                shouldRequestRemoval = ClientMissileIndicesAwaitingReuseRemoval.Add(missileIndex);
+            }
+
+            if (shouldRequestRemoval)
+            {
+                try
+                {
+                    mission.RemoveMissileAsClient(missileIndex);
+                    if (ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+                    {
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: deferred exact SiegeAmbush CreateMissile " +
+                            "until reused local missile index is removed. " +
+                            "MissileIndex=" + missileIndex +
+                            " AgentIndex=" + createMissile.AgentIndex);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    lock (ClientMissileIndicesAwaitingReuseRemoval)
+                    {
+                        ClientMissileIndicesAwaitingReuseRemoval.Remove(missileIndex);
+                    }
+
+                    if (ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+                    {
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: exact SiegeAmbush reused missile removal " +
+                            "will be retried. MissileIndex=" + missileIndex +
+                            " Error=" + ex.Message);
+                    }
+                }
+            }
+
+            return true;
+        }
+
+        private static bool TryGetLocalMissileShooterAgentIndex(
+            Mission mission,
+            int missileIndex,
+            out int shooterAgentIndex)
+        {
+            shooterAgentIndex = -1;
+            if (mission == null ||
+                missileIndex < 0 ||
+                MissionMissilesDictionaryField == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                if (!(MissionMissilesDictionaryField.GetValue(mission) is IDictionary missilesDictionary))
+                    return false;
+
+                object missile = missilesDictionary[missileIndex];
+                if (missile == null)
+                    return false;
+
+                PropertyInfo shooterAgentProperty = missile.GetType().GetProperty(
+                    "ShooterAgent",
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (shooterAgentProperty == null)
+                    return false;
+
+                Agent shooterAgent = shooterAgentProperty.GetValue(missile) as Agent;
+                shooterAgentIndex = shooterAgent?.Index ?? -1;
+                return true;
+            }
+            catch
+            {
+                shooterAgentIndex = -1;
+                return false;
+            }
+        }
+
+        private static bool DoesLocalMissileMatchCollisionShooter(
+            Mission mission,
+            HandleMissileCollisionReaction message,
+            out int localShooterAgentIndex)
+        {
+            localShooterAgentIndex = -1;
+            return message != null &&
+                   TryGetLocalMissileShooterAgentIndex(
+                       mission,
+                       message.MissileIndex,
+                       out localShooterAgentIndex) &&
+                   localShooterAgentIndex == message.AttackerAgentIndex;
         }
 
         private static bool TryDeferClientThrownProjectileBecomeInvisibleForVisualGrace(
@@ -7042,7 +7434,7 @@ namespace CoopSpectator.Patches
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
             if (!SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty) ||
-                !ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+                !ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(scenarioContext))
             {
                 return false;
             }
@@ -7081,7 +7473,7 @@ namespace CoopSpectator.Patches
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
             if (!SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty) ||
-                !ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+                !ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(scenarioContext))
             {
                 return false;
             }
@@ -7183,6 +7575,106 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static void TryReplayDeferredClientExactSiegeMissionObjectMessages(
+            Mission mission,
+            string source)
+        {
+            if (mission == null ||
+                !SiegeMissionObjectIdBridge.IsExactSiegeClientContext(mission))
+            {
+                return;
+            }
+
+            List<DeferredClientExactSiegeMissionObjectMessagePayload> deferredPayloads;
+            lock (DeferredClientExactSiegeMissionObjectMessagePayloads)
+            {
+                if (DeferredClientExactSiegeMissionObjectMessagePayloads.Count <= 0)
+                    return;
+
+                deferredPayloads = DeferredClientExactSiegeMissionObjectMessagePayloads
+                    .OrderBy(candidate => candidate.Sequence)
+                    .ToList();
+            }
+
+            MissionNetworkComponent missionNetworkComponent =
+                mission.GetMissionBehavior<MissionNetworkComponent>();
+            if (missionNetworkComponent == null)
+                return;
+
+            DateTime nowUtc = DateTime.UtcNow;
+            foreach (DeferredClientExactSiegeMissionObjectMessagePayload deferredPayload in deferredPayloads)
+            {
+                if (deferredPayload?.Message == null ||
+                    deferredPayload.HandlerMethod == null ||
+                    string.IsNullOrWhiteSpace(deferredPayload.MissionObjectIdMemberName))
+                {
+                    continue;
+                }
+
+                if (deferredPayload.LastAttemptUtc != DateTime.MinValue &&
+                    nowUtc - deferredPayload.LastAttemptUtc < TimeSpan.FromMilliseconds(100))
+                {
+                    continue;
+                }
+
+                if (!TryRemapExactSiegeMissionObjectIdMessage(
+                        deferredPayload.Message,
+                        deferredPayload.MissionObjectIdMemberName,
+                        deferredPayload.Target,
+                        deferredPayload.MessageName))
+                {
+                    continue;
+                }
+
+                if (!TryGetMissionObjectIdMemberValue(
+                        deferredPayload.Message,
+                        deferredPayload.MissionObjectIdMemberName,
+                        out MissionObjectId localMissionObjectId,
+                        out _) ||
+                    TryGetLocalMissionObject(localMissionObjectId) == null)
+                {
+                    continue;
+                }
+
+                deferredPayload.LastAttemptUtc = nowUtc;
+                deferredPayload.Attempts++;
+                try
+                {
+                    deferredPayload.HandlerMethod.Invoke(
+                        missionNetworkComponent,
+                        new object[] { deferredPayload.Message });
+                    lock (DeferredClientExactSiegeMissionObjectMessagePayloads)
+                    {
+                        DeferredClientExactSiegeMissionObjectMessagePayloads.Remove(
+                            deferredPayload);
+                    }
+
+                    if (ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+                    {
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: replayed deferred exact siege mission-object message. " +
+                            "Message=" + deferredPayload.MessageName +
+                            " MissionObjectId=" + GetMissionObjectIdValue(localMissionObjectId) +
+                            " Attempts=" + deferredPayload.Attempts +
+                            " Source=" + (source ?? "unknown"));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    if (ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics &&
+                        (deferredPayload.Attempts == 1 || deferredPayload.Attempts % 20 == 0))
+                    {
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: deferred exact siege mission-object message replay failed. " +
+                            "Message=" + deferredPayload.MessageName +
+                            " MissionObjectId=" + GetMissionObjectIdValue(localMissionObjectId) +
+                            " Attempts=" + deferredPayload.Attempts +
+                            " Error=" + ex.GetBaseException().Message);
+                    }
+                }
+            }
+        }
+
         private static bool ShouldDelayDeferredClientSetMissionObjectVisibilityReplay(
             Mission mission,
             DeferredClientSetMissionObjectVisibilityPayload deferredPayload,
@@ -7196,7 +7688,7 @@ namespace CoopSpectator.Patches
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
             if (!SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty) ||
-                !ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+                !ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(scenarioContext))
             {
                 return false;
             }
@@ -7261,7 +7753,7 @@ namespace CoopSpectator.Patches
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
             if (!SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty) ||
-                !ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+                !ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(scenarioContext))
             {
                 return false;
             }
@@ -8085,6 +8577,38 @@ namespace CoopSpectator.Patches
                 "|Amount=" + missionWeapon.Amount +
                 "|Ammo=" + missionWeapon.Ammo +
                 "|Action1={" + actionSummary + "}";
+            return true;
+        }
+
+        private static bool TryDeferUnmappedExactSiegeMissionObjectMessage(
+            GameNetworkMessage message,
+            string missionObjectIdMemberName,
+            SiegeMissionObjectIdBridgeTarget target,
+            string messageName,
+            MethodInfo handlerMethod)
+        {
+            Mission mission = Mission.Current;
+            if (message == null ||
+                !SiegeMissionObjectIdBridge.IsExactSiegeClientContext(mission))
+            {
+                return false;
+            }
+
+            if (TryRemapExactSiegeMissionObjectIdMessage(
+                    message,
+                    missionObjectIdMemberName,
+                    target,
+                    messageName))
+            {
+                return false;
+            }
+
+            RegisterDeferredClientExactSiegeMissionObjectMessage(
+                message,
+                missionObjectIdMemberName,
+                target,
+                messageName,
+                handlerMethod);
             return true;
         }
 
@@ -10441,6 +10965,14 @@ namespace CoopSpectator.Patches
 
                 deferredPayload.LastAttemptUtc = nowUtc;
                 deferredPayload.Attempts++;
+                if (TryDeferExactSiegeAmbushClientCreateMissileForIndexReuse(
+                        mission,
+                        createMissile,
+                        registerDeferredPayload: false))
+                {
+                    continue;
+                }
+
                 try
                 {
                     _missionNetworkComponentHandleServerEventCreateMissileMethod.Invoke(
@@ -10517,6 +11049,15 @@ namespace CoopSpectator.Patches
                     continue;
                 }
 
+                if (!IsDeferredClientProjectileVisualGracePayload(deferredPayload) &&
+                    nowUtc - deferredPayload.DeferredUtc >
+                    MaxDeferredClientStandardMissileCollisionAge)
+                {
+                    RemoveDeferredClientHandleMissileCollisionReactionPayload(
+                        handleMissileCollisionReaction);
+                    continue;
+                }
+
                 if (HasDeferredClientCreateMissilePayload(
                         handleMissileCollisionReaction.MissileIndex,
                         handleMissileCollisionReaction.AttackerAgentIndex))
@@ -10537,6 +11078,32 @@ namespace CoopSpectator.Patches
                             " AttackerAgentIndex=" + handleMissileCollisionReaction.AttackerAgentIndex +
                             " AttachedAgentIndex=" + handleMissileCollisionReaction.AttachedAgentIndex +
                             " Source=" + (source ?? "unknown"));
+                        continue;
+                    }
+
+                    if (!IsDeferredClientProjectileVisualGracePayload(deferredPayload))
+                    {
+                        RemoveDeferredClientHandleMissileCollisionReactionPayload(
+                            handleMissileCollisionReaction);
+                    }
+                    continue;
+                }
+
+                if (!DoesLocalMissileMatchCollisionShooter(
+                        mission,
+                        handleMissileCollisionReaction,
+                        out int localShooterAgentIndex))
+                {
+                    RemoveDeferredClientHandleMissileCollisionReactionPayload(
+                        handleMissileCollisionReaction);
+                    if (ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+                    {
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: dropped deferred stale missile collision before replay. " +
+                            "MissileIndex=" + handleMissileCollisionReaction.MissileIndex +
+                            " PayloadAttackerAgentIndex=" + handleMissileCollisionReaction.AttackerAgentIndex +
+                            " LocalShooterAgentIndex=" + localShooterAgentIndex +
+                            " Source=" + (source ?? "unknown"));
                     }
                     continue;
                 }
@@ -10556,7 +11123,11 @@ namespace CoopSpectator.Patches
                         handleMissileCollisionReaction.AttackerAgentIndex,
                         canBeNull: true);
                     if (attackerAgent == null || !attackerAgent.IsActive())
+                    {
+                        RemoveDeferredClientHandleMissileCollisionReactionPayload(
+                            handleMissileCollisionReaction);
                         continue;
+                    }
                 }
 
                 if (handleMissileCollisionReaction.AttachedAgentIndex >= 0)
@@ -10567,6 +11138,8 @@ namespace CoopSpectator.Patches
                     if (!IsDeferredClientProjectileVisualGracePayload(deferredPayload) &&
                         (attachedAgent == null || !attachedAgent.IsActive()))
                     {
+                        RemoveDeferredClientHandleMissileCollisionReactionPayload(
+                            handleMissileCollisionReaction);
                         continue;
                     }
                 }
@@ -11319,6 +11892,35 @@ namespace CoopSpectator.Patches
                     AreDeferredClientHandleMissileCollisionReactionMessagesEquivalent(
                         candidate?.Message,
                         referenceMessage));
+            }
+        }
+
+        private static void RemoveDeferredClientMissileCollisionPayloadsForReusedIndex(
+            int missileIndex,
+            int currentShooterAgentIndex)
+        {
+            if (missileIndex < 0)
+                return;
+
+            lock (DeferredClientHandleMissileCollisionReactionPayloads)
+            {
+                DeferredClientHandleMissileCollisionReactionPayloads.RemoveAll(candidate =>
+                    candidate?.Message != null &&
+                    candidate.Message.MissileIndex == missileIndex &&
+                    candidate.Message.AttackerAgentIndex != currentShooterAgentIndex);
+            }
+        }
+
+        private static void RemoveDeferredClientMissileCollisionPayloadsForIndex(int missileIndex)
+        {
+            if (missileIndex < 0)
+                return;
+
+            lock (DeferredClientHandleMissileCollisionReactionPayloads)
+            {
+                DeferredClientHandleMissileCollisionReactionPayloads.RemoveAll(candidate =>
+                    candidate?.Message != null &&
+                    candidate.Message.MissileIndex == missileIndex);
             }
         }
 
@@ -13068,7 +13670,7 @@ namespace CoopSpectator.Patches
                 BattleSnapshotRuntimeState.GetScenarioContext() ??
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
-            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(scenarioContext))
                 return false;
 
             if (CoopMissionSpawnLogic.ShouldUseFieldMaterializedSiegeReplayRuntime(mission))
@@ -13494,6 +14096,9 @@ namespace CoopSpectator.Patches
                         "AgentIndex=" + synchronizeAgentSpawnEquipment.AgentIndex);
                     return false;
                 }
+
+                if (agent == null)
+                    return false;
 
                 if (agent != null &&
                     CoopMissionSpawnLogic.ShouldClearDismountedSiegeSynchronizeAgentMountVisuals(
@@ -14296,6 +14901,27 @@ namespace CoopSpectator.Patches
             return __exception;
         }
 
+        private static bool MissionNetworkComponent_HandleServerEventSetMissionObjectDisabled_Prefix(
+            GameNetworkMessage baseMessage)
+        {
+            try
+            {
+                return !TryDeferUnmappedExactSiegeMissionObjectMessage(
+                    baseMessage,
+                    "MissionObjectId",
+                    SiegeMissionObjectIdBridgeTarget.AnyMissionObject,
+                    "SetMissionObjectDisabled",
+                    _missionNetworkComponentHandleServerEventSetMissionObjectDisabledMethod);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: SetMissionObjectDisabled siege id gate failed closed: " +
+                    ex.Message);
+                return false;
+            }
+        }
+
         private static bool MissionNetworkComponent_HandleServerEventSetRangedSiegeWeaponState_Prefix(GameNetworkMessage baseMessage)
         {
             try
@@ -14427,18 +15053,18 @@ namespace CoopSpectator.Patches
         {
             try
             {
-                TryRemapExactSiegeMissionObjectIdMessage(
+                return !TryDeferUnmappedExactSiegeMissionObjectMessage(
                     baseMessage,
                     "MissionObjectId",
                     SiegeMissionObjectIdBridgeTarget.AnyMissionObject,
-                    "SyncObjectHitpoints");
+                    "SyncObjectHitpoints",
+                    _missionNetworkComponentHandleServerEventHitSynchronizeObjectHitpointsMethod);
             }
             catch (Exception ex)
             {
-                ModLogger.Info("BattleMapSpawnHandoffPatch: SyncObjectHitpoints siege id remap failed open: " + ex.Message);
+                ModLogger.Info("BattleMapSpawnHandoffPatch: SyncObjectHitpoints siege id gate failed closed: " + ex.Message);
+                return false;
             }
-
-            return true;
         }
 
         private static bool MissionNetworkComponent_HandleServerEventHitSynchronizeObjectDestructionLevel_Prefix(GameNetworkMessage baseMessage)
@@ -14659,7 +15285,7 @@ namespace CoopSpectator.Patches
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
             return SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty) &&
-                   ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext);
+                   ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(scenarioContext);
         }
 
         private static bool MissionNetworkComponent_HandleServerEventSpawnWeaponWithNewEntity_Prefix(GameNetworkMessage baseMessage)
@@ -14884,14 +15510,6 @@ namespace CoopSpectator.Patches
 
                 if (agent == null)
                 {
-                    RegisterDeferredClientSpawnAttachedWeaponOnCorpsePayload(
-                        spawnAttachedWeaponOnCorpse,
-                        "corpse-agent-missing");
-                    ModLogger.Info(
-                        "BattleMapSpawnHandoffPatch: deferred client SpawnAttachedWeaponOnCorpse because local corpse agent is not materialized yet. " +
-                        "AgentIndex=" + spawnAttachedWeaponOnCorpse.AgentIndex +
-                        " AttachedIndex=" + spawnAttachedWeaponOnCorpse.AttachedIndex +
-                        " ForcedIndex=" + spawnAttachedWeaponOnCorpse.ForcedIndex);
                     return false;
                 }
 
@@ -14954,6 +15572,9 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                if (agent == null)
+                    return false;
+
                 return true;
             }
             catch (Exception ex)
@@ -15005,11 +15626,43 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                if (agent == null)
+                    return false;
+
                 return true;
             }
             catch (Exception ex)
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: AttachWeaponToAgent prefix failed open: " + ex.Message);
+                return true;
+            }
+        }
+
+        private static bool MissionNetworkComponent_HandleServerEventRemoveEquippedWeapon_Prefix(
+            GameNetworkMessage baseMessage)
+        {
+            try
+            {
+                if (!(baseMessage is RemoveEquippedWeapon removeEquippedWeapon))
+                    return true;
+
+                Mission mission = Mission.Current;
+                if (!ShouldRunAgentMaterializationHandoff(mission) ||
+                    !ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
+                {
+                    return true;
+                }
+
+                Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(
+                    removeEquippedWeapon.AgentIndex,
+                    canBeNull: true);
+                return agent != null;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: RemoveEquippedWeapon prefix failed open: " +
+                    ex.Message);
                 return true;
             }
         }
@@ -15055,6 +15708,9 @@ namespace CoopSpectator.Patches
                         " WeaponEquipmentIndex=" + setWeaponNetworkData.WeaponEquipmentIndex);
                     return false;
                 }
+
+                if (agent == null)
+                    return false;
 
                 string setWeaponNetworkDataPayloadSummary =
                     "WeaponEquipmentIndex=" + setWeaponNetworkData.WeaponEquipmentIndex;
@@ -15182,6 +15838,9 @@ namespace CoopSpectator.Patches
                         " AmmoEquipmentIndex=" + setWeaponAmmoData.AmmoEquipmentIndex);
                     return false;
                 }
+
+                if (agent == null)
+                    return false;
 
                 string setWeaponAmmoDataPayloadSummary =
                     "WeaponEquipmentIndex=" + setWeaponAmmoData.WeaponEquipmentIndex +
@@ -15451,6 +16110,9 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                if (agent == null)
+                    return false;
+
                 string setWeaponReloadPhasePayloadSummary =
                     "EquipmentIndex=" + setWeaponReloadPhase.EquipmentIndex +
                     " ReloadPhase=" + setWeaponReloadPhase.ReloadPhase;
@@ -15687,6 +16349,9 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                if (agent == null)
+                    return false;
+
                 if (CoopMissionSpawnLogic.ShouldSuppressClientPostPossessionControlledTroopWeaponState(
                         mission,
                         agent,
@@ -15790,6 +16455,9 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                if (agent == null)
+                    return false;
+
                 if (CoopMissionSpawnLogic.ShouldSuppressClientPostPossessionControlledTroopWeaponState(
                         mission,
                         agent,
@@ -15863,6 +16531,10 @@ namespace CoopSpectator.Patches
                 if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
                     return true;
 
+                RemoveDeferredClientMissileCollisionPayloadsForReusedIndex(
+                    createMissile.MissileIndex,
+                    createMissile.AgentIndex);
+
                 if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string snapshotReadinessSummary))
                 {
                     RegisterDeferredClientCreateMissilePayload(
@@ -15894,6 +16566,17 @@ namespace CoopSpectator.Patches
                             "MissileIndex=" + createMissile.MissileIndex +
                             " AgentIndex=" + createMissile.AgentIndex);
                     }
+                    return false;
+                }
+
+                if (shooterAgent == null || !shooterAgent.IsActive())
+                    return false;
+
+                if (TryDeferExactSiegeAmbushClientCreateMissileForIndexReuse(
+                        mission,
+                        createMissile,
+                        registerDeferredPayload: true))
+                {
                     return false;
                 }
 
@@ -15953,14 +16636,25 @@ namespace CoopSpectator.Patches
 
                 if (!MissionHasLocalMissile(handleMissileCollisionReaction.MissileIndex))
                 {
-                    RegisterDeferredClientHandleMissileCollisionReactionPayload(
+                    return false;
+                }
+
+                if (!DoesLocalMissileMatchCollisionShooter(
+                        mission,
                         handleMissileCollisionReaction,
-                        "local-missile-missing");
-                    ModLogger.Info(
-                        "BattleMapSpawnHandoffPatch: deferred client HandleMissileCollisionReaction because local missile entity is not materialized yet. " +
-                        "MissileIndex=" + handleMissileCollisionReaction.MissileIndex +
-                        " AttackerAgentIndex=" + handleMissileCollisionReaction.AttackerAgentIndex +
-                        " AttachedAgentIndex=" + handleMissileCollisionReaction.AttachedAgentIndex);
+                        out int localShooterAgentIndex))
+                {
+                    RemoveDeferredClientHandleMissileCollisionReactionPayload(
+                        handleMissileCollisionReaction);
+                    if (ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+                    {
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: dropped stale client missile collision because " +
+                            "the reused missile index belongs to another shooter. " +
+                            "MissileIndex=" + handleMissileCollisionReaction.MissileIndex +
+                            " PayloadAttackerAgentIndex=" + handleMissileCollisionReaction.AttackerAgentIndex +
+                            " LocalShooterAgentIndex=" + localShooterAgentIndex);
+                    }
                     return false;
                 }
 
@@ -15982,6 +16676,9 @@ namespace CoopSpectator.Patches
                             " AttackerAgentIndex=" + handleMissileCollisionReaction.AttackerAgentIndex);
                         return false;
                     }
+
+                    if (attackerAgent == null || !attackerAgent.IsActive())
+                        return false;
                 }
 
                 if (handleMissileCollisionReaction.AttachedAgentIndex >= 0)
@@ -16002,6 +16699,9 @@ namespace CoopSpectator.Patches
                             " AttachedAgentIndex=" + handleMissileCollisionReaction.AttachedAgentIndex);
                         return false;
                     }
+
+                    if (attachedAgent == null || !attachedAgent.IsActive())
+                        return false;
                 }
 
                 return true;
@@ -16158,7 +16858,8 @@ namespace CoopSpectator.Patches
                         out int riderAgentIndex,
                         out string entryId))
                 {
-                    return true;
+                    __state = true;
+                    return false;
                 }
 
                 __state = true;
@@ -16294,6 +16995,9 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                if (agent == null)
+                    return false;
+
                 TryLogClientPossessionLifecycleDiagnostics(
                     mission,
                     makeAgentDead.AgentIndex,
@@ -16355,7 +17059,7 @@ namespace CoopSpectator.Patches
                 }
 
                 if (agent == null)
-                    return true;
+                    return !ShouldUseSafeStringIdCreateAgentPathOnClient(mission);
 
                 string setWieldedItemIndexPayloadSummary =
                     "WieldedItemIndex=" + setWieldedItemIndex.WieldedItemIndex +

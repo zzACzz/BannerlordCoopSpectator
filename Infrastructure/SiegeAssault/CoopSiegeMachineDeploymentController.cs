@@ -305,6 +305,61 @@ namespace CoopSpectator.Infrastructure
             return failedCount == 0 && expectedRemainingAfter <= 0;
         }
 
+        public static bool TryValidateAutoDeploymentReadyForSide(
+            Mission mission,
+            Team team,
+            bool treatSideAsPlayerSide,
+            out string diagnostics)
+        {
+            diagnostics = "invalid-context";
+            if (mission == null || team == null || team.Side == BattleSideEnum.None)
+                return false;
+
+            MissionSiegeEnginesLogic siegeEnginesLogic =
+                mission.GetMissionBehavior<MissionSiegeEnginesLogic>();
+            IMissionSiegeWeaponsController weaponsController =
+                siegeEnginesLogic?.GetSiegeWeaponsController(team.Side);
+            if (weaponsController == null)
+            {
+                diagnostics =
+                    "WeaponsController=<null>" +
+                    " Team=" + FormatTeam(team) +
+                    " HasSiegeEnginesLogic=" + (siegeEnginesLogic != null);
+                return false;
+            }
+
+            List<DeploymentPoint> deploymentPoints = CollectAutoDeployDeploymentPoints(
+                mission,
+                mission.GetMissionBehavior<SiegeDeploymentHandler>(),
+                team.Side,
+                out string deploymentPointSourceDiagnostics);
+            List<DeploymentPoint> candidateDeploymentPoints =
+                CollectAutoDeployCandidatePoints(
+                    mission,
+                    team,
+                    deploymentPoints,
+                    treatSideAsPlayerSide,
+                    weaponsController);
+            int expectedRemaining = CountAutoDeployableRemainingWeaponCount(
+                deploymentPoints,
+                candidateDeploymentPoints,
+                weaponsController);
+            int deployedCount = CountAutoDeployRelevantDeployedWeaponCount(
+                deploymentPoints,
+                weaponsController);
+
+            diagnostics =
+                "Team=" + FormatTeam(team) +
+                " TreatSideAsPlayerSide=" + treatSideAsPlayerSide +
+                " Points=" + deploymentPoints.Count +
+                " PointSources={" + deploymentPointSourceDiagnostics + "}" +
+                " Candidates=" + candidateDeploymentPoints.Count +
+                " Deployed=" + deployedCount +
+                " ExpectedRemaining=" + expectedRemaining +
+                " ReadOnlyValidation=True";
+            return expectedRemaining <= 0;
+        }
+
         private static void AutoDeployAttackerSiegeWeapons(
             Mission mission,
             Team team,

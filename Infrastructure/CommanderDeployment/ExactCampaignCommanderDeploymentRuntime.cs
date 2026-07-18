@@ -21,7 +21,7 @@ namespace CoopSpectator.Infrastructure
             Mission mission,
             BattleScenarioContextMessage scenarioContext)
         {
-            return ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext) ||
+            return ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(scenarioContext) ||
                    IsExactLandBattleScenario(mission, scenarioContext);
         }
 

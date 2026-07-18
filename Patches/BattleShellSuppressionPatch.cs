@@ -1010,7 +1010,7 @@ namespace CoopSpectator.Patches
             BattleScenarioContextMessage scenarioContext =
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
-            return ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext);
+            return ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(scenarioContext);
         }
 
         private static void MultiplayerRoundController_AfterStart_Prefix(object __instance)
@@ -1280,7 +1280,7 @@ namespace CoopSpectator.Patches
             BattleScenarioContextMessage scenarioContext =
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
-            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(scenarioContext))
                 return false;
 
             string key =
@@ -1326,7 +1326,7 @@ namespace CoopSpectator.Patches
             BattleScenarioContextMessage scenarioContext =
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
-            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(scenarioContext))
                 return false;
 
             string key =
@@ -2160,7 +2160,7 @@ namespace CoopSpectator.Patches
             BattleScenarioContextMessage scenarioContext =
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
-            return ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext);
+            return ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(scenarioContext);
         }
 
         private static bool ShouldEnsureSiegeNativeOpposingTeamsBeforeLobbyEarlyStart(Mission mission)

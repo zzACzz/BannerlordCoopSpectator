@@ -6,6 +6,7 @@ using System.Text;
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure.LordsHall;
 using CoopSpectator.Infrastructure.SallyOut;
+using CoopSpectator.Infrastructure.SiegeAmbush;
 using CoopSpectator.MissionBehaviors;
 using CoopSpectator.MissionBehaviors.LordsHall;
 using CoopSpectator.Network.Messages;
@@ -318,7 +319,7 @@ namespace CoopSpectator.Infrastructure
                 }
 
                 BattleScenarioContextMessage scenarioContext = ResolveScenarioContextForMission(mission);
-                if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+                if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(scenarioContext))
                 {
                     diagnostics =
                         "not-siege-assault-with-deployment " +
@@ -458,9 +459,13 @@ namespace CoopSpectator.Infrastructure
                 bool useSiegeAmbushController = RequiresSiegeAmbushController(scenarioContext);
                 bool useLordsHallController = IsLordsHallSiegeSubtype(scenarioContext);
                 bool isLandSallyOutScenario = SallyOutScenarioContract.IsSallyOutScenario(scenarioContext);
+                bool isSiegeAmbushScenario =
+                    SiegeAmbushScenarioContract.IsSiegeAmbushScenario(scenarioContext);
                 bool isSallyOutSubtype = IsSallyOutSiegeSubtype(scenarioContext);
                 bool isReliefForceAttack = IsReliefSiegeSubtype(scenarioContext);
                 bool isSiegeAssaultWithDeploymentSubtype = ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext);
+                bool isExactSiegeWithDeploymentSubtype =
+                    ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(scenarioContext);
                 bool isSiegeAssaultNoDeploymentSubtype = ExactCampaignSiegeAssaultNoDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext);
                 bool isAnySiegeAssaultSubtype = isSiegeAssaultWithDeploymentSubtype || isSiegeAssaultNoDeploymentSubtype;
                 Mission.MissionTeamAITypeEnum missionTeamAiType = ResolveMissionTeamAiType(scenarioContext);
@@ -512,7 +517,7 @@ namespace CoopSpectator.Infrastructure
                             scenarioContext,
                             isSallyOutSubtype,
                             isReliefForceAttack,
-                            isSiegeAssaultWithDeploymentSubtype,
+                            isExactSiegeWithDeploymentSubtype,
                             out siegePreparationDiagnostics))
                     {
                         reason = siegePreparationDiagnostics ?? "siege-scene-preparation-failed";
@@ -532,7 +537,7 @@ namespace CoopSpectator.Infrastructure
                     bool hasInitialSiegeStateHandler = GetMissionBehaviorByFullName(
                         mission,
                         "SandBox.Missions.MissionLogics.CampaignSiegeStateHandler") != null;
-                    if (isSiegeAssaultWithDeploymentSubtype)
+                    if (isExactSiegeWithDeploymentSubtype)
                     {
                         siegeStateHandlerDiagnostics = hasInitialSiegeStateHandler
                             ? "Existing=True Created=False RuntimeType=CampaignSiegeStateHandler"
@@ -586,7 +591,7 @@ namespace CoopSpectator.Infrastructure
                         mission,
                         missionTeamAiType,
                         !deferMissionTeamAiActivationUntilBattleActive,
-                        isSiegeAssaultWithDeploymentSubtype,
+                        isExactSiegeWithDeploymentSubtype,
                         source,
                         out teamAiDiagnostics))
                 {
@@ -693,7 +698,7 @@ namespace CoopSpectator.Infrastructure
                 MissionBehavior existingBattleSpawnLogic = mission.GetMissionBehavior<BattleSpawnLogic>();
                 if (existingBattleSpawnLogic == null)
                 {
-                    if (isSiegeAssaultWithDeploymentSubtype)
+                    if (isExactSiegeWithDeploymentSubtype)
                     {
                         reason = "battle-spawn-logic-missing-from-initial-stack";
                         return false;
@@ -729,7 +734,7 @@ namespace CoopSpectator.Infrastructure
                 NativeMissionAgentSpawnLogic spawnLogic = mission.GetMissionBehavior<NativeMissionAgentSpawnLogic>();
                 if (spawnLogic == null)
                 {
-                    if (isSiegeAssaultWithDeploymentSubtype)
+                    if (isExactSiegeWithDeploymentSubtype)
                     {
                         reason = "agent-spawn-logic-missing-from-initial-stack";
                         return false;
@@ -749,7 +754,7 @@ namespace CoopSpectator.Infrastructure
                 MissionBehavior existingBattleReinforcementsSpawnController = mission.GetMissionBehavior<BattleReinforcementsSpawnController>();
                 if (existingBattleReinforcementsSpawnController == null)
                 {
-                    if (isSiegeAssaultWithDeploymentSubtype)
+                    if (isExactSiegeWithDeploymentSubtype)
                     {
                         reason = "battle-reinforcements-controller-missing-from-initial-stack";
                         return false;
@@ -764,16 +769,16 @@ namespace CoopSpectator.Infrastructure
                     battleReinforcementsSpawnController.AfterStart();
                 }
 
-                if (isSiegeAssaultWithDeploymentSubtype)
+                if (isExactSiegeWithDeploymentSubtype)
                 {
-                    initializationStep = "ensure-siege-assault-with-deployment-behaviors";
+                    initializationStep = "ensure-exact-siege-with-deployment-behaviors";
                     if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.TryEnsureMissionBehaviorContract(
                             mission,
                             scenarioContext,
                             playerSide,
                             out siegeAssaultDeploymentDiagnostics))
                     {
-                        reason = siegeAssaultDeploymentDiagnostics ?? "siege-assault-with-deployment-contract-failed";
+                        reason = siegeAssaultDeploymentDiagnostics ?? "exact-siege-with-deployment-contract-failed";
                         return false;
                     }
                 }
@@ -860,11 +865,52 @@ namespace CoopSpectator.Infrastructure
                                 mission,
                                 defenderTotal,
                                 attackerTotal,
+                                isSiegeAmbushScenario,
                                 out string siegeAmbushDiagnostics))
                         {
                             reason = siegeAmbushDiagnostics ?? "siege-ambush-controller-failed";
                             return false;
                         }
+
+                        initializationStep = "prepare-siege-ambush-deployment-plan";
+                        if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.TryPrepareDeploymentPlanContract(
+                                mission,
+                                suppliers,
+                                playerSide,
+                                out string siegeAmbushDeploymentPlanDiagnostics))
+                        {
+                            reason =
+                                siegeAmbushDeploymentPlanDiagnostics ??
+                                "siege-ambush-deployment-plan-failed";
+                            return false;
+                        }
+
+                        initializationStep = "adopt-siege-ambush-spawn-contract";
+                        if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.TryAdoptInitializedSallyOutSpawnContract(
+                                mission,
+                                spawnLogic,
+                                out string siegeAmbushSpawnContractDiagnostics))
+                        {
+                            reason =
+                                siegeAmbushSpawnContractDiagnostics ??
+                                "siege-ambush-spawn-contract-adopt-failed";
+                            return false;
+                        }
+
+                        LogBootstrapContractSnapshot(
+                            mission,
+                            spawnLogic,
+                            playerSide,
+                            supplierDiagnostics +
+                            " FormationBannerSeed={" + formationBannerDiagnostics + "}" +
+                            " DeploymentPlanBridge={" + combinedDeploymentPlanDiagnostics + "}" +
+                            " MissionTeamAI={" + teamAiDiagnostics + "}" +
+                            " SiegeAmbush={" + siegeAmbushDiagnostics + "}" +
+                            " SiegeAmbushDeploymentPlan={" + siegeAmbushDeploymentPlanDiagnostics + "}" +
+                            " SiegeAmbushSpawnContract={" + siegeAmbushSpawnContractDiagnostics + "}" +
+                            " RuntimeContract={SiegeAmbushWithDeployment}",
+                            "post-init-siege-ambush-controller",
+                            source);
                     }
                     finally
                     {
@@ -1026,7 +1072,7 @@ namespace CoopSpectator.Infrastructure
                 _activeMission = mission;
                 _activeSpawnLogic = spawnLogic;
                 _activeSuppliers = suppliers;
-                _activeMode = isSiegeAssaultWithDeploymentSubtype
+                _activeMode = isExactSiegeWithDeploymentSubtype
                     ? ActiveBootstrapMode.SiegeAssaultWithDeployment
                     : isSiegeAssaultNoDeploymentSubtype
                         ? ActiveBootstrapMode.SiegeAssaultNoDeployment
@@ -1155,6 +1201,24 @@ namespace CoopSpectator.Infrastructure
                 return true;
             }
 
+            if (SiegeAmbushScenarioContract.IsSiegeAmbushScenario(scenarioContext))
+            {
+                if (!SiegeAmbushScenarioContract.IsValidatedScenario(
+                        scenarioContext,
+                        runtimeScene,
+                        out string siegeAmbushDiagnostics))
+                {
+                    reason =
+                        "siege-ambush-contract-invalid:" +
+                        siegeAmbushDiagnostics;
+                    return false;
+                }
+
+                battleSpawnTag = "sally_out_set";
+                battleSizeType = Mission.BattleSizeType.SallyOut;
+                return true;
+            }
+
             if (string.Equals(siegeSubtype, "SiegeAssault", StringComparison.OrdinalIgnoreCase))
             {
                 battleSpawnTag = BattleSpawnLogic.BattleTag;
@@ -1195,7 +1259,12 @@ namespace CoopSpectator.Infrastructure
         private static bool RequiresSiegeAmbushController(BattleScenarioContextMessage scenarioContext)
         {
             string siegeSubtype = scenarioContext?.SiegeContext?.SiegeSubtype ?? string.Empty;
-            return string.Equals(siegeSubtype, "Relief", StringComparison.OrdinalIgnoreCase);
+            return string.Equals(
+                       siegeSubtype,
+                       "Relief",
+                       StringComparison.OrdinalIgnoreCase) ||
+                   SiegeAmbushScenarioContract.IsSiegeAmbushScenario(
+                       scenarioContext);
         }
 
         private static bool IsLordsHallSiegeSubtype(BattleScenarioContextMessage scenarioContext)
@@ -1206,7 +1275,12 @@ namespace CoopSpectator.Infrastructure
         private static bool IsSallyOutSiegeSubtype(BattleScenarioContextMessage scenarioContext)
         {
             string siegeSubtype = scenarioContext?.SiegeContext?.SiegeSubtype ?? string.Empty;
-            return string.Equals(siegeSubtype, "BlockadeSallyOut", StringComparison.OrdinalIgnoreCase);
+            return string.Equals(
+                       siegeSubtype,
+                       "BlockadeSallyOut",
+                       StringComparison.OrdinalIgnoreCase) ||
+                   SiegeAmbushScenarioContract.IsSiegeAmbushScenario(
+                       scenarioContext);
         }
 
         private static bool IsReliefSiegeSubtype(BattleScenarioContextMessage scenarioContext)
@@ -1254,7 +1328,7 @@ namespace CoopSpectator.Infrastructure
             Mission.MissionTeamAITypeEnum missionTeamAiType,
             BattleScenarioContextMessage scenarioContext)
         {
-            if (ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+            if (ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(scenarioContext))
                 return false;
 
             return missionTeamAiType == Mission.MissionTeamAITypeEnum.Siege ||
@@ -2745,6 +2819,7 @@ namespace CoopSpectator.Infrastructure
             Mission mission,
             int defenderTotal,
             int attackerTotal,
+            bool isSallyOutAmbush,
             out string diagnostics)
         {
             diagnostics = "mission-null";
@@ -2756,9 +2831,27 @@ namespace CoopSpectator.Infrastructure
             bool created = false;
             if (controller == null)
             {
-                controller = new CoopExactCampaignSiegeAmbushMissionController(defenderTotal, attackerTotal);
+                if (isSallyOutAmbush)
+                {
+                    diagnostics =
+                        "siege-ambush-controller-missing-from-initial-stack";
+                    return false;
+                }
+
+                controller = new CoopExactCampaignSiegeAmbushMissionController(
+                    defenderTotal,
+                    attackerTotal,
+                    isSallyOutAmbush);
                 mission.AddMissionBehavior(controller);
                 created = true;
+            }
+            else if (controller.IsSallyOutAmbush != isSallyOutAmbush)
+            {
+                diagnostics =
+                    "existing-controller-mode-mismatch Existing=" +
+                    controller.IsSallyOutAmbush +
+                    " Requested=" + isSallyOutAmbush;
+                return false;
             }
             else
             {
@@ -2769,6 +2862,7 @@ namespace CoopSpectator.Infrastructure
             diagnostics =
                 "Created=" + created +
                 " Started=" + controller.HasStarted +
+                " IsSallyOutAmbush=" + controller.IsSallyOutAmbush +
                 " DefenderTotal=" + defenderTotal +
                 " AttackerTotal=" + attackerTotal;
             return controller.HasStarted;

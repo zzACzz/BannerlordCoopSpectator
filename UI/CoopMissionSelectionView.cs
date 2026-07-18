@@ -5,6 +5,7 @@ using System.Linq;
 using System.Reflection;
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.Infrastructure.SiegeAmbush;
 using CoopSpectator.MissionBehaviors;
 using CoopSpectator.Network.Messages;
 using CoopSpectator.Patches;
@@ -801,11 +802,16 @@ namespace CoopSpectator.UI
             BattleSideEnum side = snapshot?.EffectiveSide ?? mission.PlayerTeam?.Side ?? BattleSideEnum.None;
             if (side == BattleSideEnum.None)
                 side = _selectedSideOverride;
-            bool useMountedFormationClasses =
+            bool useExactLandBattleFormationPlacement =
                 ExactCampaignCommanderDeploymentRuntime.IsExactLandBattleScenario(
                     mission,
                     scenarioContext);
-            if (!useMountedFormationClasses)
+            bool useMountedFormationClasses =
+                ShouldUseMountedCommanderDeploymentFormationClasses(
+                    mission,
+                    scenarioContext,
+                    side);
+            if (!useExactLandBattleFormationPlacement)
             {
                 ExactCampaignSiegeAssaultWithDeploymentRuntime.TryEnsureCommanderDeploymentUiContract(
                     mission,
@@ -818,7 +824,7 @@ namespace CoopSpectator.UI
             if (missionCamera == null)
                 throw new InvalidOperationException("combat-camera-null");
 
-            if (useMountedFormationClasses)
+            if (useExactLandBattleFormationPlacement)
             {
                 if (!ExactCampaignCommanderDeploymentRuntime.TryBeginClientManualFormationPlacement(
                         mission,
@@ -829,8 +835,9 @@ namespace CoopSpectator.UI
                 }
 
                 _landBattleManualFormationPlacementActive = true;
-                CoopSiegeOrderOfBattleVM.BeginInitialMountedConfiguration();
             }
+            if (useMountedFormationClasses)
+                CoopSiegeOrderOfBattleVM.BeginInitialMountedConfiguration();
 
             CoopSiegeOrderOfBattleVM commanderVm = null;
             try
@@ -1625,7 +1632,10 @@ namespace CoopSpectator.UI
                     " SelectableWithUnits=" + selectableFormationsWithUnits +
                     " PhysicalClassUnits=" + physicalClassUnitCount +
                     " CommanderAgentIndex=" + selectedCommanderAgent.Index;
-                return ownedFormationsWithUnits == formationsWithUnits;
+                return formationsWithUnits > 0 &&
+                       selectableFormationsWithUnits > 0 &&
+                       physicalClassUnitCount > 0 &&
+                       ownedFormationsWithUnits == formationsWithUnits;
             }
             catch (Exception ex)
             {
@@ -1805,7 +1815,7 @@ namespace CoopSpectator.UI
                 BattleSnapshotRuntimeState.GetScenarioContext() ??
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
-            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(activeScenarioContext))
+            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(activeScenarioContext))
                 return false;
 
             Mission mission = Mission;
@@ -5550,12 +5560,22 @@ namespace CoopSpectator.UI
             if (!IsCommanderDeploymentOrderOfBattleActive())
                 return false;
 
+            Mission mission = Mission.Current;
             BattleScenarioContextMessage scenarioContext =
                 BattleSnapshotRuntimeState.GetScenarioContext() ??
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
-            return ExactCampaignSiegeAssaultWithDeploymentRuntime
-                .IsSiegeAssaultScenario(scenarioContext);
+            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime
+                    .IsExactSiegeWithDeploymentScenario(scenarioContext))
+            {
+                return false;
+            }
+
+            BattleSideEnum side = mission?.PlayerTeam?.Side ?? BattleSideEnum.None;
+            return !ShouldUseMountedCommanderDeploymentFormationClasses(
+                mission,
+                scenarioContext,
+                side);
         }
 
         internal static bool IsCommanderDeploymentMountedFormationScenarioActive()
@@ -5563,7 +5583,39 @@ namespace CoopSpectator.UI
             if (!IsCommanderDeploymentOrderOfBattleActive())
                 return false;
 
-            return IsCurrentExactLandBattleCommanderDeploymentScenario(Mission.Current);
+            Mission mission = Mission.Current;
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            BattleSideEnum side = mission?.PlayerTeam?.Side ?? BattleSideEnum.None;
+            return ShouldUseMountedCommanderDeploymentFormationClasses(
+                mission,
+                scenarioContext,
+                side);
+        }
+
+        private static bool ShouldUseMountedCommanderDeploymentFormationClasses(
+            Mission mission,
+            BattleScenarioContextMessage scenarioContext,
+            BattleSideEnum side)
+        {
+            if (mission == null)
+                return false;
+
+            if (ExactCampaignCommanderDeploymentRuntime.IsExactLandBattleScenario(
+                    mission,
+                    scenarioContext))
+            {
+                return true;
+            }
+
+            return SiegeAmbushScenarioContract.IsSiegeAmbushScenario(scenarioContext) &&
+                   side != BattleSideEnum.None &&
+                   ExactCampaignSiegeAssaultWithDeploymentRuntime
+                       .ShouldDeploymentPlanSpawnWithHorses(
+                           mission,
+                           side);
         }
 
         internal static bool IsCommanderBattleOrderActive()
@@ -6548,6 +6600,115 @@ namespace CoopSpectator.UI
             return false;
         }
 
+        private static bool ShouldIncludeSiegeAmbushDestroySiegeWeaponsOrder()
+        {
+            if (!IsCommanderBattleOrderActive())
+                return false;
+
+            Mission mission = Mission.Current;
+            if (mission == null ||
+                mission.PlayerTeam == null ||
+                !ReferenceEquals(mission.PlayerTeam, mission.DefenderTeam))
+            {
+                return false;
+            }
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            return SiegeAmbushScenarioContract.IsSiegeAmbushScenario(scenarioContext);
+        }
+
+        private static void ExecuteSiegeAmbushDestroySiegeWeaponsOrder(
+            OrderController orderController)
+        {
+            Mission mission = Mission.Current;
+            Team team = mission?.PlayerTeam;
+            if (!ShouldIncludeSiegeAmbushDestroySiegeWeaponsOrder() ||
+                orderController?.SelectedFormations == null ||
+                team == null)
+            {
+                InformationManager.DisplayMessage(
+                    new InformationMessage(
+                        "Coop Battle: destroy siege engines order is unavailable."));
+                return;
+            }
+
+            int formationMask = 0;
+            foreach (Formation formation in orderController.SelectedFormations)
+            {
+                if (formation == null ||
+                    !ReferenceEquals(formation.Team, team) ||
+                    formation.CountOfUnits <= 0 ||
+                    formation.Index < 0 ||
+                    formation.Index >= (int)FormationClass.NumberOfRegularFormations)
+                {
+                    continue;
+                }
+
+                formationMask |= 1 << formation.Index;
+            }
+
+            if (formationMask <= 0)
+            {
+                InformationManager.DisplayMessage(
+                    new InformationMessage(
+                        "Coop Battle: select at least one active formation."));
+                return;
+            }
+
+            bool sent =
+                CoopBattleNetworkRequestTransport
+                    .TryOrderSelectedFormationsToDestroySiegeWeapons(
+                        team.Side,
+                        formationMask,
+                        "F8 movement order");
+            InformationManager.DisplayMessage(
+                new InformationMessage(
+                    sent
+                        ? "Coop Battle: attack siege engines order sent."
+                        : "Coop Battle: failed to send attack siege engines order."));
+        }
+
+        private sealed class CoopSiegeAmbushDestroySiegeWeaponsVisualOrder : VisualOrder
+        {
+            private static readonly TextObject Name =
+                new TextObject("{=CoopAttackSiegeEngines}Attack Siege Engines");
+
+            public CoopSiegeAmbushDestroySiegeWeaponsVisualOrder()
+                : base("coop_attack_siege_engines")
+            {
+            }
+
+            protected override string GetIconId()
+            {
+                return "order_movement_charge";
+            }
+
+            public override TextObject GetName(OrderController orderController)
+            {
+                return Name;
+            }
+
+            public override bool IsTargeted()
+            {
+                return false;
+            }
+
+            public override void ExecuteOrder(
+                OrderController orderController,
+                VisualOrderExecutionParameters executionParameters)
+            {
+                ExecuteSiegeAmbushDestroySiegeWeaponsOrder(orderController);
+            }
+
+            protected override bool? OnGetFormationHasOrder(Formation formation)
+            {
+                return false;
+            }
+        }
+
         private sealed class CoopCommanderDeploymentVisualOrderProvider : VisualOrderProvider
         {
             public override bool IsAvailable()
@@ -6583,6 +6744,11 @@ namespace CoopSpectator.UI
                 movementSet.AddOrder(new FallbackVisualOrder("order_movement_fallback"));
                 movementSet.AddOrder(new StopVisualOrder("order_movement_stop"));
                 movementSet.AddOrder(new RetreatVisualOrder("order_movement_retreat"));
+                if (ShouldIncludeSiegeAmbushDestroySiegeWeaponsOrder())
+                {
+                    movementSet.AddOrder(
+                        new CoopSiegeAmbushDestroySiegeWeaponsVisualOrder());
+                }
                 movementSet.AddOrder(new ReturnVisualOrder());
 
                 var formSet = new GenericVisualOrderSet(

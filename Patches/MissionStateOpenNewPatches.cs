@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.Infrastructure.SiegeAmbush;
 using CoopSpectator.MissionBehaviors;
 using CoopSpectator.Network.Messages;
 using HarmonyLib;
@@ -96,7 +97,7 @@ namespace CoopSpectator.Patches
             {
                 SiegeAssaultMissionOpenBridge.PreOpenContract preOpenContract =
                     SiegeAssaultMissionOpenBridge.Resolve(rec.SceneName, missionName ?? string.Empty);
-                if (preOpenContract.IsValid && preOpenContract.IsSiegeAssaultWithDeployment)
+                if (preOpenContract.IsValid && preOpenContract.IsExactSiegeWithDeployment)
                 {
                     SiegeAssaultMissionOpenBridge.Capture(
                         preOpenContract,
@@ -390,7 +391,9 @@ namespace CoopSpectator.Patches
             bool addedSiegePreparation = TryAddBehaviorIfMissing(
                 list,
                 () => new SiegeMissionPreparationHandler(
-                    isSallyOut: false,
+                    isSallyOut:
+                        SiegeAmbushScenarioContract.IsSiegeAmbushScenario(
+                            scenarioContext),
                     isReliefForceAttack: false,
                     wallHitPointRatios,
                     scenarioContext?.SiegeContext?.HasAnySiegeTower == true),
@@ -477,7 +480,7 @@ namespace CoopSpectator.Patches
             if (!SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty))
                 return false;
 
-            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(scenarioContext))
                 return false;
 
             isPlayerAttacker = ResolveWrappedBattleClientPlayerAttackerSide();

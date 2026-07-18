@@ -315,7 +315,7 @@ namespace CoopSpectator.Infrastructure
             {
             }
 
-            return ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext);
+            return ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(scenarioContext);
         }
 
         private static string RegisterExactMapping(

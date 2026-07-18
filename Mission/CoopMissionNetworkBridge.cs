@@ -8,6 +8,7 @@ using System.Security.Cryptography;
 using System.Text;
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.Infrastructure.SiegeAmbush;
 using CoopSpectator.Network.Messages;
 using CoopSpectator.Patches;
 using Newtonsoft.Json;
@@ -204,6 +205,46 @@ namespace CoopSpectator.MissionBehaviors
                     " Clear=" + clearSelection +
                     " Source=" + (source ?? "unknown") +
                     " Error=" + ex.Message);
+                return false;
+            }
+        }
+
+        public static bool TryOrderSelectedFormationsToDestroySiegeWeapons(
+            BattleSideEnum side,
+            int formationMask,
+            string source)
+        {
+            if (!GameNetwork.IsClient ||
+                !GameNetwork.IsSessionActive ||
+                side == BattleSideEnum.None ||
+                formationMask <= 0)
+            {
+                return false;
+            }
+
+            try
+            {
+                GameNetwork.BeginModuleEventAsClient();
+                GameNetwork.WriteMessage(
+                    new CoopSiegeAmbushDestroySiegeWeaponsOrderMessage(
+                        side,
+                        formationMask));
+                GameNetwork.EndModuleEventAsClient();
+                ModLogger.Info(
+                    "CoopBattleNetworkRequestTransport: sent destroy siege weapons order. " +
+                    "Side=" + side +
+                    " FormationMask=" + formationMask +
+                    " Source=" + (source ?? "unknown"));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopBattleNetworkRequestTransport: destroy siege weapons order send failed. " +
+                    "Side=" + side +
+                    " FormationMask=" + formationMask +
+                    " Source=" + (source ?? "unknown") +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message);
                 return false;
             }
         }
@@ -1086,6 +1127,10 @@ namespace CoopSpectator.MissionBehaviors
 
         private static readonly FieldInfo DefaultMissionDeploymentPlanTeamDeploymentPlansField =
             typeof(DefaultMissionDeploymentPlan).GetField("_teamDeploymentPlans", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo DefaultTeamDeploymentPlanDeploymentBoundariesField =
+            typeof(DefaultTeamDeploymentPlan).GetField("_deploymentBoundaries", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo DefaultTeamDeploymentPlanDeploymentFrameField =
+            typeof(DefaultTeamDeploymentPlan).GetField("_deploymentFrame", BindingFlags.Instance | BindingFlags.NonPublic);
 
         public static bool IsCoopSiegeDeploymentMission(Mission mission)
         {
@@ -1105,7 +1150,7 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            if (ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+            if (ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(scenarioContext))
                 return true;
 
             try
@@ -1166,12 +1211,18 @@ namespace CoopSpectator.MissionBehaviors
                 if (!TryEnsureDeploymentPlanHasTeamPlan(deploymentPlan, team))
                     return false;
 
+                BattleScenarioContextMessage scenarioContext =
+                    BattleSnapshotRuntimeState.GetScenarioContext() ??
+                    BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                    BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+                bool isExactSiegeAmbush =
+                    SiegeAmbushScenarioContract.IsValidatedScenario(
+                        scenarioContext,
+                        mission.SceneName,
+                        out _);
+
                 if (!TryHasDeploymentBoundaries(deploymentPlan, team))
                 {
-                    BattleScenarioContextMessage scenarioContext =
-                        BattleSnapshotRuntimeState.GetScenarioContext() ??
-                        BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
-                        BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
                     bool isClientExactLandBattlePlacement =
                         GameNetwork.IsClient &&
                         !GameNetwork.IsServer &&
@@ -1192,6 +1243,15 @@ namespace CoopSpectator.MissionBehaviors
                     {
                         deploymentPlan.MakeDeploymentPlan(team);
                     }
+                }
+
+                if (isExactSiegeAmbush)
+                {
+                    return TryEnsureExactSiegeAmbushSceneDeploymentBoundaries(
+                        mission,
+                        deploymentPlan,
+                        team,
+                        source);
                 }
 
                 return TryHasDeploymentBoundaries(deploymentPlan, team);
@@ -1222,6 +1282,26 @@ namespace CoopSpectator.MissionBehaviors
                     deploymentPlan.IsPositionInsideDeploymentBoundaries(team, in originalPosition))
                 {
                     return false;
+                }
+
+                BattleScenarioContextMessage scenarioContext =
+                    BattleSnapshotRuntimeState.GetScenarioContext() ??
+                    BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                    BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+                if (SiegeAmbushScenarioContract.IsValidatedScenario(
+                        scenarioContext,
+                        mission.SceneName,
+                        out _))
+                {
+                    Vec2 nearestBoundaryPosition =
+                        deploymentPlan.GetClosestDeploymentBoundaryPosition(team, in originalPosition);
+                    if (!nearestBoundaryPosition.IsValid)
+                        return false;
+
+                    position = CreateWorldPositionOnMissionGround(mission, nearestBoundaryPosition);
+                    Vec2 clampedPosition = position.GetGroundVec3().AsVec2;
+                    return clampedPosition.IsValid &&
+                           deploymentPlan.IsPositionInsideDeploymentBoundaries(team, in clampedPosition);
                 }
 
                 deploymentPlan.ProjectPositionToDeploymentBoundaries(team, ref position);
@@ -1384,6 +1464,279 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return TryHasDeploymentPlanTeamEntry(deploymentPlan, team);
+        }
+
+        private static bool TryEnsureExactSiegeAmbushSceneDeploymentBoundaries(
+            Mission mission,
+            DefaultMissionDeploymentPlan deploymentPlan,
+            Team team,
+            string source)
+        {
+            if (mission?.Scene == null ||
+                deploymentPlan == null ||
+                team == null ||
+                DefaultMissionDeploymentPlanTeamDeploymentPlansField == null ||
+                DefaultTeamDeploymentPlanDeploymentBoundariesField == null ||
+                DefaultTeamDeploymentPlanDeploymentFrameField == null)
+            {
+                return false;
+            }
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            if (!SiegeAmbushScenarioContract.IsValidatedScenario(
+                    scenarioContext,
+                    mission.SceneName,
+                    out _))
+            {
+                return false;
+            }
+
+            DefaultTeamDeploymentPlan teamPlan = TryGetTeamDeploymentPlan(deploymentPlan, team);
+            if (teamPlan == null)
+                return false;
+
+            try
+            {
+                if (!(DefaultTeamDeploymentPlanDeploymentBoundariesField.GetValue(teamPlan) is
+                      MBList<(string id, MBList<Vec2> points)> deploymentBoundaries))
+                {
+                    return false;
+                }
+
+                if (TryValidateExactSiegeAmbushDeploymentBoundaryContract(
+                        teamPlan,
+                        deploymentBoundaries))
+                {
+                    return true;
+                }
+
+                var pendingBoundaries =
+                    new List<(string id, MBList<Vec2> points)>();
+                int pendingPointCount = 0;
+                foreach (var sceneBoundary in MBSceneUtilities.GetDeploymentBoundaries(team.Side))
+                {
+                    var boundary = new MBList<Vec2>(sceneBoundary.Item2);
+                    if (boundary.Count <= 2 ||
+                        boundary.Any(point => !point.IsValid))
+                    {
+                        continue;
+                    }
+
+                    MBSceneUtilities.RadialSortBoundary(ref boundary);
+                    MBSceneUtilities.FindConvexHull(ref boundary);
+                    if (boundary.Count <= 2 ||
+                        boundary.Any(point => !point.IsValid))
+                    {
+                        continue;
+                    }
+
+                    string tag = string.IsNullOrWhiteSpace(sceneBoundary.Item1)
+                        ? "coop_sally_out_" + team.Side + "_" + pendingBoundaries.Count
+                        : sceneBoundary.Item1;
+                    pendingBoundaries.Add((tag, boundary));
+                    pendingPointCount += boundary.Count;
+                }
+
+                if (pendingBoundaries.Count <= 0 ||
+                    !TryResolveExactSiegeAmbushDeploymentFrame(
+                        mission,
+                        team,
+                        out MatrixFrame deploymentFrame) ||
+                    !IsDeploymentFrameInsideBoundaries(
+                        deploymentFrame,
+                        pendingBoundaries))
+                {
+                    deploymentBoundaries.Clear();
+                    return false;
+                }
+
+                deploymentBoundaries.Clear();
+                DefaultTeamDeploymentPlanDeploymentFrameField.SetValue(
+                    teamPlan,
+                    deploymentFrame);
+                foreach (var pendingBoundary in pendingBoundaries)
+                    deploymentBoundaries.Add(pendingBoundary);
+
+                if (!TryValidateExactSiegeAmbushDeploymentBoundaryContract(
+                        teamPlan,
+                        deploymentBoundaries))
+                {
+                    deploymentBoundaries.Clear();
+                    return false;
+                }
+
+                if (CoopDebugConfig.OrderOfBattleDiagnostics)
+                {
+                    ModLogger.Info(
+                        "CoopSiegeDeploymentBoundaryRuntime: seeded exact SiegeAmbush deployment boundaries from scene. " +
+                        "Side=" + team.Side +
+                        " BoundaryCount=" + pendingBoundaries.Count +
+                        " PointCount=" + pendingPointCount +
+                        " DeploymentFrame=" + deploymentFrame.origin +
+                        " Source=" + (source ?? "unknown"));
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                if (CoopDebugConfig.OrderOfBattleDiagnostics)
+                {
+                    ModLogger.Info(
+                        "CoopSiegeDeploymentBoundaryRuntime: exact SiegeAmbush scene boundary seed failed. " +
+                        "Side=" + team.Side +
+                        " Source=" + (source ?? "unknown") +
+                        " Error=" + ex.GetType().Name + ":" + ex.Message);
+                }
+
+                return false;
+            }
+        }
+
+        private static bool TryValidateExactSiegeAmbushDeploymentBoundaryContract(
+            DefaultTeamDeploymentPlan teamPlan,
+            MBList<(string id, MBList<Vec2> points)> deploymentBoundaries)
+        {
+            if (teamPlan == null ||
+                deploymentBoundaries == null ||
+                deploymentBoundaries.Count <= 0 ||
+                DefaultTeamDeploymentPlanDeploymentFrameField == null)
+            {
+                return false;
+            }
+
+            foreach (var deploymentBoundary in deploymentBoundaries)
+            {
+                if (deploymentBoundary.points == null ||
+                    deploymentBoundary.points.Count <= 2 ||
+                    deploymentBoundary.points.Any(point => !point.IsValid))
+                {
+                    return false;
+                }
+            }
+
+            if (!(DefaultTeamDeploymentPlanDeploymentFrameField.GetValue(teamPlan) is
+                  MatrixFrame deploymentFrame))
+            {
+                return false;
+            }
+
+            return IsDeploymentFrameInsideBoundaries(
+                deploymentFrame,
+                deploymentBoundaries);
+        }
+
+        private static bool TryResolveExactSiegeAmbushDeploymentFrame(
+            Mission mission,
+            Team team,
+            out MatrixFrame deploymentFrame)
+        {
+            deploymentFrame = MatrixFrame.Zero;
+            if (mission?.Scene == null ||
+                team == null ||
+                team.Side == BattleSideEnum.None)
+            {
+                return false;
+            }
+
+            GameEntity deploymentFrameEntity = null;
+            if (team.Side == BattleSideEnum.Defender)
+            {
+                GameEntity sallyOutSet =
+                    mission.Scene.FindEntityWithTag("sally_out_ambush_battle_set");
+                deploymentFrameEntity =
+                    sallyOutSet?.GetFirstChildEntityWithTag("sally_out_ambush_infantry");
+            }
+            else if (team.Side == BattleSideEnum.Attacker)
+            {
+                deploymentFrameEntity =
+                    mission.Scene.FindEntityWithTag("attacker_infantry");
+            }
+
+            if (deploymentFrameEntity == null)
+                return false;
+
+            deploymentFrame = deploymentFrameEntity.GetGlobalFrame();
+            Vec2 origin = deploymentFrame.origin.AsVec2;
+            Vec2 direction = deploymentFrame.rotation.f.AsVec2;
+            return deploymentFrame.origin.IsValid &&
+                   origin.IsValid &&
+                   direction.IsValid &&
+                   direction.LengthSquared > 0.01f;
+        }
+
+        private static bool IsDeploymentFrameInsideBoundaries(
+            MatrixFrame deploymentFrame,
+            IEnumerable<(string id, MBList<Vec2> points)> deploymentBoundaries)
+        {
+            if (deploymentBoundaries == null ||
+                !deploymentFrame.origin.IsValid)
+            {
+                return false;
+            }
+
+            Vec2 origin = deploymentFrame.origin.AsVec2;
+            if (!origin.IsValid)
+                return false;
+
+            foreach (var deploymentBoundary in deploymentBoundaries)
+            {
+                if (deploymentBoundary.points != null &&
+                    deploymentBoundary.points.Count > 2 &&
+                    MBSceneUtilities.IsPointInsideBoundaries(
+                        in origin,
+                        deploymentBoundary.points))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static DefaultTeamDeploymentPlan TryGetTeamDeploymentPlan(
+            DefaultMissionDeploymentPlan deploymentPlan,
+            Team team)
+        {
+            if (deploymentPlan == null ||
+                team == null ||
+                DefaultMissionDeploymentPlanTeamDeploymentPlansField == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                if (!(DefaultMissionDeploymentPlanTeamDeploymentPlansField.GetValue(deploymentPlan) is
+                      System.Collections.IEnumerable entries))
+                {
+                    return null;
+                }
+
+                foreach (object entry in entries)
+                {
+                    if (entry == null)
+                        continue;
+
+                    Type entryType = entry.GetType();
+                    FieldInfo item1Field = entryType.GetField("Item1", BindingFlags.Instance | BindingFlags.Public);
+                    FieldInfo item2Field = entryType.GetField("Item2", BindingFlags.Instance | BindingFlags.Public);
+                    if (item1Field != null &&
+                        item2Field != null &&
+                        ReferenceEquals(item1Field.GetValue(entry), team))
+                    {
+                        return item2Field.GetValue(entry) as DefaultTeamDeploymentPlan;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return null;
         }
 
         private static bool TryHasDeploymentPlanTeamEntry(DefaultMissionDeploymentPlan deploymentPlan, Team team)
@@ -1780,6 +2133,8 @@ namespace CoopSpectator.MissionBehaviors
             new Dictionary<string, int>(StringComparer.Ordinal);
         private readonly Dictionary<NetworkCommunicator, HashSet<string>> _sentSiegeMissionObjectMapKeysByPeer =
             new Dictionary<NetworkCommunicator, HashSet<string>>();
+        private readonly Dictionary<int, int> _earlySiegeMissionObjectMapSideMaskByPeer =
+            new Dictionary<int, int>();
         private static readonly Dictionary<int, int> _expectedBattleSnapshotTransmissionIdByPeer = new Dictionary<int, int>();
         private static readonly Dictionary<int, int> _acknowledgedBattleSnapshotTransmissionIdByPeer = new Dictionary<int, int>();
         private static int _clientObservedBattleSnapshotTransmissionId;
@@ -1884,6 +2239,7 @@ namespace CoopSpectator.MissionBehaviors
                 registerer.RegisterBaseHandler<CoopBattleAgentControlRequestMessage>(HandleClientAgentControlRequest);
                 registerer.RegisterBaseHandler<CoopCommanderDeploymentFormationAssignmentsMessage>(HandleClientCommanderDeploymentFormationAssignments);
                 registerer.RegisterBaseHandler<CoopCommanderDeploymentSiegeMachineSelectionMessage>(HandleClientCommanderDeploymentSiegeMachineSelection);
+                registerer.RegisterBaseHandler<CoopSiegeAmbushDestroySiegeWeaponsOrderMessage>(HandleClientDestroySiegeWeaponsOrder);
                 registerer.RegisterBaseHandler<CoopBattleSnapshotChunkRequestMessage>(HandleClientBattleSnapshotChunkRequest);
                 registerer.RegisterBaseHandler<CoopBattleSnapshotRangeAckMessage>(HandleClientBattleSnapshotRangeAck);
                 registerer.RegisterBaseHandler<CoopBattleSnapshotCompleteAckMessage>(HandleClientBattleSnapshotCompleteAck);
@@ -1916,6 +2272,7 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             _nextBootstrapDependentPeerPayloadSyncUtc = nowUtc + BootstrapDependentPeerPayloadSyncInterval;
+            TrySyncEarlySiegeMissionObjectIdMaps();
             TrySyncAgentControlStates();
             TrySyncMaterializedAgentEntryPayloads();
             TrySyncEntryStatusPayloads();
@@ -2127,6 +2484,8 @@ namespace CoopSpectator.MissionBehaviors
             _lastCompletedBattleSnapshotTransmissionUtcByPeer.Remove(networkPeer.Index);
             _lastBattleSnapshotRetryUtcByPeer.Remove(networkPeer.Index);
             _lastSentAgentControlRevisionByPeer.Remove(networkPeer.Index);
+            _earlySiegeMissionObjectMapSideMaskByPeer.Remove(networkPeer.Index);
+            _sentSiegeMissionObjectMapKeysByPeer.Remove(networkPeer);
             _pendingPayloadsByKey.Remove(BuildPendingTransmissionKey(networkPeer.Index, CoopBattlePayloadKind.AuthoritativeMaterializedAgentEntrySnapshot));
             _pendingPayloadsByKey.Remove(BuildPendingTransmissionKey(networkPeer.Index, CoopBattlePayloadKind.EntryStatusSnapshot));
             _pendingPayloadsByKey.Remove(BuildPendingTransmissionKey(networkPeer.Index, CoopBattlePayloadKind.BattleSnapshot));
@@ -2148,6 +2507,8 @@ namespace CoopSpectator.MissionBehaviors
             _lastCompletedBattleSnapshotTransmissionUtcByPeer.Clear();
             _lastBattleSnapshotRetryUtcByPeer.Clear();
             _lastSentAgentControlRevisionByPeer.Clear();
+            _earlySiegeMissionObjectMapSideMaskByPeer.Clear();
+            _sentSiegeMissionObjectMapKeysByPeer.Clear();
             _pendingPayloadsByKey.Clear();
             _clientPayloadAssemblies.Clear();
             _battleSnapshotTransportStatesByPeer.Clear();
@@ -2232,6 +2593,123 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return true;
+        }
+
+        private bool HandleClientDestroySiegeWeaponsOrder(
+            NetworkCommunicator peer,
+            GameNetworkMessage baseMessage)
+        {
+            if (!(baseMessage is CoopSiegeAmbushDestroySiegeWeaponsOrderMessage message))
+                return false;
+
+            bool applied = false;
+            string diagnostics = "unhandled";
+            try
+            {
+                BattleScenarioContextMessage scenarioContext =
+                    BattleSnapshotRuntimeState.GetScenarioContext() ??
+                    BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                    BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+                if (!GameNetwork.IsServer ||
+                    Mission == null ||
+                    CoopBattlePhaseRuntimeState.GetPhase() != CoopBattlePhase.BattleActive ||
+                    !SiegeAmbushScenarioContract.IsSiegeAmbushScenario(scenarioContext))
+                {
+                    diagnostics = "invalid-scenario-or-phase";
+                    return true;
+                }
+
+                if (!TryResolveExactBattleOrderAuthority(
+                        peer,
+                        out Team team,
+                        out _,
+                        out _,
+                        out List<int> authorizedFormationIndices,
+                        out string authorityRole))
+                {
+                    diagnostics = "order-authority-missing";
+                    return true;
+                }
+
+                if (team == null ||
+                    !ReferenceEquals(team, Mission.DefenderTeam) ||
+                    message.RequestedSide != team.Side ||
+                    authorizedFormationIndices.Count <= 0)
+                {
+                    diagnostics =
+                        "invalid-side-or-authority TeamSide=" +
+                        (team?.Side.ToString() ?? "null") +
+                        " RequestedSide=" +
+                        message.RequestedSide +
+                        " Role=" +
+                        authorityRole +
+                        " Authorized=" +
+                        authorizedFormationIndices.Count;
+                    return true;
+                }
+
+                var requestedFormations = new List<Formation>();
+                for (int formationIndex = 0;
+                     formationIndex < (int)FormationClass.NumberOfRegularFormations;
+                     formationIndex++)
+                {
+                    int formationBit = 1 << formationIndex;
+                    if ((message.FormationMask & formationBit) == 0 ||
+                        !authorizedFormationIndices.Contains(formationIndex))
+                    {
+                        continue;
+                    }
+
+                    Formation formation = team.FormationsIncludingEmpty.FirstOrDefault(
+                        candidate =>
+                            candidate != null &&
+                            candidate.Index == formationIndex &&
+                            ReferenceEquals(candidate.Team, team));
+                    if (formation != null && formation.CountOfUnits > 0)
+                        requestedFormations.Add(formation);
+                }
+
+                if (requestedFormations.Count <= 0)
+                {
+                    diagnostics =
+                        "no-authorized-active-formations FormationMask=" +
+                        message.FormationMask;
+                    return true;
+                }
+
+                CoopExactCampaignSiegeAmbushMissionController controller =
+                    Mission.GetMissionBehavior<CoopExactCampaignSiegeAmbushMissionController>();
+                if (controller == null)
+                {
+                    diagnostics = "siege-ambush-controller-missing";
+                    return true;
+                }
+
+                applied = controller.TryApplyPlayerDirectedSiegeWeaponAttack(
+                    team,
+                    requestedFormations,
+                    out diagnostics);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                diagnostics =
+                    "exception " +
+                    ex.GetType().Name +
+                    ":" +
+                    ex.Message;
+                return true;
+            }
+            finally
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: handled destroy siege weapons order. " +
+                    "Peer=" + (peer?.UserName ?? "null") +
+                    " Side=" + message.RequestedSide +
+                    " FormationMask=" + message.FormationMask +
+                    " Applied=" + applied +
+                    " Diagnostics={" + diagnostics + "}");
+            }
         }
 
         private bool HandleClientSelectionRequest(NetworkCommunicator peer, GameNetworkMessage baseMessage)
@@ -2865,6 +3343,12 @@ namespace CoopSpectator.MissionBehaviors
                     applied ? "applied" : "ignored",
                     message,
                     diagnostics);
+                if (applied)
+                {
+                    BattleMapSpawnHandoffPatch.TryProcessDeferredClientCreateAgentMessages(
+                        Mission,
+                        "CoopMissionNetworkBridge.HandleServerSiegeMissionObjectIdMap");
+                }
             }
             catch (Exception ex)
             {
@@ -3421,7 +3905,23 @@ namespace CoopSpectator.MissionBehaviors
             out string diagnostics,
             string source)
         {
+            return TryBroadcastSiegeMissionObjectIdMap(
+                side,
+                peers,
+                out diagnostics,
+                out _,
+                source);
+        }
+
+        private bool TryBroadcastSiegeMissionObjectIdMap(
+            BattleSideEnum side,
+            IReadOnlyCollection<NetworkCommunicator> peers,
+            out string diagnostics,
+            out int entryCount,
+            string source)
+        {
             diagnostics = "invalid-context";
+            entryCount = 0;
             if (!GameNetwork.IsServer || Mission == null)
                 return false;
 
@@ -3435,6 +3935,7 @@ namespace CoopSpectator.MissionBehaviors
                 Mission,
                 side,
                 out string mapBuildDiagnostics);
+            entryCount = entries.Count;
             int sentCount = 0;
             int skippedCount = 0;
             int failedCount = 0;
@@ -3505,6 +4006,62 @@ namespace CoopSpectator.MissionBehaviors
                 " Build={" + mapBuildDiagnostics + "}" +
                 " Details=[" + string.Join("; ", details.ToArray()) + "]";
             return failedCount == 0;
+        }
+
+        private void TrySyncEarlySiegeMissionObjectIdMaps()
+        {
+            if (!GameNetwork.IsServer ||
+                Mission == null ||
+                GameNetwork.NetworkPeers == null)
+            {
+                return;
+            }
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            if (!SiegeAmbushScenarioContract.IsSiegeAmbushScenario(scenarioContext))
+                return;
+
+            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+            {
+                if (!IsEligibleRemotePeer(peer))
+                    continue;
+
+                _earlySiegeMissionObjectMapSideMaskByPeer.TryGetValue(
+                    peer.Index,
+                    out int publishedSideMask);
+                foreach (BattleSideEnum side in new[]
+                         {
+                             BattleSideEnum.Attacker,
+                             BattleSideEnum.Defender
+                         })
+                {
+                    int sideMask = side == BattleSideEnum.Attacker ? 1 : 2;
+                    if ((publishedSideMask & sideMask) != 0)
+                        continue;
+
+                    bool published = TryBroadcastSiegeMissionObjectIdMap(
+                        side,
+                        new[] { peer },
+                        out string diagnostics,
+                        out int entryCount,
+                        "early SiegeAmbush mission-object contract");
+                    if (!published || entryCount <= 0)
+                        continue;
+
+                    publishedSideMask |= sideMask;
+                    _earlySiegeMissionObjectMapSideMaskByPeer[peer.Index] =
+                        publishedSideMask;
+                    ModLogger.Info(
+                        "CoopMissionNetworkBridge: published early SiegeAmbush mission-object map. " +
+                        "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                        " Side=" + side +
+                        " Entries=" + entryCount +
+                        " Diagnostics={" + diagnostics + "}");
+                }
+            }
         }
 
         private static string BuildCommanderDeploymentSiegeWeaponTypeName(SiegeWeapon siegeWeapon)
@@ -8957,6 +9514,9 @@ namespace CoopSpectator.MissionBehaviors
             CampaignMapPatchMissionInit.TryApplyCampaignAtmosphereToLiveScene(
                 Mission,
                 "CoopMissionNetworkBridge.V2 applied authoritative battle snapshot");
+            CoopMissionSpawnLogic.PrepareClientBattleSnapshotForMission(
+                Mission,
+                "CoopMissionNetworkBridge.V2 applied authoritative battle snapshot");
             MarkClientBattleSnapshotApplied(assemblyState.TransmissionId, assemblyState.PayloadHash);
             _lastClientBattleSnapshotBootstrapRequestUtc = DateTime.MinValue;
             BattleMapSpawnHandoffPatch.TryProcessDeferredClientCreateAgentMessages(
@@ -9327,6 +9887,9 @@ namespace CoopSpectator.MissionBehaviors
                     if (snapshot != null)
                     {
                         BattleSnapshotRuntimeState.SetCurrent(snapshot, "CoopMissionNetworkBridge");
+                        CoopMissionSpawnLogic.PrepareClientBattleSnapshotForMission(
+                            Mission,
+                            "CoopMissionNetworkBridge applied authoritative battle snapshot");
                         bool acknowledged = CoopBattleNetworkRequestTransport.TryAcknowledgeBattleSnapshot(
                             transmissionId,
                             "CoopMissionNetworkBridge.ApplyCompletedPayload");

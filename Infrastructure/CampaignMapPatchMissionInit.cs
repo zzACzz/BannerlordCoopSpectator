@@ -2,6 +2,7 @@ using System;
 using CoopSpectator.Campaign;
 using CoopSpectator.Infrastructure.LordsHall;
 using CoopSpectator.Infrastructure.SallyOut;
+using CoopSpectator.Infrastructure.SiegeAmbush;
 using CoopSpectator.Network.Messages;
 using System.Reflection;
 using TaleWorlds.Core;
@@ -42,7 +43,7 @@ namespace CoopSpectator.Infrastructure
                 : logSource;
             BattleSnapshotMessage snapshot = TryResolveSnapshot(source);
             if (snapshot == null ||
-                !ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(snapshot.ScenarioContext))
+                !ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(snapshot.ScenarioContext))
             {
                 return false;
             }
@@ -180,7 +181,9 @@ namespace CoopSpectator.Infrastructure
             if (IsSiegeScenario(snapshot))
             {
                 string siegeSubtype = snapshot?.ScenarioContext?.SiegeContext?.SiegeSubtype ?? string.Empty;
-                if (string.Equals(siegeSubtype, "SiegeAssault", StringComparison.OrdinalIgnoreCase))
+                if (ExactCampaignSiegeAssaultWithDeploymentRuntime
+                    .IsExactSiegeWithDeploymentScenario(
+                        snapshot.ScenarioContext))
                 {
                     ApplyCampaignAtmosphereContext(ref record, snapshot, runtimeScene, source);
                     ApplyOpenSiegeAssaultSceneProfile(ref record, snapshot, runtimeScene, source);
@@ -284,7 +287,7 @@ namespace CoopSpectator.Infrastructure
         {
             CampaignAtmosphereSnapshotMessage atmosphereSnapshot = snapshot?.CampaignAtmosphere;
             if (atmosphereSnapshot == null ||
-                !ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(snapshot?.ScenarioContext))
+                !ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(snapshot?.ScenarioContext))
             {
                 return;
             }
@@ -626,7 +629,7 @@ namespace CoopSpectator.Infrastructure
             if (!ExperimentalFeatures.EnableExactSiegeCampaignSceneInitializerProfile)
                 return;
 
-            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(snapshot?.ScenarioContext))
+            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(snapshot?.ScenarioContext))
                 return;
 
             bool previousPlayingInCampaignMode = record.PlayingInCampaignMode;
@@ -897,6 +900,9 @@ namespace CoopSpectator.Infrastructure
             {
                 return Mission.MissionTeamAITypeEnum.SallyOut;
             }
+
+            if (SiegeAmbushScenarioContract.IsSiegeAmbushScenario(scenarioContext))
+                return Mission.MissionTeamAITypeEnum.SallyOut;
 
             if (ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
                 return Mission.MissionTeamAITypeEnum.Siege;

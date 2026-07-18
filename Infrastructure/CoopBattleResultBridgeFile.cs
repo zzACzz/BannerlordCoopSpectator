@@ -34,6 +34,8 @@ namespace CoopSpectator.Infrastructure
             public List<BattleResultCasualtyEventSnapshot> CasualtyEvents { get; set; } = new List<BattleResultCasualtyEventSnapshot>();
             public List<string> FrozenCaptainEntryIds { get; set; } = new List<string>();
             public List<FrozenCaptainCombatGroupSnapshotMessage> FrozenCaptainCombatGroups { get; set; } = new List<FrozenCaptainCombatGroupSnapshotMessage>();
+            public List<BattleSiegeEngineSnapshotMessage> AttackerSiegeEngines { get; set; } = new List<BattleSiegeEngineSnapshotMessage>();
+            public List<BattleSiegeEngineSnapshotMessage> DefenderSiegeEngines { get; set; } = new List<BattleSiegeEngineSnapshotMessage>();
         }
 
         public sealed class BattleResultCasualtyEventSnapshot

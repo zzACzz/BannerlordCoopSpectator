@@ -60,7 +60,7 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
             BattleMapContractDiagnostics.LogMissionInitializerRecordState(record, "CoopBattle mission init pre-apply");
             TryApplyCampaignMapPatchContext(ref record, scene);
             BattleMapContractDiagnostics.LogMissionInitializerRecordState(record, "CoopBattle mission init pre-open");
-            InitializeMissionBehaviorsDelegate behaviorFactory = preOpenContract.IsSiegeAssaultWithDeployment
+            InitializeMissionBehaviorsDelegate behaviorFactory = preOpenContract.IsExactSiegeWithDeployment
                 ? new InitializeMissionBehaviorsDelegate(
                     MissionMultiplayerCoopSiegeAssaultWithDeploymentMode.CreateBehaviorsForOfficialOpenNewBridge)
                 : new InitializeMissionBehaviorsDelegate(CreateBehaviorsForMission);

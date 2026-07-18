@@ -199,6 +199,11 @@ namespace CoopSpectator.Patches
                             formation.CountOfUnits > 0 &&
                             ReferenceEquals(formation.Team, team)));
                 }
+                CancelPlayerDirectedSiegeWeaponAttackForOrder(
+                    team,
+                    selectedFormations,
+                    message.OrderType,
+                    "simple-order");
                 orderController.SetOrder(message.OrderType);
                 if (message.OrderType == OrderType.AIControlOn ||
                     message.OrderType == OrderType.AIControlOff)
@@ -247,6 +252,11 @@ namespace CoopSpectator.Patches
                     return true;
 
                 TryRefreshNativeSelectionFromShadow(networkPeer, team, orderController);
+                CancelPlayerDirectedSiegeWeaponAttackForOrder(
+                    team,
+                    ResolveActiveSelectedFormations(networkPeer, team, orderController),
+                    message.OrderType,
+                    "position-order");
                 var orderPosition = new WorldPosition(
                     mission.Scene,
                     UIntPtr.Zero,
@@ -291,7 +301,15 @@ namespace CoopSpectator.Patches
                 ApplyOrderWithFormation message = baseMessage as ApplyOrderWithFormation;
                 Formation formation = message == null ? null : ResolveFormation(team, message.FormationIndex);
                 if (formation != null)
+                {
+                    TryRefreshNativeSelectionFromShadow(networkPeer, team, orderController);
+                    CancelPlayerDirectedSiegeWeaponAttackForOrder(
+                        team,
+                        ResolveActiveSelectedFormations(networkPeer, team, orderController),
+                        message.OrderType,
+                        "formation-target-order");
                     orderController.SetOrderWithFormation(message.OrderType, formation);
+                }
 
                 __result = true;
                 return false;
@@ -379,6 +397,11 @@ namespace CoopSpectator.Patches
                 bool shouldUseShadowSelection = shadowFormations.Count > 0;
                 if (shouldUseShadowSelection)
                     TryRefreshNativeSelectionFromShadow(networkPeer, team, orderController);
+                CancelPlayerDirectedSiegeWeaponAttackForOrder(
+                    team,
+                    ResolveActiveSelectedFormations(networkPeer, team, orderController),
+                    message.OrderType,
+                    "two-position-order");
 
                 LogOrderDiagnostics(
                     "two-positions-entry",
@@ -824,6 +847,76 @@ namespace CoopSpectator.Patches
             }
 
             return null;
+        }
+
+        private static List<Formation> ResolveActiveSelectedFormations(
+            NetworkCommunicator networkPeer,
+            Team team,
+            OrderController orderController)
+        {
+            List<Formation> selectedFormations =
+                ResolveShadowSelectedFormations(
+                    networkPeer,
+                    team,
+                    includeEmpty: false);
+            if (selectedFormations.Count > 0 ||
+                orderController?.SelectedFormations == null)
+            {
+                return selectedFormations;
+            }
+
+            selectedFormations.AddRange(
+                orderController.SelectedFormations.Where(
+                    formation =>
+                        formation != null &&
+                        formation.CountOfUnits > 0 &&
+                        ReferenceEquals(formation.Team, team)));
+            return selectedFormations;
+        }
+
+        private static void CancelPlayerDirectedSiegeWeaponAttackForOrder(
+            Team team,
+            IEnumerable<Formation> formations,
+            OrderType orderType,
+            string source)
+        {
+            if (!IsPlayerDirectedSiegeWeaponAttackCancelingOrder(orderType))
+                return;
+
+            Mission mission = Mission.Current;
+            CoopExactCampaignSiegeAmbushMissionController controller =
+                mission?.GetMissionBehavior<CoopExactCampaignSiegeAmbushMissionController>();
+            controller?.CancelPlayerDirectedSiegeWeaponAttack(
+                team,
+                formations,
+                (source ?? "order") + ":" + orderType);
+        }
+
+        private static bool IsPlayerDirectedSiegeWeaponAttackCancelingOrder(
+            OrderType orderType)
+        {
+            switch (orderType)
+            {
+                case OrderType.Move:
+                case OrderType.MoveToLineSegment:
+                case OrderType.MoveToLineSegmentWithHorizontalLayout:
+                case OrderType.Charge:
+                case OrderType.ChargeWithTarget:
+                case OrderType.StandYourGround:
+                case OrderType.FollowMe:
+                case OrderType.FollowEntity:
+                case OrderType.Retreat:
+                case OrderType.AdvanceTenPaces:
+                case OrderType.FallBackTenPaces:
+                case OrderType.Advance:
+                case OrderType.FallBack:
+                case OrderType.AIControlOn:
+                case OrderType.AIControlOff:
+                case OrderType.AttackEntity:
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         private static SiegeWeapon ResolveSiegeWeapon(MissionObjectId siegeWeaponId, Team team)

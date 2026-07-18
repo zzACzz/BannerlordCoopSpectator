@@ -8,4 +8,5 @@
   <string id="str_multiplayer_game_type.TdmClone" text="{=*}TDM Clone" />
   <string id="CoopDelegateControlToAi" text="{=*}Delegate control to AI" />
   <string id="CoopReturnControlHint" text="{=*}H — Return control" />
+  <string id="CoopAttackSiegeEngines" text="{=*}Attack Siege Engines" />
 </strings>

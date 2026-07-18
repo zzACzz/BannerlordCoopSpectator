@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.Infrastructure.SiegeAmbush;
 using CoopSpectator.MissionBehaviors;
 using CoopSpectator.Network.Messages;
 using TaleWorlds.Core;
@@ -138,11 +139,16 @@ namespace CoopSpectator.GameMode
 
         private static List<MissionBehavior> BuildClientMissionBehaviors(Mission mission, bool isDedicated)
         {
+            BattleScenarioContextMessage scenarioContext = ResolveScenarioContext();
+            bool isSiegeAmbushClient =
+                SiegeAmbushScenarioContract.IsSiegeAmbushScenario(
+                    scenarioContext);
             var list = new List<MissionBehavior>
             {
                 MissionLobbyComponent.CreateBehavior(),
                 new MultiplayerWarmupComponent(),
-                new MissionMultiplayerCoopSiegeAssaultWithDeploymentClient(),
+                new MissionMultiplayerCoopSiegeAssaultWithDeploymentClient(
+                    disableSceneOcclusion: isSiegeAmbushClient),
                 new MultiplayerTimerComponent(),
             };
 
@@ -305,6 +311,9 @@ namespace CoopSpectator.GameMode
         {
             BattleScenarioContextMessage scenarioContext = ResolveScenarioContext();
             bool isPlayerAttacker = ResolvePlayerAttackerSide();
+            bool isSiegeAmbush =
+                SiegeAmbushScenarioContract.IsSiegeAmbushScenario(
+                    scenarioContext);
             if (includeScenePreparation)
             {
                 float[] wallHitPointRatios =
@@ -322,7 +331,7 @@ namespace CoopSpectator.GameMode
                     list,
                     mission,
                     () => new SiegeMissionPreparationHandler(
-                        isSallyOut: false,
+                        isSallyOut: isSiegeAmbush,
                         isReliefForceAttack: false,
                         wallHitPointRatios,
                         hasAnySiegeTower),
@@ -542,6 +551,7 @@ namespace CoopSpectator.GameMode
                 GetExistingBehaviorByTypeName(mission, "DefaultBattleMissionAgentSpawnLogic") != null)
             {
                 list.Add(new SiegeReplayNativeSpawnContractBootstrapBehavior(playerSide));
+                TryAppendInitialSiegeAmbushController(list, mission);
                 ModLogger.Info(
                     "CoopSiegeAssaultWithDeployment: appended siege replay native spawn contract bootstrap after existing DefaultBattleMissionAgentSpawnLogic.");
                 return;
@@ -568,11 +578,43 @@ namespace CoopSpectator.GameMode
             list.Add(spawnLogic);
             list.Add(battleReinforcementsSpawnController);
             list.Add(new SiegeReplayNativeSpawnContractBootstrapBehavior(playerSide));
+            TryAppendInitialSiegeAmbushController(list, mission);
             ModLogger.Info(
                 "CoopSiegeAssaultWithDeployment: appended initial BattleSpawnLogic, DefaultBattleMissionAgentSpawnLogic, BattleReinforcementsSpawnController and spawn contract bootstrap. " +
                 "Scene=" + (mission.SceneName ?? "null") +
                 " PlayerSide=" + playerSide +
                 " Diagnostics=" + (diagnostics ?? "none"));
+        }
+
+        private static void TryAppendInitialSiegeAmbushController(
+            List<MissionBehavior> list,
+            Mission mission)
+        {
+            if (list == null || mission == null)
+                return;
+
+            BattleScenarioContextMessage scenarioContext = ResolveScenarioContext();
+            if (!SiegeAmbushScenarioContract.IsSiegeAmbushScenario(scenarioContext))
+                return;
+
+            if (MissionBehaviorHelpers.ListContainsBehaviorType(
+                    list,
+                    nameof(CoopExactCampaignSiegeAmbushMissionController)) ||
+                GetExistingBehaviorByTypeName(
+                    mission,
+                    nameof(CoopExactCampaignSiegeAmbushMissionController)) != null)
+            {
+                return;
+            }
+
+            list.Add(
+                new CoopExactCampaignSiegeAmbushMissionController(
+                    defenderTotalTroopCount: 0,
+                    attackerTotalTroopCount: 0,
+                    isSallyOutAmbush: true));
+            ModLogger.Info(
+                "CoopSiegeAssaultWithDeployment: appended initial CoopExactCampaignSiegeAmbushMissionController after native spawn contract bootstrap. " +
+                "Scene=" + (mission.SceneName ?? "null") + ".");
         }
 
         private static void AddIfMissing(

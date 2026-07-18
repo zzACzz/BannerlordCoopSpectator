@@ -69,6 +69,7 @@
     <Compile Include="..\Network\Messages\BattleStartMessage.cs" Link="Network\Messages\BattleStartMessage.cs" />
     <Compile Include="..\Network\Messages\CoopBattleSelectionNetworkMessages.cs" Link="Network\Messages\CoopBattleSelectionNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopBattleAgentControlNetworkMessages.cs" Link="Network\Messages\CoopBattleAgentControlNetworkMessages.cs" />
+    <Compile Include="..\Network\Messages\CoopSiegeAmbushOrderNetworkMessages.cs" Link="Network\Messages\CoopSiegeAmbushOrderNetworkMessages.cs" />
     <Compile Include="..\Infrastructure\ModLogger.cs" Link="Infrastructure\ModLogger.cs" />
     <Compile Include="..\Infrastructure\BannerAwareAgentOrigin.cs" Link="Infrastructure\BannerAwareAgentOrigin.cs" />
     <Compile Include="..\Infrastructure\CoopDebugConfig.cs" Link="Infrastructure\CoopDebugConfig.cs" />
@@ -79,6 +80,7 @@
     <Compile Include="..\Infrastructure\CampaignMissionShellRuntimeState.cs" Link="Infrastructure\CampaignMissionShellRuntimeState.cs" />
     <Compile Include="..\Infrastructure\LordsHall\LordsHallScenarioContract.cs" Link="Infrastructure\LordsHall\LordsHallScenarioContract.cs" />
     <Compile Include="..\Infrastructure\SallyOut\SallyOutScenarioContract.cs" Link="Infrastructure\SallyOut\SallyOutScenarioContract.cs" />
+    <Compile Include="..\Infrastructure\SiegeAmbush\SiegeAmbushScenarioContract.cs" Link="Infrastructure\SiegeAmbush\SiegeAmbushScenarioContract.cs" />
     <Compile Include="..\Infrastructure\VillageBattle\ExactVillageBattleScenarioContract.cs" Link="Infrastructure\VillageBattle\ExactVillageBattleScenarioContract.cs" />
     <Compile Include="..\Infrastructure\LandBattle\ExactLandBattleScenarioContract.cs" Link="Infrastructure\LandBattle\ExactLandBattleScenarioContract.cs" />
     <Compile Include="..\Infrastructure\CommanderDeployment\ExactLandBattleCommanderDeploymentRuntime.cs" Link="Infrastructure\CommanderDeployment\ExactLandBattleCommanderDeploymentRuntime.cs" />
@@ -146,9 +148,11 @@
     <Compile Include="..\Patches\MultiplayerHeroClassOverridePatch.cs" Link="Patches\MultiplayerHeroClassOverridePatch.cs" />
     <Compile Include="..\Patches\MissionStateOpenNewPatches.cs" Link="Patches\MissionStateOpenNewPatches.cs" />
     <Compile Include="..\Patches\ExactCampaignArmyBootstrapPatch.cs" Link="Patches\ExactCampaignArmyBootstrapPatch.cs" />
+    <Compile Include="..\Patches\ExactSiegeAmbushDeploymentControllerPatch.cs" Link="Patches\ExactSiegeAmbushDeploymentControllerPatch.cs" />
     <Compile Include="..\Patches\ExactCampaignPreSpawnLoadoutPatch.cs" Link="Patches\ExactCampaignPreSpawnLoadoutPatch.cs" />
     <Compile Include="..\Patches\ExactCampaignNetworkObjectBootstrapPatch.cs" Link="Patches\ExactCampaignNetworkObjectBootstrapPatch.cs" />
     <Compile Include="..\Patches\BattleMapSpawnHandoffPatch.cs" Link="Patches\BattleMapSpawnHandoffPatch.cs" />
+    <Compile Include="..\Patches\CoopBotsControlledCountPatch.cs" Link="Patches\CoopBotsControlledCountPatch.cs" />
     <Compile Include="..\Patches\MissionItemUsageSetFlagsGuardPatch.cs" Link="Patches\MissionItemUsageSetFlagsGuardPatch.cs" />
     <Compile Include="..\Patches\CommanderDeploymentMissionNetworkComponentPatch.cs" Link="Patches\CommanderDeploymentMissionNetworkComponentPatch.cs" />
     <Compile Include="..\Patches\LateJoinPeerBootstrapGatePatch.cs" Link="Patches\LateJoinPeerBootstrapGatePatch.cs" />
