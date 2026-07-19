@@ -131,7 +131,14 @@ namespace CoopSpectator.Patches
             }
             else if (string.Equals(missionName, OfficialBattleMissionName, StringComparison.Ordinal) && GameNetwork.IsClient)
             {
-                handler = mission => WrapVanillaBattleClientBehaviors(mission, originalHandler);
+                string preOpenRuntimeScene = rec.SceneName ?? string.Empty;
+                BattleScenarioContextMessage preOpenScenarioContext =
+                    CoopPreMissionTopologyRuntimeState.GetActiveScenarioContext();
+                handler = mission => WrapVanillaBattleClientBehaviors(
+                    mission,
+                    originalHandler,
+                    preOpenRuntimeScene,
+                    preOpenScenarioContext);
                 ModLogger.Info("MissionState.OpenNew: wrapped Battle client behavior handler for coop selection overlay injection.");
             }
         }
@@ -290,12 +297,18 @@ namespace CoopSpectator.Patches
 
         private static IEnumerable<MissionBehavior> WrapVanillaBattleClientBehaviors(
             Mission mission,
-            InitializeMissionBehaviorsDelegate originalHandler)
+            InitializeMissionBehaviorsDelegate originalHandler,
+            string preOpenRuntimeScene,
+            BattleScenarioContextMessage preOpenScenarioContext)
         {
             List<MissionBehavior> list = originalHandler != null
                 ? new List<MissionBehavior>(originalHandler(mission) ?? Enumerable.Empty<MissionBehavior>())
                 : new List<MissionBehavior>();
-            bool battleMapRuntime = MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission?.SceneName ?? string.Empty);
+            string runtimeScene = !string.IsNullOrWhiteSpace(preOpenRuntimeScene)
+                ? preOpenRuntimeScene
+                : mission?.SceneName ?? string.Empty;
+            bool battleMapRuntime =
+                MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(runtimeScene);
 
             LogWrappedBehaviorStack("battle-before-removal", list);
 
@@ -318,8 +331,12 @@ namespace CoopSpectator.Patches
 
             if (battleMapRuntime)
             {
-                InjectBattleMapClientUiParityViews(mission, list);
-                InjectExactSiegeAssaultClientBehaviors(mission, list);
+                InjectBattleMapClientUiParityViews(mission, list, runtimeScene);
+                InjectExactSiegeAssaultClientBehaviors(
+                    mission,
+                    list,
+                    runtimeScene,
+                    preOpenScenarioContext);
                 MissionMultiplayerCoopBattleMode.AppendExactLandBattleCommanderDeploymentSupport(
                     list,
                     mission,
@@ -340,7 +357,10 @@ namespace CoopSpectator.Patches
             return list;
         }
 
-        private static void InjectBattleMapClientUiParityViews(Mission mission, List<MissionBehavior> list)
+        private static void InjectBattleMapClientUiParityViews(
+            Mission mission,
+            List<MissionBehavior> list,
+            string runtimeScene)
         {
             bool addedAgentLabel = TryAddBehaviorIfMissing(
                 list,
@@ -364,16 +384,22 @@ namespace CoopSpectator.Patches
                 "MissionStateOpenNewPatches: battle-map client already had formation-marker mission view in wrapped Battle stack.");
 
             ModLogger.Info(
-                "CoopBattle client: injected agent label and formation marker mission views for wrapped MultiplayerBattle battle-map runtime. Scene=" + (mission?.SceneName ?? "null") +
+                "CoopBattle client: injected agent label and formation marker mission views for wrapped MultiplayerBattle battle-map runtime. Scene=" + (runtimeScene ?? mission?.SceneName ?? "null") +
                 " AddedAgentLabel=" + addedAgentLabel +
                 " AddedFormationTargetSelection=" + addedFormationTargetSelection +
                 " AddedFormationMarker=" + addedFormationMarker);
         }
 
-        private static void InjectExactSiegeAssaultClientBehaviors(Mission mission, List<MissionBehavior> list)
+        private static void InjectExactSiegeAssaultClientBehaviors(
+            Mission mission,
+            List<MissionBehavior> list,
+            string runtimeScene,
+            BattleScenarioContextMessage preOpenScenarioContext)
         {
             if (!TryResolveWrappedBattleExactSiegeAssaultWithDeploymentContext(
                     mission,
+                    runtimeScene,
+                    preOpenScenarioContext,
                     out BattleScenarioContextMessage scenarioContext,
                     out bool isPlayerAttacker))
             {
@@ -427,6 +453,13 @@ namespace CoopSpectator.Patches
                 "MissionStateOpenNewPatches: wrapped Battle client injected MissionSiegeEnginesLogic for exact siege assault runtime.",
                 "MissionStateOpenNewPatches: wrapped Battle client already had MissionSiegeEnginesLogic for exact siege assault runtime.");
 
+            bool addedBannerBearerLogic = TryAddBehaviorIfMissing(
+                list,
+                () => new BannerBearerLogic(),
+                new[] { "BannerBearerLogic" },
+                "MissionStateOpenNewPatches: wrapped Battle client injected BannerBearerLogic for exact siege assault runtime.",
+                "MissionStateOpenNewPatches: wrapped Battle client already had BannerBearerLogic for exact siege assault runtime.");
+
             bool shouldInjectDeploymentBridge =
                 ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldInjectWrappedBattleClientDeploymentBehaviors(
                     mission,
@@ -460,24 +493,33 @@ namespace CoopSpectator.Patches
                 " DeploymentBridgePolicy=" + deploymentBridgePolicy +
                 " AddedSiegePreparation=" + addedSiegePreparation +
                 " AddedSiegeEnginesLogic=" + addedSiegeEnginesLogic +
+                " AddedBannerBearerLogic=" + addedBannerBearerLogic +
                 " AddedSiegeDeploymentHandler=" + addedSiegeDeploymentHandler +
                 " AddedSiegeDeploymentController=" + addedSiegeDeploymentController + ".");
         }
 
         private static bool TryResolveWrappedBattleExactSiegeAssaultWithDeploymentContext(
             Mission mission,
+            string runtimeScene,
+            BattleScenarioContextMessage preOpenScenarioContext,
             out BattleScenarioContextMessage scenarioContext,
             out bool isPlayerAttacker)
         {
             scenarioContext =
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
-                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext ??
+                preOpenScenarioContext ??
+                CoopPreMissionTopologyRuntimeState.GetActiveScenarioContext();
             isPlayerAttacker = true;
 
             if (mission == null)
                 return false;
 
-            if (!SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty))
+            string effectiveRuntimeScene = !string.IsNullOrWhiteSpace(runtimeScene)
+                ? runtimeScene
+                : mission.SceneName ?? string.Empty;
+            if (!SceneRuntimeClassifier.IsExactCampaignBattleScene(
+                    effectiveRuntimeScene))
                 return false;
 
             if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(scenarioContext))
@@ -498,6 +540,11 @@ namespace CoopSpectator.Patches
                 .FirstOrDefault(side => side != null && side.IsPlayerSide);
             if (snapshotPlayerSide != null)
                 return IsAttackerSideKey(snapshotPlayerSide.SideText ?? snapshotPlayerSide.SideId);
+
+            string preMissionPlayerSide =
+                CoopPreMissionTopologyRuntimeState.GetActivePlayerSide();
+            if (!string.IsNullOrWhiteSpace(preMissionPlayerSide))
+                return IsAttackerSideKey(preMissionPlayerSide);
 
             return true;
         }

@@ -81,7 +81,8 @@ namespace CoopSpectator.Infrastructure
             {
                 scenarioContext = BattleSnapshotRuntimeState.GetScenarioContext() ??
                                   BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
-                                  BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+                                  BattleSnapshotRuntimeState.GetState()?.ScenarioContext ??
+                                  CoopPreMissionTopologyRuntimeState.GetActiveScenarioContext();
             }
             catch
             {
@@ -101,7 +102,8 @@ namespace CoopSpectator.Infrastructure
                 BattleScenarioContextMessage scenarioContext =
                     BattleSnapshotRuntimeState.GetScenarioContext() ??
                     BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
-                    BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+                    BattleSnapshotRuntimeState.GetState()?.ScenarioContext ??
+                    CoopPreMissionTopologyRuntimeState.GetActiveScenarioContext();
                 return LordsHallScenarioContract.IsValidatedScenario(
                     scenarioContext,
                     sceneName,
@@ -127,6 +129,8 @@ namespace CoopSpectator.Infrastructure
             try
             {
                 BattleScenarioContextMessage scenarioContext = BattleSnapshotRuntimeState.GetScenarioContext();
+                if (scenarioContext == null)
+                    scenarioContext = CoopPreMissionTopologyRuntimeState.GetActiveScenarioContext();
                 if (scenarioContext?.IsSiegeBattle != true)
                     return false;
 
@@ -140,8 +144,16 @@ namespace CoopSpectator.Infrastructure
                 }
 
                 BattleSnapshotMessage snapshot = BattleSnapshotRuntimeState.GetCurrent();
-                return SceneNamesMatch(sceneName, snapshot?.MapScene) ||
-                       SceneNamesMatch(sceneName, snapshot?.MultiplayerScene);
+                if (SceneNamesMatch(sceneName, snapshot?.MapScene) ||
+                    SceneNamesMatch(sceneName, snapshot?.MultiplayerScene))
+                {
+                    return true;
+                }
+
+                return CoopPreMissionTopologyRuntimeState.TryGetActive(
+                    sceneName,
+                    out _,
+                    out _);
             }
             catch
             {

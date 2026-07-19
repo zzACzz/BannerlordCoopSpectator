@@ -991,6 +991,68 @@ namespace CoopSpectator.Network.Messages
     }
 
     [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromClient)]
+    public sealed class CoopMaterializedAgentEntrySnapshotCompleteAckMessage : GameNetworkMessage
+    {
+        private static readonly CompressionInfo.Integer TransmissionCompressionInfo = new CompressionInfo.Integer(0, 1048575, maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer EntryCountCompressionInfo = new CompressionInfo.Integer(0, 4096, maximumValueGiven: true);
+
+        public CoopMaterializedAgentEntrySnapshotCompleteAckMessage(
+            int transmissionId,
+            bool appliedSuccessfully,
+            int entryCount,
+            string payloadHash)
+        {
+            TransmissionId = transmissionId;
+            AppliedSuccessfully = appliedSuccessfully;
+            EntryCount = entryCount;
+            PayloadHash = string.IsNullOrWhiteSpace(payloadHash) ? string.Empty : payloadHash.Trim();
+        }
+
+        public CoopMaterializedAgentEntrySnapshotCompleteAckMessage()
+        {
+            TransmissionId = 0;
+            AppliedSuccessfully = false;
+            EntryCount = 0;
+            PayloadHash = string.Empty;
+        }
+
+        public int TransmissionId { get; private set; }
+        public bool AppliedSuccessfully { get; private set; }
+        public int EntryCount { get; private set; }
+        public string PayloadHash { get; private set; }
+
+        protected override bool OnRead()
+        {
+            bool bufferReadValid = true;
+            TransmissionId = ReadIntFromPacket(TransmissionCompressionInfo, ref bufferReadValid);
+            AppliedSuccessfully = ReadBoolFromPacket(ref bufferReadValid);
+            EntryCount = ReadIntFromPacket(EntryCountCompressionInfo, ref bufferReadValid);
+            PayloadHash = ReadStringFromPacket(ref bufferReadValid) ?? string.Empty;
+            return bufferReadValid;
+        }
+
+        protected override void OnWrite()
+        {
+            WriteIntToPacket(TransmissionId, TransmissionCompressionInfo);
+            WriteBoolToPacket(AppliedSuccessfully);
+            WriteIntToPacket(EntryCount, EntryCountCompressionInfo);
+            WriteStringToPacket(PayloadHash ?? string.Empty);
+        }
+
+        protected override MultiplayerMessageFilter OnGetLogFilter()
+        {
+            return MultiplayerMessageFilter.Mission;
+        }
+
+        protected override string OnGetLogFormat()
+        {
+            return "CoopMaterializedAgentEntrySnapshotCompleteAck TransmissionId=" + TransmissionId +
+                " AppliedSuccessfully=" + AppliedSuccessfully +
+                " EntryCount=" + EntryCount;
+        }
+    }
+
+    [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromClient)]
     public sealed class CoopBattleSnapshotAbortMessage : GameNetworkMessage
     {
         private static readonly CompressionInfo.Integer TransmissionCompressionInfo = new CompressionInfo.Integer(0, 1048575, maximumValueGiven: true);

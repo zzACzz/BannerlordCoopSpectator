@@ -191,8 +191,13 @@ namespace CoopSpectator.Patches
 
         private static void LogExactNameOverride(Agent agent, string entryId, string exactName, string source)
         {
-            if (agent == null || string.IsNullOrWhiteSpace(entryId) || string.IsNullOrWhiteSpace(exactName))
+            if (!ExperimentalFeatures.EnableBattleSelectionDisplayNameDiagnostics ||
+                agent == null ||
+                string.IsNullOrWhiteSpace(entryId) ||
+                string.IsNullOrWhiteSpace(exactName))
+            {
                 return;
+            }
 
             string logKey = agent.Index + "|" + entryId + "|" + source + "|" + exactName;
             if (!LoggedOverrideKeys.Add(logKey))

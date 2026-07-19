@@ -73,6 +73,7 @@ namespace CoopSpectator.Patches
         private static MethodInfo _missionNetworkComponentHandleServerEventSetWieldedItemIndexMethod;
         private static MethodInfo _missionNetworkComponentHandleServerEventSetAgentHealthMethod;
         private static MethodInfo _missionNetworkComponentHandleServerEventMakeAgentDeadMethod;
+        private static MethodInfo _missionNetworkComponentHandleServerEventHitSynchronizeObjectDestructionLevelMethod;
         private static readonly object FiveModeWeaponUsageProtocolLock = new object();
         private static CompressionInfo.Integer _defaultWeaponUsageIndexCompressionInfo;
         private static bool _defaultWeaponUsageIndexCompressionInfoCaptured;
@@ -1416,6 +1417,7 @@ namespace CoopSpectator.Patches
                 return;
             }
 
+            _missionNetworkComponentHandleServerEventHitSynchronizeObjectHitpointsMethod = target;
             harmony.Patch(target, prefix: new HarmonyMethod(prefix));
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventHitSynchronizeObjectHitpoints.");
         }
@@ -1434,6 +1436,7 @@ namespace CoopSpectator.Patches
                 return;
             }
 
+            _missionNetworkComponentHandleServerEventHitSynchronizeObjectDestructionLevelMethod = target;
             harmony.Patch(target, prefix: new HarmonyMethod(prefix));
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventHitSynchronizeObjectDestructionLevel.");
         }
@@ -1658,7 +1661,6 @@ namespace CoopSpectator.Patches
                 return;
             }
 
-            _missionNetworkComponentHandleServerEventHitSynchronizeObjectHitpointsMethod = target;
             harmony.Patch(target, prefix: new HarmonyMethod(prefix));
             ModLogger.Info(
                 "BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventRemoveEquippedWeapon.");
@@ -2528,8 +2530,6 @@ namespace CoopSpectator.Patches
 
                 bool snapshotReadyForExactHeroHandoff =
                     CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string snapshotReadinessSummary);
-                bool safeStringIdCreateAgentPathActive =
-                    ShouldUseSafeStringIdCreateAgentPathOnClient(mission);
                 bool strictExactCandidate = false;
                 bool mountedHeroPayloadCandidate = IsMountedHeroTemplatePayload(createAgent);
                 ExactCreateAgentCorridorDiagnostics.ObserveClientCreateAgentPrefix(
@@ -2539,23 +2539,6 @@ namespace CoopSpectator.Patches
                     strictExactCandidate,
                     mountedHeroPayloadCandidate,
                     "battle-map handoff CreateAgent prefix");
-                if (safeStringIdCreateAgentPathActive &&
-                    !snapshotReadyForExactHeroHandoff &&
-                    !IsUnsafeImmediateClientAgentBaselineMaterializationActive)
-                {
-                    RegisterDeferredClientCreateAgentPayload(createAgent, snapshotReadinessSummary);
-                    ModLogger.Info(
-                        "BattleMapSpawnHandoffPatch: deferred client CreateAgent until current battle snapshot is applied. " +
-                        "AgentIndex=" + createAgent.AgentIndex +
-                        " MountAgentIndex=" + createAgent.MountAgentIndex +
-                        " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
-                        " Reason=" + (snapshotReadinessSummary ?? "unknown"));
-                    ExactCreateAgentCorridorDiagnostics.ObserveClientCreateAgentBypass(
-                        createAgent,
-                        "deferred-generic-create-agent-snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"),
-                        "battle-map handoff CreateAgent prefix");
-                    return false;
-                }
 
                 if (snapshotReadyForExactHeroHandoff)
                 {
@@ -2795,6 +2778,9 @@ namespace CoopSpectator.Patches
             if (GameNetwork.IsServer || mission == null)
                 return false;
 
+            if (CoopMissionNetworkBridge.HasObservedClientBattleSnapshotManifestForCurrentMission(out _))
+                return true;
+
             if (CoopMissionSpawnLogic.UseDedicatedSafeStringIdExactEquipmentPathOnClient())
                 return true;
 
@@ -2811,6 +2797,9 @@ namespace CoopSpectator.Patches
         {
             if (mission == null)
                 return false;
+
+            if (CoopMissionNetworkBridge.HasObservedClientBattleSnapshotManifestForCurrentMission(out _))
+                return true;
 
             string sceneName = mission.SceneName ?? string.Empty;
             return MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(sceneName) ||
@@ -3224,6 +3213,42 @@ namespace CoopSpectator.Patches
             return totalPending;
         }
 
+        internal static void TryReconcileDeferredClientAgentMaterialization(
+            Mission mission,
+            string source)
+        {
+            if (!GameNetwork.IsClient ||
+                mission == null ||
+                !ShouldRunAgentMaterializationHandoff(mission))
+            {
+                return;
+            }
+
+            int pendingBefore = GetDeferredClientAgentMaterializationPendingCount(out string summaryBefore);
+            if (pendingBefore <= 0)
+                return;
+
+            TryProcessDeferredClientMountedHeroCreateAgents(
+                mission,
+                (source ?? "client agent materialization reconciliation") + " mounted heroes");
+            TryProcessDeferredClientCreateAgentMessages(
+                mission,
+                (source ?? "client agent materialization reconciliation") + " agent payloads");
+
+            if (!ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+                return;
+
+            int pendingAfter = GetDeferredClientAgentMaterializationPendingCount(out string summaryAfter);
+            if (pendingAfter == pendingBefore)
+                return;
+
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: reconciled deferred client agent materialization before readiness evaluation. " +
+                "PendingBefore={" + (summaryBefore ?? "unknown") + "} " +
+                "PendingAfter={" + (summaryAfter ?? "unknown") + "} " +
+                "Source=" + (source ?? "unknown"));
+        }
+
         internal static void TryProcessDeferredClientCreateAgentMessages(Mission mission, string source)
         {
             if (!GameNetwork.IsClient ||
@@ -3236,30 +3261,39 @@ namespace CoopSpectator.Patches
             if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string snapshotReadinessSummary))
                 return;
 
-            TryReplayDeferredClientCreateAgents(mission, source, snapshotReadinessSummary);
-            TryReplayDeferredClientAgentSetFormation(mission, source, snapshotReadinessSummary);
-            TryReplayDeferredClientSetAgentActionSet(mission, source, snapshotReadinessSummary);
-            TryReplayDeferredClientSynchronizeAgentEquipment(mission, source, snapshotReadinessSummary);
-            TryReplayDeferredClientSpawnWeaponWithNewEntity(mission, source, snapshotReadinessSummary);
-            TryReplayDeferredClientAttachWeaponToSpawnedWeapon(mission, source, snapshotReadinessSummary);
-            TryReplayDeferredClientSpawnAttachedWeaponOnSpawnedWeapon(mission, source, snapshotReadinessSummary);
-            TryReplayDeferredClientSpawnAttachedWeaponOnCorpse(mission, source, snapshotReadinessSummary);
-            TryReplayDeferredClientSynchronizeMissionObject(mission, source, snapshotReadinessSummary);
-            TryReplayDeferredClientSetMissionObjectVisibility(mission, source, snapshotReadinessSummary);
+            if (!CoopMissionNetworkBridge.IsClientCurrentMaterializedAgentEntrySnapshotApplied(
+                    out string materializedMapReadinessSummary))
+            {
+                return;
+            }
+
+            string replayReadinessSummary =
+                snapshotReadinessSummary +
+                " MaterializedMap={" + materializedMapReadinessSummary + "}";
+            TryReplayDeferredClientCreateAgents(mission, source, replayReadinessSummary);
+            TryReplayDeferredClientAgentSetFormation(mission, source, replayReadinessSummary);
+            TryReplayDeferredClientSetAgentActionSet(mission, source, replayReadinessSummary);
+            TryReplayDeferredClientSynchronizeAgentEquipment(mission, source, replayReadinessSummary);
+            TryReplayDeferredClientSpawnWeaponWithNewEntity(mission, source, replayReadinessSummary);
+            TryReplayDeferredClientAttachWeaponToSpawnedWeapon(mission, source, replayReadinessSummary);
+            TryReplayDeferredClientSpawnAttachedWeaponOnSpawnedWeapon(mission, source, replayReadinessSummary);
+            TryReplayDeferredClientSpawnAttachedWeaponOnCorpse(mission, source, replayReadinessSummary);
+            TryReplayDeferredClientSynchronizeMissionObject(mission, source, replayReadinessSummary);
+            TryReplayDeferredClientSetMissionObjectVisibility(mission, source, replayReadinessSummary);
             TryReplayDeferredClientExactSiegeMissionObjectMessages(mission, source);
-            TryReplayDeferredClientAttachWeaponToAgent(mission, source, snapshotReadinessSummary);
-            TryReplayDeferredClientAttachWeaponToWeaponInAgentEquipmentSlot(mission, source, snapshotReadinessSummary);
-            TryReplayDeferredClientSetWeaponNetworkData(mission, source, snapshotReadinessSummary);
-            TryReplayDeferredClientSetWeaponAmmoData(mission, source, snapshotReadinessSummary);
-            TryReplayDeferredClientSetWeaponReloadPhase(mission, source, snapshotReadinessSummary);
+            TryReplayDeferredClientAttachWeaponToAgent(mission, source, replayReadinessSummary);
+            TryReplayDeferredClientAttachWeaponToWeaponInAgentEquipmentSlot(mission, source, replayReadinessSummary);
+            TryReplayDeferredClientSetWeaponNetworkData(mission, source, replayReadinessSummary);
+            TryReplayDeferredClientSetWeaponAmmoData(mission, source, replayReadinessSummary);
+            TryReplayDeferredClientSetWeaponReloadPhase(mission, source, replayReadinessSummary);
             TryProcessDelayedLocalControlledWeaponStateMessages(mission, source);
-            TryReplayDeferredClientCreateMissile(mission, source, snapshotReadinessSummary);
-            TryReplayDeferredClientHandleMissileCollisionReaction(mission, source, snapshotReadinessSummary);
-            TryReplayDeferredClientSetWieldedItemIndex(mission, source, snapshotReadinessSummary);
-            TryReplayDeferredClientStartSwitchingWeaponUsageIndex(mission, source, snapshotReadinessSummary);
-            TryReplayDeferredClientWeaponUsageIndexChangeMessage(mission, source, snapshotReadinessSummary);
-            TryReplayDeferredClientSetAgentHealth(mission, source, snapshotReadinessSummary);
-            TryReplayDeferredClientMakeAgentDead(mission, source, snapshotReadinessSummary);
+            TryReplayDeferredClientCreateMissile(mission, source, replayReadinessSummary);
+            TryReplayDeferredClientHandleMissileCollisionReaction(mission, source, replayReadinessSummary);
+            TryReplayDeferredClientSetWieldedItemIndex(mission, source, replayReadinessSummary);
+            TryReplayDeferredClientStartSwitchingWeaponUsageIndex(mission, source, replayReadinessSummary);
+            TryReplayDeferredClientWeaponUsageIndexChangeMessage(mission, source, replayReadinessSummary);
+            TryReplayDeferredClientSetAgentHealth(mission, source, replayReadinessSummary);
+            TryReplayDeferredClientMakeAgentDead(mission, source, replayReadinessSummary);
             TryApplyLocalControlledRangedTerminalReloadCompletion(mission);
         }
 
@@ -3273,6 +3307,9 @@ namespace CoopSpectator.Patches
             }
 
             if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string snapshotReadinessSummary))
+                return;
+
+            if (!CoopMissionNetworkBridge.IsClientCurrentMaterializedAgentEntrySnapshotApplied(out _))
                 return;
 
             List<DeferredMountedHeroCreateAgentPayload> deferredPayloads;
@@ -7393,11 +7430,14 @@ namespace CoopSpectator.Patches
                     RemoveDeferredClientSetMissionObjectVisibilityPayload(
                         synchronizeMissionObject.MissionObjectId,
                         deferredPayload.DeferredUtc);
-                    ModLogger.Info(
-                        "BattleMapSpawnHandoffPatch: replayed deferred client SynchronizeMissionObject after battle snapshot apply. " +
-                        "MissionObjectId=" + GetMissionObjectIdValue(synchronizeMissionObject.MissionObjectId) +
-                        " Attempts=" + deferredPayload.Attempts +
-                        " Source=" + (source ?? "unknown"));
+                    if (ExperimentalFeatures.EnableExactSiegeMissionObjectSyncDiagnostics)
+                    {
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: replayed deferred client SynchronizeMissionObject after battle snapshot apply. " +
+                            "MissionObjectId=" + GetMissionObjectIdValue(synchronizeMissionObject.MissionObjectId) +
+                            " Attempts=" + deferredPayload.Attempts +
+                            " Source=" + (source ?? "unknown"));
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -7631,7 +7671,10 @@ namespace CoopSpectator.Patches
                         deferredPayload.MissionObjectIdMemberName,
                         out MissionObjectId localMissionObjectId,
                         out _) ||
-                    TryGetLocalMissionObject(localMissionObjectId) == null)
+                    !IsExactSiegeMissionObjectMessageTargetReady(
+                        deferredPayload.Message,
+                        deferredPayload.MissionObjectIdMemberName,
+                        deferredPayload.MessageName))
                 {
                     continue;
                 }
@@ -8598,6 +8641,10 @@ namespace CoopSpectator.Patches
                     message,
                     missionObjectIdMemberName,
                     target,
+                    messageName) &&
+                IsExactSiegeMissionObjectMessageTargetReady(
+                    message,
+                    missionObjectIdMemberName,
                     messageName))
             {
                 return false;
@@ -8610,6 +8657,35 @@ namespace CoopSpectator.Patches
                 messageName,
                 handlerMethod);
             return true;
+        }
+
+        private static bool IsExactSiegeMissionObjectMessageTargetReady(
+            GameNetworkMessage message,
+            string missionObjectIdMemberName,
+            string messageName)
+        {
+            if (!TryGetMissionObjectIdMemberValue(
+                    message,
+                    missionObjectIdMemberName,
+                    out MissionObjectId missionObjectId,
+                    out _))
+            {
+                return false;
+            }
+
+            MissionObject localMissionObject = TryGetLocalMissionObject(missionObjectId);
+            if (localMissionObject == null)
+                return false;
+
+            if (!string.Equals(messageName, "SyncObjectHitpoints", StringComparison.Ordinal) &&
+                !string.Equals(messageName, "SyncObjectDestructionLevel", StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            WeakGameEntity gameEntity = localMissionObject.GameEntity;
+            return gameEntity.IsValid &&
+                   gameEntity.GetFirstScriptOfType<DestructableComponent>() != null;
         }
 
         private static bool TryConsumePendingLocalControlledBowTerminalReloadCompletion(
@@ -12254,6 +12330,11 @@ namespace CoopSpectator.Patches
 
             Banner banner = ResolveStrictExactHeroCreateAgentBanner(teamFromTeamIndex, formation);
             Equipment createTimeSpawnEquipment = ResolveStrictExactHeroCreateAgentSpawnEquipment(contract, createAgent);
+            if (createTimeSpawnEquipment != null && createAgent.MountAgentIndex < 0)
+            {
+                createTimeSpawnEquipment[EquipmentIndex.Horse] = default;
+                createTimeSpawnEquipment[EquipmentIndex.HorseHarness] = default;
+            }
             MissionEquipment createTimeMissionEquipment = ResolveStrictExactHeroCreateAgentMissionEquipment(
                 createTimeSpawnEquipment,
                 banner,
@@ -12313,6 +12394,7 @@ namespace CoopSpectator.Patches
                     " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
                     " ContractCharacter=" + (character.StringId ?? "null") +
                     " MountAgentIndex=" + createAgent.MountAgentIndex +
+                    " DismountedPayload=" + (createAgent.MountAgentIndex < 0) +
                     " FormationIndex=" + createAgent.FormationIndex +
                     " StrippedRemotePeer=True" +
                     " CanonicalizedCharacter=False";
@@ -14639,7 +14721,7 @@ namespace CoopSpectator.Patches
                     return true;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return true;
 
                 if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
@@ -14675,10 +14757,13 @@ namespace CoopSpectator.Patches
                         synchronizeMissionObject,
                         "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"),
                         remappedExactSiegeMissionObjectId);
-                    ModLogger.Info(
-                        "BattleMapSpawnHandoffPatch: deferred client SynchronizeMissionObject until current battle snapshot is applied. " +
-                        "MissionObjectId=" + GetMissionObjectIdValue(synchronizeMissionObject.MissionObjectId) +
-                        " Reason=" + (snapshotReadinessSummary ?? "unknown"));
+                    if (ExperimentalFeatures.EnableExactSiegeMissionObjectSyncDiagnostics)
+                    {
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: deferred client SynchronizeMissionObject until current battle snapshot is applied. " +
+                            "MissionObjectId=" + GetMissionObjectIdValue(synchronizeMissionObject.MissionObjectId) +
+                            " Reason=" + (snapshotReadinessSummary ?? "unknown"));
+                    }
                     return false;
                 }
 
@@ -14763,7 +14848,7 @@ namespace CoopSpectator.Patches
                     return __exception;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return __exception;
 
                 TryLogExactSiegeMissionObjectSyncDiagnostic(
@@ -14881,7 +14966,7 @@ namespace CoopSpectator.Patches
                     return __exception;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return __exception;
 
                 if (ShouldApplyExactSiegeSynchronizeMissionObjectDirectCleanup(mission))
@@ -15071,36 +15156,56 @@ namespace CoopSpectator.Patches
         {
             try
             {
-                TryRemapExactSiegeMissionObjectIdMessage(
+                return !TryDeferUnmappedExactSiegeMissionObjectMessage(
                     baseMessage,
                     "MissionObjectId",
                     SiegeMissionObjectIdBridgeTarget.AnyMissionObject,
-                    "SyncObjectDestructionLevel");
+                    "SyncObjectDestructionLevel",
+                    _missionNetworkComponentHandleServerEventHitSynchronizeObjectDestructionLevelMethod);
             }
             catch (Exception ex)
             {
-                ModLogger.Info("BattleMapSpawnHandoffPatch: SyncObjectDestructionLevel siege id remap failed open: " + ex.Message);
+                ModLogger.Info("BattleMapSpawnHandoffPatch: SyncObjectDestructionLevel siege id gate failed closed: " + ex.Message);
+                return false;
             }
-
-            return true;
         }
 
         private static bool MissionNetworkComponent_HandleServerEventHitBurstAllHeavyHitParticles_Prefix(GameNetworkMessage baseMessage)
         {
+            bool shouldGuardExactClientMessage = false;
             try
             {
+                if (!(baseMessage is BurstAllHeavyHitParticles burstAllHeavyHitParticles))
+                    return true;
+
+                Mission mission = Mission.Current;
+                shouldGuardExactClientMessage =
+                    mission != null &&
+                    ShouldUseSafeStringIdCreateAgentPathOnClient(mission);
+
                 TryRemapExactSiegeMissionObjectIdMessage(
-                    baseMessage,
+                    burstAllHeavyHitParticles,
                     "MissionObjectId",
-                    SiegeMissionObjectIdBridgeTarget.AnyMissionObject,
+                    SiegeMissionObjectIdBridgeTarget.SynchedMissionObject,
                     "BurstAllHeavyHitParticles");
+
+                if (!shouldGuardExactClientMessage)
+                    return true;
+
+                MissionObject localMissionObject =
+                    TryGetLocalMissionObject(burstAllHeavyHitParticles.MissionObjectId);
+                if (localMissionObject == null)
+                    return false;
+
+                WeakGameEntity gameEntity = localMissionObject.GameEntity;
+                return gameEntity.IsValid &&
+                       gameEntity.GetFirstScriptOfType<DestructableComponent>() != null;
             }
             catch (Exception ex)
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: BurstAllHeavyHitParticles siege id remap failed open: " + ex.Message);
+                return !shouldGuardExactClientMessage;
             }
-
-            return true;
         }
 
         private static bool MissionNetworkComponent_HandleServerEventSetUsableGameObjectIsDeactivated_Prefix(GameNetworkMessage baseMessage)
@@ -15233,7 +15338,7 @@ namespace CoopSpectator.Patches
                     return;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return;
 
                 if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
@@ -15259,7 +15364,7 @@ namespace CoopSpectator.Patches
                     return;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return;
 
                 if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
@@ -15296,7 +15401,7 @@ namespace CoopSpectator.Patches
                     return true;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return true;
 
                 if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
@@ -15347,7 +15452,7 @@ namespace CoopSpectator.Patches
                     return true;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return true;
 
                 if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
@@ -15407,7 +15512,7 @@ namespace CoopSpectator.Patches
                     return true;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return true;
 
                 if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
@@ -15470,7 +15575,7 @@ namespace CoopSpectator.Patches
                     return true;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return true;
 
                 if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
@@ -15538,7 +15643,7 @@ namespace CoopSpectator.Patches
                     return true;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return true;
 
                 if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
@@ -15592,7 +15697,7 @@ namespace CoopSpectator.Patches
                     return true;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return true;
 
                 if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
@@ -16525,7 +16630,7 @@ namespace CoopSpectator.Patches
                     return true;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return true;
 
                 if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
@@ -16599,7 +16704,7 @@ namespace CoopSpectator.Patches
                     return true;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return true;
 
                 if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
@@ -16796,7 +16901,7 @@ namespace CoopSpectator.Patches
                     return true;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return true;
 
                 bool safeStringIdCreateAgentPathActive =
@@ -16915,7 +17020,7 @@ namespace CoopSpectator.Patches
                     return;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return;
 
                 Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(setAgentHealth.AgentIndex, canBeNull: true);
@@ -16946,7 +17051,7 @@ namespace CoopSpectator.Patches
                     return true;
 
                 Mission mission = Mission.Current;
-                if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+                if (!ShouldRunAgentMaterializationHandoff(mission))
                     return true;
 
                 if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
@@ -18025,7 +18130,7 @@ namespace CoopSpectator.Patches
                 Mission mission = Mission.Current;
                 if (mission == null ||
                     GameNetwork.IsServer ||
-                    !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
+                    !ShouldRunAgentMaterializationHandoff(mission) ||
                     !ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
                 {
                     return true;

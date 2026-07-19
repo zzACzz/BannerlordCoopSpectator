@@ -849,6 +849,31 @@ namespace CoopSpectator.Infrastructure
             {
             }
 
+            try
+            {
+                BattleScenarioContextMessage preMissionScenarioContext =
+                    CoopPreMissionTopologyRuntimeState.GetActiveScenarioContext();
+                if (preMissionScenarioContext != null &&
+                    CoopPreMissionTopologyRuntimeState.TryGetActive(
+                        string.Empty,
+                        out CoopPreMissionTopologyContract preMissionContract,
+                        out _))
+                {
+                    return new BattleSnapshotMessage
+                    {
+                        BattleId = preMissionContract.BattleId,
+                        MapScene = preMissionContract.RuntimeScene,
+                        MultiplayerScene = preMissionContract.RuntimeScene,
+                        PlayerSide = preMissionContract.PlayerSide,
+                        PlayerTroopsReceivedDamageMultiplier = 1f,
+                        ScenarioContext = preMissionScenarioContext
+                    };
+                }
+            }
+            catch
+            {
+            }
+
             if (GameNetwork.IsClient && !CustomGameJoinContextState.ShouldAllowLocalBattleRosterFileFallback())
             {
                 ModLogger.Info(

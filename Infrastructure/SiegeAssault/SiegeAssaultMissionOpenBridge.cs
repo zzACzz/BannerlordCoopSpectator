@@ -389,6 +389,17 @@ namespace CoopSpectator.Infrastructure
 
             try
             {
+                BattleScenarioContextMessage preMissionScenarioContext =
+                    CoopPreMissionTopologyRuntimeState.GetActiveScenarioContext();
+                if (preMissionScenarioContext != null)
+                    return preMissionScenarioContext;
+            }
+            catch
+            {
+            }
+
+            try
+            {
                 if (!GameNetwork.IsClient || CustomGameJoinContextState.ShouldAllowLocalBattleRosterFileFallback())
                 {
                     BattleSnapshotMessage rosterSnapshot = BattleRosterFileHelper.ReadSnapshot();

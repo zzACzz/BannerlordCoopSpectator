@@ -386,6 +386,7 @@ namespace CoopSpectator
                 else
                 {
                     TryConfigureDedicatedHarmonyRuntimeCompat();
+                    TryApplyPreMissionTopologyContractPatch();
                     TryApplyGameModeOverridePatch();
                     TryApplyMissionStateOpenNewPatches();
                     TryApplyExactCampaignArmyBootstrapPatch();
@@ -505,6 +506,22 @@ namespace CoopSpectator
             catch (Exception ex)
             {
                 ModLogger.Info("CoopSpectatorDedicated: ExactCampaignArmyBootstrap patch apply failed: " + ex.Message);
+            }
+        }
+
+        private static void TryApplyPreMissionTopologyContractPatch()
+        {
+            try
+            {
+                if (_harmony == null)
+                    _harmony = new Harmony("com.coopspectator.dedicated");
+                PreMissionTopologyContractPatch.Apply(_harmony);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopSpectatorDedicated: PreMissionTopologyContract patch apply failed: " +
+                    ex.Message);
             }
         }
 

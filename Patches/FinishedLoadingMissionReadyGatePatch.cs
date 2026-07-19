@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using System.Threading.Tasks;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.MissionBehaviors;
 using HarmonyLib;
 using NetworkMessages.FromClient;
 using NetworkMessages.FromServer;
@@ -16,6 +18,10 @@ namespace CoopSpectator.Patches
     {
         private static FieldInfo _baseNetworkComponentDataField;
         private static MethodInfo _ensureBaseNetworkComponentDataMethod;
+        private static readonly object DeferredPeerSync = new object();
+        private static readonly HashSet<int> DeferredPeerIndices = new HashSet<int>();
+        private static readonly TimeSpan FinishedLoadingBarrierTimeout = TimeSpan.FromSeconds(90);
+        private static readonly TimeSpan FinishedLoadingBarrierPollInterval = TimeSpan.FromMilliseconds(25);
 
         public static void Apply(Harmony harmony)
         {
@@ -70,10 +76,31 @@ namespace CoopSpectator.Patches
             if (networkPeer == null || networkPeer.IsServerPeer)
                 return true;
 
-            if (!PendingBattleMissionStartupState.ShouldDelayServerFinishedLoadingValidation(Mission.Current, out string delayDetails))
+            Mission requestedMission = Mission.Current;
+            bool startupDelayRequired =
+                PendingBattleMissionStartupState.ShouldDelayServerFinishedLoadingValidation(
+                    requestedMission,
+                    out string delayDetails);
+            bool payloadBarrierRequired =
+                CoopMissionNetworkBridge.ShouldGateServerFinishedLoading(
+                    requestedMission,
+                    out string payloadBarrierDetails);
+            if (!startupDelayRequired && !payloadBarrierRequired)
                 return true;
 
-            HandleClientEventFinishedLoadingDeferred(__instance, networkPeer, message, delayDetails);
+            if (!TryRegisterDeferredPeer(networkPeer.Index))
+            {
+                __result = true;
+                return false;
+            }
+
+            HandleClientEventFinishedLoadingDeferred(
+                __instance,
+                networkPeer,
+                message.BattleIndex,
+                requestedMission,
+                delayDetails,
+                payloadBarrierDetails);
             __result = true;
             return false;
         }
@@ -81,39 +108,134 @@ namespace CoopSpectator.Patches
         private static async void HandleClientEventFinishedLoadingDeferred(
             object instance,
             NetworkCommunicator networkPeer,
-            FinishedLoading message,
-            string initialDelayDetails)
+            int requestedBattleIndex,
+            Mission requestedMission,
+            string initialDelayDetails,
+            string initialPayloadBarrierDetails)
         {
             DateTime startedUtc = DateTime.UtcNow;
             string finalDelayDetails = initialDelayDetails ?? string.Empty;
+            string finalPayloadBarrierDetails = initialPayloadBarrierDetails ?? string.Empty;
+            string action = "none";
 
             try
             {
                 EnsureBaseNetworkComponentData(instance);
-                while (PendingBattleMissionStartupState.ShouldDelayServerFinishedLoadingValidation(Mission.Current, out string delayDetails))
+                while (true)
                 {
+                    if (networkPeer == null ||
+                        networkPeer.IsServerPeer ||
+                        !networkPeer.IsConnectionActive)
+                    {
+                        action = "peer-disconnected";
+                        break;
+                    }
+
+                    Mission currentMission = Mission.Current;
+                    int currentBattleIndex = GetCurrentBattleIndex(instance);
+                    bool battleChanged = currentBattleIndex != requestedBattleIndex;
+                    if (!battleChanged &&
+                        requestedMission == null &&
+                        currentMission != null)
+                    {
+                        requestedMission = currentMission;
+                    }
+
+                    bool missionChanged =
+                        battleChanged ||
+                        (requestedMission != null &&
+                         (currentMission == null ||
+                          !ReferenceEquals(currentMission, requestedMission)));
+                    if (missionChanged)
+                    {
+                        SendUnloadMission(networkPeer);
+                        action = "UnloadMission:mission-or-battle-changed";
+                        break;
+                    }
+
+                    if (DateTime.UtcNow - startedUtc >= FinishedLoadingBarrierTimeout)
+                    {
+                        SendUnloadMission(networkPeer);
+                        action = "UnloadMission:barrier-timeout";
+                        break;
+                    }
+
+                    bool startupDelayRequired =
+                        PendingBattleMissionStartupState.ShouldDelayServerFinishedLoadingValidation(
+                            currentMission,
+                            out string delayDetails);
                     finalDelayDetails = delayDetails ?? string.Empty;
-                    await Task.Delay(1);
-                }
+                    bool payloadBarrierRequired =
+                        CoopMissionNetworkBridge.ShouldGateServerFinishedLoading(
+                            currentMission,
+                            out string payloadBarrierPolicy);
+                    bool payloadBarrierReady = !payloadBarrierRequired;
+                    if (payloadBarrierRequired)
+                    {
+                        CoopMissionNetworkBridge bridge =
+                            currentMission.GetMissionBehavior<CoopMissionNetworkBridge>();
+                        if (bridge == null)
+                        {
+                            finalPayloadBarrierDetails =
+                                "Policy={" + payloadBarrierPolicy + "} Bridge=missing";
+                        }
+                        else
+                        {
+                            payloadBarrierReady = bridge.TryAdvancePeerFinishedLoadingBarrier(
+                                networkPeer,
+                                out string payloadReadiness);
+                            finalPayloadBarrierDetails =
+                                "Policy={" + payloadBarrierPolicy + "} Readiness={" +
+                                payloadReadiness + "}";
+                        }
+                    }
+                    else
+                    {
+                        finalPayloadBarrierDetails = "Policy={" + payloadBarrierPolicy + "}";
+                    }
 
-                if (networkPeer == null || networkPeer.IsServerPeer)
-                    return;
+                    if (!startupDelayRequired &&
+                        payloadBarrierReady &&
+                        requestedMission != null)
+                    {
+                        bool finalMissionIdentityMatched =
+                            ReferenceEquals(Mission.Current, requestedMission) &&
+                            GetCurrentBattleIndex(instance) == requestedBattleIndex;
+                        bool finalPayloadBarrierReady = true;
+                        if (payloadBarrierRequired)
+                        {
+                            CoopMissionNetworkBridge bridge =
+                                currentMission.GetMissionBehavior<CoopMissionNetworkBridge>();
+                            string finalPayloadReadiness = "bridge-missing";
+                            finalPayloadBarrierReady =
+                                bridge != null &&
+                                bridge.TryAdvancePeerFinishedLoadingBarrier(
+                                    networkPeer,
+                                    out finalPayloadReadiness);
+                            finalPayloadBarrierDetails +=
+                                " FinalRecheck={" + finalPayloadReadiness + "}";
+                        }
 
-                int currentBattleIndex = GetCurrentBattleIndex(instance);
-                Mission currentMission = Mission.Current;
-                bool shouldUnload = currentMission == null || currentBattleIndex != message.BattleIndex;
+                        if (finalMissionIdentityMatched &&
+                            finalPayloadBarrierReady &&
+                            networkPeer.IsConnectionActive)
+                        {
+                            Debug.Print(
+                                "Server: " + networkPeer.UserName +
+                                " has finished loading. From now on, I will include him in the broadcasted messages");
+                            GameNetwork.ClientFinishedLoading(networkPeer);
+                            action = "ClientFinishedLoading";
+                        }
+                        else
+                        {
+                            SendUnloadMission(networkPeer);
+                            action = "UnloadMission:final-recheck-failed";
+                        }
 
-                Debug.Print("Server: " + networkPeer.UserName + " has finished loading. From now on, I will include him in the broadcasted messages");
+                        break;
+                    }
 
-                if (shouldUnload)
-                {
-                    GameNetwork.BeginModuleEventAsServer(networkPeer);
-                    GameNetwork.WriteMessage(new UnloadMission(true));
-                    GameNetwork.EndModuleEventAsServer();
-                }
-                else
-                {
-                    GameNetwork.ClientFinishedLoading(networkPeer);
+                    await Task.Delay(FinishedLoadingBarrierPollInterval);
                 }
 
                 ModLogger.Info(
@@ -122,11 +244,13 @@ namespace CoopSpectator.Patches
                     " DeferredForMs=" + (DateTime.UtcNow - startedUtc).TotalMilliseconds.ToString("0") +
                     " InitialDelayDetails=" + (initialDelayDetails ?? string.Empty) +
                     " FinalDelayDetails=" + (finalDelayDetails ?? string.Empty) +
-                    " MissionScene=" + (currentMission?.SceneName ?? "null") +
-                    " MissionState=" + (currentMission?.CurrentState.ToString() ?? "null") +
-                    " CurrentBattleIndex=" + currentBattleIndex +
-                    " FinishedLoadingBattleIndex=" + message.BattleIndex +
-                    " Action=" + (shouldUnload ? "UnloadMission" : "ClientFinishedLoading") + ".");
+                    " InitialPayloadBarrierDetails=" + (initialPayloadBarrierDetails ?? string.Empty) +
+                    " FinalPayloadBarrierDetails=" + (finalPayloadBarrierDetails ?? string.Empty) +
+                    " MissionScene=" + (Mission.Current?.SceneName ?? "null") +
+                    " MissionState=" + (Mission.Current?.CurrentState.ToString() ?? "null") +
+                    " CurrentBattleIndex=" + GetCurrentBattleIndex(instance) +
+                    " FinishedLoadingBattleIndex=" + requestedBattleIndex +
+                    " Action=" + action + ".");
             }
             catch (Exception ex)
             {
@@ -134,9 +258,46 @@ namespace CoopSpectator.Patches
                     "FinishedLoadingMissionReadyGatePatch: deferred FinishedLoading handling failed. " +
                     "Peer=" + (networkPeer?.UserName ?? "unknown") +
                     " InitialDelayDetails=" + (initialDelayDetails ?? string.Empty) +
-                    " FinalDelayDetails=" + (finalDelayDetails ?? string.Empty) + ".",
+                    " FinalDelayDetails=" + (finalDelayDetails ?? string.Empty) +
+                    " FinalPayloadBarrierDetails=" + (finalPayloadBarrierDetails ?? string.Empty) + ".",
                     ex);
+
+                if (networkPeer != null && networkPeer.IsConnectionActive)
+                    SendUnloadMission(networkPeer);
             }
+            finally
+            {
+                if (networkPeer != null)
+                    UnregisterDeferredPeer(networkPeer.Index);
+            }
+        }
+
+        private static bool TryRegisterDeferredPeer(int peerIndex)
+        {
+            if (peerIndex < 0)
+                return false;
+
+            lock (DeferredPeerSync)
+                return DeferredPeerIndices.Add(peerIndex);
+        }
+
+        private static void UnregisterDeferredPeer(int peerIndex)
+        {
+            if (peerIndex < 0)
+                return;
+
+            lock (DeferredPeerSync)
+                DeferredPeerIndices.Remove(peerIndex);
+        }
+
+        private static void SendUnloadMission(NetworkCommunicator networkPeer)
+        {
+            if (networkPeer == null || networkPeer.IsServerPeer || !networkPeer.IsConnectionActive)
+                return;
+
+            GameNetwork.BeginModuleEventAsServer(networkPeer);
+            GameNetwork.WriteMessage(new UnloadMission(true));
+            GameNetwork.EndModuleEventAsServer();
         }
 
         private static void EnsureBaseNetworkComponentData(object instance)

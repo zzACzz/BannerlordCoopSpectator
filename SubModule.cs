@@ -204,6 +204,8 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
 
                 if (EnableManualHarmonyApply)
                 {
+                    PreMissionTopologyContractPatch.Apply(harmony);
+
                     if (EnableManualPatchLobbyClient)
                     {
                         GameModeOverridePatches.Apply(harmony);
@@ -332,6 +334,7 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                         MultiplayerHeroClassOverridePatch.Apply(harmony);
                         CampaignCombatProfileAgentStatsPatch.Apply(harmony);
                         CoopBattleDisplayNameConsumerPatch.Apply(harmony);
+                        AgentDisplayNamePatch.Apply(harmony);
                     }
                     else
                     {
@@ -361,6 +364,7 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                         if (loadedAssemblyName == "TaleWorlds.MountAndBlade.Multiplayer" ||
                             loadedAssemblyName == "TaleWorlds.MountAndBlade.Lobby")
                         {
+                            PreMissionTopologyContractPatch.Apply(harmony);
                             LobbyCustomGameLocalJoinPatch.Apply(harmony);
                         }
 

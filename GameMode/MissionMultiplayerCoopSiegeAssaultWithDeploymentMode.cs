@@ -659,7 +659,8 @@ namespace CoopSpectator.GameMode
         {
             return BattleSnapshotRuntimeState.GetScenarioContext()
                    ?? BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext
-                   ?? BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+                   ?? BattleSnapshotRuntimeState.GetState()?.ScenarioContext
+                   ?? CoopPreMissionTopologyRuntimeState.GetActiveScenarioContext();
         }
 
         private static bool ShouldUseFieldMaterializedArmyRuntime(Mission mission)
@@ -678,6 +679,11 @@ namespace CoopSpectator.GameMode
                 .FirstOrDefault(side => side != null && side.IsPlayerSide);
             if (snapshotPlayerSide != null)
                 return IsAttackerSideKey(snapshotPlayerSide.SideText ?? snapshotPlayerSide.SideId);
+
+            string preMissionPlayerSide =
+                CoopPreMissionTopologyRuntimeState.GetActivePlayerSide();
+            if (!string.IsNullOrWhiteSpace(preMissionPlayerSide))
+                return IsAttackerSideKey(preMissionPlayerSide);
 
             return true;
         }

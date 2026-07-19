@@ -264,6 +264,11 @@ namespace CoopSpectator.Patches
             patchedCount += TryPatchMethod(
                 harmony,
                 "TaleWorlds.MountAndBlade.DedicatedCustomServer.MissionCustomGameServerComponent",
+                "EndGameAsServer",
+                nameof(MissionCustomGameServerComponent_EndGameAsServer_Prefix)) ? 1 : 0;
+            patchedCount += TryPatchMethod(
+                harmony,
+                "TaleWorlds.MountAndBlade.DedicatedCustomServer.MissionCustomGameServerComponent",
                 "AddScoresToStats",
                 nameof(MissionCustomGameServerComponent_AddScoresToStats_Prefix),
                 typeof(MultiplayerGameType),
@@ -832,6 +837,45 @@ namespace CoopSpectator.Patches
             LogAfterStartPostfixObservation((__instance as MissionBehavior)?.Mission ?? Mission.Current, "MissionCustomGameServerComponent.AfterStart completed");
         }
 
+        private static void MissionCustomGameServerComponent_EndGameAsServer_Prefix(object __instance)
+        {
+            try
+            {
+                Mission mission = (__instance as MissionBehavior)?.Mission ?? Mission.Current;
+                if (!GameNetwork.IsServer ||
+                    !GameNetwork.IsDedicatedServer ||
+                    !IsDedicatedServerProcess() ||
+                    !ReferenceEquals(Mission.Current, mission) ||
+                    !IsCoopBattleMapRuntime(mission) ||
+                    !mission.MissionEnded ||
+                    mission.CurrentState != Mission.State.Continuing ||
+                    CoopBattlePhaseRuntimeState.GetPhase() < CoopBattlePhase.BattleEnded)
+                {
+                    return;
+                }
+
+                MissionLobbyComponent lobbyComponent =
+                    mission.GetMissionBehavior<MissionLobbyComponent>();
+                if (lobbyComponent == null ||
+                    lobbyComponent.CurrentMultiplayerState !=
+                    MissionLobbyComponent.MultiplayerGameState.Ending)
+                {
+                    return;
+                }
+
+                mission.EndMission();
+                ModLogger.Info(
+                    "BattleShellSuppressionPatch: completed dedicated coop mission end transition before native server unload. " +
+                    "Scene=" + (mission.SceneName ?? "unknown") + ".");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Error(
+                    "BattleShellSuppressionPatch: dedicated coop mission end transition guard failed.",
+                    ex);
+            }
+        }
+
         private static bool MissionCustomGameServerComponent_AddScoresToStats_Prefix(object __instance, MultiplayerGameType __0, IEnumerable<MissionPeer> __1)
         {
             try
@@ -1008,9 +1052,16 @@ namespace CoopSpectator.Patches
                 return false;
 
             BattleScenarioContextMessage scenarioContext =
-                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
-                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+                ResolveRemoteClientSiegeScenarioContext();
             return ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(scenarioContext);
+        }
+
+        private static BattleScenarioContextMessage ResolveRemoteClientSiegeScenarioContext()
+        {
+            return
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext ??
+                CoopPreMissionTopologyRuntimeState.GetActiveScenarioContext();
         }
 
         private static void MultiplayerRoundController_AfterStart_Prefix(object __instance)
@@ -2158,8 +2209,7 @@ namespace CoopSpectator.Patches
                 return false;
 
             BattleScenarioContextMessage scenarioContext =
-                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
-                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+                ResolveRemoteClientSiegeScenarioContext();
             return ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(scenarioContext);
         }
 

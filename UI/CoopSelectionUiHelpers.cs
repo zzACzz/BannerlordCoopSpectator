@@ -1212,6 +1212,13 @@ namespace CoopSpectator.UI
                 return "Finalizing troop visuals...";
             }
 
+            if (trimmedSummary.StartsWith("authoritative-materialized-entry-snapshot", StringComparison.OrdinalIgnoreCase) ||
+                trimmedSummary.StartsWith("authoritative-materialized-entry-map-incomplete", StringComparison.OrdinalIgnoreCase) ||
+                trimmedSummary.StartsWith("active-authoritative-materialized-agents-pending", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Finalizing troop materialization...";
+            }
+
             return "Finalizing siege materialization...";
         }
 

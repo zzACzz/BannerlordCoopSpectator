@@ -8,7 +8,7 @@ This archive contains only:
 - `CoopSpectatorDedicated`
 - `README_EN.md`
 - `README_UA.md`
-- `CHANGELOG_v0.1.2.md`
+- `CHANGELOG_v0.1.3.md`
 
 ## Install
 
@@ -19,7 +19,7 @@ This archive contains only:
 
 This light package does not include `SandBox` or `SandBoxCore`.
 
-`BannerlordCoopCampaign_v0.1.2_HostLarge.zip` was removed from this release because the recent patch increased the size of the base game modules.
+`BannerlordCoopCampaign_v0.1.3_HostLarge.zip` is not included in this release because of the large size of the base game modules.
 
 To start the server correctly, also copy `SandBox` and `SandBoxCore` from the game's `Modules` folder into the dedicated server `Modules` folder and allow overwrite.
 
