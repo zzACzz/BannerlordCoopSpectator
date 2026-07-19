@@ -4062,6 +4062,7 @@ namespace CoopSpectator.UI
 
         private void HandleCommanderAutoDeployRequested()
         {
+            TryApplyCommanderDeploymentOrderBridgeAutoDeploy();
             TrySendCommanderDeploymentCompletionRequest(
                 autoDeploy: true,
                 source: "CoopCommanderDeploymentUI AutoDeploy");
@@ -4093,6 +4094,9 @@ namespace CoopSpectator.UI
                     _commanderDeploymentViewModel,
                     Mission,
                     "mission-order-auto-deploy");
+                OrderOfBattleSiegeProjectedCountsPatch.TrySyncCommanderDeploymentFormationAssignmentsForTeam(
+                    Mission?.PlayerTeam,
+                    "CoopMissionSelectionView mission-order-auto-deploy");
                 ModLogger.Info("CoopMissionSelectionView: applied safe MissionOrderVM auto deployment. Handled=" + handled);
             }
             catch (Exception ex)
@@ -5600,22 +5604,11 @@ namespace CoopSpectator.UI
             BattleScenarioContextMessage scenarioContext,
             BattleSideEnum side)
         {
-            if (mission == null)
-                return false;
-
-            if (ExactCampaignCommanderDeploymentRuntime.IsExactLandBattleScenario(
+            return ExactCampaignCommanderDeploymentRuntime
+                .ShouldPreserveMountedFormationClasses(
                     mission,
-                    scenarioContext))
-            {
-                return true;
-            }
-
-            return SiegeAmbushScenarioContract.IsSiegeAmbushScenario(scenarioContext) &&
-                   side != BattleSideEnum.None &&
-                   ExactCampaignSiegeAssaultWithDeploymentRuntime
-                       .ShouldDeploymentPlanSpawnWithHorses(
-                           mission,
-                           side);
+                    scenarioContext,
+                    side);
         }
 
         internal static bool IsCommanderBattleOrderActive()

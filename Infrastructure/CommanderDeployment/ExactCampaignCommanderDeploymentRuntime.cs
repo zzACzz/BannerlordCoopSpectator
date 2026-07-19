@@ -1,4 +1,5 @@
 using CoopSpectator.Network.Messages;
+using CoopSpectator.Infrastructure.SiegeAmbush;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
 
@@ -23,6 +24,25 @@ namespace CoopSpectator.Infrastructure
         {
             return ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(scenarioContext) ||
                    IsExactLandBattleScenario(mission, scenarioContext);
+        }
+
+        public static bool ShouldPreserveMountedFormationClasses(
+            Mission mission,
+            BattleScenarioContextMessage scenarioContext,
+            BattleSideEnum side)
+        {
+            if (mission == null)
+                return false;
+
+            if (IsExactLandBattleScenario(mission, scenarioContext))
+                return true;
+
+            return SiegeAmbushScenarioContract.IsSiegeAmbushScenario(scenarioContext) &&
+                   side != BattleSideEnum.None &&
+                   ExactCampaignSiegeAssaultWithDeploymentRuntime
+                       .ShouldDeploymentPlanSpawnWithHorses(
+                           mission,
+                           side);
         }
 
         public static bool IsDeploymentRuntimeActive(Mission mission)

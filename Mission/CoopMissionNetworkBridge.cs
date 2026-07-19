@@ -7199,7 +7199,10 @@ namespace CoopSpectator.MissionBehaviors
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
             bool scenarioPreservesMountedClasses =
                 ExactCampaignCommanderDeploymentRuntime
-                    .IsExactLandBattleScenario(mission, scenarioContext);
+                    .ShouldPreserveMountedFormationClasses(
+                        mission,
+                        scenarioContext,
+                        team.Side);
             if (preserveMountedClasses != scenarioPreservesMountedClasses)
             {
                 LogCommanderDeploymentAssignmentDiagnostics(

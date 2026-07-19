@@ -3081,6 +3081,8 @@ namespace CoopSpectator.Infrastructure
 
             int nonEmptyFormationCount = 0;
             int positionedFormationCount = 0;
+            int activeUnitCount = 0;
+            int teleportedUnitCount = 0;
             var failures = new List<string>();
             bool previousTeleportingAgents = mission.IsTeleportingAgents;
             try
@@ -3155,9 +3157,28 @@ namespace CoopSpectator.Infrastructure
                             formation.ArrangementOrder.GetUnitSpacing());
                         formation.ApplyActionOnEachUnit(agent =>
                         {
-                            agent?.ForceUpdateCachedAndFormationValues(
+                            if (agent == null || !agent.IsActive())
+                                return;
+
+                            activeUnitCount++;
+                            agent.ForceUpdateCachedAndFormationValues(
                                 updateOnlyMovement: false,
                                 arrangementChangeAllowed: false);
+                            WorldPosition orderPosition =
+                                formation.GetOrderPositionOfUnit(agent);
+                            if (!orderPosition.IsValid)
+                            {
+                                failures.Add(
+                                    formation.FormationIndex +
+                                    ":unit-" +
+                                    agent.Index +
+                                    "-order-position-invalid");
+                                return;
+                            }
+
+                            agent.TeleportToPosition(
+                                orderPosition.GetGroundVec3());
+                            teleportedUnitCount++;
                         });
                         formation.SetHasPendingUnitPositions(
                             hasPendingUnitPositions: false);
@@ -3185,9 +3206,13 @@ namespace CoopSpectator.Infrastructure
                 "Team=" + DescribeDeploymentTeam(team) +
                 " NonEmpty=" + nonEmptyFormationCount +
                 " Positioned=" + positionedFormationCount +
+                " ActiveUnits=" + activeUnitCount +
+                " TeleportedUnits=" + teleportedUnitCount +
                 " Failures=[" + string.Join("; ", failures) + "]";
             return nonEmptyFormationCount > 0 &&
-                   positionedFormationCount == nonEmptyFormationCount;
+                   positionedFormationCount == nonEmptyFormationCount &&
+                   activeUnitCount > 0 &&
+                   teleportedUnitCount == activeUnitCount;
         }
 
         private static void ForceUpdateDeploymentTeamUnits(Team team)
