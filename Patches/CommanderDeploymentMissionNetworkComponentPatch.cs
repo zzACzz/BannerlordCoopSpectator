@@ -822,7 +822,18 @@ namespace CoopSpectator.Patches
                         formation.SetPositioning(orderPosition, direction);
 
                     formation.ApplyActionOnEachUnit(
-                        agent => agent.ForceUpdateCachedAndFormationValues(updateOnlyMovement: true, arrangementChangeAllowed: false));
+                        agent =>
+                        {
+                            if (agent == null || !agent.IsActive())
+                                return;
+
+                            agent.ForceUpdateCachedAndFormationValues(
+                                updateOnlyMovement: false,
+                                arrangementChangeAllowed: false);
+                            WorldPosition unitOrderPosition = formation.GetOrderPositionOfUnit(agent);
+                            if (unitOrderPosition.IsValid)
+                                agent.TeleportToPosition(unitOrderPosition.GetGroundVec3());
+                        });
                     formation.SetHasPendingUnitPositions(hasPendingUnitPositions: false);
                     formation.SetMovementOrder(MovementOrder.MovementOrderStop);
                 }
