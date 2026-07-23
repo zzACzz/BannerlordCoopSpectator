@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using CoopSpectator.Campaign.Relief;
 using CoopSpectator.Campaign.SallyOut;
 using CoopSpectator.Campaign.VillageBattle;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.Infrastructure.Relief;
 using CoopSpectator.Infrastructure.SallyOut;
 using CoopSpectator.Infrastructure.VillageBattle;
 using CoopSpectator.Network.Messages;
@@ -209,6 +211,22 @@ namespace CoopSpectator.Campaign.LandBattle
             BattleSnapshotMessage snapshot =
                 BattleSnapshotRuntimeState.GetCurrent() ??
                 BattleSnapshotRuntimeState.GetState()?.Snapshot;
+            if (ExactReliefCampaignBattleAdapter.IsCampaignBattle(battle))
+            {
+                if (!ExactReliefCampaignBattleAdapter
+                        .TryValidateFinalEncounterResult(
+                            battle,
+                            snapshot,
+                            result,
+                            out diagnostics))
+                {
+                    return false;
+                }
+
+                mode = ExactReliefScenarioContract.ResultStage;
+                return true;
+            }
+
             if (ExactVillageBattleCampaignBattleAdapter.IsCampaignBattle(battle))
             {
                 if (!ExactVillageBattleCampaignBattleAdapter

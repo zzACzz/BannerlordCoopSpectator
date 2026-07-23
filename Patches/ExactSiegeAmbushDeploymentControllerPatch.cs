@@ -129,6 +129,9 @@ namespace CoopSpectator.Patches
 
                 if (_authoritativeFinishScopeDepth > 0)
                 {
+                    CommanderDeploymentFormationSnapshotRuntime.CaptureAll(
+                        mission,
+                        "DeploymentMissionController.FinishDeployment prefix");
                     __state = true;
                     return true;
                 }
@@ -162,6 +165,9 @@ namespace CoopSpectator.Patches
             try
             {
                 Mission mission = __instance?.Mission;
+                CommanderDeploymentFormationSnapshotRuntime.RestoreAllAfterNativeFinish(
+                    mission,
+                    "DeploymentMissionController.FinishDeployment postfix");
                 RestorePreBattleHoldAfterAuthoritativeDeployment(
                     mission,
                     "authoritative deployment finished");
@@ -430,7 +436,7 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static bool IsExactSiegeAmbushMission(Mission mission)
+        internal static bool IsExactSiegeAmbushMission(Mission mission)
         {
             if (mission == null)
                 return false;

@@ -1011,6 +1011,24 @@ namespace CoopSpectator.Infrastructure
             return TryAutoDeployDeployment(
                 mission,
                 finishDeployment: true,
+                preservedSides: null,
+                out diagnostics);
+        }
+
+        public static bool TryForceAutoDeployAndFinishDeploymentPreservingSides(
+            Mission mission,
+            IEnumerable<BattleSideEnum> preservedSides,
+            out string diagnostics)
+        {
+            HashSet<BattleSideEnum> preservedSideSet =
+                preservedSides != null
+                    ? new HashSet<BattleSideEnum>(
+                        preservedSides.Where(side => side != BattleSideEnum.None))
+                    : new HashSet<BattleSideEnum>();
+            return TryAutoDeployDeployment(
+                mission,
+                finishDeployment: true,
+                preservedSideSet,
                 out diagnostics);
         }
 
@@ -1021,6 +1039,7 @@ namespace CoopSpectator.Infrastructure
             return TryAutoDeployDeployment(
                 mission,
                 finishDeployment: false,
+                preservedSides: null,
                 out diagnostics);
         }
 
@@ -1485,6 +1504,7 @@ namespace CoopSpectator.Infrastructure
         private static bool TryAutoDeployDeployment(
             Mission mission,
             bool finishDeployment,
+            HashSet<BattleSideEnum> preservedSides,
             out string diagnostics)
         {
             diagnostics = "mission-null";
@@ -1532,9 +1552,7 @@ namespace CoopSpectator.Infrastructure
                     scenarioContext,
                     mission.SceneName,
                     out _);
-            bool preserveExactSiegeAmbushPlayerDeployment =
-                finishDeployment &&
-                isExactSiegeAmbush;
+            preservedSides = preservedSides ?? new HashSet<BattleSideEnum>();
 
             string deploymentPlanDiagnostics = "plan-not-remade";
             if (mission.GetDeploymentPlan<IMissionDeploymentPlan>(out IMissionDeploymentPlan deploymentPlan) &&
@@ -1543,8 +1561,8 @@ namespace CoopSpectator.Infrastructure
                 List<string> planResults = new List<string>();
                 foreach (Team battleTeam in battleTeams)
                 {
-                    if (preserveExactSiegeAmbushPlayerDeployment &&
-                        ReferenceEquals(battleTeam, playerTeam))
+                    if (finishDeployment &&
+                        preservedSides.Contains(battleTeam.Side))
                     {
                         planResults.Add(DescribeDeploymentTeam(battleTeam) + ":preserved-manual");
                         continue;
@@ -1604,6 +1622,7 @@ namespace CoopSpectator.Infrastructure
                 ShouldUseDedicatedFieldMaterializedSiegeMachineStateOnly(mission);
 
             int autoDeployedTeamCount = 0;
+            int preservedTeamCount = 0;
             bool forceUpdatedUnits = false;
             bool finishedDeployment = false;
             bool playerSiegeWeaponsDeployed = false;
@@ -1646,9 +1665,10 @@ namespace CoopSpectator.Infrastructure
 
                     foreach (Team battleTeam in battleTeams)
                     {
-                        if (preserveExactSiegeAmbushPlayerDeployment &&
-                            ReferenceEquals(battleTeam, playerTeam))
+                        if (finishDeployment &&
+                            preservedSides.Contains(battleTeam.Side))
                         {
+                            preservedTeamCount++;
                             continue;
                         }
 
@@ -1708,9 +1728,10 @@ namespace CoopSpectator.Infrastructure
                 {
                     foreach (Team battleTeam in battleTeams)
                     {
-                        if (preserveExactSiegeAmbushPlayerDeployment &&
-                            ReferenceEquals(battleTeam, playerTeam))
+                        if (finishDeployment &&
+                            preservedSides.Contains(battleTeam.Side))
                         {
+                            preservedTeamCount++;
                             continue;
                         }
 
@@ -1867,13 +1888,18 @@ namespace CoopSpectator.Infrastructure
                 " PlayerSiegeWeaponsDeployed=" + playerSiegeWeaponsDeployed +
                 " AiSiegeWeaponsDeployed=" + aiSiegeWeaponsDeployed +
                 " ForceUpdatedUnits=" + forceUpdatedUnits +
-                " PreservedExactSiegeAmbushPlayerDeployment=" + preserveExactSiegeAmbushPlayerDeployment +
+                " PreservedSides=[" + string.Join(",", preservedSides) + "]" +
+                " PreservedTeamCount=" + preservedTeamCount +
                 " RequestedFinishDeployment=" + finishDeployment +
                 " FinishedDeploymentCall=" + finishedDeployment +
                 " NonFatalFaults=[" + string.Join("; ", nonFatalDeploymentFaults) + "]" +
                 " DeploymentFinished=" + deploymentFinished;
             return finishDeployment
-                ? deploymentFinished && (autoDeployedTeamCount > 0 || controlledSiegeMachinesDeployed || stateOnlyFieldMaterializedDeployment)
+                ? deploymentFinished &&
+                  (autoDeployedTeamCount > 0 ||
+                   preservedTeamCount > 0 ||
+                   controlledSiegeMachinesDeployed ||
+                   stateOnlyFieldMaterializedDeployment)
                 : autoDeployedTeamCount > 0 || controlledSiegeMachinesDeployed;
         }
 

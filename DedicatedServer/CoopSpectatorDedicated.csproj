@@ -55,6 +55,7 @@
     <Compile Include="..\Mission\CoopMissionBehaviors.cs" Link="Mission\CoopMissionBehaviors.cs" />
     <Compile Include="..\Mission\CoopExactCampaignLordsHallMissionController.cs" Link="Mission\CoopExactCampaignLordsHallMissionController.cs" />
     <Compile Include="..\Mission\LordsHall\LordsHallMissionRuntime.cs" Link="Mission\LordsHall\LordsHallMissionRuntime.cs" />
+    <Compile Include="..\Mission\CoopExactCampaignReliefMissionController.cs" Link="Mission\CoopExactCampaignReliefMissionController.cs" />
     <Compile Include="..\Mission\CoopExactCampaignSiegeAmbushMissionController.cs" Link="Mission\CoopExactCampaignSiegeAmbushMissionController.cs" />
     <Compile Include="..\Mission\CoopMissionNetworkBridge.cs" Link="Mission\CoopMissionNetworkBridge.cs" />
     <Compile Include="..\MissionModels\CoopCampaignDerivedAgentStatCalculateModel.cs" Link="MissionModels\CoopCampaignDerivedAgentStatCalculateModel.cs" />
@@ -80,6 +81,7 @@
     <Compile Include="..\Infrastructure\CampaignCasualtyProbabilityCalculator.cs" Link="Infrastructure\CampaignCasualtyProbabilityCalculator.cs" />
     <Compile Include="..\Infrastructure\CampaignMissionShellRuntimeState.cs" Link="Infrastructure\CampaignMissionShellRuntimeState.cs" />
     <Compile Include="..\Infrastructure\LordsHall\LordsHallScenarioContract.cs" Link="Infrastructure\LordsHall\LordsHallScenarioContract.cs" />
+    <Compile Include="..\Infrastructure\Relief\ExactReliefScenarioContract.cs" Link="Infrastructure\Relief\ExactReliefScenarioContract.cs" />
     <Compile Include="..\Infrastructure\SallyOut\SallyOutScenarioContract.cs" Link="Infrastructure\SallyOut\SallyOutScenarioContract.cs" />
     <Compile Include="..\Infrastructure\SiegeAmbush\SiegeAmbushScenarioContract.cs" Link="Infrastructure\SiegeAmbush\SiegeAmbushScenarioContract.cs" />
     <Compile Include="..\Infrastructure\VillageBattle\ExactVillageBattleScenarioContract.cs" Link="Infrastructure\VillageBattle\ExactVillageBattleScenarioContract.cs" />

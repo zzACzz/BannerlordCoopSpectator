@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.Infrastructure.SiegeAmbush;
 using CoopSpectator.MissionBehaviors;
 using TaleWorlds.Core;
 using TaleWorlds.Engine;
@@ -319,13 +320,21 @@ namespace CoopSpectator.UI
 
         private IEnumerable<DeploymentPoint> CollectDeploymentPoints()
         {
-            if (_mission?.ActiveMissionObjects == null)
+            bool includeInactiveSiegeAmbushPoints = IsSiegeAmbushScenario();
+            if (_mission == null ||
+                (includeInactiveSiegeAmbushPoints
+                    ? _mission.MissionObjects == null
+                    : _mission.ActiveMissionObjects == null))
+            {
                 yield break;
+            }
 
             IEnumerable<DeploymentPoint> points;
             try
             {
-                points = _mission.ActiveMissionObjects.FindAllWithType<DeploymentPoint>();
+                points = includeInactiveSiegeAmbushPoints
+                    ? _mission.MissionObjects.FindAllWithType<DeploymentPoint>().ToList()
+                    : _mission.ActiveMissionObjects.FindAllWithType<DeploymentPoint>().ToList();
             }
             catch
             {
@@ -335,7 +344,7 @@ namespace CoopSpectator.UI
             foreach (DeploymentPoint deploymentPoint in points)
             {
                 if (deploymentPoint == null ||
-                    deploymentPoint.IsDisabled ||
+                    (!includeInactiveSiegeAmbushPoints && deploymentPoint.IsDisabled) ||
                     deploymentPoint.Side != _side)
                 {
                     continue;
@@ -356,11 +365,24 @@ namespace CoopSpectator.UI
                 AddDeployableWeapons(result, SafeGetWeaponsUnder(deploymentPoint));
 
             SiegeWeapon selectedWeapon = ResolveSelectedWeapon(deploymentPoint);
+            bool includeInactiveSiegeAmbushWeapons = IsSiegeAmbushScenario();
             return result
-                .Where(weapon => weapon != null && !weapon.IsDisabled && weapon.Side == deploymentPoint.Side)
+                .Where(weapon =>
+                    weapon != null &&
+                    (includeInactiveSiegeAmbushWeapons || !weapon.IsDisabled) &&
+                    weapon.Side == deploymentPoint.Side)
                 .Where(weapon => IsCampaignAllowedWeapon(weapon) || ReferenceEquals(weapon, selectedWeapon))
                 .Distinct()
                 .ToList();
+        }
+
+        private bool IsSiegeAmbushScenario()
+        {
+            var scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            return SiegeAmbushScenarioContract.IsSiegeAmbushScenario(scenarioContext);
         }
 
         private static IEnumerable<SynchedMissionObject> SafeEnumerateDeployableWeapons(DeploymentPoint deploymentPoint)

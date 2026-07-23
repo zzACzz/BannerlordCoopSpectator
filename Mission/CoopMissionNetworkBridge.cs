@@ -60,11 +60,15 @@ namespace CoopSpectator.MissionBehaviors
 
         public static bool TryAutoDeployCommanderDeployment(BattleSideEnum side, string entryId, string source)
         {
-            return TrySendClientRequest(
+            CoopMissionNetworkBridge.BeginClientCommanderDeploymentAutoDeployRequest(side);
+            bool sent = TrySendClientRequest(
                 CoopBattleSelectionRequestKind.AutoDeployCommanderDeployment,
                 side,
                 entryId,
                 (source ?? "commander-deployment") + " AutoDeployCommanderDeployment");
+            if (!sent)
+                CoopMissionNetworkBridge.CancelClientCommanderDeploymentAutoDeployRequest(side);
+            return sent;
         }
 
         public static bool TryFinishCommanderDeployment(BattleSideEnum side, string entryId, string source)
@@ -91,6 +95,7 @@ namespace CoopSpectator.MissionBehaviors
             byte[] assignmentBytes,
             byte[] formationLayoutBytes,
             byte[] captainAssignmentBytes,
+            int layoutRevision,
             string source)
         {
             if (!GameNetwork.IsClient ||
@@ -140,7 +145,8 @@ namespace CoopSpectator.MissionBehaviors
                     side,
                     assignmentBytes,
                     safeLayoutBytes,
-                    safeCaptainBytes));
+                    safeCaptainBytes,
+                    layoutRevision));
                 GameNetwork.EndModuleEventAsClient();
                 return true;
             }
@@ -152,6 +158,7 @@ namespace CoopSpectator.MissionBehaviors
                     " Bytes=" + assignmentBytes.Length +
                     " LayoutBytes=" + safeLayoutBytes.Length +
                     " CaptainBytes=" + safeCaptainBytes.Length +
+                    " LayoutRevision=" + layoutRevision +
                     " Source=" + (source ?? "unknown") +
                     " Error=" + ex.Message);
                 return false;
@@ -2131,6 +2138,10 @@ namespace CoopSpectator.MissionBehaviors
         private readonly Dictionary<int, BattleSnapshotClientAssemblyState> _clientBattleSnapshotAssembliesByTransmission = new Dictionary<int, BattleSnapshotClientAssemblyState>();
         private readonly Dictionary<BattleSideEnum, Dictionary<int, string>> _delegatedCaptainEntryIdByFormationIndexAndSide =
             new Dictionary<BattleSideEnum, Dictionary<int, string>>();
+        private readonly Dictionary<BattleSideEnum, int> _commanderDeploymentFormationLayoutRevisionBySide =
+            new Dictionary<BattleSideEnum, int>();
+        private readonly Dictionary<BattleSideEnum, ClientCommanderAutoDeployRequestState> _clientCommanderAutoDeployRequestBySide =
+            new Dictionary<BattleSideEnum, ClientCommanderAutoDeployRequestState>();
         private readonly Dictionary<BattleSideEnum, HashSet<int>> _voluntarilyAiControlledFormationIndicesBySide =
             new Dictionary<BattleSideEnum, HashSet<int>>();
         private readonly Dictionary<BattleSideEnum, string> _lastBroadcastDelegatedCaptainAssignmentKeyBySide =
@@ -2225,6 +2236,72 @@ namespace CoopSpectator.MissionBehaviors
             return true;
         }
 
+        internal static int GetClientCommanderDeploymentFormationLayoutRevision(BattleSideEnum side)
+        {
+            if (!GameNetwork.IsClient || side == BattleSideEnum.None)
+                return 0;
+
+            Mission mission = Mission.Current;
+            CoopMissionNetworkBridge bridge = mission?.GetMissionBehavior<CoopMissionNetworkBridge>();
+            return bridge != null
+                ? bridge.GetCommanderDeploymentFormationLayoutRevision(side)
+                : 0;
+        }
+
+        internal static void BeginClientCommanderDeploymentAutoDeployRequest(BattleSideEnum side)
+        {
+            if (!GameNetwork.IsClient || side == BattleSideEnum.None)
+                return;
+
+            Mission mission = Mission.Current;
+            CoopMissionNetworkBridge bridge = mission?.GetMissionBehavior<CoopMissionNetworkBridge>();
+            bridge?.CaptureClientCommanderDeploymentAutoDeployRequest(side);
+        }
+
+        internal static void CancelClientCommanderDeploymentAutoDeployRequest(BattleSideEnum side)
+        {
+            if (!GameNetwork.IsClient || side == BattleSideEnum.None)
+                return;
+
+            Mission mission = Mission.Current;
+            CoopMissionNetworkBridge bridge = mission?.GetMissionBehavior<CoopMissionNetworkBridge>();
+            bridge?._clientCommanderAutoDeployRequestBySide.Remove(side);
+        }
+
+        public static bool TrySendCommanderDeploymentFormationLayoutState(
+            Mission mission,
+            NetworkCommunicator peer,
+            BattleSideEnum side,
+            out string diagnostics,
+            string source)
+        {
+            diagnostics = "mission-null";
+            if (mission == null)
+                return false;
+
+            if (!GameNetwork.IsServer || peer == null || side == BattleSideEnum.None)
+            {
+                diagnostics =
+                    "invalid-context IsServer=" + GameNetwork.IsServer +
+                    " Peer=" + (peer?.UserName ?? "<null>") +
+                    " Side=" + side;
+                return false;
+            }
+
+            CoopMissionNetworkBridge bridge = mission.GetMissionBehavior<CoopMissionNetworkBridge>();
+            if (bridge == null)
+            {
+                diagnostics = "bridge-missing";
+                return false;
+            }
+
+            return bridge.TrySendCommanderDeploymentFormationLayoutState(
+                peer,
+                side,
+                out diagnostics,
+                source);
+        }
+
         public static bool TryBroadcastCommanderDeploymentSiegeMachineState(
             Mission mission,
             BattleSideEnum side,
@@ -2278,6 +2355,7 @@ namespace CoopSpectator.MissionBehaviors
                 registerer.RegisterBaseHandler<CoopBattleSnapshotManifestMessage>(HandleServerBattleSnapshotManifest);
                 registerer.RegisterBaseHandler<CoopBattleSnapshotChunkV2Message>(HandleServerBattleSnapshotChunkV2);
                 registerer.RegisterBaseHandler<CoopDelegatedCaptainAssignmentsStateMessage>(HandleServerDelegatedCaptainAssignmentsState);
+                registerer.RegisterBaseHandler<CoopCommanderDeploymentFormationLayoutStateMessage>(HandleServerCommanderDeploymentFormationLayoutState);
                 registerer.RegisterBaseHandler<CoopCommanderDeploymentSiegeMachineStateMessage>(HandleServerCommanderDeploymentSiegeMachineState);
                 registerer.RegisterBaseHandler<CoopSiegeMissionObjectIdMapMessage>(HandleServerSiegeMissionObjectIdMap);
                 ModLogger.Info("CoopMissionNetworkBridge: registered client payload chunk handler.");
@@ -3338,6 +3416,146 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
+        private void HandleServerCommanderDeploymentFormationLayoutState(GameNetworkMessage baseMessage)
+        {
+            if (!(baseMessage is CoopCommanderDeploymentFormationLayoutStateMessage message))
+                return;
+
+            try
+            {
+                bool applied = TryApplyServerCommanderDeploymentFormationLayoutState(
+                    message,
+                    out string diagnostics);
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: " +
+                    (applied ? "applied" : "ignored") +
+                    " authoritative commander auto-deploy formation layout state. " +
+                    "Side=" + message.AssignmentSide +
+                    " LayoutRevision=" + message.LayoutRevision +
+                    " LayoutBytes=" + (message.FormationLayoutBytes?.Length ?? 0) +
+                    " Diagnostics={" + (diagnostics ?? string.Empty) + "}");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: authoritative commander auto-deploy formation layout state handling failed. " +
+                    "Side=" + message.AssignmentSide +
+                    " LayoutRevision=" + message.LayoutRevision +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message);
+            }
+        }
+
+        private bool TryApplyServerCommanderDeploymentFormationLayoutState(
+            CoopCommanderDeploymentFormationLayoutStateMessage message,
+            out string diagnostics)
+        {
+            diagnostics = "invalid-context";
+            Mission mission = Mission ?? Mission.Current;
+            if (!GameNetwork.IsClient || mission == null || message == null)
+                return false;
+
+            if (message.AssignmentSide == BattleSideEnum.None || message.LayoutRevision <= 0)
+            {
+                diagnostics =
+                    "invalid-header Side=" + message.AssignmentSide +
+                    " LayoutRevision=" + message.LayoutRevision;
+                return false;
+            }
+
+            CoopBattlePhase phase = CoopBattlePhaseRuntimeState.GetPhase();
+            if (phase != CoopBattlePhase.Deployment)
+            {
+                diagnostics = "phase-not-deployment Phase=" + phase;
+                return false;
+            }
+
+            Team team = mission.Teams?
+                .FirstOrDefault(candidate => candidate != null && candidate.Side == message.AssignmentSide);
+            if (team == null)
+            {
+                diagnostics = "team-missing Side=" + message.AssignmentSide;
+                return false;
+            }
+
+            int currentRevision = GetCommanderDeploymentFormationLayoutRevision(message.AssignmentSide);
+            if (message.LayoutRevision <= currentRevision)
+            {
+                diagnostics =
+                    "stale-state CurrentRevision=" + currentRevision +
+                    " MessageRevision=" + message.LayoutRevision;
+                return false;
+            }
+
+            Dictionary<int, CommanderDeploymentFormationLayout> layouts =
+                DecodeCommanderDeploymentFormationLayouts(message.FormationLayoutBytes);
+            if (layouts.Count <= 0)
+            {
+                diagnostics = "layout-payload-empty-or-invalid";
+                return false;
+            }
+
+            _clientCommanderAutoDeployRequestBySide.TryGetValue(
+                message.AssignmentSide,
+                out ClientCommanderAutoDeployRequestState pendingRequest);
+            bool pendingMatchesCurrentRevision =
+                pendingRequest != null && pendingRequest.BaseRevision == currentRevision;
+            int appliedCount = 0;
+            int preservedManualCount = 0;
+            int rejectedCount = 0;
+            var affectedFormations = new List<Formation>();
+            foreach (KeyValuePair<int, CommanderDeploymentFormationLayout> record in layouts)
+            {
+                Formation formation = ResolveCommanderDeploymentFormation(team, record.Key);
+                if (formation == null)
+                {
+                    rejectedCount++;
+                    continue;
+                }
+
+                if (pendingMatchesCurrentRevision &&
+                    HasClientFormationLayoutChangedSinceAutoDeployRequest(formation, pendingRequest))
+                {
+                    preservedManualCount++;
+                    affectedFormations.Add(formation);
+                    continue;
+                }
+
+                if (!TryApplyCommanderDeploymentFormationLayout(mission, formation, record.Value))
+                {
+                    rejectedCount++;
+                    continue;
+                }
+
+                appliedCount++;
+                affectedFormations.Add(formation);
+            }
+
+            _commanderDeploymentFormationLayoutRevisionBySide[message.AssignmentSide] =
+                message.LayoutRevision;
+            _clientCommanderAutoDeployRequestBySide.Remove(message.AssignmentSide);
+            try
+            {
+                team.TriggerOnFormationsChangedInDeployment();
+            }
+            catch
+            {
+            }
+
+            CommanderDeploymentFormationSnapshotRuntime.LogFormationFrames(
+                mission,
+                affectedFormations,
+                "client-authoritative-auto-deploy-layout-applied",
+                "Side=" + message.AssignmentSide +
+                " LayoutRevision=" + message.LayoutRevision);
+            diagnostics =
+                "CurrentRevision=" + currentRevision +
+                " Applied=" + appliedCount +
+                " PreservedManual=" + preservedManualCount +
+                " Rejected=" + rejectedCount +
+                " Layouts=" + layouts.Count;
+            return appliedCount > 0 || preservedManualCount > 0;
+        }
+
         private void HandleServerCommanderDeploymentSiegeMachineState(GameNetworkMessage baseMessage)
         {
             if (!(baseMessage is CoopCommanderDeploymentSiegeMachineStateMessage message))
@@ -3492,6 +3710,10 @@ namespace CoopSpectator.MissionBehaviors
                 siegeWeapon,
                 message.ClearSelection,
                 out string localApplyDiagnostics);
+            string hitPointNormalizationDiagnostics =
+                applied && !message.ClearSelection && siegeWeapon != null
+                    ? TryNormalizeRemoteClientCommanderDeploymentSiegeWeaponHitPoints(side, siegeWeapon)
+                    : "<skipped>";
             SiegeMissionObjectIdMapRuntime.ClearClientCache(Mission);
             string idBridgeDiagnostics = TryRegisterCommanderDeploymentSiegeMachineIdBridge(
                 message,
@@ -3507,6 +3729,7 @@ namespace CoopSpectator.MissionBehaviors
                 " DeploymentPointResolution=" + deploymentPointResolutionDiagnostics +
                 " SiegeWeaponResolution=" + siegeWeaponResolutionDiagnostics +
                 " LocalApply={" + localApplyDiagnostics + "}" +
+                " HitPointNormalization={" + hitPointNormalizationDiagnostics + "}" +
                 " IdBridge={" + idBridgeDiagnostics + "}");
             return applied;
         }
@@ -3834,6 +4057,73 @@ namespace CoopSpectator.MissionBehaviors
                     " ServerPreparation=" + serverPreparationDiagnostics +
                     " Resolution=" + deploymentPointResolutionDiagnostics +
                     " SiegeController={" + siegeControllerDiagnostics + "}");
+                return false;
+            }
+        }
+
+        private bool TrySendCommanderDeploymentFormationLayoutState(
+            NetworkCommunicator peer,
+            BattleSideEnum side,
+            out string diagnostics,
+            string source)
+        {
+            diagnostics = "invalid-context";
+            if (!GameNetwork.IsServer || Mission == null || peer == null || side == BattleSideEnum.None)
+                return false;
+
+            Team team = Mission.Teams?
+                .FirstOrDefault(candidate => candidate != null && candidate.Side == side);
+            if (team == null)
+            {
+                diagnostics = "team-missing Side=" + side;
+                return false;
+            }
+
+            if (!TryBuildCommanderDeploymentFormationLayoutPayload(
+                    team,
+                    out byte[] formationLayoutBytes,
+                    out int layoutCount))
+            {
+                diagnostics = "layout-payload-empty Side=" + side;
+                return false;
+            }
+
+            int currentRevision = GetCommanderDeploymentFormationLayoutRevision(side);
+            int nextRevision = currentRevision >= int.MaxValue ? 1 : currentRevision + 1;
+            _commanderDeploymentFormationLayoutRevisionBySide[side] = nextRevision;
+            CommanderDeploymentFormationSnapshotRuntime.LogFormationFrames(
+                Mission,
+                team.FormationsIncludingEmpty,
+                "server-authoritative-auto-deploy-layout-before-send",
+                "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                " Side=" + side +
+                " LayoutRevision=" + nextRevision);
+
+            try
+            {
+                GameNetwork.BeginModuleEventAsServer(peer);
+                GameNetwork.WriteMessage(new CoopCommanderDeploymentFormationLayoutStateMessage(
+                    side,
+                    nextRevision,
+                    formationLayoutBytes));
+                GameNetwork.EndModuleEventAsServer();
+                diagnostics =
+                    "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                    " Side=" + side +
+                    " PreviousRevision=" + currentRevision +
+                    " LayoutRevision=" + nextRevision +
+                    " Layouts=" + layoutCount +
+                    " LayoutBytes=" + formationLayoutBytes.Length +
+                    " Source=" + (source ?? "unknown");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                diagnostics =
+                    "send-failed Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                    " Side=" + side +
+                    " LayoutRevision=" + nextRevision +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message;
                 return false;
             }
         }
@@ -5454,6 +5744,77 @@ namespace CoopSpectator.MissionBehaviors
                    " Manual={" + manualDiagnostics + "}";
         }
 
+        private static string TryNormalizeRemoteClientCommanderDeploymentSiegeWeaponHitPoints(
+            BattleSideEnum side,
+            SiegeWeapon siegeWeapon)
+        {
+            if (!GameNetwork.IsClient || GameNetwork.IsServer || siegeWeapon == null)
+                return "Skipped=True Reason=invalid-context";
+
+            try
+            {
+                DestructableComponent destructionComponent = siegeWeapon.DestructionComponent;
+                if (destructionComponent == null)
+                    return "Skipped=True Reason=missing-destruction-component";
+
+                float preservedHitPoint = destructionComponent.HitPoint;
+                float previousMaxHitPoint = destructionComponent.MaxHitPoint;
+                string controllerRecoveryDiagnostics =
+                    TryRecoverCommanderDeploymentSiegeControllerAfterDeploy(side, siegeWeapon);
+
+                if (!TryResolveCommanderDeploymentSiegeWeaponsController(
+                        side,
+                        out IMissionSiegeWeaponsController weaponsController,
+                        out string controllerDiagnostics))
+                {
+                    return "Applied=False Controller={" + controllerDiagnostics + "}" +
+                           " Recovery={" + controllerRecoveryDiagnostics + "}";
+                }
+
+                object destructionComponentKey = destructionComponent;
+                string stateDiagnostics = BuildCommanderDeploymentControllerStateForWeapon(
+                    weaponsController,
+                    siegeWeapon,
+                    destructionComponentKey,
+                    out _,
+                    out _,
+                    out _,
+                    out MissionSiegeWeapon deployedMissionWeapon,
+                    out bool containsDeployedDestructionComponent,
+                    out _);
+                if (!containsDeployedDestructionComponent || deployedMissionWeapon == null)
+                {
+                    return "Applied=False Reason=missing-deployed-mission-weapon" +
+                           " Recovery={" + controllerRecoveryDiagnostics + "}" +
+                           " State={" + stateDiagnostics + "}";
+                }
+
+                float campaignMaxHitPoint = deployedMissionWeapon.MaxHealth;
+                if (campaignMaxHitPoint <= 0f)
+                {
+                    return "Applied=False Reason=invalid-campaign-max-hit-point" +
+                           " CampaignMax=" + FormatCommanderDeploymentFloat(campaignMaxHitPoint) +
+                           " Recovery={" + controllerRecoveryDiagnostics + "}" +
+                           " State={" + stateDiagnostics + "}";
+                }
+
+                float normalizedHitPoint = Math.Max(0f, Math.Min(preservedHitPoint, campaignMaxHitPoint));
+                destructionComponent.MaxHitPoint = campaignMaxHitPoint;
+                destructionComponent.HitPoint = normalizedHitPoint;
+                return "Applied=True" +
+                       " Previous=" + FormatCommanderDeploymentFloat(preservedHitPoint) +
+                       "/" + FormatCommanderDeploymentFloat(previousMaxHitPoint) +
+                       " Normalized=" + FormatCommanderDeploymentFloat(normalizedHitPoint) +
+                       "/" + FormatCommanderDeploymentFloat(campaignMaxHitPoint) +
+                       " Recovery={" + controllerRecoveryDiagnostics + "}" +
+                       " State={" + stateDiagnostics + "}";
+            }
+            catch (Exception ex)
+            {
+                return "Applied=False Error=" + ex.GetType().Name + ":" + ex.Message;
+            }
+        }
+
         private static bool TryResolveCommanderDeploymentSiegeWeaponsController(
             BattleSideEnum side,
             out IMissionSiegeWeaponsController weaponsController,
@@ -6163,6 +6524,22 @@ namespace CoopSpectator.MissionBehaviors
 
             Dictionary<int, CommanderDeploymentFormationLayout> formationLayouts =
                 DecodeCommanderDeploymentFormationLayouts(message.FormationLayoutBytes);
+            int currentLayoutRevision =
+                GetCommanderDeploymentFormationLayoutRevision(team.Side);
+            int rejectedStaleLayoutCount = 0;
+            if (formationLayouts.Count > 0 &&
+                message.LayoutRevision != currentLayoutRevision)
+            {
+                rejectedStaleLayoutCount = formationLayouts.Count;
+                formationLayouts.Clear();
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: ignored stale commander deployment formation layouts. " +
+                    "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                    " Side=" + team.Side +
+                    " ClientRevision=" + message.LayoutRevision +
+                    " ServerRevision=" + currentLayoutRevision +
+                    " RejectedLayouts=" + rejectedStaleLayoutCount);
+            }
             bool hasCaptainAssignmentPayload = message.CaptainAssignmentBytes != null &&
                                                message.CaptainAssignmentBytes.Length > 0;
             var delegatedCaptainAssignments = new Dictionary<int, string>();
@@ -6208,7 +6585,11 @@ namespace CoopSpectator.MissionBehaviors
                 0,
                 0,
                 formationLayouts.Count,
-                "Before=[" + BuildCommanderDeploymentFormationSummary(team) + "]");
+                "PayloadLayouts=[" + BuildCommanderDeploymentFormationLayoutSummary(formationLayouts) + "]" +
+                " ClientRevision=" + message.LayoutRevision +
+                " ServerRevision=" + currentLayoutRevision +
+                " RejectedStaleLayouts=" + rejectedStaleLayoutCount +
+                " Before=[" + BuildCommanderDeploymentFormationSummary(team) + "]");
 
             if (IsCommanderDeploymentCompositionAssignmentPayload(assignmentBytes))
             {
@@ -6352,6 +6733,13 @@ namespace CoopSpectator.MissionBehaviors
                         impactedFormations.Contains(formation),
                         layout);
                 }
+
+                CommanderDeploymentFormationSnapshotRuntime.LogFormationFrames(
+                    mission,
+                    formationsToFinalize,
+                    "server-legacy-assignment-after-finalize",
+                    "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "<null>") +
+                    " Side=" + team.Side);
 
                 CoopMissionSpawnLogic.TryResolveCommanderDeploymentOrderLease(
                     peer,
@@ -6557,13 +6945,56 @@ namespace CoopSpectator.MissionBehaviors
         internal static void ReapplyDelegatedFormationOwnership(
             Mission mission,
             Team team,
-            string source)
+            string source,
+            bool preserveNativeBesiegerActivationHold = false)
         {
             if (mission == null || team == null)
                 return;
 
             CoopMissionNetworkBridge bridge = mission.GetMissionBehavior<CoopMissionNetworkBridge>();
-            bridge?.ReapplyDelegatedFormationOwnership(team, source);
+            bridge?.ReapplyDelegatedFormationOwnership(
+                team,
+                source,
+                preserveNativeBesiegerActivationHold);
+        }
+
+        internal static void ResetSiegeAmbushCommanderFormationAiOwnership(
+            Mission mission,
+            string source,
+            bool preserveNativeBesiegerActivationHold = false)
+        {
+            if (!GameNetwork.IsServer || mission == null)
+                return;
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            if (!SiegeAmbushScenarioContract.IsSiegeAmbushScenario(scenarioContext))
+                return;
+
+            CoopMissionNetworkBridge bridge = mission.GetMissionBehavior<CoopMissionNetworkBridge>();
+            bridge?.ResetSiegeAmbushCommanderFormationAiOwnership(
+                source,
+                preserveNativeBesiegerActivationHold);
+        }
+
+        internal static void MaintainSiegeAmbushCommanderFormationAiOwnership(
+            Mission mission,
+            string source)
+        {
+            if (!GameNetwork.IsServer || mission == null)
+                return;
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            if (!SiegeAmbushScenarioContract.IsSiegeAmbushScenario(scenarioContext))
+                return;
+
+            CoopMissionNetworkBridge bridge = mission.GetMissionBehavior<CoopMissionNetworkBridge>();
+            bridge?.MaintainSiegeAmbushCommanderFormationAiOwnership(source);
         }
 
         internal static void UpdateVoluntaryFormationAiControl(
@@ -6818,11 +7249,18 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        private void ReapplyDelegatedFormationOwnership(Team team, string source)
+        private void ReapplyDelegatedFormationOwnership(
+            Team team,
+            string source,
+            bool preserveNativeBesiegerActivationHold = false)
         {
             Mission mission = this.Mission ?? Mission.Current;
             if (mission == null || team == null)
                 return;
+
+            bool keepFormationAiDisabled =
+                preserveNativeBesiegerActivationHold &&
+                team.Side == BattleSideEnum.Attacker;
 
             if (!_delegatedCaptainEntryIdByFormationIndexAndSide.TryGetValue(
                     team.Side,
@@ -6863,7 +7301,8 @@ namespace CoopSpectator.MissionBehaviors
                         team.AssignPlayerAsSergeantOfFormation(captainPeer, formation.FormationIndex);
 
                     formation.PlayerOwner = captainAgent;
-                    if (voluntarilyAiControlledFormationIndices.Contains(formation.Index))
+                    if (voluntarilyAiControlledFormationIndices.Contains(formation.Index) &&
+                        !keepFormationAiDisabled)
                         EnsureDelegatedFormationAiControl(formation);
                     else
                         formation.SetControlledByAI(false, false);
@@ -6871,7 +7310,10 @@ namespace CoopSpectator.MissionBehaviors
                 }
 
                 formation.PlayerOwner = null;
-                EnsureDelegatedFormationAiControl(formation);
+                if (keepFormationAiDisabled)
+                    formation.SetControlledByAI(false, false);
+                else
+                    EnsureDelegatedFormationAiControl(formation);
             }
 
             Agent campaignCommanderAgent = team.GeneralAgent;
@@ -6894,7 +7336,8 @@ namespace CoopSpectator.MissionBehaviors
                     if (!ReferenceEquals(formation.PlayerOwner, campaignCommanderAgent))
                         formation.PlayerOwner = campaignCommanderAgent;
 
-                    if (voluntarilyAiControlledFormationIndices.Contains(formation.Index))
+                    if (voluntarilyAiControlledFormationIndices.Contains(formation.Index) &&
+                        !keepFormationAiDisabled)
                         EnsureDelegatedFormationAiControl(formation);
                     else
                         formation.SetControlledByAI(false, false);
@@ -6902,7 +7345,7 @@ namespace CoopSpectator.MissionBehaviors
                 else
                 {
                     formation.PlayerOwner = null;
-                    formation.SetControlledByAI(true, true);
+                    formation.SetControlledByAI(!keepFormationAiDisabled, !keepFormationAiDisabled);
                 }
             }
 
@@ -6919,7 +7362,236 @@ namespace CoopSpectator.MissionBehaviors
                     " Assignments=" + assignments.Count +
                     " VoluntaryAiFormations=" + voluntarilyAiControlledFormationIndices.Count +
                     " CampaignCommanderPlayerControlled=" + campaignCommanderIsPlayerControlled +
+                    " PreserveNativeBesiegerActivationHold=" + keepFormationAiDisabled +
                     " Source=" + (source ?? "unknown"));
+            }
+        }
+
+        private void ResetSiegeAmbushCommanderFormationAiOwnership(
+            string source,
+            bool preserveNativeBesiegerActivationHold)
+        {
+            Mission mission = this.Mission ?? Mission.Current;
+            if (!GameNetwork.IsServer || mission == null)
+                return;
+
+            int clearedVoluntaryFormationCount = 0;
+            int clearedStaleMovementOrderCount = 0;
+            var ownershipDiagnostics = new List<string>();
+            foreach (Team team in mission.Teams)
+            {
+                if (team == null ||
+                    team.Side == BattleSideEnum.None ||
+                    ReferenceEquals(team, mission.SpectatorTeam))
+                {
+                    continue;
+                }
+
+                if (_voluntarilyAiControlledFormationIndicesBySide.TryGetValue(
+                        team.Side,
+                        out HashSet<int> voluntarilyAiControlledFormationIndices))
+                {
+                    clearedVoluntaryFormationCount += voluntarilyAiControlledFormationIndices.Count;
+                    voluntarilyAiControlledFormationIndices.Clear();
+                }
+
+                ReapplyDelegatedFormationOwnership(
+                    team,
+                    "siege-ambush-battle-start:" + (source ?? "unknown"),
+                    preserveNativeBesiegerActivationHold);
+
+                foreach (Formation formation in team.FormationsIncludingEmpty)
+                {
+                    if (!TryResolveActivePlayerFormationOwner(
+                            mission,
+                            team,
+                            formation,
+                            out _))
+                    {
+                        continue;
+                    }
+
+                    if (TryRestorePlayerFormationControl(
+                            formation,
+                            clearMovementOrder: true))
+                    {
+                        clearedStaleMovementOrderCount++;
+                    }
+                }
+
+                if (!CoopDebugConfig.OrderOfBattleDiagnostics)
+                    continue;
+
+                foreach (Formation formation in team.FormationsIncludingEmpty)
+                {
+                    if (formation == null || formation.CountOfUnits <= 0)
+                        continue;
+
+                    ownershipDiagnostics.Add(
+                        team.Side + ":" + formation.Index +
+                        "/Units=" + formation.CountOfUnits +
+                        "/PlayerOwner=" + (formation.PlayerOwner?.Index.ToString() ?? "null") +
+                        "/Captain=" + (formation.Captain?.Index.ToString() ?? "null") +
+                        "/Ai=" + formation.IsAIControlled +
+                        "/Behavior=" + (formation.AI?.ActiveBehavior?.GetType().Name ?? "null"));
+                }
+            }
+
+            if (CoopDebugConfig.OrderOfBattleDiagnostics)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: reset exact SiegeAmbush commander formation AI ownership. " +
+                    "ClearedVoluntaryFormations=" + clearedVoluntaryFormationCount +
+                    " ClearedStaleMovementOrders=" + clearedStaleMovementOrderCount +
+                    " Formations=[" + string.Join(",", ownershipDiagnostics.ToArray()) + "]" +
+                    " Source=" + (source ?? "unknown"));
+            }
+        }
+
+        private void MaintainSiegeAmbushCommanderFormationAiOwnership(string source)
+        {
+            Mission mission = this.Mission ?? Mission.Current;
+            if (!GameNetwork.IsServer || mission == null)
+                return;
+
+            var repairDiagnostics = new List<string>();
+            foreach (Team team in mission.Teams)
+            {
+                if (team == null ||
+                    team.Side == BattleSideEnum.None ||
+                    ReferenceEquals(team, mission.SpectatorTeam))
+                {
+                    continue;
+                }
+
+                var formationsToRepair = new List<ValueTuple<Formation, bool>>();
+                foreach (Formation formation in team.FormationsIncludingEmpty)
+                {
+                    if (!TryResolveActivePlayerFormationOwner(
+                            mission,
+                            team,
+                            formation,
+                            out Agent expectedOwner))
+                    {
+                        continue;
+                    }
+
+                    bool unexpectedAiControl = formation.IsAIControlled;
+                    bool unexpectedPlayerOwner =
+                        !ReferenceEquals(formation.PlayerOwner, expectedOwner);
+                    if (!unexpectedAiControl && !unexpectedPlayerOwner)
+                        continue;
+
+                    formationsToRepair.Add(
+                        new ValueTuple<Formation, bool>(
+                            formation,
+                            unexpectedAiControl));
+                    if (CoopDebugConfig.OrderOfBattleDiagnostics)
+                    {
+                        repairDiagnostics.Add(
+                            team.Side + ":" + formation.Index +
+                            "/Ai=" + unexpectedAiControl +
+                            "/OwnerMismatch=" + unexpectedPlayerOwner);
+                    }
+                }
+
+                if (formationsToRepair.Count <= 0)
+                    continue;
+
+                ReapplyDelegatedFormationOwnership(
+                    team,
+                    "siege-ambush-ownership-maintenance:" + (source ?? "unknown"));
+                foreach (ValueTuple<Formation, bool> repair in formationsToRepair)
+                {
+                    if (!TryResolveActivePlayerFormationOwner(
+                            mission,
+                            team,
+                            repair.Item1,
+                            out _))
+                    {
+                        continue;
+                    }
+
+                    TryRestorePlayerFormationControl(
+                        repair.Item1,
+                        clearMovementOrder: repair.Item2);
+                }
+            }
+
+            if (CoopDebugConfig.OrderOfBattleDiagnostics && repairDiagnostics.Count > 0)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: repaired exact SiegeAmbush commander formation ownership. " +
+                    "Formations=[" + string.Join(",", repairDiagnostics.ToArray()) + "]" +
+                    " Source=" + (source ?? "unknown"));
+            }
+        }
+
+        private bool TryResolveActivePlayerFormationOwner(
+            Mission mission,
+            Team team,
+            Formation formation,
+            out Agent playerOwner)
+        {
+            playerOwner = null;
+            if (mission == null ||
+                team == null ||
+                formation == null ||
+                formation.CountOfUnits <= 0 ||
+                !ReferenceEquals(formation.Team, team) ||
+                formation.Index < 0 ||
+                formation.Index >= (int)FormationClass.NumberOfRegularFormations)
+            {
+                return false;
+            }
+
+            if (_voluntarilyAiControlledFormationIndicesBySide.TryGetValue(
+                    team.Side,
+                    out HashSet<int> voluntarilyAiControlledFormationIndices) &&
+                voluntarilyAiControlledFormationIndices.Contains(formation.Index))
+            {
+                return false;
+            }
+
+            if (_delegatedCaptainEntryIdByFormationIndexAndSide.TryGetValue(
+                    team.Side,
+                    out Dictionary<int, string> assignments) &&
+                assignments.TryGetValue(formation.Index, out string captainEntryId))
+            {
+                playerOwner = ResolveDelegatedCaptainAgent(mission, team, captainEntryId);
+            }
+            else
+            {
+                playerOwner = team.GeneralAgent;
+            }
+
+            return playerOwner != null &&
+                   playerOwner.IsActive() &&
+                   !playerOwner.IsMount &&
+                   ReferenceEquals(playerOwner.Team, team) &&
+                   playerOwner.MissionPeer?.ControlledAgent != null &&
+                   ReferenceEquals(
+                       playerOwner.MissionPeer.ControlledAgent,
+                       playerOwner);
+        }
+
+        private static bool TryRestorePlayerFormationControl(
+            Formation formation,
+            bool clearMovementOrder)
+        {
+            if (formation == null)
+                return false;
+
+            try
+            {
+                formation.SetControlledByAI(false, false);
+                if (clearMovementOrder)
+                    formation.SetMovementOrder(MovementOrder.MovementOrderStop);
+                return clearMovementOrder;
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -7402,6 +8074,13 @@ namespace CoopSpectator.MissionBehaviors
                         layout);
                 }
 
+                CommanderDeploymentFormationSnapshotRuntime.LogFormationFrames(
+                    mission,
+                    formationsToFinalize,
+                    "server-composition-assignment-after-finalize",
+                    "Peer=" + (peer?.UserName ?? peer?.Index.ToString() ?? "<null>") +
+                    " Side=" + team.Side);
+
                 CommanderDeploymentMissionNetworkComponentPatch.TryRefreshCommanderDeploymentSelection(
                     peer,
                     team,
@@ -7857,6 +8536,7 @@ namespace CoopSpectator.MissionBehaviors
                     " TeamSide=" + (team?.Side.ToString() ?? "<null>") +
                     " AssignmentBytes=" + (message?.AssignmentBytes?.Length ?? 0) +
                     " LayoutBytes=" + (message?.FormationLayoutBytes?.Length ?? 0) +
+                    " LayoutRevision=" + (message?.LayoutRevision ?? 0) +
                     " Decoded=" + decodedAssignments +
                     " AppliedMoves=" + appliedMoves +
                     " Rejected=" + rejectedAssignments +
@@ -7910,6 +8590,7 @@ namespace CoopSpectator.MissionBehaviors
                     " TeamSide=" + (team?.Side.ToString() ?? "<null>") +
                     " AssignmentBytes=" + (message?.AssignmentBytes?.Length ?? 0) +
                     " LayoutBytes=" + (message?.FormationLayoutBytes?.Length ?? 0) +
+                    " LayoutRevision=" + (message?.LayoutRevision ?? 0) +
                     " Decoded=" + decodedAssignments +
                     " AppliedMoves=" + appliedMoves +
                     " Rejected=" + rejectedAssignments +
@@ -7938,6 +8619,181 @@ namespace CoopSpectator.MissionBehaviors
             return parts.Count <= 0 ? string.Empty : string.Join(",", parts.ToArray());
         }
 
+        private static string BuildCommanderDeploymentFormationLayoutSummary(
+            Dictionary<int, CommanderDeploymentFormationLayout> layouts)
+        {
+            if (!IsCommanderDeploymentOrderOfBattleDiagnosticsEnabled())
+                return string.Empty;
+            if (layouts == null || layouts.Count <= 0)
+                return string.Empty;
+
+            try
+            {
+                return string.Join(
+                    "; ",
+                    layouts
+                        .OrderBy(layout => layout.Key)
+                        .Select(layout =>
+                            "Formation=" + layout.Key +
+                            "/Valid=" + layout.Value.IsValid +
+                            "/Position=(" + FormatCommanderDeploymentDiagnosticFloat(layout.Value.Position.x) +
+                            "," + FormatCommanderDeploymentDiagnosticFloat(layout.Value.Position.y) + ")" +
+                            "/Direction=(" + FormatCommanderDeploymentDiagnosticFloat(layout.Value.Direction.x) +
+                            "," + FormatCommanderDeploymentDiagnosticFloat(layout.Value.Direction.y) + ")")
+                        .ToArray());
+            }
+            catch (Exception ex)
+            {
+                return "format-failed:" + ex.GetType().Name + ":" + ex.Message;
+            }
+        }
+
+        private static string FormatCommanderDeploymentDiagnosticFloat(float value)
+        {
+            return value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        private int GetCommanderDeploymentFormationLayoutRevision(BattleSideEnum side)
+        {
+            return side != BattleSideEnum.None &&
+                   _commanderDeploymentFormationLayoutRevisionBySide.TryGetValue(side, out int revision)
+                ? Math.Max(0, revision)
+                : 0;
+        }
+
+        private void CaptureClientCommanderDeploymentAutoDeployRequest(BattleSideEnum side)
+        {
+            Mission mission = Mission ?? Mission.Current;
+            if (!GameNetwork.IsClient || mission == null || side == BattleSideEnum.None)
+                return;
+
+            Team team = mission.Teams?
+                .FirstOrDefault(candidate => candidate != null && candidate.Side == side);
+            if (team == null)
+                return;
+
+            _clientCommanderAutoDeployRequestBySide[side] =
+                new ClientCommanderAutoDeployRequestState(
+                    GetCommanderDeploymentFormationLayoutRevision(side),
+                    CaptureCommanderDeploymentFormationLayouts(team));
+        }
+
+        private static Dictionary<int, CommanderDeploymentFormationLayout> CaptureCommanderDeploymentFormationLayouts(
+            Team team)
+        {
+            var layouts = new Dictionary<int, CommanderDeploymentFormationLayout>();
+            if (team?.FormationsIncludingEmpty == null)
+                return layouts;
+
+            foreach (Formation formation in team.FormationsIncludingEmpty)
+            {
+                if (formation == null ||
+                    formation.Index < 0 ||
+                    formation.Index >= (int)FormationClass.NumberOfRegularFormations ||
+                    !formation.OrderPositionIsValid)
+                {
+                    continue;
+                }
+
+                Vec2 position = formation.OrderPosition;
+                Vec2 direction = formation.Direction;
+                if (!position.IsValid)
+                    continue;
+                if (!direction.IsValid || direction.LengthSquared < 0.0001f)
+                    direction = Vec2.Forward;
+                else
+                    direction = direction.Normalized();
+
+                layouts[formation.Index] =
+                    new CommanderDeploymentFormationLayout(position, direction);
+            }
+
+            return layouts;
+        }
+
+        private static bool HasClientFormationLayoutChangedSinceAutoDeployRequest(
+            Formation formation,
+            ClientCommanderAutoDeployRequestState pendingRequest)
+        {
+            if (formation == null || pendingRequest == null)
+                return false;
+
+            bool baselineValid = pendingRequest.Layouts.TryGetValue(
+                formation.Index,
+                out CommanderDeploymentFormationLayout baseline);
+            bool currentValid = formation.OrderPositionIsValid && formation.OrderPosition.IsValid;
+            if (baselineValid != currentValid)
+                return true;
+            if (!baselineValid)
+                return false;
+
+            Vec2 currentDirection = formation.Direction;
+            if (!currentDirection.IsValid || currentDirection.LengthSquared < 0.0001f)
+                currentDirection = Vec2.Forward;
+            else
+                currentDirection = currentDirection.Normalized();
+
+            return (formation.OrderPosition - baseline.Position).LengthSquared > 0.0001f ||
+                   (currentDirection - baseline.Direction).LengthSquared > 0.0001f;
+        }
+
+        private static bool TryBuildCommanderDeploymentFormationLayoutPayload(
+            Team team,
+            out byte[] formationLayoutBytes,
+            out int layoutCount)
+        {
+            formationLayoutBytes = Array.Empty<byte>();
+            Dictionary<int, CommanderDeploymentFormationLayout> layouts =
+                CaptureCommanderDeploymentFormationLayouts(team);
+            layoutCount = layouts.Count;
+            if (layoutCount <= 0)
+                return false;
+
+            int maxLayoutRecords =
+                CoopCommanderDeploymentFormationAssignmentsMessage.MaxFormationLayoutBytes /
+                CoopCommanderDeploymentFormationAssignmentsMessage.BytesPerFormationLayout;
+            List<KeyValuePair<int, CommanderDeploymentFormationLayout>> orderedLayouts = layouts
+                .OrderBy(layout => layout.Key)
+                .Take(maxLayoutRecords)
+                .ToList();
+            layoutCount = orderedLayouts.Count;
+            formationLayoutBytes = new byte[
+                layoutCount * CoopCommanderDeploymentFormationAssignmentsMessage.BytesPerFormationLayout];
+            int offset = 0;
+            foreach (KeyValuePair<int, CommanderDeploymentFormationLayout> record in orderedLayouts)
+            {
+                formationLayoutBytes[offset++] = (byte)(record.Key & 0xFF);
+                WriteCommanderDeploymentSingleToPayload(
+                    formationLayoutBytes,
+                    ref offset,
+                    record.Value.Position.x);
+                WriteCommanderDeploymentSingleToPayload(
+                    formationLayoutBytes,
+                    ref offset,
+                    record.Value.Position.y);
+                WriteCommanderDeploymentSingleToPayload(
+                    formationLayoutBytes,
+                    ref offset,
+                    record.Value.Direction.x);
+                WriteCommanderDeploymentSingleToPayload(
+                    formationLayoutBytes,
+                    ref offset,
+                    record.Value.Direction.y);
+            }
+
+            return layoutCount > 0;
+        }
+
+        private static void WriteCommanderDeploymentSingleToPayload(
+            byte[] payload,
+            ref int offset,
+            float value)
+        {
+            byte[] bytes = BitConverter.GetBytes(value);
+            Buffer.BlockCopy(bytes, 0, payload, offset, bytes.Length);
+            offset += bytes.Length;
+        }
+
         private struct CommanderDeploymentFormationLayout
         {
             public CommanderDeploymentFormationLayout(Vec2 position, Vec2 direction)
@@ -7950,6 +8806,20 @@ namespace CoopSpectator.MissionBehaviors
             public bool IsValid { get; }
             public Vec2 Position { get; }
             public Vec2 Direction { get; }
+        }
+
+        private sealed class ClientCommanderAutoDeployRequestState
+        {
+            public ClientCommanderAutoDeployRequestState(
+                int baseRevision,
+                Dictionary<int, CommanderDeploymentFormationLayout> layouts)
+            {
+                BaseRevision = Math.Max(0, baseRevision);
+                Layouts = layouts ?? new Dictionary<int, CommanderDeploymentFormationLayout>();
+            }
+
+            public int BaseRevision { get; }
+            public Dictionary<int, CommanderDeploymentFormationLayout> Layouts { get; }
         }
 
         private struct CommanderDeploymentFormationComposition
@@ -8129,8 +8999,16 @@ namespace CoopSpectator.MissionBehaviors
                 }
             }
 
-            if (!TryApplyCommanderDeploymentFormationLayout(mission, formation, layout))
+            bool restoredAuthoritativeFrame =
+                CommanderDeploymentFormationSnapshotRuntime.TryApplyAuthoritativeFrame(
+                    mission,
+                    formation,
+                    "commander-formation-assignment");
+            if (!restoredAuthoritativeFrame &&
+                !TryApplyCommanderDeploymentFormationLayout(mission, formation, layout))
+            {
                 TryEnsureCommanderDeploymentFormationPosition(mission, formation);
+            }
 
             try
             {
@@ -8919,6 +9797,22 @@ namespace CoopSpectator.MissionBehaviors
 
                 readinessSummary = "BattleSnapshot={" + snapshotReadinessSummary + "}";
                 return false;
+            }
+
+            bool activeReconnectFinalizeGate =
+                CoopBattlePeerReconnectState.TryGetActiveBattleReconnectFinalizeGateState(
+                    peer,
+                    out _);
+            if (!activeReconnectFinalizeGate &&
+                CoopMissionSpawnLogic.CanAdvancePeerFinishedLoadingBeforeInitialArmyMaterialization(
+                    Mission,
+                    out string initialMaterializationReadiness))
+            {
+                readinessSummary =
+                    "BattleSnapshot={" + snapshotReadinessSummary + "} " +
+                    "InitialMaterialization={" + initialMaterializationReadiness + "} " +
+                    "ActiveReconnectFinalizeGate=False";
+                return true;
             }
 
             if (!CoopMissionSpawnLogic.AreAuthoritativePeerPayloadsReady(

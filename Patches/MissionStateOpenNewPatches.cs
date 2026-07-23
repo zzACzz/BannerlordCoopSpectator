@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.Infrastructure.Relief;
 using CoopSpectator.Infrastructure.SiegeAmbush;
 using CoopSpectator.MissionBehaviors;
 using CoopSpectator.Network.Messages;
@@ -420,7 +421,9 @@ namespace CoopSpectator.Patches
                     isSallyOut:
                         SiegeAmbushScenarioContract.IsSiegeAmbushScenario(
                             scenarioContext),
-                    isReliefForceAttack: false,
+                    isReliefForceAttack:
+                        ExactReliefScenarioContract.IsReliefScenario(
+                            scenarioContext),
                     wallHitPointRatios,
                     scenarioContext?.SiegeContext?.HasAnySiegeTower == true),
                 new[] { "SiegeMissionPreparationHandler" },
@@ -522,7 +525,10 @@ namespace CoopSpectator.Patches
                     effectiveRuntimeScene))
                 return false;
 
-            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(scenarioContext))
+            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime
+                    .IsExactSiegeWithDeploymentScenario(scenarioContext) &&
+                !ExactReliefScenarioContract.IsReliefScenario(
+                    scenarioContext))
                 return false;
 
             isPlayerAttacker = ResolveWrappedBattleClientPlayerAttackerSide();

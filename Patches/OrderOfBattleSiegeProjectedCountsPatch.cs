@@ -2001,7 +2001,12 @@ namespace CoopSpectator.Patches
             }
         }
 
-        internal static bool TrySyncCommanderDeploymentFormationAssignmentsForTeam(Team team, string source)
+        internal static bool TrySyncCommanderDeploymentFormationAssignmentsForTeam(
+            Team team,
+            string source,
+            bool includeFormationLayouts = true,
+            bool requireFormationLayouts = false,
+            bool forceSend = false)
         {
             if (CoopSiegeOrderOfBattleVM.IsApplyingInitialMountedConfiguration)
             {
@@ -2043,6 +2048,34 @@ namespace CoopSpectator.Patches
                 return false;
             }
 
+            if (!includeFormationLayouts)
+            {
+                formationLayoutBytes = Array.Empty<byte>();
+                int layoutKeyIndex = assignmentKey.IndexOf("|L=", StringComparison.Ordinal);
+                if (layoutKeyIndex >= 0)
+                    assignmentKey = assignmentKey.Substring(0, layoutKeyIndex);
+                assignmentKey += "|L=server-authoritative";
+            }
+
+            if (requireFormationLayouts && formationLayoutBytes.Length <= 0)
+            {
+                LogCommanderDeploymentAssignmentSyncDiagnostics(
+                    "skip-no-formation-layout",
+                    team,
+                    source,
+                    string.Empty);
+                return false;
+            }
+
+            if (includeFormationLayouts)
+            {
+                CommanderDeploymentFormationSnapshotRuntime.LogFormationFrames(
+                    Mission.Current,
+                    team.FormationsIncludingEmpty,
+                    "client-formation-layout-before-send",
+                    source);
+            }
+
             byte[] captainAssignmentBytes = Array.Empty<byte>();
             string captainAssignmentKey = string.Empty;
             CoopSiegeOrderOfBattleVM.TryBuildReusableCaptainAssignmentPayload(
@@ -2050,8 +2083,12 @@ namespace CoopSpectator.Patches
                 out captainAssignmentBytes,
                 out captainAssignmentKey);
             assignmentKey += "|C=" + captainAssignmentKey;
+            int layoutRevision =
+                CoopMissionNetworkBridge.GetClientCommanderDeploymentFormationLayoutRevision(team.Side);
+            assignmentKey += "|R=" + layoutRevision;
 
-            if (string.Equals(
+            if (!forceSend &&
+                string.Equals(
                     _lastSentCommanderDeploymentFormationAssignmentsKey,
                     assignmentKey,
                     StringComparison.Ordinal))
@@ -2071,6 +2108,7 @@ namespace CoopSpectator.Patches
                     assignmentBytes,
                     formationLayoutBytes,
                     captainAssignmentBytes,
+                    layoutRevision,
                     source))
             {
                 LogCommanderDeploymentAssignmentSyncDiagnostics(
@@ -2090,8 +2128,53 @@ namespace CoopSpectator.Patches
                 source,
                 "AssignmentBytes=" + assignmentBytes.Length +
                 " LayoutBytes=" + formationLayoutBytes.Length +
-                " CaptainBytes=" + captainAssignmentBytes.Length);
+                " Layouts=[" + BuildCommanderDeploymentFormationLayoutPayloadSummary(formationLayoutBytes) + "]" +
+                " CaptainBytes=" + captainAssignmentBytes.Length +
+                " LayoutRevision=" + layoutRevision);
             return true;
+        }
+
+        private static string BuildCommanderDeploymentFormationLayoutPayloadSummary(byte[] payload)
+        {
+            if (!CoopDebugConfig.OrderOfBattleDiagnostics)
+                return string.Empty;
+            if (payload == null || payload.Length <= 0)
+                return string.Empty;
+            if (payload.Length % CoopCommanderDeploymentFormationAssignmentsMessage.BytesPerFormationLayout != 0)
+                return "invalid-length:" + payload.Length;
+
+            try
+            {
+                var details = new List<string>();
+                for (int offset = 0;
+                     offset + CoopCommanderDeploymentFormationAssignmentsMessage.BytesPerFormationLayout <= payload.Length;)
+                {
+                    int formationIndex = payload[offset++];
+                    float positionX = BitConverter.ToSingle(payload, offset);
+                    offset += sizeof(float);
+                    float positionY = BitConverter.ToSingle(payload, offset);
+                    offset += sizeof(float);
+                    float directionX = BitConverter.ToSingle(payload, offset);
+                    offset += sizeof(float);
+                    float directionY = BitConverter.ToSingle(payload, offset);
+                    offset += sizeof(float);
+                    details.Add(
+                        "Formation=" + formationIndex +
+                        "/Position=(" + FormatDiagnosticFloat(positionX) + "," + FormatDiagnosticFloat(positionY) + ")" +
+                        "/Direction=(" + FormatDiagnosticFloat(directionX) + "," + FormatDiagnosticFloat(directionY) + ")");
+                }
+
+                return string.Join("; ", details.ToArray());
+            }
+            catch (Exception ex)
+            {
+                return "decode-failed:" + ex.GetType().Name + ":" + ex.Message;
+            }
+        }
+
+        private static string FormatDiagnosticFloat(float value)
+        {
+            return value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
         }
 
         private static void LogCommanderDeploymentAssignmentSyncDiagnostics(

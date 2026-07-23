@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.Infrastructure.Relief;
 using CoopSpectator.Infrastructure.SiegeAmbush;
 using CoopSpectator.MissionBehaviors;
 using CoopSpectator.Network.Messages;
@@ -314,6 +315,9 @@ namespace CoopSpectator.GameMode
             bool isSiegeAmbush =
                 SiegeAmbushScenarioContract.IsSiegeAmbushScenario(
                     scenarioContext);
+            bool isRelief =
+                ExactReliefScenarioContract.IsReliefScenario(
+                    scenarioContext);
             if (includeScenePreparation)
             {
                 float[] wallHitPointRatios =
@@ -332,7 +336,7 @@ namespace CoopSpectator.GameMode
                     mission,
                     () => new SiegeMissionPreparationHandler(
                         isSallyOut: isSiegeAmbush,
-                        isReliefForceAttack: false,
+                        isReliefForceAttack: isRelief,
                         wallHitPointRatios,
                         hasAnySiegeTower),
                     "SiegeMissionPreparationHandler",

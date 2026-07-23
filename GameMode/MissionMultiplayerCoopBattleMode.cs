@@ -428,9 +428,9 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 return;
 
             BattleScenarioContextMessage scenarioContext =
-                BattleSnapshotRuntimeState.GetScenarioContext() ??
-                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
-                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+                ResolveBattleScenarioContextForMission(
+                    mission,
+                    out string scenarioContextDiagnostics);
             if (!SallyOutScenarioContract.IsValidatedScenario(
                     scenarioContext,
                     mission.SceneName,
@@ -455,6 +455,7 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 ModLogger.Info(
                     "CoopBattle server: appended AgentMoraleInteractionLogic for SallyOut campaign morale and fleeing. " +
                     "Scene=" + (mission.SceneName ?? "null") +
+                    " ScenarioContext={" + scenarioContextDiagnostics + "}" +
                     " Diagnostics={" + (diagnostics ?? string.Empty) + "}.");
             }
         }
@@ -468,9 +469,9 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 return;
 
             BattleScenarioContextMessage scenarioContext =
-                BattleSnapshotRuntimeState.GetScenarioContext() ??
-                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
-                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+                ResolveBattleScenarioContextForMission(
+                    mission,
+                    out string scenarioContextDiagnostics);
             if (!ExactLandBattleScenarioContract.IsValidatedScenario(
                     scenarioContext,
                     mission.SceneName,
@@ -490,7 +491,36 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 "CoopBattle " + (peerRole ?? "unknown") +
                 ": appended BannerBearerLogic for exact land-battle commander deployment. " +
                 "Scene=" + (mission.SceneName ?? "null") +
+                " ScenarioContext={" + scenarioContextDiagnostics + "}" +
                 " Diagnostics={" + (diagnostics ?? string.Empty) + "}.");
+        }
+
+        private static BattleScenarioContextMessage ResolveBattleScenarioContextForMission(
+            Mission mission,
+            out string diagnostics)
+        {
+            string runtimeScene = mission?.SceneName ?? string.Empty;
+            if (CoopPreMissionTopologyRuntimeState.TryGetActive(
+                    runtimeScene,
+                    out CoopPreMissionTopologyContract topologyContract,
+                    out string topologyDiagnostics) &&
+                topologyContract?.ScenarioContext != null)
+            {
+                diagnostics =
+                    "Source=PreMissionTopology " +
+                    (topologyDiagnostics ?? string.Empty);
+                return topologyContract.ScenarioContext;
+            }
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            diagnostics =
+                "Source=BattleSnapshot " +
+                "Topology={" + (topologyDiagnostics ?? string.Empty) + "} " +
+                "ScenarioAvailable=" + (scenarioContext != null);
+            return scenarioContext;
         }
 
         private static void ValidateServerStackSanity(List<MissionBehavior> list)

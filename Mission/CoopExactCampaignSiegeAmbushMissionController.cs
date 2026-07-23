@@ -31,10 +31,12 @@ namespace CoopSpectator.MissionBehaviors
         private float _retreatGateHoldUntilMissionTime = float.MinValue;
         private bool _retreatGateHoldActive;
         private float _nextPlayerDirectedSiegeWeaponAttackMaintenanceTime;
+        private float _nextCommanderFormationOwnershipMaintenanceTime;
 
         private const float RetreatGateReleaseGraceSeconds = 5f;
         private const float WithdrawalTargetToleranceSquared = 9f;
         private const float PlayerDirectedSiegeWeaponAttackMaintenanceIntervalSeconds = 0.5f;
+        private const float CommanderFormationOwnershipMaintenanceIntervalSeconds = 0.5f;
 
         private static readonly FieldInfo BesiegedDeploymentTimerField =
             typeof(SallyOutMissionController).GetField(
@@ -124,9 +126,28 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             base.OnMissionTick(dt);
+            MaintainCommanderFormationOwnership();
             MaintainPlayerDirectedSiegeWeaponAttacks();
             MaintainDefenderManualWithdrawalTargets();
             MaintainDefenderRetreatCorridor();
+        }
+
+        private void MaintainCommanderFormationOwnership()
+        {
+            if (!GameNetwork.IsServer ||
+                Mission == null ||
+                CoopBattlePhaseRuntimeState.GetPhase() != CoopBattlePhase.BattleActive ||
+                Mission.CurrentTime < _nextCommanderFormationOwnershipMaintenanceTime)
+            {
+                return;
+            }
+
+            _nextCommanderFormationOwnershipMaintenanceTime =
+                Mission.CurrentTime +
+                CommanderFormationOwnershipMaintenanceIntervalSeconds;
+            CoopMissionNetworkBridge.MaintainSiegeAmbushCommanderFormationAiOwnership(
+                Mission,
+                "siege-ambush-controller-tick");
         }
 
         public void EnsureBattleLifecycleActivated(string source)
@@ -386,6 +407,10 @@ namespace CoopSpectator.MissionBehaviors
             _battleLifecycleActivated = true;
             BesiegedDeploymentTimerField.SetValue(this, new BasicMissionTimer());
             base.OnDeploymentFinished();
+            CoopMissionNetworkBridge.ResetSiegeAmbushCommanderFormationAiOwnership(
+                Mission,
+                "native-sally-out-deployment-finished",
+                preserveNativeBesiegerActivationHold: true);
             ExactSiegeAmbushDeploymentControllerPatch.ReleaseBattleAgentHold(
                 Mission,
                 "native SallyOut battle lifecycle activated");

@@ -3,9 +3,12 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.Infrastructure.SiegeAmbush;
 using CoopSpectator.MissionBehaviors;
+using CoopSpectator.Network.Messages;
 using HarmonyLib;
 using NetworkMessages.FromClient;
+using TaleWorlds.Core;
 using TaleWorlds.Engine;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
@@ -205,16 +208,11 @@ namespace CoopSpectator.Patches
                     message.OrderType,
                     "simple-order");
                 orderController.SetOrder(message.OrderType);
-                if (message.OrderType == OrderType.AIControlOn ||
-                    message.OrderType == OrderType.AIControlOff)
-                {
-                    CoopMissionNetworkBridge.UpdateVoluntaryFormationAiControl(
-                        Mission.Current,
-                        team,
-                        selectedFormations,
-                        message.OrderType == OrderType.AIControlOn,
-                        "commander-simple-order-" + message.OrderType);
-                }
+                UpdateCommanderFormationAiControlForOrder(
+                    team,
+                    selectedFormations,
+                    message.OrderType,
+                    "commander-simple-order");
 
                 LogOrderDiagnostics(
                     "simple-order-applied",
@@ -252,9 +250,11 @@ namespace CoopSpectator.Patches
                     return true;
 
                 TryRefreshNativeSelectionFromShadow(networkPeer, team, orderController);
+                List<Formation> selectedFormations =
+                    ResolveActiveSelectedFormations(networkPeer, team, orderController);
                 CancelPlayerDirectedSiegeWeaponAttackForOrder(
                     team,
-                    ResolveActiveSelectedFormations(networkPeer, team, orderController),
+                    selectedFormations,
                     message.OrderType,
                     "position-order");
                 var orderPosition = new WorldPosition(
@@ -271,6 +271,26 @@ namespace CoopSpectator.Patches
                         "server-position-order");
                 }
                 orderController.SetOrderWithPosition(message.OrderType, orderPosition);
+                UpdateCommanderFormationAiControlForOrder(
+                    team,
+                    selectedFormations,
+                    message.OrderType,
+                    "commander-position-order");
+                if (isDeploymentOrderLease)
+                {
+                    ForceCommanderDeploymentPositioning(orderController);
+                    IEnumerable<Formation> positionedFormations =
+                        ResolveActiveSelectedFormations(networkPeer, team, orderController);
+                    CommanderDeploymentFormationSnapshotRuntime.CaptureFormations(
+                        mission,
+                        positionedFormations,
+                        "server-position-order");
+                    CommanderDeploymentFormationSnapshotRuntime.LogFormationFrames(
+                        mission,
+                        positionedFormations,
+                        "server-position-order-after-capture",
+                        "Peer=" + (networkPeer?.UserName ?? networkPeer?.Index.ToString() ?? "<null>"));
+                }
 
                 LogOrderDiagnostics(
                     "position-order-applied",
@@ -303,12 +323,19 @@ namespace CoopSpectator.Patches
                 if (formation != null)
                 {
                     TryRefreshNativeSelectionFromShadow(networkPeer, team, orderController);
+                    List<Formation> selectedFormations =
+                        ResolveActiveSelectedFormations(networkPeer, team, orderController);
                     CancelPlayerDirectedSiegeWeaponAttackForOrder(
                         team,
-                        ResolveActiveSelectedFormations(networkPeer, team, orderController),
+                        selectedFormations,
                         message.OrderType,
                         "formation-target-order");
                     orderController.SetOrderWithFormation(message.OrderType, formation);
+                    UpdateCommanderFormationAiControlForOrder(
+                        team,
+                        selectedFormations,
+                        message.OrderType,
+                        "commander-formation-target-order");
                 }
 
                 __result = true;
@@ -397,9 +424,11 @@ namespace CoopSpectator.Patches
                 bool shouldUseShadowSelection = shadowFormations.Count > 0;
                 if (shouldUseShadowSelection)
                     TryRefreshNativeSelectionFromShadow(networkPeer, team, orderController);
+                List<Formation> selectedFormations =
+                    ResolveActiveSelectedFormations(networkPeer, team, orderController);
                 CancelPlayerDirectedSiegeWeaponAttackForOrder(
                     team,
-                    ResolveActiveSelectedFormations(networkPeer, team, orderController),
+                    selectedFormations,
                     message.OrderType,
                     "two-position-order");
 
@@ -462,6 +491,30 @@ namespace CoopSpectator.Patches
                     if (isDeploymentOrderLease)
                         mission.IsTeleportingAgents = previousTeleportingAgents;
                 }
+
+                if (isDeploymentOrderLease)
+                {
+                    IEnumerable<Formation> positionedFormations =
+                        shouldUseShadowSelection
+                            ? shadowFormations
+                            : ResolveActiveSelectedFormations(networkPeer, team, orderController);
+                    CommanderDeploymentFormationSnapshotRuntime.CaptureFormations(
+                        mission,
+                        positionedFormations,
+                        "server-two-position-order");
+                    CommanderDeploymentFormationSnapshotRuntime.LogFormationFrames(
+                        mission,
+                        positionedFormations,
+                        "server-two-position-order-after-capture",
+                        "Peer=" + (networkPeer?.UserName ?? networkPeer?.Index.ToString() ?? "<null>") +
+                        " OrderType=" + message.OrderType);
+                }
+
+                UpdateCommanderFormationAiControlForOrder(
+                    team,
+                    selectedFormations,
+                    message.OrderType,
+                    "commander-two-position-order");
 
                 LogOrderDiagnostics(
                     "two-positions-applied",
@@ -901,6 +954,84 @@ namespace CoopSpectator.Patches
                 team,
                 formations,
                 (source ?? "order") + ":" + orderType);
+        }
+
+        private static void UpdateCommanderFormationAiControlForOrder(
+            Team team,
+            IEnumerable<Formation> formations,
+            OrderType orderType,
+            string source)
+        {
+            Mission mission = Mission.Current;
+            if (mission == null || team == null || formations == null)
+                return;
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            bool isSiegeAmbush = SiegeAmbushScenarioContract.IsSiegeAmbushScenario(scenarioContext);
+            if (!isSiegeAmbush)
+            {
+                if (orderType == OrderType.AIControlOn || orderType == OrderType.AIControlOff)
+                {
+                    CoopMissionNetworkBridge.UpdateVoluntaryFormationAiControl(
+                        mission,
+                        team,
+                        formations,
+                        orderType == OrderType.AIControlOn,
+                        (source ?? "commander-order") + ":" + orderType);
+                }
+
+                return;
+            }
+
+            // Native auto deployment emits AIControlOn while the mission is still in
+            // Deployment. It is a placement implementation detail, not a request to
+            // keep the commander's formations delegated after battle start.
+            if (CoopBattlePhaseRuntimeState.GetPhase() != CoopBattlePhase.BattleActive)
+                return;
+
+            bool? isAiControlled = null;
+            if (orderType == OrderType.AIControlOn)
+                isAiControlled = true;
+            else if (orderType == OrderType.AIControlOff ||
+                     IsManualCommanderMovementOrder(orderType))
+                isAiControlled = false;
+
+            if (!isAiControlled.HasValue)
+                return;
+
+            CoopMissionNetworkBridge.UpdateVoluntaryFormationAiControl(
+                mission,
+                team,
+                formations,
+                isAiControlled.Value,
+                (source ?? "commander-order") + ":" + orderType);
+        }
+
+        private static bool IsManualCommanderMovementOrder(OrderType orderType)
+        {
+            switch (orderType)
+            {
+                case OrderType.Move:
+                case OrderType.MoveToLineSegment:
+                case OrderType.MoveToLineSegmentWithHorizontalLayout:
+                case OrderType.Charge:
+                case OrderType.ChargeWithTarget:
+                case OrderType.StandYourGround:
+                case OrderType.FollowMe:
+                case OrderType.FollowEntity:
+                case OrderType.Retreat:
+                case OrderType.AdvanceTenPaces:
+                case OrderType.FallBackTenPaces:
+                case OrderType.Advance:
+                case OrderType.FallBack:
+                case OrderType.AttackEntity:
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         private static bool IsPlayerDirectedSiegeWeaponAttackCancelingOrder(
@@ -1382,6 +1513,482 @@ namespace CoopSpectator.Patches
             public int TeamIndex { get; }
             public HashSet<int> FormationIndices { get; }
             public HashSet<int> AuthorizedFormationIndices { get; set; }
+        }
+    }
+
+    internal static class CommanderDeploymentFormationSnapshotRuntime
+    {
+        private static readonly object Sync = new object();
+        private static readonly Dictionary<int, FormationSnapshot> SnapshotsByFormationKey =
+            new Dictionary<int, FormationSnapshot>();
+        private static Mission _activeMission;
+
+        internal static int CaptureFormations(
+            Mission mission,
+            IEnumerable<Formation> formations,
+            string source)
+        {
+            if (!ShouldTrackMission(mission) || formations == null)
+                return 0;
+
+            List<Formation> diagnosticFormationList = null;
+            IEnumerable<Formation> formationsToCapture = formations;
+            if (CoopDebugConfig.OrderOfBattleDiagnostics)
+            {
+                diagnosticFormationList = formations
+                    .Where(formation => formation != null)
+                    .Distinct()
+                    .ToList();
+                formationsToCapture = diagnosticFormationList;
+            }
+            int captured = 0;
+            lock (Sync)
+            {
+                EnsureMissionNoLock(mission);
+                foreach (Formation formation in formationsToCapture)
+                {
+                    if (TryCaptureFormationNoLock(formation))
+                        captured++;
+                }
+            }
+
+            LogDiagnostics("captured authoritative manual frames", mission, captured, source);
+            IEnumerable<Formation> diagnosticFormations = diagnosticFormationList != null
+                ? (IEnumerable<Formation>)diagnosticFormationList
+                : Array.Empty<Formation>();
+            LogFormationFrames(
+                mission,
+                diagnosticFormations,
+                "captured-authoritative-manual-frames",
+                source);
+            return captured;
+        }
+
+        internal static int CaptureAll(Mission mission, string source)
+        {
+            if (!ShouldTrackMission(mission) || mission.Teams == null)
+                return 0;
+
+            LogFormationFrames(
+                mission,
+                EnumerateBattleFormations(mission),
+                "before-native-finish-capture",
+                source);
+            int captured = 0;
+            lock (Sync)
+            {
+                EnsureMissionNoLock(mission);
+                SnapshotsByFormationKey.Clear();
+                foreach (Team team in mission.Teams)
+                {
+                    if (team == null ||
+                        team.Side == BattleSideEnum.None ||
+                        team.FormationsIncludingEmpty == null)
+                    {
+                        continue;
+                    }
+
+                    foreach (Formation formation in team.FormationsIncludingEmpty)
+                    {
+                        if (TryCaptureFormationNoLock(formation))
+                            captured++;
+                    }
+                }
+            }
+
+            LogDiagnostics("captured pre-finish frames", mission, captured, source);
+            LogStoredSnapshots(mission, "captured-pre-finish-snapshots", source);
+            return captured;
+        }
+
+        internal static int ResetTeam(Mission mission, Team team, string source)
+        {
+            if (!ShouldTrackMission(mission) || team == null)
+                return 0;
+
+            int removed = 0;
+            lock (Sync)
+            {
+                EnsureMissionNoLock(mission);
+                int[] keys = SnapshotsByFormationKey
+                    .Where(pair => ReferenceEquals(pair.Value.Formation?.Team, team))
+                    .Select(pair => pair.Key)
+                    .ToArray();
+                foreach (int key in keys)
+                {
+                    if (SnapshotsByFormationKey.Remove(key))
+                        removed++;
+                }
+            }
+
+            LogDiagnostics("reset pre-auto-deploy frames", mission, removed, source);
+            return removed;
+        }
+
+        internal static bool TryApplyAuthoritativeFrame(
+            Mission mission,
+            Formation formation,
+            string source)
+        {
+            if (!ShouldTrackMission(mission) || formation == null)
+                return false;
+
+            FormationSnapshot snapshot;
+            lock (Sync)
+            {
+                if (!ReferenceEquals(_activeMission, mission) ||
+                    !SnapshotsByFormationKey.TryGetValue(
+                        BuildFormationKey(formation),
+                        out snapshot) ||
+                    !ReferenceEquals(snapshot.Formation, formation))
+                {
+                    return false;
+                }
+            }
+
+            bool applied = TryApplySnapshot(mission, snapshot, teleportUnits: false);
+            if (applied)
+            {
+                LogDiagnostics("reapplied authoritative frame", mission, 1, source);
+                LogFormationFrames(
+                    mission,
+                    new[] { formation },
+                    "reapplied-authoritative-frame",
+                    source);
+            }
+            return applied;
+        }
+
+        internal static int RestoreAllAfterNativeFinish(Mission mission, string source)
+        {
+            if (!ShouldTrackMission(mission))
+                return 0;
+
+            List<FormationSnapshot> snapshots;
+            lock (Sync)
+            {
+                if (!ReferenceEquals(_activeMission, mission))
+                    return 0;
+
+                snapshots = new List<FormationSnapshot>(SnapshotsByFormationKey.Values);
+            }
+
+            LogFormationFrames(
+                mission,
+                snapshots.Select(snapshot => snapshot.Formation),
+                "after-native-finish-before-restore",
+                source);
+            LogStoredSnapshots(mission, "snapshots-before-post-finish-restore", source);
+            int restored = 0;
+            bool previousTeleportingAgents = mission.IsTeleportingAgents;
+            try
+            {
+                mission.IsTeleportingAgents = true;
+                foreach (FormationSnapshot snapshot in snapshots)
+                {
+                    if (TryApplySnapshot(mission, snapshot, teleportUnits: true))
+                        restored++;
+                }
+            }
+            finally
+            {
+                mission.IsTeleportingAgents = previousTeleportingAgents;
+            }
+
+            LogDiagnostics("restored post-finish frames", mission, restored, source);
+            LogFormationFrames(
+                mission,
+                snapshots.Select(snapshot => snapshot.Formation),
+                "after-native-finish-restore",
+                source);
+            return restored;
+        }
+
+        internal static void LogFormationFrames(
+            Mission mission,
+            IEnumerable<Formation> formations,
+            string stage,
+            string source)
+        {
+            if (!CoopDebugConfig.OrderOfBattleDiagnostics || mission == null || formations == null)
+                return;
+
+            try
+            {
+                var details = new List<string>();
+                foreach (Formation formation in formations
+                             .Where(candidate => candidate != null)
+                             .Distinct()
+                             .OrderBy(candidate => candidate.Team?.TeamIndex ?? -1)
+                             .ThenBy(candidate => candidate.Index))
+                {
+                    Vec2 position = formation.OrderPosition;
+                    Vec2 direction = formation.Direction;
+                    FormOrder formOrder = formation.FormOrder;
+                    details.Add(
+                        "Team=" + (formation.Team?.TeamIndex.ToString() ?? "null") +
+                        "/Side=" + (formation.Team?.Side.ToString() ?? "null") +
+                        "/Formation=" + formation.Index +
+                        "/Units=" + formation.CountOfUnits +
+                        "/PositionValid=" + formation.OrderPositionIsValid +
+                        "/Position=" + FormatVec2(position) +
+                        "/Direction=" + FormatVec2(direction) +
+                        "/Width=" + FormatFloat(formation.Width) +
+                        "/Depth=" + FormatFloat(formation.Depth) +
+                        "/UnitSpacing=" + formation.UnitSpacing +
+                        "/FormOrder=" + formOrder.OrderEnum +
+                        "/CustomWidth=" + FormatFloat(formOrder.CustomFlankWidth) +
+                        "/Arrangement=" + formation.ArrangementOrder.OrderEnum +
+                        "/Movement=" + formation.GetReadonlyMovementOrderReference().OrderType);
+                }
+
+                ModLogger.Info(
+                    "CommanderDeploymentFormationSnapshotRuntime: formation frame diagnostics. " +
+                    "Stage=" + (stage ?? string.Empty) +
+                    " Mission=" + (mission.SceneName ?? "<null>") +
+                    " Formations=[" + string.Join("; ", details.ToArray()) + "]" +
+                    " Source=" + (source ?? "unknown"));
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CommanderDeploymentFormationSnapshotRuntime: formation frame diagnostics failed. " +
+                    "Stage=" + (stage ?? string.Empty) +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message);
+            }
+        }
+
+        private static bool ShouldTrackMission(Mission mission)
+        {
+            return GameNetwork.IsServer &&
+                   mission != null &&
+                   mission.Scene != null &&
+                   ExactSiegeAmbushDeploymentControllerPatch.IsExactSiegeAmbushMission(mission);
+        }
+
+        private static void EnsureMissionNoLock(Mission mission)
+        {
+            if (ReferenceEquals(_activeMission, mission))
+                return;
+
+            _activeMission = mission;
+            SnapshotsByFormationKey.Clear();
+        }
+
+        private static IEnumerable<Formation> EnumerateBattleFormations(Mission mission)
+        {
+            if (mission?.Teams == null)
+                yield break;
+
+            foreach (Team team in mission.Teams)
+            {
+                if (team == null ||
+                    team.Side == BattleSideEnum.None ||
+                    team.FormationsIncludingEmpty == null)
+                {
+                    continue;
+                }
+
+                foreach (Formation formation in team.FormationsIncludingEmpty)
+                {
+                    if (formation != null)
+                        yield return formation;
+                }
+            }
+        }
+
+        private static void LogStoredSnapshots(Mission mission, string stage, string source)
+        {
+            if (!CoopDebugConfig.OrderOfBattleDiagnostics || mission == null)
+                return;
+
+            try
+            {
+                List<FormationSnapshot> snapshots;
+                lock (Sync)
+                {
+                    if (!ReferenceEquals(_activeMission, mission))
+                        return;
+
+                    snapshots = SnapshotsByFormationKey.Values
+                        .OrderBy(snapshot => snapshot.Formation?.Team?.TeamIndex ?? -1)
+                        .ThenBy(snapshot => snapshot.Formation?.Index ?? -1)
+                        .ToList();
+                }
+
+                var details = new List<string>();
+                foreach (FormationSnapshot snapshot in snapshots)
+                {
+                    details.Add(
+                        "Team=" + (snapshot.Formation?.Team?.TeamIndex.ToString() ?? "null") +
+                        "/Side=" + (snapshot.Formation?.Team?.Side.ToString() ?? "null") +
+                        "/Formation=" + (snapshot.Formation?.Index.ToString() ?? "null") +
+                        "/Position=" + FormatVec2(snapshot.Position) +
+                        "/Direction=" + FormatVec2(snapshot.Direction) +
+                        "/UnitSpacing=" + snapshot.UnitSpacing +
+                        "/FormOrder=" + snapshot.FormOrder.OrderEnum +
+                        "/CustomWidth=" + FormatFloat(snapshot.FormOrder.CustomFlankWidth));
+                }
+
+                ModLogger.Info(
+                    "CommanderDeploymentFormationSnapshotRuntime: stored snapshot diagnostics. " +
+                    "Stage=" + (stage ?? string.Empty) +
+                    " Mission=" + (mission.SceneName ?? "<null>") +
+                    " Snapshots=[" + string.Join("; ", details.ToArray()) + "]" +
+                    " Source=" + (source ?? "unknown"));
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CommanderDeploymentFormationSnapshotRuntime: stored snapshot diagnostics failed. " +
+                    "Stage=" + (stage ?? string.Empty) +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message);
+            }
+        }
+
+        private static string FormatVec2(Vec2 value)
+        {
+            return "(" + FormatFloat(value.x) + "," + FormatFloat(value.y) + ")";
+        }
+
+        private static string FormatFloat(float value)
+        {
+            return value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        private static bool TryCaptureFormationNoLock(Formation formation)
+        {
+            if (formation == null ||
+                formation.Team == null ||
+                formation.Team.Side == BattleSideEnum.None ||
+                formation.CountOfUnits <= 0 ||
+                !formation.OrderPositionIsValid)
+            {
+                return false;
+            }
+
+            Vec2 position = formation.OrderPosition;
+            Vec2 direction = formation.Direction;
+            if (!position.IsValid)
+                return false;
+            if (!direction.IsValid || direction.LengthSquared < 0.0001f)
+                direction = Vec2.Forward;
+            else
+                direction = direction.Normalized();
+
+            SnapshotsByFormationKey[BuildFormationKey(formation)] =
+                new FormationSnapshot(
+                    formation,
+                    position,
+                    direction,
+                    formation.FormOrder,
+                    formation.UnitSpacing);
+            return true;
+        }
+
+        private static bool TryApplySnapshot(
+            Mission mission,
+            FormationSnapshot snapshot,
+            bool teleportUnits)
+        {
+            Formation formation = snapshot.Formation;
+            if (mission?.Scene == null ||
+                formation == null ||
+                formation.Team == null ||
+                formation.CountOfUnits <= 0 ||
+                !snapshot.Position.IsValid)
+            {
+                return false;
+            }
+
+            try
+            {
+                float height = mission.Scene.GetTerrainHeight(snapshot.Position);
+                mission.Scene.GetHeightAtPoint(snapshot.Position, BodyFlags.None, ref height);
+                var worldPosition = new WorldPosition(
+                    mission.Scene,
+                    UIntPtr.Zero,
+                    new Vec3(snapshot.Position, height),
+                    hasValidZ: false);
+                formation.SetPositioning(
+                    worldPosition,
+                    snapshot.Direction,
+                    snapshot.UnitSpacing);
+                formation.SetFormOrder(
+                    snapshot.FormOrder,
+                    updateDesiredFileCount: false);
+
+                if (teleportUnits)
+                {
+                    formation.ApplyActionOnEachUnit(
+                        agent =>
+                        {
+                            if (agent == null || !agent.IsActive())
+                                return;
+
+                            agent.ForceUpdateCachedAndFormationValues(
+                                updateOnlyMovement: false,
+                                arrangementChangeAllowed: false);
+                            WorldPosition unitOrderPosition =
+                                formation.GetOrderPositionOfUnit(agent);
+                            if (unitOrderPosition.IsValid)
+                                agent.TeleportToPosition(unitOrderPosition.GetGroundVec3());
+                        });
+                    formation.SetHasPendingUnitPositions(hasPendingUnitPositions: false);
+                }
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static int BuildFormationKey(Formation formation)
+        {
+            int teamIndex = formation?.Team?.TeamIndex ?? -1;
+            int formationIndex = formation?.Index ?? -1;
+            return (teamIndex << 8) ^ (formationIndex & 0xFF);
+        }
+
+        private static void LogDiagnostics(
+            string stage,
+            Mission mission,
+            int formationCount,
+            string source)
+        {
+            if (!CoopDebugConfig.OrderOfBattleDiagnostics)
+                return;
+
+            ModLogger.Info(
+                "CommanderDeploymentFormationSnapshotRuntime: " + stage + ". " +
+                "Mission=" + (mission?.SceneName ?? "<null>") +
+                " Formations=" + formationCount +
+                " Source=" + (source ?? "unknown"));
+        }
+
+        private readonly struct FormationSnapshot
+        {
+            public FormationSnapshot(
+                Formation formation,
+                Vec2 position,
+                Vec2 direction,
+                FormOrder formOrder,
+                int unitSpacing)
+            {
+                Formation = formation;
+                Position = position;
+                Direction = direction;
+                FormOrder = formOrder;
+                UnitSpacing = unitSpacing;
+            }
+
+            public Formation Formation { get; }
+            public Vec2 Position { get; }
+            public Vec2 Direction { get; }
+            public FormOrder FormOrder { get; }
+            public int UnitSpacing { get; }
         }
     }
 }

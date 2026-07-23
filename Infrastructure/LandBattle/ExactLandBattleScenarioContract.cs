@@ -1,4 +1,5 @@
 using System;
+using CoopSpectator.Infrastructure.Relief;
 using CoopSpectator.Infrastructure.SallyOut;
 using CoopSpectator.Infrastructure.VillageBattle;
 using CoopSpectator.Network.Messages;
@@ -9,7 +10,8 @@ namespace CoopSpectator.Infrastructure
     {
         public static bool IsLandBattleScenario(BattleScenarioContextMessage scenarioContext)
         {
-            return SallyOutScenarioContract.IsSallyOutScenario(scenarioContext) ||
+            return ExactReliefScenarioContract.IsReliefScenario(scenarioContext) ||
+                   SallyOutScenarioContract.IsSallyOutScenario(scenarioContext) ||
                    IsVillageBattleScenario(scenarioContext) ||
                    IsFieldBattleScenario(scenarioContext);
         }
@@ -39,6 +41,14 @@ namespace CoopSpectator.Infrastructure
             string runtimeScene,
             out string diagnostics)
         {
+            if (ExactReliefScenarioContract.IsReliefScenario(scenarioContext))
+            {
+                return ExactReliefScenarioContract.IsValidatedScenario(
+                    scenarioContext,
+                    runtimeScene,
+                    out diagnostics);
+            }
+
             if (SallyOutScenarioContract.IsSallyOutScenario(scenarioContext))
             {
                 bool validated = SallyOutScenarioContract.IsValidatedScenario(
@@ -71,6 +81,14 @@ namespace CoopSpectator.Infrastructure
             out string diagnostics)
         {
             BattleScenarioContextMessage scenarioContext = snapshot?.ScenarioContext;
+            if (ExactReliefScenarioContract.IsReliefScenario(scenarioContext))
+            {
+                return ExactReliefScenarioContract.IsValidatedScenario(
+                    scenarioContext,
+                    runtimeScene,
+                    out diagnostics);
+            }
+
             if (SallyOutScenarioContract.IsSallyOutScenario(scenarioContext))
             {
                 bool validated = SallyOutScenarioContract.IsValidatedScenario(

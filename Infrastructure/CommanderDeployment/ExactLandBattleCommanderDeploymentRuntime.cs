@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using CoopSpectator.Network.Messages;
 using TaleWorlds.Core;
 using TaleWorlds.Engine;
@@ -16,6 +17,10 @@ namespace CoopSpectator.Infrastructure
         private static Mission _manualPlacementMission;
         private static bool _manualPlacementActive;
         private static bool _manualPlacementPreviousTeleportingAgents;
+        private static readonly HashSet<BattleSideEnum> ActiveManualPlacementSides =
+            new HashSet<BattleSideEnum>();
+        private static readonly HashSet<BattleSideEnum> CompletedDeploymentSides =
+            new HashSet<BattleSideEnum>();
 
         public static bool IsDeploymentRuntimeActive(Mission mission)
         {
@@ -29,19 +34,33 @@ namespace CoopSpectator.Infrastructure
                     RestoreManualPlacementStateLocked();
                     _activeMission = mission;
                     _deploymentLifecycleFinished = false;
+                    CompletedDeploymentSides.Clear();
                 }
 
                 return true;
             }
         }
 
-        public static bool TryBeginManualPlacement(Mission mission, out string diagnostics)
+        public static bool TryBeginManualPlacement(
+            Mission mission,
+            BattleSideEnum side,
+            out string diagnostics)
         {
             diagnostics = "deployment-runtime-inactive";
             if (!IsDeploymentRuntimeActive(mission))
                 return false;
 
-            return TryBeginValidatedManualPlacement(mission, out diagnostics);
+            if (side == BattleSideEnum.None)
+            {
+                diagnostics = "manual-placement-side-none";
+                return false;
+            }
+
+            return TryBeginValidatedManualPlacement(
+                mission,
+                side,
+                enforceSideLifecycle: true,
+                out diagnostics);
         }
 
         public static bool TryBeginClientManualPlacement(Mission mission, out string diagnostics)
@@ -54,6 +73,8 @@ namespace CoopSpectator.Infrastructure
 
             bool placementStarted = TryBeginValidatedManualPlacement(
                 mission,
+                BattleSideEnum.None,
+                enforceSideLifecycle: false,
                 out string placementDiagnostics);
             diagnostics =
                 placementDiagnostics +
@@ -74,7 +95,11 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
-        private static bool TryBeginValidatedManualPlacement(Mission mission, out string diagnostics)
+        private static bool TryBeginValidatedManualPlacement(
+            Mission mission,
+            BattleSideEnum side,
+            bool enforceSideLifecycle,
+            out string diagnostics)
         {
             lock (Sync)
             {
@@ -83,6 +108,7 @@ namespace CoopSpectator.Infrastructure
                     RestoreManualPlacementStateLocked();
                     _activeMission = mission;
                     _deploymentLifecycleFinished = false;
+                    CompletedDeploymentSides.Clear();
                 }
 
                 if (_deploymentLifecycleFinished)
@@ -91,10 +117,21 @@ namespace CoopSpectator.Infrastructure
                     return false;
                 }
 
+                if (enforceSideLifecycle && CompletedDeploymentSides.Contains(side))
+                {
+                    diagnostics = "side-deployment-already-finished Side=" + side;
+                    return false;
+                }
+
                 if (_manualPlacementActive && ReferenceEquals(_manualPlacementMission, mission))
                 {
+                    if (enforceSideLifecycle)
+                        ActiveManualPlacementSides.Add(side);
                     mission.IsTeleportingAgents = true;
-                    diagnostics = "manual-placement-already-active";
+                    diagnostics =
+                        "manual-placement-already-active" +
+                        " Side=" + side +
+                        " ActiveSides=[" + string.Join(",", ActiveManualPlacementSides) + "]";
                     return true;
                 }
 
@@ -102,10 +139,15 @@ namespace CoopSpectator.Infrastructure
                 _manualPlacementMission = mission;
                 _manualPlacementPreviousTeleportingAgents = mission.IsTeleportingAgents;
                 _manualPlacementActive = true;
+                if (enforceSideLifecycle)
+                    ActiveManualPlacementSides.Add(side);
                 mission.IsTeleportingAgents = true;
             }
 
-            diagnostics = "manual-placement-started";
+            diagnostics =
+                "manual-placement-started" +
+                " Side=" + side +
+                " ActiveSides=[" + string.Join(",", ActiveManualPlacementSides) + "]";
             return true;
         }
 
@@ -138,6 +180,20 @@ namespace CoopSpectator.Infrastructure
             lock (Sync)
             {
                 return ReferenceEquals(_activeMission, mission) && _deploymentLifecycleFinished;
+            }
+        }
+
+        public static bool HasSideDeploymentFinished(
+            Mission mission,
+            BattleSideEnum side)
+        {
+            if (side == BattleSideEnum.None || !IsDeploymentRuntimeActive(mission))
+                return false;
+
+            lock (Sync)
+            {
+                return ReferenceEquals(_activeMission, mission) &&
+                       CompletedDeploymentSides.Contains(side);
             }
         }
 
@@ -174,6 +230,9 @@ namespace CoopSpectator.Infrastructure
             }
 
             int deployedFormationCount = 0;
+            int activeUnitCount = 0;
+            int teleportedUnitCount = 0;
+            var failures = new List<string>();
             bool previousTeleportingAgents = mission.IsTeleportingAgents;
             try
             {
@@ -209,9 +268,29 @@ namespace CoopSpectator.Infrastructure
                         spawnDirection,
                         formation.ArrangementOrder.GetUnitSpacing());
                     formation.ApplyActionOnEachUnit(agent =>
+                    {
+                        if (agent == null || !agent.IsActive())
+                            return;
+
+                        activeUnitCount++;
                         agent.ForceUpdateCachedAndFormationValues(
-                            updateOnlyMovement: true,
-                            arrangementChangeAllowed: false));
+                            updateOnlyMovement: false,
+                            arrangementChangeAllowed: false);
+                        WorldPosition orderPosition =
+                            formation.GetOrderPositionOfUnit(agent);
+                        if (!orderPosition.IsValid)
+                        {
+                            failures.Add(
+                                formation.FormationIndex +
+                                ":unit-" +
+                                agent.Index +
+                                "-order-position-invalid");
+                            return;
+                        }
+
+                        agent.TeleportToPosition(orderPosition.GetGroundVec3());
+                        teleportedUnitCount++;
+                    });
                     formation.SetHasPendingUnitPositions(hasPendingUnitPositions: false);
                     formation.SetMovementOrder(MovementOrder.MovementOrderStop);
                     deployedFormationCount++;
@@ -221,8 +300,13 @@ namespace CoopSpectator.Infrastructure
                     "auto-deployed-existing-agents" +
                     " Side=" + side +
                     " TeamIndex=" + team.TeamIndex +
-                    " Formations=" + deployedFormationCount;
-                return deployedFormationCount > 0;
+                    " Formations=" + deployedFormationCount +
+                    " ActiveUnits=" + activeUnitCount +
+                    " TeleportedUnits=" + teleportedUnitCount +
+                    " Failures=[" + string.Join("; ", failures) + "]";
+                return deployedFormationCount > 0 &&
+                       activeUnitCount > 0 &&
+                       teleportedUnitCount == activeUnitCount;
             }
             catch (Exception ex)
             {
@@ -230,7 +314,10 @@ namespace CoopSpectator.Infrastructure
                     "auto-deploy-faulted " +
                     ex.GetType().Name + ":" + ex.Message +
                     " Side=" + side +
-                    " Formations=" + deployedFormationCount;
+                    " Formations=" + deployedFormationCount +
+                    " ActiveUnits=" + activeUnitCount +
+                    " TeleportedUnits=" + teleportedUnitCount +
+                    " Failures=[" + string.Join("; ", failures) + "]";
                 return false;
             }
             finally
@@ -247,14 +334,30 @@ namespace CoopSpectator.Infrastructure
             if (!IsDeploymentRuntimeActive(mission))
                 return false;
 
-            bool attackerDeployed = TryAutoDeploySide(
-                mission,
-                BattleSideEnum.Attacker,
-                out string attackerDiagnostics);
-            bool defenderDeployed = TryAutoDeploySide(
-                mission,
-                BattleSideEnum.Defender,
-                out string defenderDiagnostics);
+            bool attackerAlreadyFinished =
+                HasSideDeploymentFinished(mission, BattleSideEnum.Attacker);
+            bool defenderAlreadyFinished =
+                HasSideDeploymentFinished(mission, BattleSideEnum.Defender);
+            string attackerDiagnostics = "preserved-completed-side";
+            string defenderDiagnostics = "preserved-completed-side";
+            bool attackerDeployed = attackerAlreadyFinished;
+            bool defenderDeployed = defenderAlreadyFinished;
+            if (!attackerAlreadyFinished)
+            {
+                attackerDeployed = TryAutoDeploySide(
+                    mission,
+                    BattleSideEnum.Attacker,
+                    out attackerDiagnostics);
+            }
+
+            if (!defenderAlreadyFinished)
+            {
+                defenderDeployed = TryAutoDeploySide(
+                    mission,
+                    BattleSideEnum.Defender,
+                    out defenderDiagnostics);
+            }
+
             if (!attackerDeployed || !defenderDeployed)
             {
                 diagnostics =
@@ -280,6 +383,64 @@ namespace CoopSpectator.Infrastructure
             return deploymentFinished && !stillBlocking;
         }
 
+        public static bool TryCompleteSideDeployment(
+            Mission mission,
+            BattleSideEnum side,
+            out bool deploymentLifecycleFinished,
+            out string diagnostics)
+        {
+            deploymentLifecycleFinished = false;
+            diagnostics = "deployment-runtime-inactive";
+            if (!IsDeploymentRuntimeActive(mission))
+                return false;
+
+            if (side == BattleSideEnum.None)
+            {
+                diagnostics = "side-none";
+                return false;
+            }
+
+            lock (Sync)
+            {
+                if (!ReferenceEquals(_activeMission, mission))
+                {
+                    diagnostics = "active-mission-mismatch";
+                    return false;
+                }
+
+                if (_deploymentLifecycleFinished)
+                {
+                    deploymentLifecycleFinished = true;
+                    diagnostics = "deployment-already-finished";
+                    return true;
+                }
+
+                CompletedDeploymentSides.Add(side);
+                ActiveManualPlacementSides.Remove(side);
+                bool bothSidesFinished =
+                    CompletedDeploymentSides.Contains(BattleSideEnum.Attacker) &&
+                    CompletedDeploymentSides.Contains(BattleSideEnum.Defender);
+                if (bothSidesFinished)
+                {
+                    _deploymentLifecycleFinished = true;
+                    RestoreManualPlacementStateLocked();
+                }
+                else if (_manualPlacementActive)
+                {
+                    mission.IsTeleportingAgents = true;
+                }
+
+                deploymentLifecycleFinished = _deploymentLifecycleFinished;
+                diagnostics =
+                    "side-deployment-finished" +
+                    " Side=" + side +
+                    " CompletedSides=[" + string.Join(",", CompletedDeploymentSides) + "]" +
+                    " ActiveSides=[" + string.Join(",", ActiveManualPlacementSides) + "]" +
+                    " LifecycleFinished=" + deploymentLifecycleFinished;
+                return true;
+            }
+        }
+
         public static bool TryFinishDeployment(Mission mission, out string diagnostics)
         {
             diagnostics = "deployment-runtime-inactive";
@@ -295,6 +456,8 @@ namespace CoopSpectator.Infrastructure
                 }
 
                 _deploymentLifecycleFinished = true;
+                CompletedDeploymentSides.Add(BattleSideEnum.Attacker);
+                CompletedDeploymentSides.Add(BattleSideEnum.Defender);
                 RestoreManualPlacementStateLocked();
             }
 
@@ -316,6 +479,7 @@ namespace CoopSpectator.Infrastructure
                 RestoreManualPlacementStateLocked();
                 _activeMission = null;
                 _deploymentLifecycleFinished = false;
+                CompletedDeploymentSides.Clear();
             }
         }
 
@@ -329,6 +493,7 @@ namespace CoopSpectator.Infrastructure
             _manualPlacementMission = null;
             _manualPlacementActive = false;
             _manualPlacementPreviousTeleportingAgents = false;
+            ActiveManualPlacementSides.Clear();
 
             if (placementMission == null)
                 return;

@@ -123,17 +123,21 @@ namespace CoopSpectator.Network.Messages
         public const int MaxCaptainAssignmentBytes = 2048;
 
         private static readonly CompressionInfo.Integer BattleSideCompressionInfo = new CompressionInfo.Integer(-1, 1, maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer LayoutRevisionCompressionInfo =
+            new CompressionInfo.Integer(0, int.MaxValue, maximumValueGiven: true);
 
         public CoopCommanderDeploymentFormationAssignmentsMessage(
             BattleSideEnum requestedSide,
             byte[] assignmentBytes,
             byte[] formationLayoutBytes,
-            byte[] captainAssignmentBytes)
+            byte[] captainAssignmentBytes,
+            int layoutRevision)
         {
             RequestedSide = requestedSide;
             AssignmentBytes = assignmentBytes ?? Array.Empty<byte>();
             FormationLayoutBytes = formationLayoutBytes ?? Array.Empty<byte>();
             CaptainAssignmentBytes = captainAssignmentBytes ?? Array.Empty<byte>();
+            LayoutRevision = Math.Max(0, layoutRevision);
         }
 
         public CoopCommanderDeploymentFormationAssignmentsMessage()
@@ -142,12 +146,14 @@ namespace CoopSpectator.Network.Messages
             AssignmentBytes = Array.Empty<byte>();
             FormationLayoutBytes = Array.Empty<byte>();
             CaptainAssignmentBytes = Array.Empty<byte>();
+            LayoutRevision = 0;
         }
 
         public BattleSideEnum RequestedSide { get; private set; }
         public byte[] AssignmentBytes { get; private set; }
         public byte[] FormationLayoutBytes { get; private set; }
         public byte[] CaptainAssignmentBytes { get; private set; }
+        public int LayoutRevision { get; private set; }
 
         protected override bool OnRead()
         {
@@ -156,6 +162,7 @@ namespace CoopSpectator.Network.Messages
             AssignmentBytes = ReadPayload(MaxAssignmentBytes, ref bufferReadValid);
             FormationLayoutBytes = ReadPayload(MaxFormationLayoutBytes, ref bufferReadValid);
             CaptainAssignmentBytes = ReadPayload(MaxCaptainAssignmentBytes, ref bufferReadValid);
+            LayoutRevision = ReadIntFromPacket(LayoutRevisionCompressionInfo, ref bufferReadValid);
 
             return bufferReadValid;
         }
@@ -169,6 +176,7 @@ namespace CoopSpectator.Network.Messages
             WritePayload(assignmentBytes, MaxAssignmentBytes);
             WritePayload(formationLayoutBytes, MaxFormationLayoutBytes);
             WritePayload(captainAssignmentBytes, MaxCaptainAssignmentBytes);
+            WriteIntToPacket(Math.Max(0, LayoutRevision), LayoutRevisionCompressionInfo);
         }
 
         protected override MultiplayerMessageFilter OnGetLogFilter()
@@ -181,7 +189,8 @@ namespace CoopSpectator.Network.Messages
             return "CoopCommanderDeploymentFormationAssignments Side=" + RequestedSide +
                 " Bytes=" + (AssignmentBytes?.Length ?? 0) +
                 " LayoutBytes=" + (FormationLayoutBytes?.Length ?? 0) +
-                " CaptainBytes=" + (CaptainAssignmentBytes?.Length ?? 0);
+                " CaptainBytes=" + (CaptainAssignmentBytes?.Length ?? 0) +
+                " LayoutRevision=" + LayoutRevision;
         }
 
         private byte[] ReadPayload(int maxBytes, ref bool bufferReadValid)
@@ -204,6 +213,84 @@ namespace CoopSpectator.Network.Messages
             byte[] safePayload = payload ?? Array.Empty<byte>();
             int payloadLength = Math.Min(safePayload.Length, maxBytes);
             WriteByteArrayToPacket(safePayload, 0, payloadLength);
+        }
+    }
+
+    [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromServer)]
+    public sealed class CoopCommanderDeploymentFormationLayoutStateMessage : GameNetworkMessage
+    {
+        private static readonly CompressionInfo.Integer BattleSideCompressionInfo =
+            new CompressionInfo.Integer(-1, 1, maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer LayoutRevisionCompressionInfo =
+            new CompressionInfo.Integer(0, int.MaxValue, maximumValueGiven: true);
+
+        public CoopCommanderDeploymentFormationLayoutStateMessage(
+            BattleSideEnum assignmentSide,
+            int layoutRevision,
+            byte[] formationLayoutBytes)
+        {
+            AssignmentSide = assignmentSide;
+            LayoutRevision = Math.Max(0, layoutRevision);
+            FormationLayoutBytes = formationLayoutBytes ?? Array.Empty<byte>();
+        }
+
+        public CoopCommanderDeploymentFormationLayoutStateMessage()
+        {
+            AssignmentSide = BattleSideEnum.None;
+            LayoutRevision = 0;
+            FormationLayoutBytes = Array.Empty<byte>();
+        }
+
+        public BattleSideEnum AssignmentSide { get; private set; }
+        public int LayoutRevision { get; private set; }
+        public byte[] FormationLayoutBytes { get; private set; }
+
+        protected override bool OnRead()
+        {
+            bool bufferReadValid = true;
+            AssignmentSide = (BattleSideEnum)ReadIntFromPacket(BattleSideCompressionInfo, ref bufferReadValid);
+            LayoutRevision = ReadIntFromPacket(LayoutRevisionCompressionInfo, ref bufferReadValid);
+            byte[] payloadBuffer =
+                new byte[CoopCommanderDeploymentFormationAssignmentsMessage.MaxFormationLayoutBytes];
+            int bytesRead = ReadByteArrayFromPacket(
+                payloadBuffer,
+                0,
+                payloadBuffer.Length,
+                ref bufferReadValid);
+            if (bytesRead <= 0)
+            {
+                FormationLayoutBytes = Array.Empty<byte>();
+            }
+            else
+            {
+                FormationLayoutBytes = new byte[bytesRead];
+                Buffer.BlockCopy(payloadBuffer, 0, FormationLayoutBytes, 0, bytesRead);
+            }
+
+            return bufferReadValid;
+        }
+
+        protected override void OnWrite()
+        {
+            byte[] payload = FormationLayoutBytes ?? Array.Empty<byte>();
+            int payloadLength = Math.Min(
+                payload.Length,
+                CoopCommanderDeploymentFormationAssignmentsMessage.MaxFormationLayoutBytes);
+            WriteIntToPacket((int)AssignmentSide, BattleSideCompressionInfo);
+            WriteIntToPacket(Math.Max(0, LayoutRevision), LayoutRevisionCompressionInfo);
+            WriteByteArrayToPacket(payload, 0, payloadLength);
+        }
+
+        protected override MultiplayerMessageFilter OnGetLogFilter()
+        {
+            return MultiplayerMessageFilter.Mission;
+        }
+
+        protected override string OnGetLogFormat()
+        {
+            return "CoopCommanderDeploymentFormationLayoutState Side=" + AssignmentSide +
+                " LayoutRevision=" + LayoutRevision +
+                " LayoutBytes=" + (FormationLayoutBytes?.Length ?? 0);
         }
     }
 

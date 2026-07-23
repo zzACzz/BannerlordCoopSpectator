@@ -26,9 +26,12 @@ using Helpers;
 using TaleWorlds.ObjectSystem;
 using CoopSpectator.Campaign.LandBattle;
 using CoopSpectator.Campaign.LordsHall;
+using CoopSpectator.Campaign.Relief;
 using CoopSpectator.Campaign.SallyOut;
 using CoopSpectator.Campaign.SiegeAmbush;
+using CoopSpectator.Campaign.SiegeAssault;
 using CoopSpectator.Infrastructure.LordsHall;
+using CoopSpectator.Infrastructure.Relief;
 using CoopSpectator.Infrastructure.SallyOut;
 using CoopSpectator.Infrastructure.SiegeAmbush;
 
@@ -694,6 +697,21 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     summary +=
                         " SiegeAmbushDiagnostics={" +
                         siegeAmbushDiagnostics + "}";
+                    return true;
+                }
+
+                if (ExactReliefCampaignBattleAdapter.IsCampaignBattle(battle) &&
+                    !ExactReliefCampaignBattleAdapter.TryValidateActiveMission(
+                        battle,
+                        encounterSettlement,
+                        mission,
+                        out _,
+                        out string reliefDiagnostics))
+                {
+                    reason = "relief-contract-invalid";
+                    summary +=
+                        " ReliefDiagnostics={" +
+                        reliefDiagnostics + "}";
                     return true;
                 }
 
@@ -3280,6 +3298,40 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             bool useNativeFinalLordsHallAftermath = ShouldUseNativeFinalLordsHallAftermath(result);
             bool useNativeFinalLandBattleAftermath = ShouldUseNativeFinalLandBattleAftermath(result);
             bool useNativeSiegeAmbushAftermath = ShouldUseNativeSiegeAmbushAftermath(result);
+            bool useExactSiegeAssaultEngineResult =
+                ExactSiegeAssaultCampaignBattleAdapter
+                    .IsCampaignResultCandidate(
+                        PlayerEncounter.Battle,
+                        result);
+            if (useExactSiegeAssaultEngineResult)
+            {
+                BattleSnapshotMessage snapshot =
+                    BattleSnapshotRuntimeState.GetCurrent() ??
+                    BattleSnapshotRuntimeState.GetState()?.Snapshot;
+                if (!ExactSiegeAssaultCampaignBattleAdapter
+                        .TryApplyMissionSiegeEngineResult(
+                            PlayerEncounter.Battle,
+                            snapshot,
+                            mission,
+                            result,
+                            out string siegeAssaultEngineDiagnostics))
+                {
+                    if (!string.Equals(
+                            _lastMissionExitFailedBattleResultKey,
+                            resultKey,
+                            StringComparison.Ordinal))
+                    {
+                        _lastMissionExitFailedBattleResultKey = resultKey;
+                        ModLogger.Info(
+                            "BattleDetector: siege-assault mission exit deferred because exact siege-engine result could not be applied. " +
+                            "BattleId=" + (result.BattleId ?? "null") +
+                            " Diagnostics={" +
+                            siegeAssaultEngineDiagnostics + "}.");
+                    }
+
+                    return;
+                }
+            }
             if (useNativeSiegeAmbushAftermath)
             {
                 if (!SiegeAmbushCampaignBattleAdapter.TryApplyMissionSiegeEngineResult(
@@ -4820,8 +4872,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             if (LordsHallCampaignBattleAdapter.IsCampaignStage(battle, encounterSettlement))
                 return LordsHallScenarioContract.SiegeSubtype;
 
-            if (battle?.IsSiegeOutside == true)
-                return "Relief";
+            if (ExactReliefCampaignBattleAdapter.IsCampaignBattle(battle))
+                return ExactReliefScenarioContract.SiegeSubtype;
 
             if (SallyOutCampaignBattleAdapter.IsCampaignBattle(battle))
                 return SallyOutScenarioContract.SiegeSubtype;
@@ -4930,6 +4982,14 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     StringComparison.OrdinalIgnoreCase))
             {
                 return SiegeAmbushScenarioContract.SceneLocationId;
+            }
+
+            if (string.Equals(
+                    siegeSubtype,
+                    ExactReliefScenarioContract.SiegeSubtype,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return ExactReliefScenarioContract.SceneLocationId;
             }
 
             return string.Empty;
@@ -10632,6 +10692,29 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         ? "native-siege-ambush-mission-scene"
                         : "siege-ambush-contract-invalid:" +
                           siegeAmbushDiagnostics;
+                    return context;
+                }
+
+                if (ExactReliefCampaignBattleAdapter.IsCampaignStage(
+                        battle,
+                        encounterSettlement))
+                {
+                    bool contractValid =
+                        ExactReliefCampaignBattleAdapter
+                            .TryValidateActiveMission(
+                                battle,
+                                encounterSettlement,
+                                mission,
+                                out string expectedScene,
+                                out string reliefDiagnostics);
+                    context.BattleSceneName =
+                        !string.IsNullOrWhiteSpace(expectedScene)
+                            ? expectedScene
+                            : missionSceneName;
+                    context.Source = contractValid
+                        ? "native-relief-mission-scene"
+                        : "relief-contract-invalid:" +
+                          reliefDiagnostics;
                     return context;
                 }
 

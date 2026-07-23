@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Text;
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure.LordsHall;
+using CoopSpectator.Infrastructure.Relief;
 using CoopSpectator.Infrastructure.SallyOut;
 using CoopSpectator.Infrastructure.SiegeAmbush;
 using CoopSpectator.MissionBehaviors;
@@ -457,6 +458,9 @@ namespace CoopSpectator.Infrastructure
                     return false;
                 }
                 bool useSiegeAmbushController = RequiresSiegeAmbushController(scenarioContext);
+                bool useReliefController =
+                    ExactReliefScenarioContract.IsReliefScenario(
+                        scenarioContext);
                 bool useLordsHallController = IsLordsHallSiegeSubtype(scenarioContext);
                 bool isLandSallyOutScenario = SallyOutScenarioContract.IsSallyOutScenario(scenarioContext);
                 bool isSiegeAmbushScenario =
@@ -467,7 +471,10 @@ namespace CoopSpectator.Infrastructure
                 bool isExactSiegeWithDeploymentSubtype =
                     ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(scenarioContext);
                 bool isSiegeAssaultNoDeploymentSubtype = ExactCampaignSiegeAssaultNoDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext);
-                bool isAnySiegeAssaultSubtype = isSiegeAssaultWithDeploymentSubtype || isSiegeAssaultNoDeploymentSubtype;
+                bool requiresCampaignSiegeStateHandler =
+                    isSiegeAssaultWithDeploymentSubtype ||
+                    isSiegeAssaultNoDeploymentSubtype ||
+                    useReliefController;
                 Mission.MissionTeamAITypeEnum missionTeamAiType = ResolveMissionTeamAiType(scenarioContext);
                 bool deferMissionTeamAiActivationUntilBattleActive =
                     ShouldDeferMissionTeamAiActivationUntilBattleActive(
@@ -530,7 +537,7 @@ namespace CoopSpectator.Infrastructure
                 }
 
                 string siegeStateHandlerDiagnostics = "not-required";
-                if (isAnySiegeAssaultSubtype)
+                if (requiresCampaignSiegeStateHandler)
                 {
                     initializationStep = "ensure-siege-assault-state-handler";
                     bool requireSiegeStateHandler = !IsDedicatedServerProcess();
@@ -939,6 +946,23 @@ namespace CoopSpectator.Infrastructure
                                 " PostSanitization={" + (postSanitizationDeploymentPlanDiagnostics ?? string.Empty) + "}";
                         }
 
+                        string reliefControllerDiagnostics = "not-required";
+                        if (useReliefController)
+                        {
+                            initializationStep = "ensure-relief-controller";
+                            if (!TryEnsureReliefControllerInitialized(
+                                    mission,
+                                    defenderTotal,
+                                    attackerTotal,
+                                    out reliefControllerDiagnostics))
+                            {
+                                reason =
+                                    reliefControllerDiagnostics ??
+                                    "relief-controller-failed";
+                                return false;
+                            }
+                        }
+
                         if (isSiegeAssaultWithDeploymentSubtype)
                         {
                             initializationStep = "prepare-siege-assault-with-deployment-plan";
@@ -1036,11 +1060,15 @@ namespace CoopSpectator.Infrastructure
                                 spawnLogic,
                                 playerSide,
                                 supplierDiagnostics +
-                                " FormationBannerSeed={" + formationBannerDiagnostics + "}" +
-                                " DeploymentPlanBridge={" + combinedDeploymentPlanDiagnostics + "}" +
-                                " MissionTeamAI={" + teamAiDiagnostics + "}" +
-                                " SpawnHorses={Defender=" + spawnDefenderHorses + " Attacker=" + spawnAttackerHorses + "}",
-                                "pre-init-with-single-phase",
+                                 " FormationBannerSeed={" + formationBannerDiagnostics + "}" +
+                                 " DeploymentPlanBridge={" + combinedDeploymentPlanDiagnostics + "}" +
+                                 " MissionTeamAI={" + teamAiDiagnostics + "}" +
+                                 " SpawnHorses={Defender=" + spawnDefenderHorses + " Attacker=" + spawnAttackerHorses + "}" +
+                                 (useReliefController
+                                     ? " ReliefController={" + reliefControllerDiagnostics + "}" +
+                                       " RuntimeContract={ReliefFieldCore}"
+                                     : string.Empty),
+                                 "pre-init-with-single-phase",
                                 source);
                             initializationStep = "init-with-single-phase";
                             spawnLogic.InitWithSinglePhase(
@@ -1234,6 +1262,17 @@ namespace CoopSpectator.Infrastructure
 
             if (string.Equals(siegeSubtype, "Relief", StringComparison.OrdinalIgnoreCase))
             {
+                if (!ExactReliefScenarioContract.IsValidatedScenario(
+                        scenarioContext,
+                        runtimeScene,
+                        out string reliefDiagnostics))
+                {
+                    reason =
+                        "relief-contract-invalid:" +
+                        reliefDiagnostics;
+                    return false;
+                }
+
                 battleSpawnTag = BattleSpawnLogic.ReliefForceAttackTag;
                 battleSizeType = Mission.BattleSizeType.Siege;
                 return true;
@@ -1258,13 +1297,8 @@ namespace CoopSpectator.Infrastructure
 
         private static bool RequiresSiegeAmbushController(BattleScenarioContextMessage scenarioContext)
         {
-            string siegeSubtype = scenarioContext?.SiegeContext?.SiegeSubtype ?? string.Empty;
-            return string.Equals(
-                       siegeSubtype,
-                       "Relief",
-                       StringComparison.OrdinalIgnoreCase) ||
-                   SiegeAmbushScenarioContract.IsSiegeAmbushScenario(
-                       scenarioContext);
+            return SiegeAmbushScenarioContract.IsSiegeAmbushScenario(
+                scenarioContext);
         }
 
         private static bool IsLordsHallSiegeSubtype(BattleScenarioContextMessage scenarioContext)
@@ -1285,8 +1319,8 @@ namespace CoopSpectator.Infrastructure
 
         private static bool IsReliefSiegeSubtype(BattleScenarioContextMessage scenarioContext)
         {
-            string siegeSubtype = scenarioContext?.SiegeContext?.SiegeSubtype ?? string.Empty;
-            return string.Equals(siegeSubtype, "Relief", StringComparison.OrdinalIgnoreCase);
+            return ExactReliefScenarioContract.IsReliefScenario(
+                scenarioContext);
         }
 
         private static bool IsSiegeAssaultSubtype(BattleScenarioContextMessage scenarioContext)
@@ -2868,6 +2902,45 @@ namespace CoopSpectator.Infrastructure
             return controller.HasStarted;
         }
 
+        private static bool TryEnsureReliefControllerInitialized(
+            Mission mission,
+            int defenderTotal,
+            int attackerTotal,
+            out string diagnostics)
+        {
+            diagnostics = "mission-null";
+            if (mission == null)
+                return false;
+
+            CoopExactCampaignReliefMissionController controller =
+                mission.GetMissionBehavior<
+                    CoopExactCampaignReliefMissionController>();
+            bool created = false;
+            if (controller == null)
+            {
+                controller =
+                    new CoopExactCampaignReliefMissionController(
+                        defenderTotal,
+                        attackerTotal);
+                mission.AddMissionBehavior(controller);
+                created = true;
+            }
+            else
+            {
+                controller.UpdateTroopCounts(
+                    defenderTotal,
+                    attackerTotal);
+            }
+
+            controller.EnsureInitializedAndStarted();
+            diagnostics =
+                "Created=" + created +
+                " Started=" + controller.HasStarted +
+                " DefenderTotal=" + defenderTotal +
+                " AttackerTotal=" + attackerTotal;
+            return controller.HasStarted;
+        }
+
         private static bool TryEnsureLordsHallControllerInitialized(
             Mission mission,
             IMissionTroopSupplier[] suppliers,
@@ -3566,6 +3639,76 @@ namespace CoopSpectator.Infrastructure
                 " PlayerSide=" + _activePlayerSide +
                 " Source=" + (source ?? "unknown"));
             TryLogRuntimeDiagnostics(mission, source + " gate-change", force: true);
+        }
+
+        public static void TryStopNativeReinforcementSpawnersAtBattleEnd(
+            Mission mission,
+            string source)
+        {
+            if (!IsActive(mission) ||
+                !ReferenceEquals(_activeMission, mission) ||
+                !UsesSpawnLogicRuntimeMode(_activeMode) ||
+                _activeSpawnLogic == null)
+            {
+                return;
+            }
+
+            bool reinforcementGateWasEnabled = _reinforcementsEnabled;
+            bool defenderSpawnerWasEnabled = false;
+            bool attackerSpawnerWasEnabled = false;
+            try
+            {
+                defenderSpawnerWasEnabled =
+                    _activeSpawnLogic.IsSideSpawnEnabled(BattleSideEnum.Defender);
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                attackerSpawnerWasEnabled =
+                    _activeSpawnLogic.IsSideSpawnEnabled(BattleSideEnum.Attacker);
+            }
+            catch
+            {
+            }
+
+            if (!reinforcementGateWasEnabled &&
+                !defenderSpawnerWasEnabled &&
+                !attackerSpawnerWasEnabled)
+            {
+                return;
+            }
+
+            try
+            {
+                _activeSpawnLogic.SetReinforcementsSpawnEnabled(false);
+                _activeSpawnLogic.StopSpawner(BattleSideEnum.Defender);
+                _activeSpawnLogic.StopSpawner(BattleSideEnum.Attacker);
+                _reinforcementsEnabled = false;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "ExactCampaignArmyBootstrap: failed to stop native reinforcement spawners at battle end. " +
+                    "Scene=" + (mission.SceneName ?? "null") +
+                    " Mode=" + _activeMode +
+                    " PlayerSide=" + _activePlayerSide +
+                    " Source=" + (source ?? "unknown") +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message);
+                return;
+            }
+
+            ModLogger.Info(
+                "ExactCampaignArmyBootstrap: stopped native reinforcement spawners at battle end. " +
+                "Scene=" + (mission.SceneName ?? "null") +
+                " ReinforcementGateWasEnabled=" + reinforcementGateWasEnabled +
+                " DefenderSpawnerWasEnabled=" + defenderSpawnerWasEnabled +
+                " AttackerSpawnerWasEnabled=" + attackerSpawnerWasEnabled +
+                " Mode=" + _activeMode +
+                " PlayerSide=" + _activePlayerSide +
+                " Source=" + (source ?? "unknown"));
         }
 
         public static void TrySuppressNativeReinforcementSpawnersForMaterializedSiege(Mission mission, string source)

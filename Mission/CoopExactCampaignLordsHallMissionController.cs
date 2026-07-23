@@ -115,6 +115,7 @@ namespace CoopSpectator.MissionBehaviors
                     _spawnedAgents.Add(agent);
                     AgentFlag agentFlags = agent.GetAgentFlags();
                     agent.SetAgentFlags((AgentFlag)((uint)agentFlags & 0xFFEFFFFFu));
+                    agent.WieldInitialWeapons(Agent.WeaponWieldActionType.Instant);
                     spawnPoint.AssignAgent(agent);
                 }
             }
@@ -162,7 +163,8 @@ namespace CoopSpectator.MissionBehaviors
                     if (agent == null || !agent.IsActive())
                         continue;
 
-                    agent.WieldInitialWeapons(Agent.WeaponWieldActionType.Instant);
+                    if (_side != BattleSideEnum.Defender)
+                        agent.WieldInitialWeapons(Agent.WeaponWieldActionType.Instant);
                     agent.SetWatchState(Agent.WatchState.Alarmed);
                     if (_side == BattleSideEnum.Defender)
                         agent.SetBehaviorValueSet(HumanAIComponent.BehaviorValueSet.DefensiveArrangementMove);

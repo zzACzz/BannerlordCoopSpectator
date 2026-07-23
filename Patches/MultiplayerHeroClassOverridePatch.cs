@@ -39,6 +39,13 @@ namespace CoopSpectator.Patches
                 MethodInfo postfix = typeof(MultiplayerHeroClassOverridePatch).GetMethod(
                     nameof(GetMPHeroClassForPeer_Postfix),
                     BindingFlags.Static | BindingFlags.NonPublic);
+                MethodInfo availablePerksTarget = AccessTools.Method(
+                    typeof(MultiplayerClassDivisions),
+                    "GetAvailablePerksForPeer",
+                    new[] { typeof(MissionPeer) });
+                MethodInfo availablePerksPrefix = typeof(MultiplayerHeroClassOverridePatch).GetMethod(
+                    nameof(GetAvailablePerksForPeer_Prefix),
+                    BindingFlags.Static | BindingFlags.NonPublic);
 
                 if (prefix == null || postfix == null)
                 {
@@ -50,9 +57,24 @@ namespace CoopSpectator.Patches
                     target,
                     prefix: new HarmonyMethod(prefix),
                     postfix: new HarmonyMethod(postfix));
+
+                if (availablePerksTarget != null && availablePerksPrefix != null)
+                {
+                    harmony.Patch(
+                        availablePerksTarget,
+                        prefix: new HarmonyMethod(availablePerksPrefix));
+                }
+                else
+                {
+                    ModLogger.Info(
+                        "MultiplayerHeroClassOverridePatch: GetAvailablePerksForPeer null-class guard target not found. " +
+                        "Peer-class override remains applied.");
+                }
+
                 ModLogger.Info(
-                    "MultiplayerHeroClassOverridePatch: client detached-peer guard and server override applied to " +
-                    "MultiplayerClassDivisions.GetMPHeroClassForPeer.");
+                    "MultiplayerHeroClassOverridePatch: client detached-peer/canonical-culture guards and server override applied to " +
+                    "MultiplayerClassDivisions.GetMPHeroClassForPeer; client null-class perk guard applied=" +
+                    (availablePerksTarget != null && availablePerksPrefix != null) + ".");
             }
             catch (Exception ex)
             {
@@ -87,15 +109,50 @@ namespace CoopSpectator.Patches
                 __result = detachedAgent == null
                     ? null
                     : MultiplayerClassDivisions.GetMPHeroClassForCharacter(detachedAgent.Character);
+
+                if (__result == null)
+                {
+                    __result = ResolveCanonicalPeerCultureHeroClass(
+                        peer,
+                        peer.SelectedTroopIndex);
+                }
+
                 return false;
             }
             catch
             {
-                // Native callers support a null class, but the native method does
-                // not support an out-of-range culture-class index.
+                // Keep the native out-of-range culture-class path suppressed. The
+                // guarded peer-perk path converts an unresolved class to no perks.
                 __result = null;
                 return false;
             }
+        }
+
+        private static bool GetAvailablePerksForPeer_Prefix(
+            MissionPeer missionPeer,
+            ref List<List<IReadOnlyPerkObject>> __result)
+        {
+            if (!GameNetwork.IsClient || missionPeer?.Team == null)
+                return true;
+
+            Mission mission = Mission.Current;
+            if (mission == null ||
+                mission.GetMissionBehavior<CoopMissionNetworkBridge>() == null)
+            {
+                return true;
+            }
+
+            try
+            {
+                if (MultiplayerClassDivisions.GetMPHeroClassForPeer(missionPeer) != null)
+                    return true;
+            }
+            catch
+            {
+            }
+
+            __result = new List<List<IReadOnlyPerkObject>>();
+            return false;
         }
 
         private static bool IsPeerCultureHeroClassIndexValid(MissionPeer peer, int selectedTroopIndex)
@@ -114,6 +171,36 @@ namespace CoopSpectator.Patches
             }
 
             return false;
+        }
+
+        private static MultiplayerClassDivisions.MPHeroClass ResolveCanonicalPeerCultureHeroClass(
+            MissionPeer peer,
+            int selectedTroopIndex)
+        {
+            string cultureId = peer?.Culture?.StringId;
+            if (string.IsNullOrWhiteSpace(cultureId) || selectedTroopIndex < 0)
+                return null;
+
+            int matchingCultureIndex = 0;
+            foreach (MultiplayerClassDivisions.MPHeroClass heroClass in
+                     MultiplayerClassDivisions.GetMPHeroClasses())
+            {
+                if (heroClass?.Culture == null ||
+                    !string.Equals(
+                        heroClass.Culture.StringId,
+                        cultureId,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (matchingCultureIndex == selectedTroopIndex)
+                    return heroClass;
+
+                matchingCultureIndex++;
+            }
+
+            return null;
         }
 
         private static Agent ResolveDetachedPeerAgent(Mission mission, MissionPeer peer)

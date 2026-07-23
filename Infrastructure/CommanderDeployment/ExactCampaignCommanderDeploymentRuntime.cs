@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using CoopSpectator.Network.Messages;
 using CoopSpectator.Infrastructure.SiegeAmbush;
 using TaleWorlds.Core;
@@ -7,6 +8,12 @@ namespace CoopSpectator.Infrastructure
 {
     internal static class ExactCampaignCommanderDeploymentRuntime
     {
+        private static readonly object SiegeDeploymentSync = new object();
+        private static Mission _siegeDeploymentMission;
+        private static bool _siegeDeploymentLifecycleFinished;
+        private static readonly HashSet<BattleSideEnum> CompletedSiegeDeploymentSides =
+            new HashSet<BattleSideEnum>();
+
         public static bool IsExactLandBattleScenario(
             Mission mission,
             BattleScenarioContextMessage scenarioContext)
@@ -64,6 +71,28 @@ namespace CoopSpectator.Infrastructure
             return ExactLandBattleCommanderDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission);
         }
 
+        public static bool HasSideDeploymentFinished(
+            Mission mission,
+            BattleSideEnum side)
+        {
+            if (ExactCampaignSiegeAssaultWithDeploymentRuntime.IsDeploymentRuntimeActive(mission))
+            {
+                if (side == BattleSideEnum.None)
+                    return false;
+
+                EnsureSiegeDeploymentState(mission);
+                lock (SiegeDeploymentSync)
+                {
+                    return ReferenceEquals(_siegeDeploymentMission, mission) &&
+                           CompletedSiegeDeploymentSides.Contains(side);
+                }
+            }
+
+            return ExactLandBattleCommanderDeploymentRuntime.HasSideDeploymentFinished(
+                mission,
+                side);
+        }
+
         public static bool TryAutoDeployDeploymentOnly(
             Mission mission,
             BattleSideEnum side,
@@ -83,7 +112,10 @@ namespace CoopSpectator.Infrastructure
                 out diagnostics);
         }
 
-        public static bool TryBeginManualFormationPlacement(Mission mission, out string diagnostics)
+        public static bool TryBeginManualFormationPlacement(
+            Mission mission,
+            BattleSideEnum side,
+            out string diagnostics)
         {
             if (ExactCampaignSiegeAssaultWithDeploymentRuntime.IsDeploymentRuntimeActive(mission))
             {
@@ -91,7 +123,10 @@ namespace CoopSpectator.Infrastructure
                 return true;
             }
 
-            return ExactLandBattleCommanderDeploymentRuntime.TryBeginManualPlacement(mission, out diagnostics);
+            return ExactLandBattleCommanderDeploymentRuntime.TryBeginManualPlacement(
+                mission,
+                side,
+                out diagnostics);
         }
 
         public static bool TryBeginClientManualFormationPlacement(Mission mission, out string diagnostics)
@@ -111,27 +146,143 @@ namespace CoopSpectator.Infrastructure
             ExactLandBattleCommanderDeploymentRuntime.EndManualPlacement(mission, source);
         }
 
-        public static bool TryFinishDeployment(Mission mission, out string diagnostics)
-        {
-            if (ExactCampaignSiegeAssaultWithDeploymentRuntime.IsDeploymentRuntimeActive(mission))
-            {
-                return ExactCampaignSiegeAssaultWithDeploymentRuntime.TryForceAutoDeployAndFinishDeployment(
-                    mission,
-                    out diagnostics);
-            }
-
-            return ExactLandBattleCommanderDeploymentRuntime.TryFinishDeployment(mission, out diagnostics);
-        }
-
-        public static bool TryForceFinishForBattleStartRequest(
+        public static bool TryCompleteCommanderDeployment(
             Mission mission,
+            BattleSideEnum side,
+            out bool deploymentLifecycleFinished,
             out string diagnostics)
         {
             if (ExactCampaignSiegeAssaultWithDeploymentRuntime.IsDeploymentRuntimeActive(mission))
             {
-                return ExactCampaignSiegeAssaultWithDeploymentRuntime.TryForceAutoDeployAndFinishDeployment(
-                    mission,
-                    out diagnostics);
+                if (side == BattleSideEnum.None)
+                {
+                    deploymentLifecycleFinished = false;
+                    diagnostics = "side-none";
+                    return false;
+                }
+
+                EnsureSiegeDeploymentState(mission);
+                List<BattleSideEnum> completedSides;
+                bool bothSidesFinished;
+                lock (SiegeDeploymentSync)
+                {
+                    if (!ReferenceEquals(_siegeDeploymentMission, mission))
+                    {
+                        deploymentLifecycleFinished = false;
+                        diagnostics = "active-mission-mismatch";
+                        return false;
+                    }
+
+                    if (_siegeDeploymentLifecycleFinished)
+                    {
+                        deploymentLifecycleFinished = true;
+                        diagnostics = "deployment-already-finished";
+                        return true;
+                    }
+
+                    CompletedSiegeDeploymentSides.Add(side);
+                    completedSides = new List<BattleSideEnum>(CompletedSiegeDeploymentSides);
+                    bothSidesFinished =
+                        CompletedSiegeDeploymentSides.Contains(BattleSideEnum.Attacker) &&
+                        CompletedSiegeDeploymentSides.Contains(BattleSideEnum.Defender);
+                }
+
+                if (!bothSidesFinished)
+                {
+                    deploymentLifecycleFinished = false;
+                    diagnostics =
+                        "side-deployment-finished" +
+                        " Side=" + side +
+                        " CompletedSides=[" + string.Join(",", completedSides) + "]" +
+                        " LifecycleFinished=False";
+                    return true;
+                }
+
+                bool completed =
+                    ExactCampaignSiegeAssaultWithDeploymentRuntime
+                        .TryForceAutoDeployAndFinishDeploymentPreservingSides(
+                            mission,
+                            completedSides,
+                            out string finishDiagnostics);
+                bool stillBlocking =
+                    ExactCampaignSiegeAssaultWithDeploymentRuntime
+                        .IsDeploymentPhaseBlockingBattleStart(mission);
+                deploymentLifecycleFinished = completed && !stillBlocking;
+                if (deploymentLifecycleFinished)
+                    MarkSiegeDeploymentLifecycleFinished(mission);
+
+                diagnostics =
+                    "both-sides-deployment-finished" +
+                    " Side=" + side +
+                    " CompletedSides=[" + string.Join(",", completedSides) + "]" +
+                    " Finished=" + completed +
+                    " StillBlocking=" + stillBlocking +
+                    " FinishDiagnostics={" + finishDiagnostics + "}";
+                return completed;
+            }
+
+            return ExactLandBattleCommanderDeploymentRuntime.TryCompleteSideDeployment(
+                mission,
+                side,
+                out deploymentLifecycleFinished,
+                out diagnostics);
+        }
+
+        public static bool TryForceFinishForBattleStartRequest(
+            Mission mission,
+            IEnumerable<BattleSideEnum> activeCommanderSides,
+            out string diagnostics)
+        {
+            if (ExactCampaignSiegeAssaultWithDeploymentRuntime.IsDeploymentRuntimeActive(mission))
+            {
+                EnsureSiegeDeploymentState(mission);
+                List<BattleSideEnum> completedSides;
+                lock (SiegeDeploymentSync)
+                    completedSides = new List<BattleSideEnum>(CompletedSiegeDeploymentSides);
+
+                var preservedSides = new HashSet<BattleSideEnum>(completedSides);
+                var validatedActiveCommanderSides = new List<BattleSideEnum>();
+                BattleScenarioContextMessage scenarioContext =
+                    BattleSnapshotRuntimeState.GetScenarioContext() ??
+                    BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                    BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+                if (SiegeAmbushScenarioContract.IsSiegeAmbushScenario(scenarioContext) &&
+                    activeCommanderSides != null)
+                {
+                    foreach (BattleSideEnum activeCommanderSide in activeCommanderSides)
+                    {
+                        if (activeCommanderSide == BattleSideEnum.None ||
+                            !preservedSides.Add(activeCommanderSide))
+                        {
+                            continue;
+                        }
+
+                        validatedActiveCommanderSides.Add(activeCommanderSide);
+                    }
+                }
+
+                bool completed =
+                    ExactCampaignSiegeAssaultWithDeploymentRuntime
+                        .TryForceAutoDeployAndFinishDeploymentPreservingSides(
+                            mission,
+                            preservedSides,
+                            out string finishDiagnostics);
+                bool stillBlocking =
+                    ExactCampaignSiegeAssaultWithDeploymentRuntime
+                        .IsDeploymentPhaseBlockingBattleStart(mission);
+                if (completed && !stillBlocking)
+                    MarkSiegeDeploymentLifecycleFinished(mission);
+
+                diagnostics =
+                    "battle-start-authority-forced-finish" +
+                    " ReadySides=[" + string.Join(",", completedSides) + "]" +
+                    " ActiveCommanderSides=[" +
+                    string.Join(",", validatedActiveCommanderSides) + "]" +
+                    " PreservedSides=[" + string.Join(",", preservedSides) + "]" +
+                    " Finished=" + completed +
+                    " StillBlocking=" + stillBlocking +
+                    " FinishDiagnostics={" + finishDiagnostics + "}";
+                return completed && !stillBlocking;
             }
 
             if (ExactLandBattleCommanderDeploymentRuntime.IsDeploymentRuntimeActive(mission))
@@ -185,7 +336,58 @@ namespace CoopSpectator.Infrastructure
 
         public static void ResetRuntimeState(Mission mission, string source)
         {
+            lock (SiegeDeploymentSync)
+            {
+                if (mission == null ||
+                    _siegeDeploymentMission == null ||
+                    ReferenceEquals(_siegeDeploymentMission, mission))
+                {
+                    _siegeDeploymentMission = null;
+                    _siegeDeploymentLifecycleFinished = false;
+                    CompletedSiegeDeploymentSides.Clear();
+                }
+            }
+
             ExactLandBattleCommanderDeploymentRuntime.ResetRuntimeState(mission, source);
+        }
+
+        private static void EnsureSiegeDeploymentState(Mission mission)
+        {
+            if (mission == null)
+                return;
+
+            bool nativeLifecycleFinished =
+                !ExactCampaignSiegeAssaultWithDeploymentRuntime
+                    .IsDeploymentPhaseBlockingBattleStart(mission);
+            lock (SiegeDeploymentSync)
+            {
+                if (!ReferenceEquals(_siegeDeploymentMission, mission))
+                {
+                    _siegeDeploymentMission = mission;
+                    _siegeDeploymentLifecycleFinished = false;
+                    CompletedSiegeDeploymentSides.Clear();
+                }
+
+                if (!nativeLifecycleFinished)
+                    return;
+
+                _siegeDeploymentLifecycleFinished = true;
+                CompletedSiegeDeploymentSides.Add(BattleSideEnum.Attacker);
+                CompletedSiegeDeploymentSides.Add(BattleSideEnum.Defender);
+            }
+        }
+
+        private static void MarkSiegeDeploymentLifecycleFinished(Mission mission)
+        {
+            lock (SiegeDeploymentSync)
+            {
+                if (!ReferenceEquals(_siegeDeploymentMission, mission))
+                    return;
+
+                _siegeDeploymentLifecycleFinished = true;
+                CompletedSiegeDeploymentSides.Add(BattleSideEnum.Attacker);
+                CompletedSiegeDeploymentSides.Add(BattleSideEnum.Defender);
+            }
         }
     }
 }
