@@ -333,19 +333,38 @@ namespace CoopSpectator.Network
                 return;
             }
 
-            if (GameNetwork.IsServer &&
-                Mission.Current == null &&
-                ExactVillageBattleScenarioContract.IsValidatedPreMissionScenario(
-                    message.ScenarioContext,
-                    message.RuntimeScene,
-                    out string villageBattleDiagnostics))
+            if (GameNetwork.IsServer && Mission.Current == null)
             {
-                PendingBattleMissionStartupState.ArmForPreMissionContract(
-                    message.RuntimeScene,
-                    "pre-mission topology contract " + (source ?? "unknown"));
-                contractDiagnostics +=
-                    " StartupBarrier=armed-village-pre-open" +
-                    " VillageBattle={" + villageBattleDiagnostics + "}";
+                string startupBarrier = string.Empty;
+                string startupScenarioDiagnostics = string.Empty;
+                if (ExactVillageBattleScenarioContract.IsValidatedPreMissionScenario(
+                        message.ScenarioContext,
+                        message.RuntimeScene,
+                        out string villageBattleDiagnostics))
+                {
+                    startupBarrier = "armed-village-pre-open";
+                    startupScenarioDiagnostics =
+                        "VillageBattle={" + villageBattleDiagnostics + "}";
+                }
+                else if (ExactLandBattleScenarioContract.IsValidatedPreMissionFieldBattleScenario(
+                             message.ScenarioContext,
+                             message.RuntimeScene,
+                             out string fieldBattleDiagnostics))
+                {
+                    startupBarrier = "armed-field-battle-pre-open";
+                    startupScenarioDiagnostics =
+                        "FieldBattle={" + fieldBattleDiagnostics + "}";
+                }
+
+                if (!string.IsNullOrWhiteSpace(startupBarrier))
+                {
+                    PendingBattleMissionStartupState.ArmForPreMissionContract(
+                        message.RuntimeScene,
+                        "pre-mission topology contract " + (source ?? "unknown"));
+                    contractDiagnostics +=
+                        " StartupBarrier=" + startupBarrier +
+                        " " + startupScenarioDiagnostics;
+                }
             }
 
             try

@@ -8,6 +8,9 @@ namespace CoopSpectator.Infrastructure
 {
     internal static class ExactLandBattleScenarioContract
     {
+        public const string FieldBattleScenarioKind = "FieldBattle";
+        public const string FieldBattleCampaignBattleType = "FieldBattle";
+
         public static bool IsLandBattleScenario(BattleScenarioContextMessage scenarioContext)
         {
             return ExactReliefScenarioContract.IsReliefScenario(scenarioContext) ||
@@ -28,12 +31,51 @@ namespace CoopSpectator.Infrastructure
                    !scenarioContext.IsSiegeBattle &&
                    string.Equals(
                        scenarioContext.ScenarioKind,
-                       "FieldBattle",
+                       FieldBattleScenarioKind,
                        StringComparison.OrdinalIgnoreCase) &&
                    string.Equals(
                        scenarioContext.CampaignBattleType,
-                       "FieldBattle",
+                       FieldBattleCampaignBattleType,
                        StringComparison.OrdinalIgnoreCase);
+        }
+
+        public static bool IsValidatedFieldBattleScenario(
+            BattleScenarioContextMessage scenarioContext,
+            string runtimeScene,
+            out string diagnostics)
+        {
+            return IsValidatedFieldBattleScenario(
+                ResolveCurrentSnapshot(),
+                scenarioContext,
+                runtimeScene,
+                out diagnostics);
+        }
+
+        public static bool IsValidatedPreMissionFieldBattleScenario(
+            BattleScenarioContextMessage scenarioContext,
+            string runtimeScene,
+            out string diagnostics)
+        {
+            diagnostics = "not-field-battle-scenario";
+            if (!IsFieldBattleScenario(scenarioContext))
+                return false;
+
+            if (string.IsNullOrWhiteSpace(runtimeScene) ||
+                !SceneRuntimeClassifier.IsCampaignBattleScene(runtimeScene))
+            {
+                diagnostics =
+                    "field-battle-runtime-scene-not-exact Runtime=" +
+                    (runtimeScene ?? string.Empty);
+                return false;
+            }
+
+            diagnostics =
+                "Mode=FieldBattle" +
+                " CampaignBattleType=" +
+                (scenarioContext.CampaignBattleType ?? string.Empty) +
+                " Scene=" + runtimeScene +
+                " Validation=PreMissionTopology";
+            return true;
         }
 
         public static bool IsValidatedScenario(

@@ -5778,7 +5778,9 @@ namespace CoopSpectator.UI
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
             return ExactCampaignCommanderDeploymentRuntime
-                .IsExactVillageBattleScenario(mission, scenarioContext);
+                       .IsExactVillageBattleScenario(mission, scenarioContext) ||
+                   ExactCampaignCommanderDeploymentRuntime
+                       .IsExactFieldBattleScenario(mission, scenarioContext);
         }
 
         private static bool IsCurrentExactLandBattleCommanderDeploymentScenario(Mission mission)
