@@ -7501,7 +7501,6 @@ namespace CoopSpectator.MissionBehaviors
             _lastDeferredClientExactVisualObserverSnapshotReadiness = string.Empty;
             EnsureClientBattleSnapshotFreshForMission(mission, "client-exact-visual-observer");
             TryRefreshClientPostPossessionExactVisualPauseWindow(mission, "client-exact-visual-observer");
-            ExactCampaignObjectCatalogBootstrap.EnsureLoaded("client-exact-visual-observer:" + (mission.SceneName ?? "null"));
             TryProcessPendingClientExactCampaignVisualOverlays(mission);
 
             DateTime nowUtc = DateTime.UtcNow;
