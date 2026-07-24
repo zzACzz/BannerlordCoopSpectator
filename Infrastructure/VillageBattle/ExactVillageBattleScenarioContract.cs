@@ -54,6 +54,33 @@ namespace CoopSpectator.Infrastructure.VillageBattle
                 out diagnostics);
         }
 
+        public static bool IsValidatedPreMissionScenario(
+            BattleScenarioContextMessage scenarioContext,
+            string runtimeScene,
+            out string diagnostics)
+        {
+            diagnostics = "not-village-battle-scenario";
+            if (!IsVillageBattleScenario(scenarioContext))
+                return false;
+
+            if (string.IsNullOrWhiteSpace(runtimeScene) ||
+                !SceneRuntimeClassifier.IsVillageBattleScene(runtimeScene))
+            {
+                diagnostics =
+                    "village-battle-runtime-scene-not-exact Runtime=" +
+                    (runtimeScene ?? string.Empty);
+                return false;
+            }
+
+            diagnostics =
+                "Mode=" + Mode +
+                " CampaignBattleType=" +
+                (scenarioContext.CampaignBattleType ?? string.Empty) +
+                " Scene=" + runtimeScene +
+                " Validation=PreMissionTopology";
+            return true;
+        }
+
         public static bool IsValidatedScenario(
             BattleSnapshotMessage snapshot,
             string runtimeScene,

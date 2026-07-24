@@ -338,6 +338,13 @@ namespace CoopSpectator.Patches
                     list,
                     runtimeScene,
                     preOpenScenarioContext);
+                MissionMultiplayerCoopBattleMode.AppendExactVillageBattleCommanderDeploymentSupport(
+                    list,
+                    mission,
+                    "wrapped-client",
+                    preOpenScenarioContext,
+                    runtimeScene,
+                    "Source=MissionState.OpenNewCapturedPreMissionTopology");
                 MissionMultiplayerCoopBattleMode.AppendExactLandBattleCommanderDeploymentSupport(
                     list,
                     mission,

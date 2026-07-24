@@ -4155,7 +4155,7 @@ namespace CoopSpectator.UI
         private bool TryApplyCommanderDeploymentOrderBridgeReady()
         {
             if (!TryEnsureCommanderDeploymentOrderBridge())
-                return !IsCurrentSiegeAmbushCommanderDeploymentScenario(Mission);
+                return !RequiresSynchronizedFinalFormationLayouts(Mission);
 
             try
             {
@@ -4187,27 +4187,27 @@ namespace CoopSpectator.UI
                     _commanderDeploymentViewModel,
                     Mission,
                     "mission-order-ready");
-                bool isSiegeAmbush =
-                    IsCurrentSiegeAmbushCommanderDeploymentScenario(Mission);
+                bool requiresFinalFormationLayouts =
+                    RequiresSynchronizedFinalFormationLayouts(Mission);
                 bool finalLayoutSent =
                     OrderOfBattleSiegeProjectedCountsPatch.TrySyncCommanderDeploymentFormationAssignmentsForTeam(
                     Mission?.PlayerTeam,
                     "CoopMissionSelectionView mission-order-ready",
-                    includeFormationLayouts: isSiegeAmbush,
-                    requireFormationLayouts: isSiegeAmbush,
-                    forceSend: isSiegeAmbush);
+                    includeFormationLayouts: requiresFinalFormationLayouts,
+                    requireFormationLayouts: requiresFinalFormationLayouts,
+                    forceSend: requiresFinalFormationLayouts);
                 ModLogger.Info(
                     "CoopMissionSelectionView: applied safe MissionOrderVM ready deployment. " +
                     "Handled=" + handled +
                     " PreservedPerSideCommanderDeployment=" + preservePerSideCommanderDeployment +
-                    " FinalLayoutRequired=" + isSiegeAmbush +
+                    " FinalLayoutRequired=" + requiresFinalFormationLayouts +
                     " FinalLayoutSent=" + finalLayoutSent);
-                return !isSiegeAmbush || finalLayoutSent;
+                return !requiresFinalFormationLayouts || finalLayoutSent;
             }
             catch (Exception ex)
             {
                 ModLogger.Info("CoopMissionSelectionView: safe MissionOrderVM ready bridge failed: " + ex.Message);
-                return !IsCurrentSiegeAmbushCommanderDeploymentScenario(Mission);
+                return !RequiresSynchronizedFinalFormationLayouts(Mission);
             }
         }
 
@@ -5760,6 +5760,25 @@ namespace CoopSpectator.UI
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
             return SiegeAmbushScenarioContract.IsSiegeAmbushScenario(scenarioContext);
+        }
+
+        private static bool RequiresSynchronizedFinalFormationLayouts(Mission mission)
+        {
+            if (IsCurrentSiegeAmbushCommanderDeploymentScenario(mission))
+                return true;
+
+            if (mission == null ||
+                !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+            {
+                return false;
+            }
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            return ExactCampaignCommanderDeploymentRuntime
+                .IsExactVillageBattleScenario(mission, scenarioContext);
         }
 
         private static bool IsCurrentExactLandBattleCommanderDeploymentScenario(Mission mission)

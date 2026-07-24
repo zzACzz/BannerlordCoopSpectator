@@ -9,7 +9,7 @@ using TaleWorlds.MountAndBlade;
 
 namespace CoopSpectator.Infrastructure
 {
-    internal static class ExactLandBattleCommanderDeploymentRuntime
+    internal static class ExactVillageBattleCommanderDeploymentRuntime
     {
         private static readonly object Sync = new object();
 
@@ -524,13 +524,7 @@ namespace CoopSpectator.Infrastructure
                 BattleSnapshotRuntimeState.GetScenarioContext() ??
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
-            if (ExactVillageBattleScenarioContract.IsVillageBattleScenario(scenarioContext))
-            {
-                diagnostics = "village-battle-owned-by-dedicated-deployment-runtime";
-                return false;
-            }
-
-            return ExactLandBattleScenarioContract.IsValidatedScenario(
+            return ExactVillageBattleScenarioContract.IsValidatedScenario(
                 scenarioContext,
                 mission.SceneName,
                 out diagnostics);
@@ -558,13 +552,7 @@ namespace CoopSpectator.Infrastructure
                 BattleSnapshotRuntimeState.GetScenarioContext() ??
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
-            if (ExactVillageBattleScenarioContract.IsVillageBattleScenario(scenarioContext))
-            {
-                diagnostics = "village-battle-owned-by-dedicated-deployment-runtime";
-                return false;
-            }
-
-            return ExactLandBattleScenarioContract.IsValidatedScenario(
+            return ExactVillageBattleScenarioContract.IsValidatedScenario(
                 scenarioContext,
                 mission.SceneName,
                 out diagnostics);

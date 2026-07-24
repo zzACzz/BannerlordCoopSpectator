@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.Infrastructure.VillageBattle;
 using CoopSpectator.Network.Messages;
 using NetworkMessages.FromServer;
 using TaleWorlds.Core;
@@ -330,6 +331,21 @@ namespace CoopSpectator.Network
                     StringComparison.Ordinal))
             {
                 return;
+            }
+
+            if (GameNetwork.IsServer &&
+                Mission.Current == null &&
+                ExactVillageBattleScenarioContract.IsValidatedPreMissionScenario(
+                    message.ScenarioContext,
+                    message.RuntimeScene,
+                    out string villageBattleDiagnostics))
+            {
+                PendingBattleMissionStartupState.ArmForPreMissionContract(
+                    message.RuntimeScene,
+                    "pre-mission topology contract " + (source ?? "unknown"));
+                contractDiagnostics +=
+                    " StartupBarrier=armed-village-pre-open" +
+                    " VillageBattle={" + villageBattleDiagnostics + "}";
             }
 
             try

@@ -23,6 +23,7 @@ using CoopSpectator.Infrastructure.LordsHall;
 using CoopSpectator.Infrastructure.Relief;
 using CoopSpectator.Infrastructure.SallyOut;
 using CoopSpectator.Infrastructure.SiegeAmbush;
+using CoopSpectator.Infrastructure.VillageBattle;
 using CoopSpectator.MissionModels;
 using CoopSpectator.Network.Messages;
 using CoopSpectator.Patches;
@@ -32746,6 +32747,42 @@ namespace CoopSpectator.MissionBehaviors
                 StringComparison.Ordinal);
         }
 
+        private static bool DoesCommanderDeploymentSelectionMatchCommanderEntry(
+            Mission mission,
+            string commanderEntryId,
+            string selectedEntryId)
+        {
+            if (string.IsNullOrWhiteSpace(commanderEntryId) ||
+                string.IsNullOrWhiteSpace(selectedEntryId))
+            {
+                return false;
+            }
+
+            if (RequiresExactVillageCommanderDeploymentEntryMatch(mission))
+            {
+                return string.Equals(
+                    commanderEntryId,
+                    selectedEntryId,
+                    StringComparison.Ordinal);
+            }
+
+            return DoesPossessedEntryMatchCommanderEntry(
+                commanderEntryId,
+                selectedEntryId);
+        }
+
+        private static bool RequiresExactVillageCommanderDeploymentEntryMatch(Mission mission)
+        {
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            return ExactVillageBattleScenarioContract.IsValidatedPreMissionScenario(
+                scenarioContext,
+                mission?.SceneName,
+                out _);
+        }
+
         private static string StripEntryVariantSuffix(string entryId)
         {
             if (string.IsNullOrWhiteSpace(entryId))
@@ -36449,7 +36486,10 @@ namespace CoopSpectator.MissionBehaviors
             if (commanderEntry != null &&
                 !string.IsNullOrWhiteSpace(commanderEntry.EntryId) &&
                 (string.IsNullOrWhiteSpace(commanderEntryId) ||
-                 !DoesPossessedEntryMatchCommanderEntry(commanderEntry.EntryId, commanderEntryId)))
+                 !DoesCommanderDeploymentSelectionMatchCommanderEntry(
+                     mission,
+                     commanderEntry.EntryId,
+                     commanderEntryId)))
             {
                 commanderEntryId = commanderEntry.EntryId;
             }
@@ -36741,7 +36781,8 @@ namespace CoopSpectator.MissionBehaviors
                     string.Equals(selectedEntryId, lease.EntryId, StringComparison.Ordinal) &&
                     commanderEntry != null &&
                     !string.IsNullOrWhiteSpace(commanderEntry.EntryId) &&
-                    DoesPossessedEntryMatchCommanderEntry(
+                    DoesCommanderDeploymentSelectionMatchCommanderEntry(
+                        mission,
                         commanderEntry.EntryId,
                         selectedEntryId);
                 if (!authorityMatchesLease)
@@ -37114,7 +37155,10 @@ namespace CoopSpectator.MissionBehaviors
                 authoritativeSide);
             if (commanderEntry != null &&
                 !string.IsNullOrWhiteSpace(commanderEntry.EntryId) &&
-                DoesPossessedEntryMatchCommanderEntry(commanderEntry.EntryId, selectedEntryId))
+                DoesCommanderDeploymentSelectionMatchCommanderEntry(
+                    mission,
+                    commanderEntry.EntryId,
+                    selectedEntryId))
             {
                 ModLogger.Info(
                     "CoopMissionSpawnLogic: rejected deferred deployment spawn request for commander entry. " +
@@ -37546,12 +37590,14 @@ namespace CoopSpectator.MissionBehaviors
             {
                 requestMatchesCommander =
                     TryMatchExactSiegeCommanderDeploymentEntryId(
+                        mission,
                         commanderEntry,
                         troopOrEntryId,
                         "request-entry",
                         out matchedSource,
                         out matchedValue) ||
                     TryMatchExactSiegeCommanderDeploymentTroopId(
+                        mission,
                         commanderEntry,
                         troopOrEntryId,
                         "request-troop",
@@ -37567,6 +37613,7 @@ namespace CoopSpectator.MissionBehaviors
             bool selectionMatchesCommander =
                 requestMatchesCommander ||
                 TryMatchExactSiegeCommanderDeploymentSelection(
+                    mission,
                     missionPeer,
                     sessionSnapshot,
                     commanderEntry,
@@ -38953,6 +39000,7 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             if (TryMatchExactSiegeCommanderDeploymentSelection(
+                    mission,
                     missionPeer,
                     sessionSnapshot,
                     commanderEntry,
@@ -39029,6 +39077,7 @@ namespace CoopSpectator.MissionBehaviors
         }
 
         private static bool TryMatchExactSiegeCommanderDeploymentSelection(
+            Mission mission,
             MissionPeer missionPeer,
             CoopBattlePeerSessionSnapshot sessionSnapshot,
             RosterEntryState commanderEntry,
@@ -39047,6 +39096,7 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
 
             if (TryMatchExactSiegeCommanderDeploymentEntryId(
+                    mission,
                     commanderEntry,
                     sessionSnapshot?.ExplicitEntryId,
                     "explicit-entry",
@@ -39057,6 +39107,7 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             if (TryMatchExactSiegeCommanderDeploymentTroopId(
+                    mission,
                     commanderEntry,
                     sessionSnapshot?.ExplicitTroopId,
                     "explicit-troop",
@@ -39071,6 +39122,7 @@ namespace CoopSpectator.MissionBehaviors
 
             if (CoopBattleAuthorityState.TryGetExplicitSelectedEntryId(missionPeer, out string explicitSelectedEntryId) &&
                 TryMatchExactSiegeCommanderDeploymentEntryId(
+                    mission,
                     commanderEntry,
                     explicitSelectedEntryId,
                     "explicit-entry-authority",
@@ -39082,6 +39134,7 @@ namespace CoopSpectator.MissionBehaviors
 
             if (CoopBattleAuthorityState.TryGetExplicitSelectedTroopId(missionPeer, out string explicitSelectedTroopId) &&
                 TryMatchExactSiegeCommanderDeploymentTroopId(
+                    mission,
                     commanderEntry,
                     explicitSelectedTroopId,
                     "explicit-troop-authority",
@@ -39095,6 +39148,7 @@ namespace CoopSpectator.MissionBehaviors
         }
 
         private static bool TryMatchExactSiegeCommanderDeploymentEntryId(
+            Mission mission,
             RosterEntryState commanderEntry,
             string candidateEntryId,
             string source,
@@ -39106,7 +39160,10 @@ namespace CoopSpectator.MissionBehaviors
             if (commanderEntry == null ||
                 string.IsNullOrWhiteSpace(commanderEntry.EntryId) ||
                 string.IsNullOrWhiteSpace(candidateEntryId) ||
-                !DoesPossessedEntryMatchCommanderEntry(commanderEntry.EntryId, candidateEntryId))
+                !DoesCommanderDeploymentSelectionMatchCommanderEntry(
+                    mission,
+                    commanderEntry.EntryId,
+                    candidateEntryId))
             {
                 return false;
             }
@@ -39117,6 +39174,7 @@ namespace CoopSpectator.MissionBehaviors
         }
 
         private static bool TryMatchExactSiegeCommanderDeploymentTroopId(
+            Mission mission,
             RosterEntryState commanderEntry,
             string candidateTroopId,
             string source,
@@ -39125,7 +39183,8 @@ namespace CoopSpectator.MissionBehaviors
         {
             matchedSource = string.Empty;
             matchedValue = string.Empty;
-            if (commanderEntry == null)
+            if (commanderEntry == null ||
+                RequiresExactVillageCommanderDeploymentEntryMatch(mission))
                 return false;
 
             string normalizedCommanderTroopId = string.IsNullOrWhiteSpace(commanderEntry.CharacterId)
