@@ -1,5 +1,6 @@
 using System;
 using CoopSpectator.Infrastructure.LordsHall;
+using CoopSpectator.Infrastructure.SallyOut;
 using CoopSpectator.Network.Messages;
 
 namespace CoopSpectator.Infrastructure
@@ -69,6 +70,32 @@ namespace CoopSpectator.Infrastructure
         public static bool IsExactSiegeAssaultWithDeploymentScene(string sceneName)
         {
             return IsExactSiegeWithDeploymentScene(sceneName);
+        }
+
+        public static bool IsExactRangedPossessionSynchronizationScene(string sceneName)
+        {
+            if (IsExactSiegeAssaultWithDeploymentScene(sceneName))
+                return true;
+
+            if (!IsExactCampaignBattleScene(sceneName))
+                return false;
+
+            try
+            {
+                BattleScenarioContextMessage scenarioContext =
+                    BattleSnapshotRuntimeState.GetScenarioContext() ??
+                    BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                    BattleSnapshotRuntimeState.GetState()?.ScenarioContext ??
+                    CoopPreMissionTopologyRuntimeState.GetActiveScenarioContext();
+                return SallyOutScenarioContract.IsValidatedScenario(
+                    scenarioContext,
+                    sceneName,
+                    out _);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         public static bool IsExactSiegeWithDeploymentScene(string sceneName)

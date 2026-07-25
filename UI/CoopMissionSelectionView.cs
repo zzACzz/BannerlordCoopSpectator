@@ -4685,19 +4685,30 @@ namespace CoopSpectator.UI
             if (mission == null || team == null)
                 return;
 
-            CoopSiegeDeploymentBoundaryRuntime.TryEnsureDeploymentPlanBoundaries(
+            bool boundariesReady = CoopSiegeDeploymentBoundaryRuntime.TryEnsureDeploymentPlanBoundaries(
                 mission,
                 team,
                 source ?? "unknown");
-            CoopSiegeDeploymentBoundaryRuntime.TryEnsureVisibleDeploymentBoundaryMarkers(
-                mission,
-                MissionScreen,
-                team,
-                source ?? "unknown");
+            if (boundariesReady)
+            {
+                CoopSiegeDeploymentBoundaryRuntime.TryEnsureVisibleDeploymentBoundaryMarkers(
+                    mission,
+                    MissionScreen,
+                    team,
+                    source ?? "unknown");
+            }
 
             object orderTroopPlacer = ResolveNativeCommanderOrderTroopPlacer();
             if (orderTroopPlacer != null)
-                TryInvokeInstanceMethod(orderTroopPlacer, "RestrictOrdersToDeploymentBoundaries", true);
+            {
+                bool restrictToBoundaries =
+                    boundariesReady ||
+                    !IsCurrentExactSallyOutCommanderDeploymentScenario(mission);
+                TryInvokeInstanceMethod(
+                    orderTroopPlacer,
+                    "RestrictOrdersToDeploymentBoundaries",
+                    restrictToBoundaries);
+            }
         }
 
         private void TryTickCommanderDeploymentFreeCamera(float dt)
@@ -5762,6 +5773,23 @@ namespace CoopSpectator.UI
             return SiegeAmbushScenarioContract.IsSiegeAmbushScenario(scenarioContext);
         }
 
+        private static bool IsCurrentExactSallyOutCommanderDeploymentScenario(Mission mission)
+        {
+            if (mission == null ||
+                !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+            {
+                return false;
+            }
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            return ExactCampaignCommanderDeploymentRuntime.IsExactSallyOutScenario(
+                mission,
+                scenarioContext);
+        }
+
         private static bool RequiresSynchronizedFinalFormationLayouts(Mission mission)
         {
             if (IsCurrentSiegeAmbushCommanderDeploymentScenario(mission))
@@ -5778,6 +5806,8 @@ namespace CoopSpectator.UI
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
             return ExactCampaignCommanderDeploymentRuntime
+                       .IsExactSallyOutScenario(mission, scenarioContext) ||
+                   ExactCampaignCommanderDeploymentRuntime
                        .IsExactVillageBattleScenario(mission, scenarioContext) ||
                    ExactCampaignCommanderDeploymentRuntime
                        .IsExactFieldBattleScenario(mission, scenarioContext);
@@ -6347,7 +6377,7 @@ namespace CoopSpectator.UI
 
         internal static void LogMissionScreenOverlayDiagnostics(ScreenBase missionScreen, string source)
         {
-            if (missionScreen == null)
+            if (!CoopDebugConfig.OrderOfBattleDiagnostics || missionScreen == null)
                 return;
 
             bool? mouseVisible = TryGetInstanceProperty<bool>(missionScreen, "MouseVisible");

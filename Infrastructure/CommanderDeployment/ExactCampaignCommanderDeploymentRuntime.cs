@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using CoopSpectator.Infrastructure.SallyOut;
 using CoopSpectator.Infrastructure.VillageBattle;
 using CoopSpectator.Network.Messages;
 using CoopSpectator.Infrastructure.SiegeAmbush;
@@ -37,6 +38,17 @@ namespace CoopSpectator.Infrastructure
                         out _);
         }
 
+        public static bool IsExactSallyOutScenario(
+            Mission mission,
+            BattleScenarioContextMessage scenarioContext)
+        {
+            return mission != null &&
+                   SallyOutScenarioContract.IsValidatedScenario(
+                       scenarioContext,
+                       mission.SceneName,
+                       out _);
+        }
+
         public static bool IsExactFieldBattleScenario(
             Mission mission,
             BattleScenarioContextMessage scenarioContext)
@@ -53,6 +65,7 @@ namespace CoopSpectator.Infrastructure
             BattleScenarioContextMessage scenarioContext)
         {
             return ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(scenarioContext) ||
+                   IsExactSallyOutScenario(mission, scenarioContext) ||
                    IsExactVillageBattleScenario(mission, scenarioContext) ||
                    IsExactFieldBattleScenario(mission, scenarioContext) ||
                    IsExactLandBattleScenario(mission, scenarioContext);
@@ -82,6 +95,9 @@ namespace CoopSpectator.Infrastructure
             if (ExactCampaignSiegeAssaultWithDeploymentRuntime.IsDeploymentRuntimeActive(mission))
                 return true;
 
+            if (ExactSallyOutCommanderDeploymentRuntime.IsDeploymentRuntimeActive(mission))
+                return true;
+
             if (ExactVillageBattleCommanderDeploymentRuntime.IsDeploymentRuntimeActive(mission))
                 return true;
 
@@ -96,6 +112,12 @@ namespace CoopSpectator.Infrastructure
             if (ExactCampaignSiegeAssaultWithDeploymentRuntime.IsDeploymentRuntimeActive(mission))
             {
                 return ExactCampaignSiegeAssaultWithDeploymentRuntime
+                    .IsDeploymentPhaseBlockingBattleStart(mission);
+            }
+
+            if (ExactSallyOutCommanderDeploymentRuntime.IsDeploymentRuntimeActive(mission))
+            {
+                return ExactSallyOutCommanderDeploymentRuntime
                     .IsDeploymentPhaseBlockingBattleStart(mission);
             }
 
@@ -131,6 +153,13 @@ namespace CoopSpectator.Infrastructure
                 }
             }
 
+            if (ExactSallyOutCommanderDeploymentRuntime.IsDeploymentRuntimeActive(mission))
+            {
+                return ExactSallyOutCommanderDeploymentRuntime.HasSideDeploymentFinished(
+                    mission,
+                    side);
+            }
+
             if (ExactVillageBattleCommanderDeploymentRuntime.IsDeploymentRuntimeActive(mission))
             {
                 return ExactVillageBattleCommanderDeploymentRuntime.HasSideDeploymentFinished(
@@ -158,6 +187,14 @@ namespace CoopSpectator.Infrastructure
             if (ExactCampaignSiegeAssaultWithDeploymentRuntime.IsDeploymentRuntimeActive(mission))
             {
                 return ExactCampaignSiegeAssaultWithDeploymentRuntime.TryAutoDeployDeploymentOnly(
+                    mission,
+                    side,
+                    out diagnostics);
+            }
+
+            if (ExactSallyOutCommanderDeploymentRuntime.IsDeploymentRuntimeActive(mission))
+            {
+                return ExactSallyOutCommanderDeploymentRuntime.TryAutoDeploySide(
                     mission,
                     side,
                     out diagnostics);
@@ -196,6 +233,14 @@ namespace CoopSpectator.Infrastructure
                 return true;
             }
 
+            if (ExactSallyOutCommanderDeploymentRuntime.IsDeploymentRuntimeActive(mission))
+            {
+                return ExactSallyOutCommanderDeploymentRuntime.TryBeginManualPlacement(
+                    mission,
+                    side,
+                    out diagnostics);
+            }
+
             if (ExactVillageBattleCommanderDeploymentRuntime.IsDeploymentRuntimeActive(mission))
             {
                 return ExactVillageBattleCommanderDeploymentRuntime.TryBeginManualPlacement(
@@ -220,6 +265,13 @@ namespace CoopSpectator.Infrastructure
 
         public static bool TryBeginClientManualFormationPlacement(Mission mission, out string diagnostics)
         {
+            if (IsCurrentExactSallyOutScenario(mission))
+            {
+                return ExactSallyOutCommanderDeploymentRuntime.TryBeginClientManualPlacement(
+                    mission,
+                    out diagnostics);
+            }
+
             if (IsCurrentExactVillageBattleScenario(mission))
             {
                 return ExactVillageBattleCommanderDeploymentRuntime.TryBeginClientManualPlacement(
@@ -241,13 +293,15 @@ namespace CoopSpectator.Infrastructure
 
         public static bool IsClientManualFormationPlacementActive(Mission mission)
         {
-            return ExactVillageBattleCommanderDeploymentRuntime.IsClientManualPlacementActive(mission) ||
+            return ExactSallyOutCommanderDeploymentRuntime.IsClientManualPlacementActive(mission) ||
+                   ExactVillageBattleCommanderDeploymentRuntime.IsClientManualPlacementActive(mission) ||
                    ExactFieldBattleCommanderDeploymentRuntime.IsClientManualPlacementActive(mission) ||
                    ExactLandBattleCommanderDeploymentRuntime.IsClientManualPlacementActive(mission);
         }
 
         public static void EndManualFormationPlacement(Mission mission, string source)
         {
+            ExactSallyOutCommanderDeploymentRuntime.EndManualPlacement(mission, source);
             ExactVillageBattleCommanderDeploymentRuntime.EndManualPlacement(mission, source);
             ExactFieldBattleCommanderDeploymentRuntime.EndManualPlacement(mission, source);
             ExactLandBattleCommanderDeploymentRuntime.EndManualPlacement(mission, source);
@@ -326,6 +380,15 @@ namespace CoopSpectator.Infrastructure
                     " StillBlocking=" + stillBlocking +
                     " FinishDiagnostics={" + finishDiagnostics + "}";
                 return completed;
+            }
+
+            if (ExactSallyOutCommanderDeploymentRuntime.IsDeploymentRuntimeActive(mission))
+            {
+                return ExactSallyOutCommanderDeploymentRuntime.TryCompleteSideDeployment(
+                    mission,
+                    side,
+                    out deploymentLifecycleFinished,
+                    out diagnostics);
             }
 
             if (ExactVillageBattleCommanderDeploymentRuntime.IsDeploymentRuntimeActive(mission))
@@ -410,6 +473,13 @@ namespace CoopSpectator.Infrastructure
                 return completed && !stillBlocking;
             }
 
+            if (ExactSallyOutCommanderDeploymentRuntime.IsDeploymentRuntimeActive(mission))
+            {
+                return ExactSallyOutCommanderDeploymentRuntime.TryForceAutoDeployBothSidesAndFinish(
+                    mission,
+                    out diagnostics);
+            }
+
             if (ExactVillageBattleCommanderDeploymentRuntime.IsDeploymentRuntimeActive(mission))
             {
                 return ExactVillageBattleCommanderDeploymentRuntime.TryForceAutoDeployBothSidesAndFinish(
@@ -465,6 +535,15 @@ namespace CoopSpectator.Infrastructure
                         selectableSource);
             }
 
+            if (ExactSallyOutCommanderDeploymentRuntime.IsDeploymentRuntimeActive(mission))
+            {
+                return side != BattleSideEnum.None &&
+                       currentPhase >= CoopBattlePhase.SideSelection &&
+                       currentPhase < CoopBattlePhase.BattleActive &&
+                       !string.IsNullOrWhiteSpace(selectableSource) &&
+                       selectableSource.StartsWith("allowed-prebattle", System.StringComparison.OrdinalIgnoreCase);
+            }
+
             if (ExactVillageBattleCommanderDeploymentRuntime.IsDeploymentRuntimeActive(mission))
             {
                 return side != BattleSideEnum.None &&
@@ -505,6 +584,7 @@ namespace CoopSpectator.Infrastructure
                 }
             }
 
+            ExactSallyOutCommanderDeploymentRuntime.ResetRuntimeState(mission, source);
             ExactVillageBattleCommanderDeploymentRuntime.ResetRuntimeState(mission, source);
             ExactFieldBattleCommanderDeploymentRuntime.ResetRuntimeState(mission, source);
             ExactLandBattleCommanderDeploymentRuntime.ResetRuntimeState(mission, source);
@@ -517,6 +597,15 @@ namespace CoopSpectator.Infrastructure
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
             return IsExactVillageBattleScenario(mission, scenarioContext);
+        }
+
+        private static bool IsCurrentExactSallyOutScenario(Mission mission)
+        {
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            return IsExactSallyOutScenario(mission, scenarioContext);
         }
 
         private static bool IsCurrentExactFieldBattleScenario(Mission mission)

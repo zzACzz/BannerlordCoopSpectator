@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using CoopSpectator.Infrastructure.SallyOut;
-using CoopSpectator.Infrastructure.VillageBattle;
 using CoopSpectator.Network.Messages;
 using TaleWorlds.Core;
 using TaleWorlds.Engine;
@@ -10,7 +9,7 @@ using TaleWorlds.MountAndBlade;
 
 namespace CoopSpectator.Infrastructure
 {
-    internal static class ExactLandBattleCommanderDeploymentRuntime
+    internal static class ExactSallyOutCommanderDeploymentRuntime
     {
         private static readonly object Sync = new object();
 
@@ -94,6 +93,42 @@ namespace CoopSpectator.Infrastructure
             {
                 return _manualPlacementActive &&
                        ReferenceEquals(_manualPlacementMission, mission);
+            }
+        }
+
+        public static bool ShouldAcceptClientFormationLayoutState(
+            Mission mission,
+            BattleSideEnum side,
+            out string diagnostics)
+        {
+            diagnostics = "client-manual-placement-inactive";
+            if (side == BattleSideEnum.None ||
+                !TryValidateClientManualPlacement(mission, out diagnostics))
+            {
+                return false;
+            }
+
+            lock (Sync)
+            {
+                if (!ReferenceEquals(_activeMission, mission) ||
+                    !ReferenceEquals(_manualPlacementMission, mission) ||
+                    !_manualPlacementActive ||
+                    _deploymentLifecycleFinished)
+                {
+                    diagnostics =
+                        "client-manual-placement-inactive" +
+                        " ActiveMission=" + ReferenceEquals(_activeMission, mission) +
+                        " PlacementMission=" + ReferenceEquals(_manualPlacementMission, mission) +
+                        " PlacementActive=" + _manualPlacementActive +
+                        " LifecycleFinished=" + _deploymentLifecycleFinished;
+                    return false;
+                }
+
+                diagnostics =
+                    "client-manual-placement-active" +
+                    " Side=" + side +
+                    " CompletedSides=[" + string.Join(",", CompletedDeploymentSides) + "]";
+                return true;
             }
         }
 
@@ -525,25 +560,7 @@ namespace CoopSpectator.Infrastructure
                 BattleSnapshotRuntimeState.GetScenarioContext() ??
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
-            if (SallyOutScenarioContract.IsSallyOutScenario(scenarioContext))
-            {
-                diagnostics = "sally-out-owned-by-dedicated-deployment-runtime";
-                return false;
-            }
-
-            if (ExactVillageBattleScenarioContract.IsVillageBattleScenario(scenarioContext))
-            {
-                diagnostics = "village-battle-owned-by-dedicated-deployment-runtime";
-                return false;
-            }
-
-            if (ExactLandBattleScenarioContract.IsFieldBattleScenario(scenarioContext))
-            {
-                diagnostics = "field-battle-owned-by-dedicated-deployment-runtime";
-                return false;
-            }
-
-            return ExactLandBattleScenarioContract.IsValidatedScenario(
+            return SallyOutScenarioContract.IsValidatedScenario(
                 scenarioContext,
                 mission.SceneName,
                 out diagnostics);
@@ -571,25 +588,7 @@ namespace CoopSpectator.Infrastructure
                 BattleSnapshotRuntimeState.GetScenarioContext() ??
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
-            if (SallyOutScenarioContract.IsSallyOutScenario(scenarioContext))
-            {
-                diagnostics = "sally-out-owned-by-dedicated-deployment-runtime";
-                return false;
-            }
-
-            if (ExactVillageBattleScenarioContract.IsVillageBattleScenario(scenarioContext))
-            {
-                diagnostics = "village-battle-owned-by-dedicated-deployment-runtime";
-                return false;
-            }
-
-            if (ExactLandBattleScenarioContract.IsFieldBattleScenario(scenarioContext))
-            {
-                diagnostics = "field-battle-owned-by-dedicated-deployment-runtime";
-                return false;
-            }
-
-            return ExactLandBattleScenarioContract.IsValidatedScenario(
+            return SallyOutScenarioContract.IsValidatedScenario(
                 scenarioContext,
                 mission.SceneName,
                 out diagnostics);

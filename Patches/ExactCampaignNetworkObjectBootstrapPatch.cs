@@ -10,6 +10,10 @@ namespace CoopSpectator.Patches
 {
     public static class ExactCampaignNetworkObjectBootstrapPatch
     {
+        private static readonly object MissionCatalogBootstrapSync = new object();
+        private static Mission _missionCatalogBootstrapMission;
+        private static bool _missionCatalogBootstrapAttempted;
+
         public static void Apply(Harmony harmony)
         {
             try
@@ -140,8 +144,28 @@ namespace CoopSpectator.Patches
                     return;
                 }
 
-                ExactCampaignObjectCatalogBootstrap.EnsureLoaded(
+                lock (MissionCatalogBootstrapSync)
+                {
+                    if (!ReferenceEquals(_missionCatalogBootstrapMission, mission))
+                    {
+                        _missionCatalogBootstrapMission = mission;
+                        _missionCatalogBootstrapAttempted = false;
+                    }
+
+                    if (_missionCatalogBootstrapAttempted)
+                        return;
+                }
+
+                bool catalogsReady = ExactCampaignObjectCatalogBootstrap.EnsureLoaded(
                     "client-network-onread:" + source + ":" + sceneName);
+                if (!catalogsReady)
+                    return;
+
+                lock (MissionCatalogBootstrapSync)
+                {
+                    if (ReferenceEquals(_missionCatalogBootstrapMission, mission))
+                        _missionCatalogBootstrapAttempted = true;
+                }
             }
             catch (Exception ex)
             {

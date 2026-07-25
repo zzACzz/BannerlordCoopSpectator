@@ -78,5 +78,23 @@ namespace CoopSpectator.Infrastructure.SallyOut
                 " SceneHasMapPatch=True";
             return true;
         }
+
+        public static bool IsValidatedPreMissionScenario(
+            BattleScenarioContextMessage scenarioContext,
+            string runtimeScene,
+            out string diagnostics)
+        {
+            if (!IsValidatedScenario(
+                    scenarioContext,
+                    runtimeScene,
+                    out diagnostics))
+            {
+                return false;
+            }
+
+            diagnostics =
+                "Mode=SallyOut Validation=PreMissionTopology " + diagnostics;
+            return true;
+        }
     }
 }

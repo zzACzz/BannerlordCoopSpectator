@@ -1077,6 +1077,292 @@ namespace CoopSpectator.Network.Messages
         }
     }
 
+    [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromServer)]
+    public sealed class CoopMaterializedReinforcementBatchBeginMessage : GameNetworkMessage
+    {
+        private static readonly CompressionInfo.Integer BatchIdCompressionInfo =
+            new CompressionInfo.Integer(0, int.MaxValue, maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer SideCompressionInfo =
+            new CompressionInfo.Integer(-1, 1, maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer CountCompressionInfo =
+            new CompressionInfo.Integer(0, 4096, maximumValueGiven: true);
+
+        public CoopMaterializedReinforcementBatchBeginMessage(
+            int batchId,
+            BattleSideEnum side,
+            int expectedAgentCount,
+            int expectedContractCount)
+        {
+            BatchId = batchId;
+            Side = side;
+            ExpectedAgentCount = expectedAgentCount;
+            ExpectedContractCount = expectedContractCount;
+        }
+
+        public CoopMaterializedReinforcementBatchBeginMessage()
+        {
+        }
+
+        public int BatchId { get; private set; }
+        public BattleSideEnum Side { get; private set; }
+        public int ExpectedAgentCount { get; private set; }
+        public int ExpectedContractCount { get; private set; }
+
+        protected override bool OnRead()
+        {
+            bool valid = true;
+            BatchId = ReadIntFromPacket(BatchIdCompressionInfo, ref valid);
+            Side = (BattleSideEnum)ReadIntFromPacket(SideCompressionInfo, ref valid);
+            ExpectedAgentCount = ReadIntFromPacket(CountCompressionInfo, ref valid);
+            ExpectedContractCount = ReadIntFromPacket(CountCompressionInfo, ref valid);
+            return valid;
+        }
+
+        protected override void OnWrite()
+        {
+            WriteIntToPacket(BatchId, BatchIdCompressionInfo);
+            WriteIntToPacket((int)Side, SideCompressionInfo);
+            WriteIntToPacket(ExpectedAgentCount, CountCompressionInfo);
+            WriteIntToPacket(ExpectedContractCount, CountCompressionInfo);
+        }
+
+        protected override MultiplayerMessageFilter OnGetLogFilter() => MultiplayerMessageFilter.Mission;
+
+        protected override string OnGetLogFormat()
+        {
+            return "CoopMaterializedReinforcementBatchBegin BatchId=" + BatchId +
+                   " Side=" + Side +
+                   " ExpectedAgentCount=" + ExpectedAgentCount +
+                   " ExpectedContractCount=" + ExpectedContractCount;
+        }
+    }
+
+    [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromServer)]
+    public sealed class CoopMaterializedReinforcementBatchContractMessage : GameNetworkMessage
+    {
+        private static readonly CompressionInfo.Integer BatchIdCompressionInfo =
+            new CompressionInfo.Integer(0, int.MaxValue, maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer CountCompressionInfo =
+            new CompressionInfo.Integer(0, 4096, maximumValueGiven: true);
+
+        public CoopMaterializedReinforcementBatchContractMessage(
+            int batchId,
+            int sequenceIndex,
+            int expectedContractCount,
+            int plannedAgentCount,
+            string entryId)
+        {
+            BatchId = batchId;
+            SequenceIndex = sequenceIndex;
+            ExpectedContractCount = expectedContractCount;
+            PlannedAgentCount = plannedAgentCount;
+            EntryId = entryId ?? string.Empty;
+        }
+
+        public CoopMaterializedReinforcementBatchContractMessage()
+        {
+            EntryId = string.Empty;
+        }
+
+        public int BatchId { get; private set; }
+        public int SequenceIndex { get; private set; }
+        public int ExpectedContractCount { get; private set; }
+        public int PlannedAgentCount { get; private set; }
+        public string EntryId { get; private set; }
+
+        protected override bool OnRead()
+        {
+            bool valid = true;
+            BatchId = ReadIntFromPacket(BatchIdCompressionInfo, ref valid);
+            SequenceIndex = ReadIntFromPacket(CountCompressionInfo, ref valid);
+            ExpectedContractCount = ReadIntFromPacket(CountCompressionInfo, ref valid);
+            PlannedAgentCount = ReadIntFromPacket(CountCompressionInfo, ref valid);
+            EntryId = ReadStringFromPacket(ref valid) ?? string.Empty;
+            return valid;
+        }
+
+        protected override void OnWrite()
+        {
+            WriteIntToPacket(BatchId, BatchIdCompressionInfo);
+            WriteIntToPacket(SequenceIndex, CountCompressionInfo);
+            WriteIntToPacket(ExpectedContractCount, CountCompressionInfo);
+            WriteIntToPacket(PlannedAgentCount, CountCompressionInfo);
+            WriteStringToPacket(EntryId ?? string.Empty);
+        }
+
+        protected override MultiplayerMessageFilter OnGetLogFilter() => MultiplayerMessageFilter.Mission;
+
+        protected override string OnGetLogFormat()
+        {
+            return "CoopMaterializedReinforcementBatchContract BatchId=" + BatchId +
+                   " SequenceIndex=" + SequenceIndex +
+                   " ExpectedContractCount=" + ExpectedContractCount +
+                   " PlannedAgentCount=" + PlannedAgentCount;
+        }
+    }
+
+    [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromClient)]
+    public sealed class CoopMaterializedReinforcementBatchPreparedMessage : GameNetworkMessage
+    {
+        private static readonly CompressionInfo.Integer BatchIdCompressionInfo =
+            new CompressionInfo.Integer(0, int.MaxValue, maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer CountCompressionInfo =
+            new CompressionInfo.Integer(0, 4096, maximumValueGiven: true);
+
+        public CoopMaterializedReinforcementBatchPreparedMessage(
+            int batchId,
+            int preparedContractCount,
+            int preparedAgentCount)
+        {
+            BatchId = batchId;
+            PreparedContractCount = preparedContractCount;
+            PreparedAgentCount = preparedAgentCount;
+        }
+
+        public CoopMaterializedReinforcementBatchPreparedMessage()
+        {
+        }
+
+        public int BatchId { get; private set; }
+        public int PreparedContractCount { get; private set; }
+        public int PreparedAgentCount { get; private set; }
+
+        protected override bool OnRead()
+        {
+            bool valid = true;
+            BatchId = ReadIntFromPacket(BatchIdCompressionInfo, ref valid);
+            PreparedContractCount = ReadIntFromPacket(CountCompressionInfo, ref valid);
+            PreparedAgentCount = ReadIntFromPacket(CountCompressionInfo, ref valid);
+            return valid;
+        }
+
+        protected override void OnWrite()
+        {
+            WriteIntToPacket(BatchId, BatchIdCompressionInfo);
+            WriteIntToPacket(PreparedContractCount, CountCompressionInfo);
+            WriteIntToPacket(PreparedAgentCount, CountCompressionInfo);
+        }
+
+        protected override MultiplayerMessageFilter OnGetLogFilter() => MultiplayerMessageFilter.Mission;
+
+        protected override string OnGetLogFormat()
+        {
+            return "CoopMaterializedReinforcementBatchPrepared BatchId=" + BatchId +
+                   " PreparedContractCount=" + PreparedContractCount +
+                   " PreparedAgentCount=" + PreparedAgentCount;
+        }
+    }
+
+    [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromServer)]
+    public sealed class CoopMaterializedReinforcementAgentBindingMessage : GameNetworkMessage
+    {
+        private static readonly CompressionInfo.Integer BatchIdCompressionInfo =
+            new CompressionInfo.Integer(0, int.MaxValue, maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer AgentIndexCompressionInfo =
+            new CompressionInfo.Integer(-1, 4095, maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer CountCompressionInfo =
+            new CompressionInfo.Integer(0, 4096, maximumValueGiven: true);
+
+        public CoopMaterializedReinforcementAgentBindingMessage(
+            int batchId,
+            int agentIndex,
+            int sequenceIndex,
+            int expectedAgentCount,
+            string entryId)
+        {
+            BatchId = batchId;
+            AgentIndex = agentIndex;
+            SequenceIndex = sequenceIndex;
+            ExpectedAgentCount = expectedAgentCount;
+            EntryId = entryId ?? string.Empty;
+        }
+
+        public CoopMaterializedReinforcementAgentBindingMessage()
+        {
+            EntryId = string.Empty;
+        }
+
+        public int BatchId { get; private set; }
+        public int AgentIndex { get; private set; }
+        public int SequenceIndex { get; private set; }
+        public int ExpectedAgentCount { get; private set; }
+        public string EntryId { get; private set; }
+
+        protected override bool OnRead()
+        {
+            bool valid = true;
+            BatchId = ReadIntFromPacket(BatchIdCompressionInfo, ref valid);
+            AgentIndex = ReadIntFromPacket(AgentIndexCompressionInfo, ref valid);
+            SequenceIndex = ReadIntFromPacket(CountCompressionInfo, ref valid);
+            ExpectedAgentCount = ReadIntFromPacket(CountCompressionInfo, ref valid);
+            EntryId = ReadStringFromPacket(ref valid) ?? string.Empty;
+            return valid;
+        }
+
+        protected override void OnWrite()
+        {
+            WriteIntToPacket(BatchId, BatchIdCompressionInfo);
+            WriteIntToPacket(AgentIndex, AgentIndexCompressionInfo);
+            WriteIntToPacket(SequenceIndex, CountCompressionInfo);
+            WriteIntToPacket(ExpectedAgentCount, CountCompressionInfo);
+            WriteStringToPacket(EntryId ?? string.Empty);
+        }
+
+        protected override MultiplayerMessageFilter OnGetLogFilter() => MultiplayerMessageFilter.Mission;
+
+        protected override string OnGetLogFormat()
+        {
+            return "CoopMaterializedReinforcementAgentBinding BatchId=" + BatchId +
+                   " AgentIndex=" + AgentIndex +
+                   " SequenceIndex=" + SequenceIndex +
+                   " ExpectedAgentCount=" + ExpectedAgentCount;
+        }
+    }
+
+    [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromClient)]
+    public sealed class CoopMaterializedReinforcementBatchReadyMessage : GameNetworkMessage
+    {
+        private static readonly CompressionInfo.Integer BatchIdCompressionInfo =
+            new CompressionInfo.Integer(0, int.MaxValue, maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer CountCompressionInfo =
+            new CompressionInfo.Integer(0, 4096, maximumValueGiven: true);
+
+        public CoopMaterializedReinforcementBatchReadyMessage(int batchId, int readyAgentCount)
+        {
+            BatchId = batchId;
+            ReadyAgentCount = readyAgentCount;
+        }
+
+        public CoopMaterializedReinforcementBatchReadyMessage()
+        {
+        }
+
+        public int BatchId { get; private set; }
+        public int ReadyAgentCount { get; private set; }
+
+        protected override bool OnRead()
+        {
+            bool valid = true;
+            BatchId = ReadIntFromPacket(BatchIdCompressionInfo, ref valid);
+            ReadyAgentCount = ReadIntFromPacket(CountCompressionInfo, ref valid);
+            return valid;
+        }
+
+        protected override void OnWrite()
+        {
+            WriteIntToPacket(BatchId, BatchIdCompressionInfo);
+            WriteIntToPacket(ReadyAgentCount, CountCompressionInfo);
+        }
+
+        protected override MultiplayerMessageFilter OnGetLogFilter() => MultiplayerMessageFilter.Mission;
+
+        protected override string OnGetLogFormat()
+        {
+            return "CoopMaterializedReinforcementBatchReady BatchId=" + BatchId +
+                   " ReadyAgentCount=" + ReadyAgentCount;
+        }
+    }
+
     [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromClient)]
     public sealed class CoopMaterializedAgentEntrySnapshotCompleteAckMessage : GameNetworkMessage
     {

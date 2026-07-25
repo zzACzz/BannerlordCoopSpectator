@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using CoopSpectator.Network.Messages;
 using TaleWorlds.MountAndBlade;
 
 namespace CoopSpectator.Infrastructure
@@ -79,6 +80,11 @@ namespace CoopSpectator.Infrastructure
             public int DefenderSelectableEntryCount { get; set; }
             public string DefenderSelectableEntryIds { get; set; }
             public string DefenderSelectableEntrySource { get; set; }
+            public string FrozenCaptainBattleInstanceId { get; set; }
+            public string FrozenCaptainStateSignature { get; set; }
+            public List<string> FrozenCaptainEntryIds { get; set; } = new List<string>();
+            public List<FrozenCaptainCombatGroupSnapshotMessage> FrozenCaptainCombatGroups { get; set; } =
+                new List<FrozenCaptainCombatGroupSnapshotMessage>();
             public DateTime UpdatedUtc { get; set; }
         }
 
@@ -247,6 +253,9 @@ namespace CoopSpectator.Infrastructure
                     "DefenderSelectableEntryCount=" + snapshot.DefenderSelectableEntryCount,
                     "DefenderSelectableEntryIds=" + (snapshot.DefenderSelectableEntryIds ?? string.Empty),
                     "DefenderSelectableEntrySource=" + (snapshot.DefenderSelectableEntrySource ?? string.Empty),
+                    "FrozenCaptainBattleInstanceId=" + (snapshot.FrozenCaptainBattleInstanceId ?? string.Empty),
+                    "FrozenCaptainStateSignature=" + (snapshot.FrozenCaptainStateSignature ?? string.Empty),
+                    "FrozenCaptainEntryIds=" + SerializeIdList(snapshot.FrozenCaptainEntryIds),
                     "UpdatedUtc=" + snapshot.UpdatedUtc.ToString("O")
                 };
                 string comparisonKey = string.Join(
@@ -366,6 +375,10 @@ namespace CoopSpectator.Infrastructure
                     DefenderAllowedEntryIds = string.Empty,
                     DefenderSelectableEntryIds = string.Empty,
                     DefenderSelectableEntrySource = string.Empty,
+                    FrozenCaptainBattleInstanceId = string.Empty,
+                    FrozenCaptainStateSignature = string.Empty,
+                    FrozenCaptainEntryIds = new List<string>(),
+                    FrozenCaptainCombatGroups = new List<FrozenCaptainCombatGroupSnapshotMessage>(),
                     UpdatedUtc = DateTime.MinValue
                 };
 
@@ -556,6 +569,15 @@ namespace CoopSpectator.Infrastructure
                         case "DefenderSelectableEntrySource":
                             snapshot.DefenderSelectableEntrySource = value;
                             break;
+                        case "FrozenCaptainBattleInstanceId":
+                            snapshot.FrozenCaptainBattleInstanceId = value;
+                            break;
+                        case "FrozenCaptainStateSignature":
+                            snapshot.FrozenCaptainStateSignature = value;
+                            break;
+                        case "FrozenCaptainEntryIds":
+                            snapshot.FrozenCaptainEntryIds = DeserializeIdList(value).ToList();
+                            break;
                         case "UpdatedUtc":
                             if (DateTime.TryParse(value, null, System.Globalization.DateTimeStyles.RoundtripKind, out DateTime updatedUtc))
                                 snapshot.UpdatedUtc = updatedUtc;
@@ -672,6 +694,26 @@ namespace CoopSpectator.Infrastructure
                 DefenderSelectableEntryCount = snapshot.DefenderSelectableEntryCount,
                 DefenderSelectableEntryIds = snapshot.DefenderSelectableEntryIds,
                 DefenderSelectableEntrySource = snapshot.DefenderSelectableEntrySource,
+                FrozenCaptainBattleInstanceId = snapshot.FrozenCaptainBattleInstanceId,
+                FrozenCaptainStateSignature = snapshot.FrozenCaptainStateSignature,
+                FrozenCaptainEntryIds = (snapshot.FrozenCaptainEntryIds ?? new List<string>()).ToList(),
+                FrozenCaptainCombatGroups = (snapshot.FrozenCaptainCombatGroups ??
+                    new List<FrozenCaptainCombatGroupSnapshotMessage>())
+                    .Where(group => group != null)
+                    .Select(group => new FrozenCaptainCombatGroupSnapshotMessage
+                    {
+                        CombatGroupId = group.CombatGroupId,
+                        Effects = (group.Effects ?? new List<CaptainPerkEffectSnapshotMessage>())
+                            .Where(effect => effect != null)
+                            .Select(effect => new CaptainPerkEffectSnapshotMessage
+                            {
+                                PerkId = effect.PerkId,
+                                Bonus = effect.Bonus,
+                                IncrementType = effect.IncrementType
+                            })
+                            .ToList()
+                    })
+                    .ToList(),
                 UpdatedUtc = snapshot.UpdatedUtc
             };
         }

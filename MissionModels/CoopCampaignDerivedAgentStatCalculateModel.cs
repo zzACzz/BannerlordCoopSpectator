@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Threading;
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.MissionBehaviors;
@@ -13,21 +15,21 @@ namespace CoopSpectator.MissionModels
     /// <summary>
     /// Thin low-level wrapper over the active MP AgentStatCalculateModel.
     /// Phase 1 keeps the stable MP runtime behavior intact, but swaps in
-    /// campaign-derived effective skills for hero entries that already have
-    /// an exact combat profile in CoopBattle.
+    /// campaign-derived effective skills for entries that already have an
+    /// exact combat profile or exact roster snapshot in CoopBattle.
     /// </summary>
     public sealed class CoopCampaignDerivedAgentStatCalculateModel : AgentStatCalculateModel
     {
         private readonly AgentStatCalculateModel _baseModel;
-        private readonly HashSet<string> _loggedExactSkillKeys = new HashSet<string>(StringComparer.Ordinal);
-        private readonly HashSet<string> _loggedWeaponDamageKeys = new HashSet<string>(StringComparer.Ordinal);
-        private readonly HashSet<string> _loggedRangedDrivenKeys = new HashSet<string>(StringComparer.Ordinal);
-        private readonly HashSet<string> _loggedExactMaxHealthKeys = new HashSet<string>(StringComparer.Ordinal);
-        private readonly HashSet<string> _loggedExactDefenseDrivenKeys = new HashSet<string>(StringComparer.Ordinal);
-        private readonly HashSet<string> _loggedExactMeleeDrivenKeys = new HashSet<string>(StringComparer.Ordinal);
-        private readonly HashSet<string> _loggedCampaignArmorKeys = new HashSet<string>(StringComparer.Ordinal);
-        private readonly Dictionary<string, float> _exactDefenseDrivenPropertyBaselines = new Dictionary<string, float>(StringComparer.Ordinal);
-        private bool _hasLoggedBattleActivation;
+        private readonly ConcurrentDictionary<string, byte> _loggedExactSkillKeys = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
+        private readonly ConcurrentDictionary<string, byte> _loggedWeaponDamageKeys = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
+        private readonly ConcurrentDictionary<string, byte> _loggedRangedDrivenKeys = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
+        private readonly ConcurrentDictionary<string, byte> _loggedExactMaxHealthKeys = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
+        private readonly ConcurrentDictionary<string, byte> _loggedExactDefenseDrivenKeys = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
+        private readonly ConcurrentDictionary<string, byte> _loggedExactMeleeDrivenKeys = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
+        private readonly ConcurrentDictionary<string, byte> _loggedCampaignArmorKeys = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
+        private readonly ConcurrentDictionary<string, float> _exactDefenseDrivenPropertyBaselines = new ConcurrentDictionary<string, float>(StringComparer.Ordinal);
+        private int _hasLoggedBattleActivation;
 
         public CoopCampaignDerivedAgentStatCalculateModel(AgentStatCalculateModel baseModel)
         {
@@ -59,7 +61,7 @@ namespace CoopSpectator.MissionModels
         {
             _baseModel.UpdateAgentStats(agent, agentDrivenProperties);
             TryApplyCampaignEquipmentArmor(agent, agent?.SpawnEquipment, agentDrivenProperties);
-            bool exactRangedDrivenPropertiesApplied = TryApplyExactHeroRangedCampaignDrivenPropertyOverrides(agent, agentDrivenProperties);
+            bool exactRangedDrivenPropertiesApplied = TryApplyExactRangedCampaignDrivenPropertyOverrides(agent, agentDrivenProperties);
             TryApplyExactDefenseDrivenPropertyOverrides(agent, agentDrivenProperties);
             TryApplyExactMeleeDrivenPropertyOverrides(agent, agentDrivenProperties);
             if (!exactRangedDrivenPropertiesApplied)
@@ -453,7 +455,9 @@ namespace CoopSpectator.MissionModels
         private static bool TryResolveGlobalCaptainEntryId(Agent agent, out string entryId)
         {
             entryId = null;
+            BattleRuntimeState state = BattleSnapshotRuntimeState.GetState();
             return agent != null &&
+                GlobalCaptainPerkRuntimeState.AreAgentStatEffectsReadyFor(state) &&
                 CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(agent, out entryId) &&
                 !string.IsNullOrWhiteSpace(entryId);
         }
@@ -609,7 +613,9 @@ namespace CoopSpectator.MissionModels
             float finalArmArmor,
             float finalLegArmor)
         {
-            if (!CoopDebugConfig.CombatModelDiagnostics || agent == null)
+            if (!ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics ||
+                !CoopDebugConfig.CombatModelDiagnostics ||
+                agent == null)
                 return;
 
             string captainPerks = BuildCaptainArmorEffectSummary(
@@ -623,7 +629,7 @@ namespace CoopSpectator.MissionModels
                 FormatDiagnosticFloat(finalHeadArmor) + "|" + FormatDiagnosticFloat(finalTorsoArmor) + "|" +
                 FormatDiagnosticFloat(finalArmArmor) + "|" + FormatDiagnosticFloat(finalLegArmor) + "|" +
                 captainPerks + "|" + hasPersonalIgnorePain;
-            if (!_loggedCampaignArmorKeys.Add(logKey))
+            if (!_loggedCampaignArmorKeys.TryAdd(logKey, 0))
                 return;
 
             ModLogger.Info(
@@ -654,7 +660,9 @@ namespace CoopSpectator.MissionModels
             bool captainToughSteedApplied,
             bool personalToughSteedApplied)
         {
-            if (!CoopDebugConfig.CombatModelDiagnostics || mountAgent == null)
+            if (!ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics ||
+                !CoopDebugConfig.CombatModelDiagnostics ||
+                mountAgent == null)
                 return;
 
             string horseId = spawnEquipment?[EquipmentIndex.Horse].Item?.StringId ?? "none";
@@ -666,7 +674,7 @@ namespace CoopSpectator.MissionModels
                 "mount|" + mountAgent.Index + "|" + (riderEntryId ?? string.Empty) + "|" + horseId + "|" + harnessId + "|" +
                 FormatDiagnosticFloat(baseMountArmor) + "|" + FormatDiagnosticFloat(finalMountArmor) + "|" +
                 captainPerk + "|" + personalToughSteedApplied;
-            if (!_loggedCampaignArmorKeys.Add(logKey))
+            if (!_loggedCampaignArmorKeys.TryAdd(logKey, 0))
                 return;
 
             ModLogger.Info(
@@ -736,20 +744,71 @@ namespace CoopSpectator.MissionModels
             if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
                 return false;
 
-            if (!CoopMissionSpawnLogic.TryGetExactHeroCombatProfileSkillValue(agent, skill, out int profileSkillValue, out entryId))
+            if (CoopMissionSpawnLogic.TryGetExactHeroCombatProfileSkillValue(
+                    agent,
+                    skill,
+                    out int profileSkillValue,
+                    out entryId))
+            {
+                TryLogBattleActivation(agent);
+                exactSkill = profileSkillValue;
+                return true;
+            }
+
+            if (!TryResolveExactRosterEntrySkillValue(agent, skill, out int rosterSkillValue, out entryId))
                 return false;
 
             TryLogBattleActivation(agent);
-            exactSkill = profileSkillValue;
+            exactSkill = rosterSkillValue;
+            return true;
+        }
+
+        private static bool TryResolveExactRosterEntrySkillValue(
+            Agent agent,
+            SkillObject skill,
+            out int skillValue,
+            out string entryId)
+        {
+            skillValue = 0;
+            entryId = string.Empty;
+            if (agent == null || skill == null)
+                return false;
+
+            if (!CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(agent, out entryId) &&
+                !CoopMissionSpawnLogic.TryResolveSelectableEntryId(agent, out entryId) &&
+                !ExactTransferContractRuntimeCache.TryGetEntryIdByRiderAgentIndex(agent.Index, out entryId))
+            {
+                return false;
+            }
+
+            RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+            if (entryState == null || entryState.IsHero)
+                return false;
+
+            string skillId = skill.StringId ?? string.Empty;
+            if (string.Equals(skillId, DefaultSkills.Bow.StringId, StringComparison.OrdinalIgnoreCase))
+                skillValue = entryState.SkillBow;
+            else if (string.Equals(skillId, DefaultSkills.Crossbow.StringId, StringComparison.OrdinalIgnoreCase))
+                skillValue = entryState.SkillCrossbow;
+            else if (string.Equals(skillId, DefaultSkills.Throwing.StringId, StringComparison.OrdinalIgnoreCase))
+                skillValue = entryState.SkillThrowing;
+            else if (string.Equals(skillId, DefaultSkills.Riding.StringId, StringComparison.OrdinalIgnoreCase))
+                skillValue = entryState.SkillRiding;
+            else
+                return false;
+
+            skillValue = Math.Max(0, skillValue);
             return true;
         }
 
         private void TryLogBattleActivation(Agent agent)
         {
-            if (_hasLoggedBattleActivation || agent?.Mission == null)
+            if (!ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics || agent?.Mission == null)
                 return;
 
-            _hasLoggedBattleActivation = true;
+            if (Interlocked.CompareExchange(ref _hasLoggedBattleActivation, 1, 0) != 0)
+                return;
+
             ModLogger.Info(
                 "CoopCampaignDerivedAgentStatCalculateModel: activated for CoopBattle mission. " +
                 "Scene=" + (agent.Mission.SceneName ?? "null") +
@@ -763,6 +822,9 @@ namespace CoopSpectator.MissionModels
             int exactSkill,
             string entryId)
         {
+            if (!ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+                return;
+
             string skillId = skill?.StringId ?? "null";
             string logKey =
                 (agent?.Index ?? -1).ToString() + "|" +
@@ -770,7 +832,7 @@ namespace CoopSpectator.MissionModels
                 (entryId ?? string.Empty) + "|" +
                 exactSkill.ToString();
 
-            if (!_loggedExactSkillKeys.Add(logKey))
+            if (!_loggedExactSkillKeys.TryAdd(logKey, 0))
                 return;
 
             ModLogger.Info(
@@ -877,7 +939,8 @@ namespace CoopSpectator.MissionModels
             float baseMultiplier,
             float updatedMultiplier)
         {
-            if (!CoopDebugConfig.CombatModelDiagnostics)
+            if (!ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics ||
+                !CoopDebugConfig.CombatModelDiagnostics)
                 return;
 
             string logKey =
@@ -886,7 +949,7 @@ namespace CoopSpectator.MissionModels
                 (entryId ?? string.Empty) + "|" +
                 updatedMultiplier.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
 
-            if (!_loggedWeaponDamageKeys.Add(logKey))
+            if (!_loggedWeaponDamageKeys.TryAdd(logKey, 0))
                 return;
 
             ModLogger.Info(
@@ -1018,12 +1081,15 @@ namespace CoopSpectator.MissionModels
             float baseHealth,
             float exactHealth)
         {
+            if (!ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+                return;
+
             string logKey =
                 (agent?.Index ?? -1).ToString() + "|" +
                 (entryId ?? string.Empty) + "|" +
                 exactHealth.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
 
-            if (!_loggedExactMaxHealthKeys.Add(logKey))
+            if (!_loggedExactMaxHealthKeys.TryAdd(logKey, 0))
                 return;
 
             ModLogger.Info(
@@ -1107,7 +1173,7 @@ namespace CoopSpectator.MissionModels
 
             float resolvedBaseline = ResolveExactDefenseDrivenPropertyBaseline(agent, agentDrivenProperties, property);
             if (!string.IsNullOrWhiteSpace(key) && resolvedBaseline > 0f)
-                _exactDefenseDrivenPropertyBaselines[key] = resolvedBaseline;
+                return _exactDefenseDrivenPropertyBaselines.GetOrAdd(key, resolvedBaseline);
 
             return resolvedBaseline;
         }
@@ -1159,12 +1225,15 @@ namespace CoopSpectator.MissionModels
 
         private void TryLogDefenseDrivenOverride(Agent agent, string entryId, string summary)
         {
+            if (!ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+                return;
+
             string logKey =
                 (agent?.Index ?? -1).ToString() + "|" +
                 (entryId ?? string.Empty) + "|" +
                 (summary ?? string.Empty);
 
-            if (!_loggedExactDefenseDrivenKeys.Add(logKey))
+            if (!_loggedExactDefenseDrivenKeys.TryAdd(logKey, 0))
                 return;
 
             ModLogger.Info(
@@ -1263,6 +1332,9 @@ namespace CoopSpectator.MissionModels
             int templateSkill,
             int exactSkill)
         {
+            if (!ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+                return;
+
             string skillId = relevantSkill?.StringId ?? "null";
             string logKey =
                 (agent?.Index ?? -1).ToString() + "|" +
@@ -1271,7 +1343,7 @@ namespace CoopSpectator.MissionModels
                 exactSwingSpeed.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + "|" +
                 exactReadySpeed.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
 
-            if (!_loggedExactMeleeDrivenKeys.Add(logKey))
+            if (!_loggedExactMeleeDrivenKeys.TryAdd(logKey, 0))
                 return;
 
             ModLogger.Info(
@@ -1729,7 +1801,7 @@ namespace CoopSpectator.MissionModels
                 appliedPerkSummary);
         }
 
-        private bool TryApplyExactHeroRangedCampaignDrivenPropertyOverrides(Agent agent, AgentDrivenProperties agentDrivenProperties)
+        private bool TryApplyExactRangedCampaignDrivenPropertyOverrides(Agent agent, AgentDrivenProperties agentDrivenProperties)
         {
             if (agent == null || agentDrivenProperties == null || !agent.IsHuman)
                 return false;
@@ -1930,7 +2002,7 @@ namespace CoopSpectator.MissionModels
             agentDrivenProperties.ThrustOrRangedReadySpeedMultiplier = Math.Max(0f, readySpeed);
             agentDrivenProperties.MissileSpeedMultiplier = Math.Max(0f, missileSpeedMultiplier);
 
-            TryLogExactHeroRangedCampaignDrivenOverride(
+            TryLogExactRangedCampaignDrivenOverride(
                 agent,
                 relevantSkill,
                 entryId,
@@ -2090,7 +2162,7 @@ namespace CoopSpectator.MissionModels
             return CoopMissionSpawnLogic.HasExactHeroCombatProfilePerk(agent, perkId, out _);
         }
 
-        private void TryLogExactHeroRangedCampaignDrivenOverride(
+        private void TryLogExactRangedCampaignDrivenOverride(
             Agent agent,
             SkillObject relevantSkill,
             string entryId,
@@ -2110,6 +2182,9 @@ namespace CoopSpectator.MissionModels
             float exactMissileSpeedMultiplier,
             string appliedPerkSummary)
         {
+            if (!ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+                return;
+
             string skillId = relevantSkill?.StringId ?? "null";
             string logKey =
                 (agent?.Index ?? -1).ToString() + "|" +
@@ -2120,7 +2195,7 @@ namespace CoopSpectator.MissionModels
                 exactUnsteadyPenalty.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture) + "|" +
                 (appliedPerkSummary ?? string.Empty);
 
-            if (!_loggedRangedDrivenKeys.Add(logKey))
+            if (!_loggedRangedDrivenKeys.TryAdd(logKey, 0))
                 return;
 
             TryLogBattleActivation(agent);
@@ -2155,6 +2230,9 @@ namespace CoopSpectator.MissionModels
             float exactMissileSpeedMultiplier,
             string appliedPerkSummary)
         {
+            if (!ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+                return;
+
             string skillId = relevantSkill?.StringId ?? "null";
             string logKey =
                 (agent?.Index ?? -1).ToString() + "|" +
@@ -2162,7 +2240,7 @@ namespace CoopSpectator.MissionModels
                 (entryId ?? string.Empty) + "|" +
                 exactMissileSpeedMultiplier.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
 
-            if (!_loggedRangedDrivenKeys.Add(logKey))
+            if (!_loggedRangedDrivenKeys.TryAdd(logKey, 0))
                 return;
 
             ModLogger.Info(

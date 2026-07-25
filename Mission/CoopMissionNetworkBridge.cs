@@ -8,6 +8,7 @@ using System.Security.Cryptography;
 using System.Text;
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.Infrastructure.SallyOut;
 using CoopSpectator.Infrastructure.SiegeAmbush;
 using CoopSpectator.Network.Messages;
 using CoopSpectator.Patches;
@@ -517,11 +518,12 @@ namespace CoopSpectator.MissionBehaviors
         private readonly float _markerInterval;
         private readonly Dictionary<BattleSideEnum, Dictionary<string, List<GameEntity>>> _boundaryMarkersBySide =
             new Dictionary<BattleSideEnum, Dictionary<string, List<GameEntity>>>();
+        private readonly Dictionary<BattleSideEnum, Dictionary<string, string>> _boundaryGeometryBySide =
+            new Dictionary<BattleSideEnum, Dictionary<string, string>>();
         private readonly HashSet<string> _loggedDiagnosticsKeys = new HashSet<string>(StringComparer.Ordinal);
         private GameEntity _cachedEntity;
         private bool _initialized;
         private bool _boundaryMarkersRemoved = true;
-        private string _lastDiagnosticsKey = string.Empty;
 
         public CoopSiegeDeploymentBoundaryMarkerView(string prefabName, float markerInterval)
         {
@@ -551,6 +553,11 @@ namespace CoopSpectator.MissionBehaviors
         {
             TryRemoveBoundaryMarkers();
             base.OnRemoveBehavior();
+        }
+
+        internal void RemoveBoundaryMarkers()
+        {
+            TryRemoveBoundaryMarkers();
         }
 
         public bool TryEnsureBoundaryMarkersForTeam(DefaultMissionDeploymentPlan deploymentPlan, Team team, string source)
@@ -613,9 +620,8 @@ namespace CoopSpectator.MissionBehaviors
                 string diagnosticsKey =
                     team.Side + "|" + boundaryCount + "|" + boundaryPointCount + "|" + createdMarkerCount + "|" +
                     createdWallCount + "|" + createdFallbackMarkerCount;
-                if (!string.Equals(_lastDiagnosticsKey, diagnosticsKey, StringComparison.Ordinal))
+                if (_loggedDiagnosticsKeys.Add("deployment-plan|" + diagnosticsKey))
                 {
-                    _lastDiagnosticsKey = diagnosticsKey;
                     ModLogger.Info(
                         "CoopSiegeDeploymentBoundaryMarkerView: ensured visible deployment boundaries. " +
                         "Side=" + team.Side +
@@ -691,9 +697,8 @@ namespace CoopSpectator.MissionBehaviors
                 string diagnosticsKey =
                     "scene|" + team.Side + "|" + boundaryCount + "|" + boundaryPointCount + "|" +
                     createdMarkerCount + "|" + createdWallCount + "|" + createdFallbackMarkerCount;
-                if (!string.Equals(_lastDiagnosticsKey, diagnosticsKey, StringComparison.Ordinal))
+                if (_loggedDiagnosticsKeys.Add("scene|" + diagnosticsKey))
                 {
-                    _lastDiagnosticsKey = diagnosticsKey;
                     ModLogger.Info(
                         "CoopSiegeDeploymentBoundaryMarkerView: ensured visible scene deployment boundaries. " +
                         "Side=" + team.Side +
@@ -723,14 +728,27 @@ namespace CoopSpectator.MissionBehaviors
             if (sideMarkers == null || string.IsNullOrWhiteSpace(key))
                 return false;
 
-            if (sideMarkers.ContainsKey(key))
-                return true;
-
             List<Vec2> pointList = points?.ToList();
             if (pointList == null || pointList.Count < 2)
                 return false;
 
             boundaryPointCount += pointList.Count;
+            Dictionary<string, string> sideGeometry = EnsureSideGeometryMap(side);
+            string geometrySignature = BuildBoundaryGeometrySignature(pointList);
+            if (sideMarkers.TryGetValue(key, out List<GameEntity> existingMarkers))
+            {
+                if (sideGeometry != null &&
+                    sideGeometry.TryGetValue(key, out string existingSignature) &&
+                    string.Equals(existingSignature, geometrySignature, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+
+                RemoveBoundaryMarkerEntities(existingMarkers);
+                sideMarkers.Remove(key);
+                sideGeometry?.Remove(key);
+            }
+
             List<GameEntity> markers = new List<GameEntity>();
 
             for (int i = 0; i < pointList.Count; i++)
@@ -743,6 +761,8 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             sideMarkers[key] = markers;
+            if (sideGeometry != null)
+                sideGeometry[key] = geometrySignature;
             createdMarkerCount += markers.Count;
             if (markers.Count > 0)
             {
@@ -783,6 +803,55 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return markers;
+        }
+
+        private Dictionary<string, string> EnsureSideGeometryMap(BattleSideEnum side)
+        {
+            if (side == BattleSideEnum.None)
+                return null;
+
+            if (!_boundaryGeometryBySide.TryGetValue(side, out Dictionary<string, string> geometry))
+            {
+                geometry = new Dictionary<string, string>(StringComparer.Ordinal);
+                _boundaryGeometryBySide[side] = geometry;
+            }
+
+            return geometry;
+        }
+
+        private static string BuildBoundaryGeometrySignature(IList<Vec2> points)
+        {
+            if (points == null)
+                return "null";
+
+            unchecked
+            {
+                int hash = 17;
+                for (int i = 0; i < points.Count; i++)
+                {
+                    hash = hash * 31 + (int)Math.Round(points[i].x * 10f);
+                    hash = hash * 31 + (int)Math.Round(points[i].y * 10f);
+                }
+
+                return points.Count + "|" + hash;
+            }
+        }
+
+        private static void RemoveBoundaryMarkerEntities(IEnumerable<GameEntity> markers)
+        {
+            if (markers == null)
+                return;
+
+            foreach (GameEntity marker in markers)
+            {
+                try
+                {
+                    marker?.Remove(103);
+                }
+                catch
+                {
+                }
+            }
         }
 
         private Banner ResolveBannerForSide(BattleSideEnum side)
@@ -1102,21 +1171,13 @@ namespace CoopSpectator.MissionBehaviors
             foreach (Dictionary<string, List<GameEntity>> markersByBoundary in _boundaryMarkersBySide.Values)
             {
                 foreach (List<GameEntity> markers in markersByBoundary.Values.ToList())
-                {
-                    foreach (GameEntity marker in markers)
-                    {
-                        try
-                        {
-                            marker?.Remove(103);
-                        }
-                        catch
-                        {
-                        }
-                    }
-                }
+                    RemoveBoundaryMarkerEntities(markers);
 
                 markersByBoundary.Clear();
             }
+
+            foreach (Dictionary<string, string> geometryByBoundary in _boundaryGeometryBySide.Values)
+                geometryByBoundary.Clear();
 
             _boundaryMarkersRemoved = true;
         }
@@ -1131,6 +1192,7 @@ namespace CoopSpectator.MissionBehaviors
             BoundaryMarkerTypeFullName + ", TaleWorlds.MountAndBlade.View";
         private const string BoundaryMarkerPrefabName = "swallowtail_banner";
         private const float BoundaryMarkerInterval = 2f;
+        private const float SallyOutBoundaryMarkerInterval = 10f;
 
         private static readonly FieldInfo DefaultMissionDeploymentPlanTeamDeploymentPlansField =
             typeof(DefaultMissionDeploymentPlan).GetField("_teamDeploymentPlans", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -1138,6 +1200,12 @@ namespace CoopSpectator.MissionBehaviors
             typeof(DefaultTeamDeploymentPlan).GetField("_deploymentBoundaries", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo DefaultTeamDeploymentPlanDeploymentFrameField =
             typeof(DefaultTeamDeploymentPlan).GetField("_deploymentFrame", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static Mission _cachedNativeBoundaryMarkerMission;
+        private static object _cachedNativeBoundaryMarker;
+#if !COOPSPECTATOR_DEDICATED
+        private static Mission _cachedCoopBoundaryMarkerMission;
+        private static CoopSiegeDeploymentBoundaryMarkerView _cachedCoopBoundaryMarker;
+#endif
 
         public static bool IsCoopSiegeDeploymentMission(Mission mission)
         {
@@ -1202,6 +1270,21 @@ namespace CoopSpectator.MissionBehaviors
                 .IsDeploymentRuntimeActive(mission);
         }
 
+        private static bool IsExactSallyOutDeploymentScenario(Mission mission)
+        {
+            if (mission == null)
+                return false;
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            return SallyOutScenarioContract.IsValidatedScenario(
+                scenarioContext,
+                mission.SceneName,
+                out _);
+        }
+
         public static bool TryEnsureDeploymentPlanBoundaries(Mission mission, Team team, string source)
         {
             if (!IsCoopCommanderDeploymentPlacementMission(mission) ||
@@ -1224,6 +1307,11 @@ namespace CoopSpectator.MissionBehaviors
                     BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
                 bool isExactSiegeAmbush =
                     SiegeAmbushScenarioContract.IsValidatedScenario(
+                        scenarioContext,
+                        mission.SceneName,
+                        out _);
+                bool isExactSallyOut =
+                    SallyOutScenarioContract.IsValidatedScenario(
                         scenarioContext,
                         mission.SceneName,
                         out _);
@@ -1255,6 +1343,15 @@ namespace CoopSpectator.MissionBehaviors
                 if (isExactSiegeAmbush)
                 {
                     return TryEnsureExactSiegeAmbushSceneDeploymentBoundaries(
+                        mission,
+                        deploymentPlan,
+                        team,
+                        source);
+                }
+
+                if (isExactSallyOut)
+                {
+                    return TryEnsureExactSallyOutDeploymentBoundaryContract(
                         mission,
                         deploymentPlan,
                         team,
@@ -1348,11 +1445,29 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             bool hasTeamDeploymentPlanBoundaries = TryEnsureDeploymentPlanBoundaries(mission, team, source);
+            bool preferNativeBoundaryMarker = IsExactSallyOutDeploymentScenario(mission);
+            if (preferNativeBoundaryMarker &&
+                TryEnsureNativeVisibleDeploymentBoundaryMarkers(
+                    mission,
+                    missionScreen,
+                    team,
+                    source,
+                    SallyOutBoundaryMarkerInterval))
+            {
+                return true;
+            }
 
 #if !COOPSPECTATOR_DEDICATED
             CoopSiegeDeploymentBoundaryMarkerView coopMarker = ResolveExistingCoopBoundaryMarker(mission);
             if (coopMarker == null)
-                coopMarker = TryCreateAndAttachCoopBoundaryMarker(mission, missionScreen);
+            {
+                coopMarker = TryCreateAndAttachCoopBoundaryMarker(
+                    mission,
+                    missionScreen,
+                    preferNativeBoundaryMarker
+                        ? SallyOutBoundaryMarkerInterval
+                        : BoundaryMarkerInterval);
+            }
             if (coopMarker != null)
             {
                 bool ensuredAny = false;
@@ -1406,25 +1521,53 @@ namespace CoopSpectator.MissionBehaviors
             }
 #endif
 
+            return TryEnsureNativeVisibleDeploymentBoundaryMarkers(
+                mission,
+                missionScreen,
+                team,
+                source,
+                BoundaryMarkerInterval);
+        }
+
+        private static bool TryEnsureNativeVisibleDeploymentBoundaryMarkers(
+            Mission mission,
+            object missionScreen,
+            Team team,
+            string source,
+            float markerInterval)
+        {
+            if (mission == null || team == null || team.Side == BattleSideEnum.None)
+                return false;
+
             object marker = ResolveExistingBoundaryMarker(mission);
             if (marker == null)
-                marker = TryCreateAndAttachBoundaryMarker(mission, missionScreen);
+                marker = TryCreateAndAttachBoundaryMarker(mission, missionScreen, markerInterval);
             if (marker == null)
                 return false;
 
             TryEnsureBoundaryMarkerInitialized(marker);
-            if (!TryAddDeploymentBoundaryMarkersDirectly(marker, mission, team))
-                TryInvokeInstanceMethod(marker, "OnDeploymentPlanMade", team, true);
+            bool ensuredAny = TryAddDeploymentBoundaryMarkersDirectly(marker, mission, team);
+            if (!ensuredAny)
+                ensuredAny = TryInvokeInstanceMethod(marker, "OnDeploymentPlanMade", team, true);
 
             Team enemyTeam = mission.PlayerEnemyTeam;
             if (enemyTeam != null && enemyTeam != team)
             {
-                TryEnsureDeploymentPlanBoundaries(mission, enemyTeam, source + " enemy");
-                if (!TryAddDeploymentBoundaryMarkersDirectly(marker, mission, enemyTeam))
-                    TryInvokeInstanceMethod(marker, "OnDeploymentPlanMade", enemyTeam, true);
+                TryEnsureDeploymentPlanBoundaries(mission, enemyTeam, (source ?? "unknown") + " enemy");
+                bool ensuredEnemy = TryAddDeploymentBoundaryMarkersDirectly(marker, mission, enemyTeam);
+                if (!ensuredEnemy)
+                {
+                    ensuredEnemy = TryInvokeInstanceMethod(
+                        marker,
+                        "OnDeploymentPlanMade",
+                        enemyTeam,
+                        true);
+                }
+
+                ensuredAny |= ensuredEnemy;
             }
 
-            return true;
+            return ensuredAny;
         }
 
         public static void TryRemoveVisibleDeploymentBoundaryMarkers(
@@ -1434,6 +1577,38 @@ namespace CoopSpectator.MissionBehaviors
         {
             try
             {
+                if (ReferenceEquals(_cachedNativeBoundaryMarkerMission, mission))
+                {
+                    if (_cachedNativeBoundaryMarker != null)
+                    {
+                        TryInvokeInstanceMethod(missionScreen, "UnregisterView", _cachedNativeBoundaryMarker);
+                        if (_cachedNativeBoundaryMarker is MissionBehavior cachedNativeBehavior &&
+                            mission?.MissionBehaviors?.Contains(cachedNativeBehavior) == true)
+                        {
+                            mission.RemoveMissionBehavior(cachedNativeBehavior);
+                        }
+                    }
+
+                    _cachedNativeBoundaryMarkerMission = null;
+                    _cachedNativeBoundaryMarker = null;
+                }
+
+#if !COOPSPECTATOR_DEDICATED
+                if (ReferenceEquals(_cachedCoopBoundaryMarkerMission, mission))
+                {
+                    if (_cachedCoopBoundaryMarker != null)
+                    {
+                        _cachedCoopBoundaryMarker.RemoveBoundaryMarkers();
+                        TryInvokeInstanceMethod(missionScreen, "UnregisterView", _cachedCoopBoundaryMarker);
+                        if (mission?.MissionBehaviors?.Contains(_cachedCoopBoundaryMarker) == true)
+                            mission.RemoveMissionBehavior(_cachedCoopBoundaryMarker);
+                    }
+
+                    _cachedCoopBoundaryMarkerMission = null;
+                    _cachedCoopBoundaryMarker = null;
+                }
+#endif
+
                 List<MissionBehavior> behaviors = mission?.MissionBehaviors;
                 if (behaviors == null)
                     return;
@@ -1636,6 +1811,501 @@ namespace CoopSpectator.MissionBehaviors
                 deploymentBoundaries);
         }
 
+        private static bool TryEnsureExactSallyOutDeploymentBoundaryContract(
+            Mission mission,
+            DefaultMissionDeploymentPlan deploymentPlan,
+            Team team,
+            string source)
+        {
+            if (mission?.Scene == null ||
+                deploymentPlan == null ||
+                team == null ||
+                DefaultTeamDeploymentPlanDeploymentBoundariesField == null ||
+                DefaultTeamDeploymentPlanDeploymentFrameField == null)
+            {
+                return false;
+            }
+
+            DefaultTeamDeploymentPlan teamPlan = TryGetTeamDeploymentPlan(deploymentPlan, team);
+            if (teamPlan == null)
+                return false;
+
+            MBList<(string id, MBList<Vec2> points)> deploymentBoundaries = null;
+            List<(string id, MBList<Vec2> points)> originalBoundaries = null;
+            MatrixFrame originalDeploymentFrame = MatrixFrame.Zero;
+            bool hasOriginalDeploymentFrame = false;
+            bool repairApplied = false;
+            try
+            {
+                deploymentBoundaries =
+                    DefaultTeamDeploymentPlanDeploymentBoundariesField.GetValue(teamPlan) as
+                        MBList<(string id, MBList<Vec2> points)>;
+                if (deploymentBoundaries == null)
+                {
+                    return false;
+                }
+
+                originalBoundaries = CloneExactSallyOutDeploymentBoundaries(deploymentBoundaries);
+                object currentDeploymentFrameValue =
+                    DefaultTeamDeploymentPlanDeploymentFrameField.GetValue(teamPlan);
+                if (currentDeploymentFrameValue is MatrixFrame currentDeploymentFrame)
+                {
+                    hasOriginalDeploymentFrame = true;
+                    originalDeploymentFrame = currentDeploymentFrame;
+                }
+
+                List<Vec2> placementSamples = CollectExactSallyOutPlacementSamples(mission, team);
+                if (placementSamples.Count <= 0)
+                    return false;
+
+                Team enemyTeam = mission.Teams?
+                    .FirstOrDefault(candidate =>
+                        candidate != null &&
+                        candidate.Side != BattleSideEnum.None &&
+                        candidate.Side != team.Side);
+                List<Vec2> enemyPlacementSamples =
+                    CollectExactSallyOutPlacementSamples(mission, enemyTeam);
+                if (HasUsableExactSallyOutDeploymentBoundaryPoints(deploymentBoundaries) &&
+                    AreExactSallyOutPlacementSamplesInsideBoundaries(
+                        deploymentPlan,
+                        team,
+                        placementSamples) &&
+                    AreExactSallyOutEnemyPlacementSamplesOutsideBoundaries(
+                        deploymentPlan,
+                        team,
+                        enemyPlacementSamples))
+                {
+                    return true;
+                }
+
+                if (!TryResolveExactSallyOutForwardDirection(
+                        mission,
+                        team,
+                        placementSamples,
+                        out Vec2 forwardDirection))
+                {
+                    return false;
+                }
+
+                Vec2 lateralDirection = new Vec2(-forwardDirection.y, forwardDirection.x);
+                float frontProjection = float.MinValue;
+                float rearProjection = float.MaxValue;
+                float minLateralProjection = float.MaxValue;
+                float maxLateralProjection = float.MinValue;
+                Vec2 sampleMean = Vec2.Zero;
+                for (int i = 0; i < placementSamples.Count; i++)
+                {
+                    Vec2 sample = placementSamples[i];
+                    sampleMean += sample;
+                    frontProjection = Math.Max(
+                        frontProjection,
+                        DotExactSallyOutBoundary(sample, forwardDirection));
+                    rearProjection = Math.Min(
+                        rearProjection,
+                        DotExactSallyOutBoundary(sample, forwardDirection));
+                    float lateralProjection = DotExactSallyOutBoundary(sample, lateralDirection);
+                    minLateralProjection = Math.Min(minLateralProjection, lateralProjection);
+                    maxLateralProjection = Math.Max(maxLateralProjection, lateralProjection);
+                }
+
+                sampleMean *= 1f / placementSamples.Count;
+                frontProjection += 10f;
+                rearProjection -= 80f;
+                float lateralCenter = (minLateralProjection + maxLateralProjection) * 0.5f;
+                float lateralHalfWidth = Math.Max(
+                    50f,
+                    (maxLateralProjection - minLateralProjection) * 0.5f + 10f);
+
+                var repairedBoundaries = new List<(string id, MBList<Vec2> points)>();
+                int repairedPointCount = 0;
+                foreach (KeyValuePair<string, ICollection<Vec2>> missionBoundary in mission.Boundaries)
+                {
+                    List<Vec2> polygon = CreateExactSallyOutConvexBoundary(missionBoundary.Value);
+                    polygon = ClipExactSallyOutBoundaryToHalfPlane(
+                        polygon,
+                        forwardDirection,
+                        frontProjection);
+                    polygon = ClipExactSallyOutBoundaryToHalfPlane(
+                        polygon,
+                        -forwardDirection,
+                        -rearProjection);
+                    polygon = ClipExactSallyOutBoundaryToHalfPlane(
+                        polygon,
+                        lateralDirection,
+                        lateralCenter + lateralHalfWidth);
+                    polygon = ClipExactSallyOutBoundaryToHalfPlane(
+                        polygon,
+                        -lateralDirection,
+                        -(lateralCenter - lateralHalfWidth));
+                    if (polygon == null || polygon.Count <= 2)
+                        continue;
+
+                    var repairedBoundary = new MBList<Vec2>(polygon);
+                    MBSceneUtilities.RadialSortBoundary(ref repairedBoundary);
+                    MBSceneUtilities.FindConvexHull(ref repairedBoundary);
+                    if (repairedBoundary.Count <= 2 ||
+                        repairedBoundary.Any(point => !point.IsValid))
+                    {
+                        continue;
+                    }
+
+                    string boundaryId = string.IsNullOrWhiteSpace(missionBoundary.Key)
+                        ? "coop_sally_out_" + team.Side + "_" + repairedBoundaries.Count
+                        : "coop_sally_out_" + team.Side + "_" + missionBoundary.Key;
+                    repairedBoundaries.Add((boundaryId, repairedBoundary));
+                    repairedPointCount += repairedBoundary.Count;
+                }
+
+                if (repairedBoundaries.Count <= 0)
+                    return false;
+
+                deploymentBoundaries.Clear();
+                foreach (var repairedBoundary in repairedBoundaries)
+                    deploymentBoundaries.Add(repairedBoundary);
+                repairApplied = true;
+
+                if (DefaultTeamDeploymentPlanDeploymentFrameField.GetValue(teamPlan) is
+                    MatrixFrame deploymentFrame)
+                {
+                    float height = mission.Scene.GetTerrainHeight(sampleMean);
+                    mission.Scene.GetHeightAtPoint(sampleMean, BodyFlags.None, ref height);
+                    deploymentFrame.origin = new Vec3(sampleMean, height);
+                    DefaultTeamDeploymentPlanDeploymentFrameField.SetValue(teamPlan, deploymentFrame);
+                }
+
+                bool repaired =
+                    HasUsableExactSallyOutDeploymentBoundaryPoints(deploymentBoundaries) &&
+                    AreExactSallyOutPlacementSamplesInsideBoundaries(
+                        deploymentPlan,
+                        team,
+                        placementSamples) &&
+                    AreExactSallyOutEnemyPlacementSamplesOutsideBoundaries(
+                        deploymentPlan,
+                        team,
+                        enemyPlacementSamples);
+                if (!repaired)
+                {
+                    RestoreExactSallyOutDeploymentBoundaryState(
+                        teamPlan,
+                        deploymentBoundaries,
+                        originalBoundaries,
+                        hasOriginalDeploymentFrame,
+                        originalDeploymentFrame);
+                    repairApplied = false;
+                    return false;
+                }
+
+                if (CoopDebugConfig.OrderOfBattleDiagnostics)
+                {
+                    ModLogger.Info(
+                        "CoopSiegeDeploymentBoundaryRuntime: repaired exact SallyOut deployment boundary from live formation layout. " +
+                        "Side=" + team.Side +
+                        " Samples=" + placementSamples.Count +
+                        " EnemySamples=" + enemyPlacementSamples.Count +
+                        " BoundaryCount=" + repairedBoundaries.Count +
+                        " PointCount=" + repairedPointCount +
+                        " Forward=" + forwardDirection +
+                        " Source=" + (source ?? "unknown"));
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                if (repairApplied)
+                {
+                    RestoreExactSallyOutDeploymentBoundaryState(
+                        teamPlan,
+                        deploymentBoundaries,
+                        originalBoundaries,
+                        hasOriginalDeploymentFrame,
+                        originalDeploymentFrame);
+                }
+
+                if (CoopDebugConfig.OrderOfBattleDiagnostics)
+                {
+                    ModLogger.Info(
+                        "CoopSiegeDeploymentBoundaryRuntime: exact SallyOut deployment boundary repair failed. " +
+                        "Side=" + team.Side +
+                        " Source=" + (source ?? "unknown") +
+                        " Error=" + ex.GetType().Name + ":" + ex.Message);
+                }
+
+                return false;
+            }
+        }
+
+        private static List<(string id, MBList<Vec2> points)> CloneExactSallyOutDeploymentBoundaries(
+            IEnumerable<(string id, MBList<Vec2> points)> source)
+        {
+            var clone = new List<(string id, MBList<Vec2> points)>();
+            if (source == null)
+                return clone;
+
+            foreach (var boundary in source)
+            {
+                var points = new MBList<Vec2>();
+                if (boundary.points != null)
+                {
+                    foreach (Vec2 point in boundary.points)
+                        points.Add(point);
+                }
+
+                clone.Add((boundary.id, points));
+            }
+
+            return clone;
+        }
+
+        private static void RestoreExactSallyOutDeploymentBoundaryState(
+            DefaultTeamDeploymentPlan teamPlan,
+            MBList<(string id, MBList<Vec2> points)> deploymentBoundaries,
+            IEnumerable<(string id, MBList<Vec2> points)> originalBoundaries,
+            bool hasOriginalDeploymentFrame,
+            MatrixFrame originalDeploymentFrame)
+        {
+            if (deploymentBoundaries != null)
+            {
+                deploymentBoundaries.Clear();
+                if (originalBoundaries != null)
+                {
+                    foreach (var boundary in originalBoundaries)
+                        deploymentBoundaries.Add(boundary);
+                }
+            }
+
+            if (hasOriginalDeploymentFrame && teamPlan != null)
+            {
+                DefaultTeamDeploymentPlanDeploymentFrameField?.SetValue(
+                    teamPlan,
+                    originalDeploymentFrame);
+            }
+        }
+
+        private static List<Vec2> CollectExactSallyOutPlacementSamples(Mission mission, Team team)
+        {
+            var samples = new List<Vec2>();
+            if (mission?.AllAgents != null)
+            {
+                foreach (Agent agent in mission.AllAgents)
+                {
+                    if (agent == null ||
+                        agent.IsMount ||
+                        !agent.IsHuman ||
+                        !agent.IsActive() ||
+                        !ReferenceEquals(agent.Team, team))
+                    {
+                        continue;
+                    }
+
+                    Vec2 position = agent.Position.AsVec2;
+                    if (position.IsValid)
+                        samples.Add(position);
+                }
+            }
+
+            if (samples.Count > 0 || team?.FormationsIncludingEmpty == null)
+                return samples;
+
+            foreach (Formation formation in team.FormationsIncludingEmpty)
+            {
+                if (formation == null ||
+                    formation.CountOfUnits <= 0 ||
+                    !formation.OrderPositionIsValid ||
+                    !formation.OrderPosition.IsValid)
+                {
+                    continue;
+                }
+
+                samples.Add(formation.OrderPosition);
+            }
+
+            return samples;
+        }
+
+        private static bool AreExactSallyOutPlacementSamplesInsideBoundaries(
+            DefaultMissionDeploymentPlan deploymentPlan,
+            Team team,
+            IEnumerable<Vec2> samples)
+        {
+            if (deploymentPlan == null || team == null || samples == null)
+                return false;
+
+            int sampleCount = 0;
+            foreach (Vec2 sample in samples)
+            {
+                if (!sample.IsValid ||
+                    !deploymentPlan.IsPositionInsideDeploymentBoundaries(team, in sample))
+                {
+                    return false;
+                }
+
+                sampleCount++;
+            }
+
+            return sampleCount > 0;
+        }
+
+        private static bool HasUsableExactSallyOutDeploymentBoundaryPoints(
+            IEnumerable<(string id, MBList<Vec2> points)> deploymentBoundaries)
+        {
+            if (deploymentBoundaries == null)
+                return false;
+
+            foreach (var deploymentBoundary in deploymentBoundaries)
+            {
+                if (deploymentBoundary.points != null &&
+                    deploymentBoundary.points.Count > 2 &&
+                    deploymentBoundary.points.All(point => point.IsValid))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool AreExactSallyOutEnemyPlacementSamplesOutsideBoundaries(
+            DefaultMissionDeploymentPlan deploymentPlan,
+            Team team,
+            IEnumerable<Vec2> enemySamples)
+        {
+            if (deploymentPlan == null || team == null)
+                return false;
+            if (enemySamples == null)
+                return true;
+
+            foreach (Vec2 enemySample in enemySamples)
+            {
+                if (!enemySample.IsValid)
+                    continue;
+
+                if (deploymentPlan.IsPositionInsideDeploymentBoundaries(team, in enemySample))
+                    return false;
+            }
+
+            return true;
+        }
+
+        private static bool TryResolveExactSallyOutForwardDirection(
+            Mission mission,
+            Team team,
+            IList<Vec2> teamSamples,
+            out Vec2 forwardDirection)
+        {
+            forwardDirection = Vec2.Zero;
+            if (mission == null || team == null || teamSamples == null || teamSamples.Count <= 0)
+                return false;
+
+            if (team.FormationsIncludingEmpty != null)
+            {
+                foreach (Formation formation in team.FormationsIncludingEmpty)
+                {
+                    if (formation == null || formation.CountOfUnits <= 0)
+                        continue;
+
+                    Vec2 direction = formation.Direction;
+                    if (direction.IsValid && direction.LengthSquared > 0.0001f)
+                        forwardDirection += direction.Normalized();
+                }
+            }
+
+            Vec2 teamMean = Vec2.Zero;
+            for (int i = 0; i < teamSamples.Count; i++)
+                teamMean += teamSamples[i];
+            teamMean *= 1f / teamSamples.Count;
+
+            Team enemyTeam = mission.Teams?
+                .FirstOrDefault(candidate =>
+                    candidate != null &&
+                    candidate.Side != BattleSideEnum.None &&
+                    candidate.Side != team.Side);
+            List<Vec2> enemySamples = CollectExactSallyOutPlacementSamples(mission, enemyTeam);
+            Vec2 towardEnemy = Vec2.Zero;
+            if (enemySamples.Count > 0)
+            {
+                Vec2 enemyMean = Vec2.Zero;
+                for (int i = 0; i < enemySamples.Count; i++)
+                    enemyMean += enemySamples[i];
+                enemyMean *= 1f / enemySamples.Count;
+                towardEnemy = enemyMean - teamMean;
+            }
+
+            if (!forwardDirection.IsValid || forwardDirection.LengthSquared <= 0.0001f)
+                forwardDirection = towardEnemy;
+            if (!forwardDirection.IsValid || forwardDirection.LengthSquared <= 0.0001f)
+                return false;
+
+            forwardDirection = forwardDirection.Normalized();
+            if (towardEnemy.IsValid &&
+                towardEnemy.LengthSquared > 0.0001f &&
+                DotExactSallyOutBoundary(forwardDirection, towardEnemy) < 0f)
+            {
+                forwardDirection = -forwardDirection;
+            }
+
+            return true;
+        }
+
+        private static List<Vec2> CreateExactSallyOutConvexBoundary(ICollection<Vec2> source)
+        {
+            if (source == null || source.Count <= 2)
+                return null;
+
+            var boundary = new MBList<Vec2>(source.Where(point => point.IsValid).ToList());
+            if (boundary.Count <= 2)
+                return null;
+
+            MBSceneUtilities.RadialSortBoundary(ref boundary);
+            MBSceneUtilities.FindConvexHull(ref boundary);
+            return boundary.Count > 2 ? boundary.ToList() : null;
+        }
+
+        private static List<Vec2> ClipExactSallyOutBoundaryToHalfPlane(
+            IList<Vec2> polygon,
+            Vec2 normal,
+            float maxProjection)
+        {
+            if (polygon == null || polygon.Count <= 2 || !normal.IsValid)
+                return null;
+
+            var clipped = new List<Vec2>();
+            Vec2 previous = polygon[polygon.Count - 1];
+            float previousDistance = DotExactSallyOutBoundary(previous, normal) - maxProjection;
+            bool previousInside = previousDistance <= 0.01f;
+            for (int i = 0; i < polygon.Count; i++)
+            {
+                Vec2 current = polygon[i];
+                float currentDistance = DotExactSallyOutBoundary(current, normal) - maxProjection;
+                bool currentInside = currentDistance <= 0.01f;
+                if (currentInside != previousInside)
+                {
+                    float denominator = previousDistance - currentDistance;
+                    if (Math.Abs(denominator) > 0.0001f)
+                    {
+                        float amount = previousDistance / denominator;
+                        Vec2 intersection = previous + (current - previous) * amount;
+                        if (intersection.IsValid)
+                            clipped.Add(intersection);
+                    }
+                }
+
+                if (currentInside)
+                    clipped.Add(current);
+
+                previous = current;
+                previousDistance = currentDistance;
+                previousInside = currentInside;
+            }
+
+            return clipped;
+        }
+
+        private static float DotExactSallyOutBoundary(Vec2 left, Vec2 right)
+        {
+            return left.x * right.x + left.y * right.y;
+        }
+
         private static bool TryResolveExactSiegeAmbushDeploymentFrame(
             Mission mission,
             Team team,
@@ -1799,7 +2469,8 @@ namespace CoopSpectator.MissionBehaviors
 #if !COOPSPECTATOR_DEDICATED
         private static CoopSiegeDeploymentBoundaryMarkerView TryCreateAndAttachCoopBoundaryMarker(
             Mission mission,
-            object missionScreen)
+            object missionScreen,
+            float markerInterval)
         {
             try
             {
@@ -1807,12 +2478,16 @@ namespace CoopSpectator.MissionBehaviors
                     return null;
 
                 CoopSiegeDeploymentBoundaryMarkerView marker =
-                    new CoopSiegeDeploymentBoundaryMarkerView(BoundaryMarkerPrefabName, BoundaryMarkerInterval);
+                    new CoopSiegeDeploymentBoundaryMarkerView(
+                        BoundaryMarkerPrefabName,
+                        markerInterval);
 
                 if (!TryInvokeInstanceMethod(missionScreen, "AddMissionView", marker))
                     mission.AddMissionBehavior(marker);
 
                 marker.AfterStart();
+                _cachedCoopBoundaryMarkerMission = mission;
+                _cachedCoopBoundaryMarker = marker;
                 return marker;
             }
             catch (Exception ex)
@@ -1827,6 +2502,12 @@ namespace CoopSpectator.MissionBehaviors
         {
             try
             {
+                if (ReferenceEquals(_cachedCoopBoundaryMarkerMission, mission) &&
+                    _cachedCoopBoundaryMarker != null)
+                {
+                    return _cachedCoopBoundaryMarker;
+                }
+
                 List<MissionBehavior> behaviors = mission?.MissionBehaviors;
                 if (behaviors == null)
                     return null;
@@ -1834,7 +2515,11 @@ namespace CoopSpectator.MissionBehaviors
                 foreach (MissionBehavior behavior in behaviors)
                 {
                     if (behavior is CoopSiegeDeploymentBoundaryMarkerView marker)
+                    {
+                        _cachedCoopBoundaryMarkerMission = mission;
+                        _cachedCoopBoundaryMarker = marker;
                         return marker;
+                    }
                 }
             }
             catch
@@ -1845,7 +2530,10 @@ namespace CoopSpectator.MissionBehaviors
         }
 #endif
 
-        private static object TryCreateAndAttachBoundaryMarker(Mission mission, object missionScreen)
+        private static object TryCreateAndAttachBoundaryMarker(
+            Mission mission,
+            object missionScreen,
+            float markerInterval)
         {
             try
             {
@@ -1853,7 +2541,10 @@ namespace CoopSpectator.MissionBehaviors
                 if (markerType == null)
                     return null;
 
-                object marker = Activator.CreateInstance(markerType, BoundaryMarkerPrefabName, BoundaryMarkerInterval);
+                object marker = Activator.CreateInstance(
+                    markerType,
+                    BoundaryMarkerPrefabName,
+                    markerInterval);
                 if (!(marker is MissionBehavior markerBehavior))
                     return null;
 
@@ -1862,6 +2553,8 @@ namespace CoopSpectator.MissionBehaviors
                     mission.AddMissionBehavior(markerBehavior);
                 }
 
+                _cachedNativeBoundaryMarkerMission = mission;
+                _cachedNativeBoundaryMarker = marker;
                 return marker;
             }
             catch
@@ -1896,6 +2589,12 @@ namespace CoopSpectator.MissionBehaviors
         {
             try
             {
+                if (ReferenceEquals(_cachedNativeBoundaryMarkerMission, mission) &&
+                    _cachedNativeBoundaryMarker != null)
+                {
+                    return _cachedNativeBoundaryMarker;
+                }
+
                 List<MissionBehavior> behaviors = mission?.MissionBehaviors;
                 if (behaviors == null)
                     return null;
@@ -1903,7 +2602,11 @@ namespace CoopSpectator.MissionBehaviors
                 foreach (MissionBehavior behavior in behaviors)
                 {
                     if (IsNativeBoundaryMarker(behavior))
+                    {
+                        _cachedNativeBoundaryMarkerMission = mission;
+                        _cachedNativeBoundaryMarker = behavior;
                         return behavior;
+                    }
                 }
             }
             catch
@@ -2188,6 +2891,12 @@ namespace CoopSpectator.MissionBehaviors
         private long _cachedMaterializedAgentEntryContentRevision = -1;
         private CoopBattleEntryStatusBridgeFile.AuthoritativeMaterializedAgentEntrySnapshot _cachedMaterializedAgentEntrySnapshot;
         private string _cachedMaterializedAgentEntryComparisonJson = string.Empty;
+        private readonly Dictionary<int, ServerMaterializedReinforcementBatchState>
+            _serverMaterializedReinforcementBatchesById =
+                new Dictionary<int, ServerMaterializedReinforcementBatchState>();
+        private readonly Dictionary<int, ClientMaterializedReinforcementBatchState>
+            _clientMaterializedReinforcementBatchesById =
+                new Dictionary<int, ClientMaterializedReinforcementBatchState>();
         private int _nextTransmissionId = 1;
         private bool _persistedHostedLocalPeerMarker;
         private DateTime _lastClientBattleSnapshotBootstrapRequestUtc = DateTime.MinValue;
@@ -2200,6 +2909,44 @@ namespace CoopSpectator.MissionBehaviors
         private CoopBattleAgentControlState _delayedClientAgentControlDiagnosticsState;
         private string _delayedClientAgentControlFormationOwnershipSyncResult = string.Empty;
         private string _delayedClientAgentControlMainAgentSyncResult = string.Empty;
+
+        private sealed class ServerMaterializedReinforcementBatchState
+        {
+            public Mission Mission;
+            public int BatchId;
+            public BattleSideEnum Side;
+            public int ExpectedAgentCount;
+            public int ExpectedContractCount;
+            public readonly HashSet<int> ExpectedPeerIndices = new HashSet<int>();
+            public readonly Dictionary<int, int> PreparedContractCountByPeer = new Dictionary<int, int>();
+            public readonly Dictionary<int, int> PreparedAgentCountByPeer = new Dictionary<int, int>();
+            public readonly Dictionary<string, int> PlannedAgentCountByEntryId =
+                new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            public readonly Dictionary<string, int> BoundAgentCountByEntryId =
+                new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            public readonly Dictionary<int, int> ReadyAgentCountByPeer = new Dictionary<int, int>();
+            public readonly Dictionary<int, string> EntryIdByAgentIndex = new Dictionary<int, string>();
+        }
+
+        private sealed class ClientMaterializedReinforcementContractState
+        {
+            public string EntryId;
+            public int PlannedAgentCount;
+        }
+
+        private sealed class ClientMaterializedReinforcementBatchState
+        {
+            public Mission Mission;
+            public int BatchId;
+            public BattleSideEnum Side;
+            public int ExpectedAgentCount;
+            public int ExpectedContractCount;
+            public bool PreparedAckSent;
+            public bool ReadyAckSent;
+            public readonly Dictionary<int, ClientMaterializedReinforcementContractState> ContractBySequence =
+                new Dictionary<int, ClientMaterializedReinforcementContractState>();
+            public readonly Dictionary<int, string> EntryIdByAgentIndex = new Dictionary<int, string>();
+        }
 
         internal static bool TryGetClientBattleSnapshotProgress(out ClientBattleSnapshotProgressInfo progress)
         {
@@ -2330,6 +3077,578 @@ namespace CoopSpectator.MissionBehaviors
             return bridge.TryBroadcastCommanderDeploymentSiegeMachineState(side, out diagnostics, source);
         }
 
+        internal static bool HasSentFrozenCaptainStateToAllEligiblePeers(
+            Mission mission,
+            out string diagnostics)
+        {
+            diagnostics = "mission-null";
+            if (mission == null)
+                return false;
+
+            if (!GameNetwork.IsServer)
+            {
+                diagnostics = "not-server";
+                return false;
+            }
+
+            CoopMissionNetworkBridge bridge = mission.GetMissionBehavior<CoopMissionNetworkBridge>();
+            if (bridge == null)
+            {
+                diagnostics = "bridge-missing";
+                return false;
+            }
+
+            return bridge.HasSentFrozenCaptainStateToAllEligiblePeers(out diagnostics);
+        }
+
+        private bool HasSentFrozenCaptainStateToAllEligiblePeers(out string diagnostics)
+        {
+            string requiredSignature = GlobalCaptainPerkRuntimeState.GetFrozenStateSignature();
+            if (string.IsNullOrWhiteSpace(requiredSignature))
+            {
+                diagnostics = "captain-state-not-ready";
+                return false;
+            }
+
+            int eligiblePeerCount = 0;
+            int readyPeerCount = 0;
+            var blockedPeers = new List<string>();
+            if (GameNetwork.NetworkPeers == null)
+            {
+                diagnostics = "network-peers-unavailable";
+                return false;
+            }
+
+            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+            {
+                if (!IsEligibleRemotePeer(peer))
+                    continue;
+
+                eligiblePeerCount++;
+                if (!AreBootstrapDependentPeerPayloadsReady(peer, out string bootstrapReadiness))
+                {
+                    blockedPeers.Add((peer.UserName ?? peer.Index.ToString()) + ":bootstrap:" + bootstrapReadiness);
+                    continue;
+                }
+
+                MissionPeer missionPeer = peer.GetComponent<MissionPeer>();
+                CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot =
+                    CoopMissionSpawnLogic.BuildEntryStatusSnapshotForPeer(
+                        Mission,
+                        missionPeer,
+                        "CoopMissionNetworkBridge captain-state send barrier");
+                string comparisonJson = SerializeComparableEntryStatusPayload(snapshot);
+                bool signatureMatches =
+                    snapshot != null &&
+                    string.Equals(
+                        snapshot.FrozenCaptainStateSignature,
+                        requiredSignature,
+                        StringComparison.OrdinalIgnoreCase);
+                bool payloadSent =
+                    !string.IsNullOrWhiteSpace(comparisonJson) &&
+                    _lastSentStatusPayloadByPeer.TryGetValue(peer.Index, out string sentPayload) &&
+                    string.Equals(sentPayload, comparisonJson, StringComparison.Ordinal);
+                if (signatureMatches && payloadSent)
+                {
+                    readyPeerCount++;
+                    continue;
+                }
+
+                blockedPeers.Add(
+                    (peer.UserName ?? peer.Index.ToString()) +
+                    ":status:SignatureMatches=" + signatureMatches +
+                    ",PayloadSent=" + payloadSent);
+            }
+
+            bool ready = readyPeerCount == eligiblePeerCount;
+            diagnostics =
+                "Signature=" + requiredSignature +
+                " EligiblePeers=" + eligiblePeerCount +
+                " ReadyPeers=" + readyPeerCount +
+                " Blocked=[" + string.Join(";", blockedPeers) + "]";
+            return ready;
+        }
+
+        internal static bool TryBeginMaterializedReinforcementBatch(
+            Mission mission,
+            int batchId,
+            BattleSideEnum side,
+            int expectedAgentCount,
+            IReadOnlyDictionary<string, int> plannedAgentCountByEntryId,
+            out string diagnostics)
+        {
+            diagnostics = "invalid-context";
+            if (!GameNetwork.IsServer ||
+                mission == null ||
+                batchId <= 0 ||
+                expectedAgentCount <= 0 ||
+                plannedAgentCountByEntryId == null ||
+                plannedAgentCountByEntryId.Count <= 0)
+                return false;
+
+            CoopMissionNetworkBridge bridge = mission.GetMissionBehavior<CoopMissionNetworkBridge>();
+            if (bridge == null)
+            {
+                diagnostics = "bridge-missing";
+                return false;
+            }
+
+            return bridge.TryBeginMaterializedReinforcementBatch(
+                batchId,
+                side,
+                expectedAgentCount,
+                plannedAgentCountByEntryId,
+                out diagnostics);
+        }
+
+        internal static bool AreMaterializedReinforcementBatchPeersPrepared(
+            Mission mission,
+            int batchId)
+        {
+            if (!GameNetwork.IsServer || mission == null || batchId <= 0)
+                return false;
+
+            CoopMissionNetworkBridge bridge = mission.GetMissionBehavior<CoopMissionNetworkBridge>();
+            return bridge != null && bridge.AreMaterializedReinforcementBatchPeersPrepared(batchId);
+        }
+
+        internal static bool TryBroadcastMaterializedReinforcementAgentBinding(
+            Mission mission,
+            int batchId,
+            int agentIndex,
+            int sequenceIndex,
+            int expectedAgentCount,
+            string entryId,
+            out string diagnostics)
+        {
+            diagnostics = "invalid-context";
+            if (!GameNetwork.IsServer || mission == null || batchId <= 0 || agentIndex < 0 || string.IsNullOrWhiteSpace(entryId))
+                return false;
+
+            CoopMissionNetworkBridge bridge = mission.GetMissionBehavior<CoopMissionNetworkBridge>();
+            if (bridge == null)
+            {
+                diagnostics = "bridge-missing";
+                return false;
+            }
+
+            return bridge.TryBroadcastMaterializedReinforcementAgentBinding(
+                batchId,
+                agentIndex,
+                sequenceIndex,
+                expectedAgentCount,
+                entryId,
+                out diagnostics);
+        }
+
+        internal static bool AreMaterializedReinforcementBatchPeersReady(
+            Mission mission,
+            int batchId,
+            out string diagnostics)
+        {
+            diagnostics = "invalid-context";
+            if (!GameNetwork.IsServer || mission == null || batchId <= 0)
+                return false;
+
+            CoopMissionNetworkBridge bridge = mission.GetMissionBehavior<CoopMissionNetworkBridge>();
+            if (bridge == null)
+            {
+                diagnostics = "bridge-missing";
+                return false;
+            }
+
+            return bridge.AreMaterializedReinforcementBatchPeersReady(batchId, out diagnostics);
+        }
+
+        internal static void CompleteMaterializedReinforcementBatch(Mission mission, int batchId)
+        {
+            if (mission == null || batchId <= 0)
+                return;
+
+            CoopMissionNetworkBridge bridge = mission.GetMissionBehavior<CoopMissionNetworkBridge>();
+            bridge?._serverMaterializedReinforcementBatchesById.Remove(batchId);
+        }
+
+        private bool TryBeginMaterializedReinforcementBatch(
+            int batchId,
+            BattleSideEnum side,
+            int expectedAgentCount,
+            IReadOnlyDictionary<string, int> plannedAgentCountByEntryId,
+            out string diagnostics)
+        {
+            KeyValuePair<string, int>[] contracts = plannedAgentCountByEntryId
+                .Where(pair => !string.IsNullOrWhiteSpace(pair.Key) && pair.Value > 0)
+                .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            int plannedAgentCount = contracts.Sum(pair => pair.Value);
+            if (contracts.Length <= 0 || plannedAgentCount != expectedAgentCount)
+            {
+                diagnostics =
+                    "invalid-contract-manifest ExpectedAgents=" + expectedAgentCount +
+                    " PlannedAgents=" + plannedAgentCount +
+                    " Contracts=" + contracts.Length;
+                return false;
+            }
+
+            var state = new ServerMaterializedReinforcementBatchState
+            {
+                Mission = Mission,
+                BatchId = batchId,
+                Side = side,
+                ExpectedAgentCount = Math.Max(1, expectedAgentCount),
+                ExpectedContractCount = contracts.Length
+            };
+            foreach (KeyValuePair<string, int> contract in contracts)
+                state.PlannedAgentCountByEntryId[contract.Key] = contract.Value;
+
+            _serverMaterializedReinforcementBatchesById[batchId] = state;
+
+            int sentCount = 0;
+            bool sendFailed = false;
+            if (GameNetwork.NetworkPeers != null)
+            {
+                foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+                {
+                    if (!IsEligibleRemotePeer(peer))
+                        continue;
+
+                    state.ExpectedPeerIndices.Add(peer.Index);
+                    try
+                    {
+                        GameNetwork.BeginModuleEventAsServer(peer);
+                        GameNetwork.WriteMessage(
+                            new CoopMaterializedReinforcementBatchBeginMessage(
+                                batchId,
+                                side,
+                                state.ExpectedAgentCount,
+                                state.ExpectedContractCount));
+                        GameNetwork.EndModuleEventAsServer();
+
+                        for (int contractIndex = 0; contractIndex < contracts.Length; contractIndex++)
+                        {
+                            KeyValuePair<string, int> contract = contracts[contractIndex];
+                            GameNetwork.BeginModuleEventAsServer(peer);
+                            GameNetwork.WriteMessage(
+                                new CoopMaterializedReinforcementBatchContractMessage(
+                                    batchId,
+                                    contractIndex + 1,
+                                    state.ExpectedContractCount,
+                                    contract.Value,
+                                    contract.Key));
+                            GameNetwork.EndModuleEventAsServer();
+                        }
+
+                        sentCount++;
+                    }
+                    catch (Exception ex)
+                    {
+                        sendFailed = true;
+                        ModLogger.Info(
+                            "CoopMissionNetworkBridge: reinforcement batch preflight send failed. " +
+                            "BatchId=" + batchId +
+                            " Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                            " Error=" + ex.GetType().Name + ":" + ex.Message);
+                    }
+                }
+            }
+
+            diagnostics =
+                "BatchId=" + batchId +
+                " Side=" + side +
+                " ExpectedAgents=" + state.ExpectedAgentCount +
+                " ExpectedContracts=" + state.ExpectedContractCount +
+                " ExpectedPeers=" + state.ExpectedPeerIndices.Count +
+                " SentPeers=" + sentCount;
+            if (sendFailed || sentCount != state.ExpectedPeerIndices.Count)
+            {
+                _serverMaterializedReinforcementBatchesById.Remove(batchId);
+                diagnostics += " SendFailed=True";
+                return false;
+            }
+
+            return true;
+        }
+
+        private bool AreMaterializedReinforcementBatchPeersPrepared(int batchId)
+        {
+            if (!_serverMaterializedReinforcementBatchesById.TryGetValue(
+                    batchId,
+                    out ServerMaterializedReinforcementBatchState state) ||
+                state == null ||
+                !ReferenceEquals(state.Mission, Mission))
+            {
+                return false;
+            }
+
+            foreach (int peerIndex in state.ExpectedPeerIndices.ToArray())
+            {
+                NetworkCommunicator peer = GameNetwork.NetworkPeers?.FirstOrDefault(
+                    candidate => candidate != null && candidate.Index == peerIndex);
+                if (!IsEligibleRemotePeer(peer))
+                    continue;
+
+                state.PreparedContractCountByPeer.TryGetValue(peerIndex, out int preparedContractCount);
+                state.PreparedAgentCountByPeer.TryGetValue(peerIndex, out int preparedAgentCount);
+                if (preparedContractCount < state.ExpectedContractCount ||
+                    preparedAgentCount < state.ExpectedAgentCount)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private bool TryBroadcastMaterializedReinforcementAgentBinding(
+            int batchId,
+            int agentIndex,
+            int sequenceIndex,
+            int expectedAgentCount,
+            string entryId,
+            out string diagnostics)
+        {
+            if (!_serverMaterializedReinforcementBatchesById.TryGetValue(
+                    batchId,
+                    out ServerMaterializedReinforcementBatchState state) ||
+                state == null ||
+                !ReferenceEquals(state.Mission, Mission))
+            {
+                diagnostics = "batch-state-missing";
+                return false;
+            }
+
+            if (expectedAgentCount != state.ExpectedAgentCount ||
+                !state.PlannedAgentCountByEntryId.TryGetValue(entryId, out int plannedEntryAgentCount))
+            {
+                diagnostics = "binding-contract-mismatch";
+                return false;
+            }
+
+            if (state.EntryIdByAgentIndex.TryGetValue(agentIndex, out string existingEntryId))
+            {
+                if (!string.Equals(existingEntryId, entryId, StringComparison.OrdinalIgnoreCase))
+                {
+                    diagnostics = "binding-agent-index-conflict";
+                    return false;
+                }
+            }
+            else
+            {
+                state.BoundAgentCountByEntryId.TryGetValue(entryId, out int boundEntryAgentCount);
+                if (boundEntryAgentCount >= plannedEntryAgentCount)
+                {
+                    diagnostics = "binding-entry-count-exceeded";
+                    return false;
+                }
+
+                state.EntryIdByAgentIndex[agentIndex] = entryId;
+                state.BoundAgentCountByEntryId[entryId] = boundEntryAgentCount + 1;
+            }
+
+            int sentCount = 0;
+            foreach (int peerIndex in state.ExpectedPeerIndices.ToArray())
+            {
+                NetworkCommunicator peer = GameNetwork.NetworkPeers?.FirstOrDefault(
+                    candidate => candidate != null && candidate.Index == peerIndex);
+                if (!IsEligibleRemotePeer(peer))
+                    continue;
+
+                try
+                {
+                    GameNetwork.BeginModuleEventAsServer(peer);
+                    GameNetwork.WriteMessage(
+                        new CoopMaterializedReinforcementAgentBindingMessage(
+                            batchId,
+                            agentIndex,
+                            Math.Max(1, sequenceIndex),
+                            state.ExpectedAgentCount,
+                            entryId));
+                    GameNetwork.EndModuleEventAsServer();
+                    sentCount++;
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Info(
+                        "CoopMissionNetworkBridge: reinforcement agent binding send failed. " +
+                        "BatchId=" + batchId +
+                        " AgentIndex=" + agentIndex +
+                        " Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                        " Error=" + ex.GetType().Name + ":" + ex.Message);
+                }
+            }
+
+            diagnostics =
+                "BatchId=" + batchId +
+                " AgentIndex=" + agentIndex +
+                " Sequence=" + sequenceIndex + "/" + state.ExpectedAgentCount +
+                " SentPeers=" + sentCount;
+            return true;
+        }
+
+        private bool AreMaterializedReinforcementBatchPeersReady(int batchId, out string diagnostics)
+        {
+            if (!_serverMaterializedReinforcementBatchesById.TryGetValue(
+                    batchId,
+                    out ServerMaterializedReinforcementBatchState state) ||
+                state == null ||
+                !ReferenceEquals(state.Mission, Mission))
+            {
+                diagnostics = "batch-state-missing";
+                return false;
+            }
+
+            var blockedPeers = new List<string>();
+            int eligiblePeerCount = 0;
+            int readyPeerCount = 0;
+            foreach (int peerIndex in state.ExpectedPeerIndices.ToArray())
+            {
+                NetworkCommunicator peer = GameNetwork.NetworkPeers?.FirstOrDefault(
+                    candidate => candidate != null && candidate.Index == peerIndex);
+                if (!IsEligibleRemotePeer(peer))
+                    continue;
+
+                eligiblePeerCount++;
+                state.ReadyAgentCountByPeer.TryGetValue(peerIndex, out int readyAgentCount);
+                if (readyAgentCount >= state.ExpectedAgentCount)
+                {
+                    readyPeerCount++;
+                    continue;
+                }
+
+                blockedPeers.Add(
+                    (peer.UserName ?? peerIndex.ToString()) +
+                    ":" + readyAgentCount + "/" + state.ExpectedAgentCount);
+            }
+
+            bool ready = readyPeerCount == eligiblePeerCount;
+            diagnostics =
+                "BatchId=" + batchId +
+                " ExpectedAgents=" + state.ExpectedAgentCount +
+                " BoundAgents=" + state.EntryIdByAgentIndex.Count +
+                " EligiblePeers=" + eligiblePeerCount +
+                " ReadyPeers=" + readyPeerCount +
+                " Blocked=[" + string.Join(";", blockedPeers) + "]";
+            return ready;
+        }
+
+        private void TrySendClientMaterializedReinforcementBatchPreparedAcks()
+        {
+            if (!GameNetwork.IsClient || Mission == null || _clientMaterializedReinforcementBatchesById.Count == 0)
+                return;
+
+            foreach (ClientMaterializedReinforcementBatchState state in
+                     _clientMaterializedReinforcementBatchesById.Values.ToArray())
+            {
+                if (state == null || state.PreparedAckSent || !ReferenceEquals(state.Mission, Mission))
+                    continue;
+
+                if (state.ExpectedAgentCount <= 0 ||
+                    state.ExpectedContractCount <= 0 ||
+                    state.ContractBySequence.Count != state.ExpectedContractCount)
+                {
+                    continue;
+                }
+
+                int preparedAgentCount = 0;
+                bool allContractsReady = true;
+                foreach (ClientMaterializedReinforcementContractState contract in state.ContractBySequence.Values)
+                {
+                    if (contract == null ||
+                        string.IsNullOrWhiteSpace(contract.EntryId) ||
+                        contract.PlannedAgentCount <= 0 ||
+                        BattleSnapshotRuntimeState.GetEntryState(contract.EntryId) == null)
+                    {
+                        allContractsReady = false;
+                        break;
+                    }
+
+                    preparedAgentCount += contract.PlannedAgentCount;
+                }
+
+                if (!allContractsReady || preparedAgentCount != state.ExpectedAgentCount)
+                    continue;
+
+                try
+                {
+                    GameNetwork.BeginModuleEventAsClient();
+                    GameNetwork.WriteMessage(
+                        new CoopMaterializedReinforcementBatchPreparedMessage(
+                            state.BatchId,
+                            state.ContractBySequence.Count,
+                            preparedAgentCount));
+                    GameNetwork.EndModuleEventAsClient();
+                    state.PreparedAckSent = true;
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Info(
+                        "CoopMissionNetworkBridge: reinforcement batch prepared ack send failed. " +
+                        "BatchId=" + state.BatchId +
+                        " Error=" + ex.GetType().Name + ":" + ex.Message);
+                }
+            }
+        }
+
+        private void TrySendClientMaterializedReinforcementBatchReadyAcks()
+        {
+            if (!GameNetwork.IsClient || Mission == null || _clientMaterializedReinforcementBatchesById.Count == 0)
+                return;
+
+            foreach (ClientMaterializedReinforcementBatchState state in
+                     _clientMaterializedReinforcementBatchesById.Values.ToArray())
+            {
+                if (state == null ||
+                    !state.PreparedAckSent ||
+                    state.ReadyAckSent ||
+                    !ReferenceEquals(state.Mission, Mission))
+                    continue;
+
+                if (state.ExpectedAgentCount <= 0 || state.EntryIdByAgentIndex.Count != state.ExpectedAgentCount)
+                    continue;
+
+                bool allAgentsReady = true;
+                foreach (KeyValuePair<int, string> binding in state.EntryIdByAgentIndex)
+                {
+                    int agentIndex = binding.Key;
+                    Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(agentIndex, canBeNull: true);
+                    if (agent == null ||
+                        !agent.IsActive() ||
+                        !CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(
+                            agentIndex,
+                            agent.Character?.StringId,
+                            state.Side,
+                            out string resolvedEntryId) ||
+                        !string.Equals(resolvedEntryId, binding.Value, StringComparison.OrdinalIgnoreCase))
+                    {
+                        allAgentsReady = false;
+                        break;
+                    }
+                }
+
+                if (!allAgentsReady)
+                    continue;
+
+                try
+                {
+                    GameNetwork.BeginModuleEventAsClient();
+                    GameNetwork.WriteMessage(
+                        new CoopMaterializedReinforcementBatchReadyMessage(
+                            state.BatchId,
+                            state.EntryIdByAgentIndex.Count));
+                    GameNetwork.EndModuleEventAsClient();
+                    state.ReadyAckSent = true;
+                    _clientMaterializedReinforcementBatchesById.Remove(state.BatchId);
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Info(
+                        "CoopMissionNetworkBridge: reinforcement batch ready ack send failed. " +
+                        "BatchId=" + state.BatchId +
+                        " Error=" + ex.GetType().Name + ":" + ex.Message);
+                }
+            }
+        }
+
         protected override void AddRemoveMessageHandlers(GameNetwork.NetworkMessageHandlerRegistererContainer registerer)
         {
             if (GameNetwork.IsServer)
@@ -2344,6 +3663,10 @@ namespace CoopSpectator.MissionBehaviors
                 registerer.RegisterBaseHandler<CoopBattleSnapshotCompleteAckMessage>(HandleClientBattleSnapshotCompleteAck);
                 registerer.RegisterBaseHandler<CoopMaterializedAgentEntrySnapshotCompleteAckMessage>(
                     HandleClientMaterializedAgentEntrySnapshotCompleteAck);
+                registerer.RegisterBaseHandler<CoopMaterializedReinforcementBatchPreparedMessage>(
+                    HandleClientMaterializedReinforcementBatchPrepared);
+                registerer.RegisterBaseHandler<CoopMaterializedReinforcementBatchReadyMessage>(
+                    HandleClientMaterializedReinforcementBatchReady);
                 registerer.RegisterBaseHandler<CoopBattleSnapshotAbortMessage>(HandleClientBattleSnapshotAbort);
                 ModLogger.Info("CoopMissionNetworkBridge: registered server selection request handler.");
             }
@@ -2358,6 +3681,12 @@ namespace CoopSpectator.MissionBehaviors
                 registerer.RegisterBaseHandler<CoopCommanderDeploymentFormationLayoutStateMessage>(HandleServerCommanderDeploymentFormationLayoutState);
                 registerer.RegisterBaseHandler<CoopCommanderDeploymentSiegeMachineStateMessage>(HandleServerCommanderDeploymentSiegeMachineState);
                 registerer.RegisterBaseHandler<CoopSiegeMissionObjectIdMapMessage>(HandleServerSiegeMissionObjectIdMap);
+                registerer.RegisterBaseHandler<CoopMaterializedReinforcementBatchBeginMessage>(
+                    HandleServerMaterializedReinforcementBatchBegin);
+                registerer.RegisterBaseHandler<CoopMaterializedReinforcementBatchContractMessage>(
+                    HandleServerMaterializedReinforcementBatchContract);
+                registerer.RegisterBaseHandler<CoopMaterializedReinforcementAgentBindingMessage>(
+                    HandleServerMaterializedReinforcementAgentBinding);
                 ModLogger.Info("CoopMissionNetworkBridge: registered client payload chunk handler.");
             }
         }
@@ -2368,6 +3697,13 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             TrySyncBattleSnapshotPayloads();
+            TryRunBootstrapDependentPeerPayloadSyncPump();
+        }
+
+        private void TryRunBootstrapDependentPeerPayloadSyncPump()
+        {
+            if (!GameNetwork.IsServer || Mission == null)
+                return;
 
             DateTime nowUtc = DateTime.UtcNow;
             if (nowUtc < _nextBootstrapDependentPeerPayloadSyncUtc)
@@ -2390,6 +3726,7 @@ namespace CoopSpectator.MissionBehaviors
         public override void OnMissionTick(float dt)
         {
             base.OnMissionTick(dt);
+            TryRunBootstrapDependentPeerPayloadSyncPump();
         }
 
         private void TryRunClientBattleSnapshotRecoveryTick()
@@ -2406,6 +3743,8 @@ namespace CoopSpectator.MissionBehaviors
                 BattleMapSpawnHandoffPatch.TryProcessDeferredClientMountedHeroCreateAgents(
                     Mission,
                     "CoopMissionNetworkBridge.TryRunClientBattleSnapshotRecoveryTick");
+                TrySendClientMaterializedReinforcementBatchPreparedAcks();
+                TrySendClientMaterializedReinforcementBatchReadyAcks();
                 TrySendClientBattleReconnectFinalizeReadyAckIfNeeded();
             }
         }
@@ -2596,6 +3935,14 @@ namespace CoopSpectator.MissionBehaviors
             _battleSnapshotTransportStatesByPeer.Remove(networkPeer.Index);
             ClearPeerTerminalBattleSnapshotFailure(networkPeer.Index);
             ClearPeerBattleSnapshotSyncState(networkPeer.Index);
+            foreach (ServerMaterializedReinforcementBatchState state in
+                     _serverMaterializedReinforcementBatchesById.Values)
+            {
+                state?.ExpectedPeerIndices.Remove(networkPeer.Index);
+                state?.PreparedContractCountByPeer.Remove(networkPeer.Index);
+                state?.PreparedAgentCountByPeer.Remove(networkPeer.Index);
+                state?.ReadyAgentCountByPeer.Remove(networkPeer.Index);
+            }
             CoopBattlePeerReconnectState.ObserveDisconnect(
                 networkPeer,
                 "CoopMissionNetworkBridge.HandlePlayerDisconnect");
@@ -2618,6 +3965,8 @@ namespace CoopSpectator.MissionBehaviors
             _acknowledgedMaterializedAgentEntryTransmissionIdByPeer.Clear();
             _expectedMaterializedAgentEntryCountByPeer.Clear();
             _expectedMaterializedAgentEntryPayloadHashByPeer.Clear();
+            _serverMaterializedReinforcementBatchesById.Clear();
+            _clientMaterializedReinforcementBatchesById.Clear();
             _sentSiegeMissionObjectMapKeysByPeer.Clear();
             _pendingPayloadsByKey.Clear();
             _clientPayloadAssemblies.Clear();
@@ -3465,8 +4814,18 @@ namespace CoopSpectator.MissionBehaviors
             CoopBattlePhase phase = CoopBattlePhaseRuntimeState.GetPhase();
             if (phase != CoopBattlePhase.Deployment)
             {
-                diagnostics = "phase-not-deployment Phase=" + phase;
-                return false;
+                bool acceptsSallyOutPlacementState =
+                    ExactSallyOutCommanderDeploymentRuntime.ShouldAcceptClientFormationLayoutState(
+                        mission,
+                        message.AssignmentSide,
+                        out string sallyOutPlacementDiagnostics);
+                if (!acceptsSallyOutPlacementState)
+                {
+                    diagnostics =
+                        "phase-not-deployment Phase=" + phase +
+                        " SallyOut={" + (sallyOutPlacementDiagnostics ?? "inactive") + "}";
+                    return false;
+                }
             }
 
             Team team = mission.Teams?
@@ -9550,6 +10909,177 @@ namespace CoopSpectator.MissionBehaviors
             return true;
         }
 
+        private bool HandleClientMaterializedReinforcementBatchPrepared(
+            NetworkCommunicator peer,
+            GameNetworkMessage baseMessage)
+        {
+            if (!(baseMessage is CoopMaterializedReinforcementBatchPreparedMessage message))
+                return false;
+
+            if (peer == null ||
+                !_serverMaterializedReinforcementBatchesById.TryGetValue(
+                    message.BatchId,
+                    out ServerMaterializedReinforcementBatchState state) ||
+                state == null ||
+                !ReferenceEquals(state.Mission, Mission) ||
+                !state.ExpectedPeerIndices.Contains(peer.Index))
+            {
+                return true;
+            }
+
+            if (message.PreparedContractCount != state.ExpectedContractCount ||
+                message.PreparedAgentCount != state.ExpectedAgentCount)
+            {
+                return true;
+            }
+
+            state.PreparedContractCountByPeer[peer.Index] = message.PreparedContractCount;
+            state.PreparedAgentCountByPeer[peer.Index] = message.PreparedAgentCount;
+            return true;
+        }
+
+        private bool HandleClientMaterializedReinforcementBatchReady(
+            NetworkCommunicator peer,
+            GameNetworkMessage baseMessage)
+        {
+            if (!(baseMessage is CoopMaterializedReinforcementBatchReadyMessage message))
+                return false;
+
+            if (peer == null ||
+                !_serverMaterializedReinforcementBatchesById.TryGetValue(
+                    message.BatchId,
+                    out ServerMaterializedReinforcementBatchState state) ||
+                state == null ||
+                !ReferenceEquals(state.Mission, Mission) ||
+                !state.ExpectedPeerIndices.Contains(peer.Index))
+            {
+                return true;
+            }
+
+            state.PreparedContractCountByPeer.TryGetValue(peer.Index, out int preparedContractCount);
+            state.PreparedAgentCountByPeer.TryGetValue(peer.Index, out int preparedAgentCount);
+            if (preparedContractCount != state.ExpectedContractCount ||
+                preparedAgentCount != state.ExpectedAgentCount ||
+                message.ReadyAgentCount != state.ExpectedAgentCount ||
+                state.EntryIdByAgentIndex.Count != state.ExpectedAgentCount)
+            {
+                return true;
+            }
+
+            state.ReadyAgentCountByPeer[peer.Index] = message.ReadyAgentCount;
+            return true;
+        }
+
+        private void HandleServerMaterializedReinforcementBatchBegin(GameNetworkMessage baseMessage)
+        {
+            if (!(baseMessage is CoopMaterializedReinforcementBatchBeginMessage message) ||
+                Mission == null ||
+                message.BatchId <= 0 ||
+                message.ExpectedAgentCount <= 0 ||
+                message.ExpectedContractCount <= 0)
+            {
+                return;
+            }
+
+            foreach (int staleBatchId in _clientMaterializedReinforcementBatchesById
+                         .Where(pair =>
+                             pair.Key != message.BatchId &&
+                             pair.Value != null &&
+                             ReferenceEquals(pair.Value.Mission, Mission) &&
+                             pair.Value.Side == message.Side)
+                         .Select(pair => pair.Key)
+                         .ToArray())
+            {
+                _clientMaterializedReinforcementBatchesById.Remove(staleBatchId);
+            }
+
+            _clientMaterializedReinforcementBatchesById[message.BatchId] =
+                new ClientMaterializedReinforcementBatchState
+                {
+                    Mission = Mission,
+                    BatchId = message.BatchId,
+                    Side = message.Side,
+                    ExpectedAgentCount = message.ExpectedAgentCount,
+                    ExpectedContractCount = message.ExpectedContractCount
+                };
+        }
+
+        private void HandleServerMaterializedReinforcementBatchContract(GameNetworkMessage baseMessage)
+        {
+            if (!(baseMessage is CoopMaterializedReinforcementBatchContractMessage message) ||
+                Mission == null ||
+                message.BatchId <= 0 ||
+                message.SequenceIndex <= 0 ||
+                message.ExpectedContractCount <= 0 ||
+                message.PlannedAgentCount <= 0 ||
+                string.IsNullOrWhiteSpace(message.EntryId))
+            {
+                return;
+            }
+
+            if (!_clientMaterializedReinforcementBatchesById.TryGetValue(
+                    message.BatchId,
+                    out ClientMaterializedReinforcementBatchState state) ||
+                state == null ||
+                !ReferenceEquals(state.Mission, Mission) ||
+                message.ExpectedContractCount != state.ExpectedContractCount ||
+                message.SequenceIndex > state.ExpectedContractCount)
+            {
+                return;
+            }
+
+            state.ContractBySequence[message.SequenceIndex] =
+                new ClientMaterializedReinforcementContractState
+                {
+                    EntryId = message.EntryId,
+                    PlannedAgentCount = message.PlannedAgentCount
+                };
+            TrySendClientMaterializedReinforcementBatchPreparedAcks();
+        }
+
+        private void HandleServerMaterializedReinforcementAgentBinding(GameNetworkMessage baseMessage)
+        {
+            if (!(baseMessage is CoopMaterializedReinforcementAgentBindingMessage message) ||
+                Mission == null ||
+                message.BatchId <= 0 ||
+                message.AgentIndex < 0 ||
+                string.IsNullOrWhiteSpace(message.EntryId))
+            {
+                return;
+            }
+
+            if (!_clientMaterializedReinforcementBatchesById.TryGetValue(
+                    message.BatchId,
+                    out ClientMaterializedReinforcementBatchState state) ||
+                state == null ||
+                !ReferenceEquals(state.Mission, Mission))
+            {
+                return;
+            }
+
+            bool entryIdWasPrepared = state.ContractBySequence.Values.Any(contract =>
+                contract != null &&
+                string.Equals(contract.EntryId, message.EntryId, StringComparison.OrdinalIgnoreCase));
+            if (!state.PreparedAckSent ||
+                message.ExpectedAgentCount != state.ExpectedAgentCount ||
+                !entryIdWasPrepared ||
+                (!state.EntryIdByAgentIndex.ContainsKey(message.AgentIndex) &&
+                 state.EntryIdByAgentIndex.Count >= state.ExpectedAgentCount))
+            {
+                return;
+            }
+
+            state.EntryIdByAgentIndex[message.AgentIndex] = message.EntryId;
+            CoopMissionSpawnLogic.ObserveClientAuthoritativeMaterializedAgentEntry(
+                message.AgentIndex,
+                message.EntryId,
+                "CoopMissionNetworkBridge reinforcement agent binding");
+            BattleMapSpawnHandoffPatch.TryProcessDeferredClientCreateAgentMessages(
+                Mission,
+                "CoopMissionNetworkBridge reinforcement agent binding");
+            TrySendClientMaterializedReinforcementBatchReadyAcks();
+        }
+
         private bool HandleClientBattleSnapshotAbort(NetworkCommunicator peer, GameNetworkMessage baseMessage)
         {
             if (!(baseMessage is CoopBattleSnapshotAbortMessage message))
@@ -11187,6 +12717,25 @@ namespace CoopSpectator.MissionBehaviors
                         JsonConvert.DeserializeObject<CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot>(payloadJson, JsonSettings);
                     if (snapshot != null)
                     {
+                        bool frozenCaptainStateApplied = false;
+                        if (!string.IsNullOrWhiteSpace(snapshot.FrozenCaptainStateSignature))
+                        {
+                            frozenCaptainStateApplied = GlobalCaptainPerkRuntimeState.ApplyAuthoritativeFrozenState(
+                                BattleSnapshotRuntimeState.GetState(),
+                                snapshot.FrozenCaptainBattleInstanceId,
+                                snapshot.FrozenCaptainEntryIds,
+                                snapshot.FrozenCaptainCombatGroups,
+                                snapshot.FrozenCaptainStateSignature,
+                                "CoopMissionNetworkBridge.ApplyCompletedPayload");
+                            if (frozenCaptainStateApplied)
+                            {
+                                CoopMissionSpawnLogic.RequestClientGlobalCaptainAgentStatRefresh(
+                                    Mission,
+                                    snapshot.FrozenCaptainStateSignature,
+                                    "CoopMissionNetworkBridge.ApplyCompletedPayload");
+                            }
+                        }
+
                         int selectableEntryCount = CountSerializedIdList(snapshot.SelectableEntryIds);
                         int attackerSelectableEntryCount = snapshot.AttackerSelectableEntryCount > 0
                             ? snapshot.AttackerSelectableEntryCount
@@ -11208,6 +12757,8 @@ namespace CoopSpectator.MissionBehaviors
                             " AttackerSelectableEntryCount=" + attackerSelectableEntryCount +
                             " DefenderSelectableEntryCount=" + defenderSelectableEntryCount +
                             " AuthoritativeMaterializedAgentEntryCount=" + snapshot.AuthoritativeMaterializedAgentEntryCount +
+                            " FrozenCaptainStateApplied=" + frozenCaptainStateApplied +
+                            " FrozenCaptainStateSignature=" + (snapshot.FrozenCaptainStateSignature ?? string.Empty) +
                             " CanRespawn=" + snapshot.CanRespawn +
                             " CanStartBattle=" + snapshot.CanStartBattle +
                             " HasAgent=" + snapshot.HasAgent +

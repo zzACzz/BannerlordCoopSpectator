@@ -101,9 +101,13 @@ namespace CoopSpectator.Infrastructure
                 Type campaignCharacterType = TryResolveCampaignType(CampaignCharacterTypeName);
                 Type campaignCultureType = TryResolveCampaignType(CampaignCultureTypeName);
                 bool canBootstrapCampaignCharacterCatalogs = campaignCharacterType != null && campaignCultureType != null;
-                bool alreadyResolved =
-                    hadItemSamplesBefore &&
-                    (!canBootstrapCampaignCharacterCatalogs || hadCharacterSamplesBefore);
+                // Exact battle agents use the materialized roster snapshot and MP
+                // surrogate characters. Campaign character samples are useful when
+                // available, but repeatedly loading the same XML cannot make them
+                // ready after the first completed bootstrap attempt. Treat the item
+                // catalog as the runtime readiness contract so reinforcement
+                // CreateAgent messages never trigger full catalog reloads mid-battle.
+                bool alreadyResolved = hadItemSamplesBefore;
 
                 if (_loaded && alreadyResolved)
                 {
@@ -206,9 +210,7 @@ namespace CoopSpectator.Infrastructure
                 bool hasItemSamplesAfter = HasResolvedItemSamples(objectManager, out string afterItemSamples);
                 int characterCountAfter = TryGetCharacterCount(objectManager);
                 int itemCountAfter = TryGetItemCount(objectManager);
-                _loaded =
-                    hasItemSamplesAfter &&
-                    (!canBootstrapCampaignCharacterCatalogs || hasCharacterSamplesAfter);
+                _loaded = hasItemSamplesAfter;
                 _lastSummary =
                     "CharacterCountBefore=" + characterCountBefore +
                     " CharacterCountAfter=" + characterCountAfter +

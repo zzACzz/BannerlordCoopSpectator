@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.Infrastructure.SallyOut;
 using CoopSpectator.Infrastructure.VillageBattle;
 using CoopSpectator.Network.Messages;
 using NetworkMessages.FromServer;
@@ -345,6 +346,15 @@ namespace CoopSpectator.Network
                     startupBarrier = "armed-village-pre-open";
                     startupScenarioDiagnostics =
                         "VillageBattle={" + villageBattleDiagnostics + "}";
+                }
+                else if (SallyOutScenarioContract.IsValidatedPreMissionScenario(
+                             message.ScenarioContext,
+                             message.RuntimeScene,
+                             out string sallyOutDiagnostics))
+                {
+                    startupBarrier = "armed-sally-out-pre-open";
+                    startupScenarioDiagnostics =
+                        "SallyOut={" + sallyOutDiagnostics + "}";
                 }
                 else if (ExactLandBattleScenarioContract.IsValidatedPreMissionFieldBattleScenario(
                              message.ScenarioContext,

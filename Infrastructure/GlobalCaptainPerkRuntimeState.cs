@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using CoopSpectator.Network.Messages;
 
 namespace CoopSpectator.Infrastructure
@@ -47,7 +50,9 @@ namespace CoopSpectator.Infrastructure
             new Dictionary<string, string>(StringComparer.Ordinal);
         private static readonly List<string> FrozenCaptainEntryIds = new List<string>();
         private static string _battleInstanceId;
+        private static string _frozenStateSignature;
         private static bool _isFrozen;
+        private static bool _agentStatEffectsReady;
 
         public static bool IsFrozenFor(BattleRuntimeState state)
         {
@@ -55,6 +60,19 @@ namespace CoopSpectator.Infrastructure
             lock (Sync)
             {
                 return _isFrozen &&
+                    !string.IsNullOrWhiteSpace(battleInstanceId) &&
+                    string.Equals(_battleInstanceId, battleInstanceId, StringComparison.Ordinal);
+            }
+        }
+
+        public static bool AreAgentStatEffectsReadyFor(BattleRuntimeState state)
+        {
+            string battleInstanceId = ResolveBattleInstanceId(state);
+            lock (Sync)
+            {
+                return _isFrozen &&
+                    _agentStatEffectsReady &&
+                    !string.IsNullOrWhiteSpace(_frozenStateSignature) &&
                     !string.IsNullOrWhiteSpace(battleInstanceId) &&
                     string.Equals(_battleInstanceId, battleInstanceId, StringComparison.Ordinal);
             }
@@ -78,6 +96,8 @@ namespace CoopSpectator.Infrastructure
                 CombatGroupByEntryId.Clear();
                 FrozenCaptainEntryIds.Clear();
                 _battleInstanceId = battleInstanceId;
+                _frozenStateSignature = string.Empty;
+                _agentStatEffectsReady = false;
 
                 foreach (RosterEntryState entry in state.EntriesById.Values.Where(candidate => candidate != null))
                 {
@@ -149,7 +169,12 @@ namespace CoopSpectator.Infrastructure
                     }
                 }
 
+                _frozenStateSignature = ComputeFrozenStateSignature(
+                    _battleInstanceId,
+                    FrozenCaptainEntryIds,
+                    EffectsByCombatGroup);
                 _isFrozen = true;
+                _agentStatEffectsReady = !string.IsNullOrWhiteSpace(_frozenStateSignature);
                 if (IsVerboseDiagnosticsEnabled())
                 {
                     ModLogger.Info(
@@ -158,6 +183,86 @@ namespace CoopSpectator.Infrastructure
                         " Captains=" + FrozenCaptainEntryIds.Count +
                         " CombatGroups=" + EffectsByCombatGroup.Count +
                         " UniqueEffects=" + EffectsByCombatGroup.Values.Sum(group => group.Count) +
+                        " Signature=" + _frozenStateSignature +
+                        " Source=" + (source ?? "unknown"));
+                }
+
+                return _agentStatEffectsReady;
+            }
+        }
+
+        public static bool ApplyAuthoritativeFrozenState(
+            BattleRuntimeState state,
+            string battleInstanceId,
+            IEnumerable<string> captainEntryIds,
+            IEnumerable<FrozenCaptainCombatGroupSnapshotMessage> frozenCombatGroups,
+            string expectedSignature,
+            string source)
+        {
+            string localBattleInstanceId = ResolveBattleInstanceId(state);
+            if (state == null ||
+                string.IsNullOrWhiteSpace(localBattleInstanceId) ||
+                string.IsNullOrWhiteSpace(battleInstanceId) ||
+                string.IsNullOrWhiteSpace(expectedSignature) ||
+                !string.Equals(localBattleInstanceId, battleInstanceId, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            Dictionary<string, string> combatGroupByEntryId = BuildCombatGroupByEntryId(state);
+            Dictionary<string, Dictionary<string, CaptainPerkEffectSnapshotMessage>> effectsByCombatGroup =
+                BuildEffectsByCombatGroup(frozenCombatGroups);
+            List<string> authoritativeCaptainEntryIds = (captainEntryIds ?? Enumerable.Empty<string>())
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(value => value, StringComparer.Ordinal)
+                .ToList();
+            string actualSignature = ComputeFrozenStateSignature(
+                battleInstanceId,
+                authoritativeCaptainEntryIds,
+                effectsByCombatGroup);
+            if (!string.Equals(actualSignature, expectedSignature, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            lock (Sync)
+            {
+                if (_isFrozen &&
+                    _agentStatEffectsReady &&
+                    string.Equals(_battleInstanceId, battleInstanceId, StringComparison.Ordinal) &&
+                    string.Equals(_frozenStateSignature, actualSignature, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                EffectsByCombatGroup.Clear();
+                foreach (KeyValuePair<string, Dictionary<string, CaptainPerkEffectSnapshotMessage>> groupPair in effectsByCombatGroup)
+                {
+                    EffectsByCombatGroup[groupPair.Key] = groupPair.Value.ToDictionary(
+                        pair => pair.Key,
+                        pair => CloneEffect(pair.Value),
+                        StringComparer.OrdinalIgnoreCase);
+                }
+
+                CombatGroupByEntryId.Clear();
+                foreach (KeyValuePair<string, string> entryPair in combatGroupByEntryId)
+                    CombatGroupByEntryId[entryPair.Key] = entryPair.Value;
+
+                FrozenCaptainEntryIds.Clear();
+                FrozenCaptainEntryIds.AddRange(authoritativeCaptainEntryIds);
+                _battleInstanceId = battleInstanceId;
+                _frozenStateSignature = actualSignature;
+                _isFrozen = true;
+                _agentStatEffectsReady = true;
+
+                if (IsVerboseDiagnosticsEnabled())
+                {
+                    ModLogger.Info(
+                        "GlobalCaptainPerkRuntimeState: applied authoritative frozen state. " +
+                        "BattleInstanceId=" + _battleInstanceId +
+                        " Captains=" + FrozenCaptainEntryIds.Count +
+                        " CombatGroups=" + EffectsByCombatGroup.Count +
+                        " UniqueEffects=" + EffectsByCombatGroup.Values.Sum(group => group.Count) +
+                        " Signature=" + _frozenStateSignature +
                         " Source=" + (source ?? "unknown"));
                 }
 
@@ -200,6 +305,24 @@ namespace CoopSpectator.Infrastructure
             lock (Sync)
             {
                 return FrozenCaptainEntryIds.ToArray();
+            }
+        }
+
+        public static string GetFrozenBattleInstanceId()
+        {
+            lock (Sync)
+            {
+                return _isFrozen ? _battleInstanceId ?? string.Empty : string.Empty;
+            }
+        }
+
+        public static string GetFrozenStateSignature()
+        {
+            lock (Sync)
+            {
+                return _isFrozen && _agentStatEffectsReady
+                    ? _frozenStateSignature ?? string.Empty
+                    : string.Empty;
             }
         }
 
@@ -253,6 +376,108 @@ namespace CoopSpectator.Infrastructure
                 Bonus = effect?.Bonus ?? 0f,
                 IncrementType = effect?.IncrementType
             };
+        }
+
+        private static Dictionary<string, string> BuildCombatGroupByEntryId(BattleRuntimeState state)
+        {
+            var result = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (state == null)
+                return result;
+
+            foreach (RosterEntryState entry in state.EntriesById.Values.Where(candidate => candidate != null))
+            {
+                if (string.IsNullOrWhiteSpace(entry.EntryId) || string.IsNullOrWhiteSpace(entry.PartyId))
+                    continue;
+
+                if (!state.PartiesById.TryGetValue(entry.PartyId, out BattlePartyState party) || party == null)
+                    continue;
+
+                string combatGroupId = string.IsNullOrWhiteSpace(party.CombatGroupId)
+                    ? (party.SideId ?? entry.SideId ?? "side") + "|party|" + party.PartyId
+                    : party.CombatGroupId;
+                result[entry.EntryId] = combatGroupId;
+            }
+
+            return result;
+        }
+
+        private static Dictionary<string, Dictionary<string, CaptainPerkEffectSnapshotMessage>> BuildEffectsByCombatGroup(
+            IEnumerable<FrozenCaptainCombatGroupSnapshotMessage> frozenCombatGroups)
+        {
+            var result = new Dictionary<string, Dictionary<string, CaptainPerkEffectSnapshotMessage>>(
+                StringComparer.OrdinalIgnoreCase);
+            foreach (FrozenCaptainCombatGroupSnapshotMessage frozenGroup in
+                frozenCombatGroups ?? Enumerable.Empty<FrozenCaptainCombatGroupSnapshotMessage>())
+            {
+                if (frozenGroup == null || string.IsNullOrWhiteSpace(frozenGroup.CombatGroupId))
+                    continue;
+
+                if (!result.TryGetValue(
+                        frozenGroup.CombatGroupId,
+                        out Dictionary<string, CaptainPerkEffectSnapshotMessage> groupEffects))
+                {
+                    groupEffects = new Dictionary<string, CaptainPerkEffectSnapshotMessage>(StringComparer.OrdinalIgnoreCase);
+                    result[frozenGroup.CombatGroupId] = groupEffects;
+                }
+
+                foreach (CaptainPerkEffectSnapshotMessage effect in
+                    frozenGroup.Effects ?? Enumerable.Empty<CaptainPerkEffectSnapshotMessage>())
+                {
+                    if (effect == null || string.IsNullOrWhiteSpace(effect.PerkId) || groupEffects.ContainsKey(effect.PerkId))
+                        continue;
+
+                    groupEffects[effect.PerkId] = CloneEffect(effect);
+                }
+            }
+
+            return result;
+        }
+
+        private static string ComputeFrozenStateSignature(
+            string battleInstanceId,
+            IEnumerable<string> captainEntryIds,
+            IReadOnlyDictionary<string, Dictionary<string, CaptainPerkEffectSnapshotMessage>> effectsByCombatGroup)
+        {
+            if (string.IsNullOrWhiteSpace(battleInstanceId))
+                return string.Empty;
+
+            var builder = new StringBuilder();
+            builder.Append("battle=").Append(battleInstanceId).Append('\n');
+            foreach (string captainEntryId in (captainEntryIds ?? Enumerable.Empty<string>())
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(value => value, StringComparer.Ordinal))
+            {
+                builder.Append("captain=").Append(captainEntryId).Append('\n');
+            }
+
+            foreach (KeyValuePair<string, Dictionary<string, CaptainPerkEffectSnapshotMessage>> groupPair in
+                (effectsByCombatGroup ??
+                    new Dictionary<string, Dictionary<string, CaptainPerkEffectSnapshotMessage>>(StringComparer.OrdinalIgnoreCase))
+                .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                builder.Append("group=").Append(groupPair.Key).Append('\n');
+                foreach (CaptainPerkEffectSnapshotMessage effect in (groupPair.Value?.Values ??
+                    Enumerable.Empty<CaptainPerkEffectSnapshotMessage>())
+                    .Where(value => value != null && !string.IsNullOrWhiteSpace(value.PerkId))
+                    .OrderBy(value => value.PerkId, StringComparer.OrdinalIgnoreCase))
+                {
+                    builder
+                        .Append("effect=")
+                        .Append(effect.PerkId)
+                        .Append('|')
+                        .Append(effect.Bonus.ToString("R", CultureInfo.InvariantCulture))
+                        .Append('|')
+                        .Append(effect.IncrementType ?? string.Empty)
+                        .Append('\n');
+                }
+            }
+
+            using (SHA256 sha256 = SHA256.Create())
+            {
+                byte[] hash = sha256.ComputeHash(Encoding.UTF8.GetBytes(builder.ToString()));
+                return BitConverter.ToString(hash).Replace("-", string.Empty);
+            }
         }
 
         private static string ResolveBattleInstanceId(BattleRuntimeState state)

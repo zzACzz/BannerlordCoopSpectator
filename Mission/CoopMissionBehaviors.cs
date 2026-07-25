@@ -154,6 +154,7 @@ namespace CoopSpectator.MissionBehaviors
             TryReleaseStaleClientMainAgent(mission);
             TryRestoreClientMainAgentFromMissionPeer(mission);
             CoopMissionSpawnLogic.TryRunClientExactCampaignVisualObserver(mission);
+            CoopMissionSpawnLogic.TryRunClientGlobalCaptainAgentStatRefresh(mission);
 
             if (_legacyOverlayAutoRequestCooldownRemaining > 0f)
                 _legacyOverlayAutoRequestCooldownRemaining = Math.Max(0f, _legacyOverlayAutoRequestCooldownRemaining - dt);
@@ -3773,6 +3774,12 @@ namespace CoopSpectator.MissionBehaviors
             EquipmentIndex.Weapon3
         };
         private static Mission _lastBattlePhaseAiHoldMission;
+        private static Mission _pendingClientGlobalCaptainAgentStatRefreshMission;
+        private static string _pendingClientGlobalCaptainAgentStatRefreshSignature = string.Empty;
+        private static string _pendingClientGlobalCaptainAgentStatRefreshSource = string.Empty;
+        private static string _lastAppliedClientGlobalCaptainAgentStatRefreshSignature = string.Empty;
+        private static Mission _pendingCaptainSynchronizedBattleStartMission;
+        private static string _pendingCaptainSynchronizedBattleStartSource = string.Empty;
         private static Mission _validatedLandBattleExactInitialMaterializationMission;
         private static string _validatedLandBattleExactInitialMaterializationSummary = string.Empty;
         private static Mission _lastMaterializedArmyMission;
@@ -3862,6 +3869,7 @@ namespace CoopSpectator.MissionBehaviors
         private static Mission _materializedSiegeReinforcementWaveMission;
         private static float _nextMaterializedSiegeReinforcementCheckMissionTime = float.MinValue;
         private static BattleSideEnum _nextMaterializedSiegeReinforcementBatchFirstSide = BattleSideEnum.Attacker;
+        private static int _nextMaterializedSiegeReinforcementBatchId = 1;
         private static readonly Dictionary<BattleSideEnum, MaterializedSiegeReinforcementWaveState>
             MaterializedSiegeReinforcementWaveStates =
                 new Dictionary<BattleSideEnum, MaterializedSiegeReinforcementWaveState>();
@@ -3878,8 +3886,17 @@ namespace CoopSpectator.MissionBehaviors
             public int PendingWavePlannedCount;
             public int PendingWaveSpawnedCount;
             public int PendingWavePlanCursor;
+            public int PendingWavePreparationTargetCount;
+            public bool PendingWavePreflightStarted;
+            public bool PendingWaveArmed;
+            public int PendingWaveBatchId;
+            public int PendingWaveBindingSequence;
+            public bool PendingWaveMaterializationComplete;
+            public bool PendingWaveBindingFailureLogged;
             public List<MaterializedSiegeReinforcementPlanEntry> PendingWavePlan =
                 new List<MaterializedSiegeReinforcementPlanEntry>();
+            public Dictionary<int, MaterializedSiegeReinforcementHeldAgentState> HeldAgentsByIndex =
+                new Dictionary<int, MaterializedSiegeReinforcementHeldAgentState>();
         }
 
         private sealed class MaterializedSiegeReinforcementPlanEntry
@@ -3889,6 +3906,16 @@ namespace CoopSpectator.MissionBehaviors
             public string ResolvedTroopSource;
             public int PlannedCount;
             public int SpawnedCount;
+        }
+
+        private sealed class MaterializedSiegeReinforcementHeldAgentState
+        {
+            public Agent Agent;
+            public Agent.MortalityState PreviousMortalityState;
+            public bool PreviousAiPaused;
+            public Agent MountAgent;
+            public Agent.MortalityState PreviousMountMortalityState;
+            public bool PreviousMountAiPaused;
         }
 
         private sealed class PendingExactCampaignNativeSpawnRegistrationState
@@ -4086,8 +4113,8 @@ namespace CoopSpectator.MissionBehaviors
         private const double InitialMaterializedArmyPulseIntervalSeconds = 0.35d;
         private const double MaterializedArmyReinforcementPulseIntervalSeconds = 0.75d;
         private const float MaterializedSiegeReinforcementCheckIntervalSeconds = 3f;
-        private const float MaterializedSiegeReinforcementBatchIntervalSeconds = 0.15f;
-        private const int MaterializedSiegeReinforcementBatchAgentBudget = 24;
+        private const float MaterializedSiegeReinforcementBatchIntervalSeconds = 0.05f;
+        private const int MaterializedSiegeReinforcementBatchAgentBudget = 1;
         private const float MaterializedSiegeReinforcementWavePercentage = 0.5f;
         private const float MaterializedSiegeReinforcementLateralSpacing = 1.8f;
         private const float MaterializedSiegeReinforcementDepthSpacing = 2.2f;
@@ -4921,6 +4948,70 @@ namespace CoopSpectator.MissionBehaviors
             FormationClass.HorseArcher
         };
 
+        internal static void RequestClientGlobalCaptainAgentStatRefresh(
+            Mission mission,
+            string frozenStateSignature,
+            string source)
+        {
+            if (!GameNetwork.IsClient ||
+                mission == null ||
+                string.IsNullOrWhiteSpace(frozenStateSignature) ||
+                string.Equals(
+                    _lastAppliedClientGlobalCaptainAgentStatRefreshSignature,
+                    frozenStateSignature,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            _pendingClientGlobalCaptainAgentStatRefreshMission = mission;
+            _pendingClientGlobalCaptainAgentStatRefreshSignature = frozenStateSignature;
+            _pendingClientGlobalCaptainAgentStatRefreshSource = source ?? "unknown";
+        }
+
+        internal static void TryRunClientGlobalCaptainAgentStatRefresh(Mission mission)
+        {
+            if (!GameNetwork.IsClient ||
+                mission == null ||
+                !ReferenceEquals(_pendingClientGlobalCaptainAgentStatRefreshMission, mission) ||
+                string.IsNullOrWhiteSpace(_pendingClientGlobalCaptainAgentStatRefreshSignature) ||
+                !GlobalCaptainPerkRuntimeState.AreAgentStatEffectsReadyFor(BattleSnapshotRuntimeState.GetState()))
+            {
+                return;
+            }
+
+            string frozenStateSignature = _pendingClientGlobalCaptainAgentStatRefreshSignature;
+            string refreshSource = _pendingClientGlobalCaptainAgentStatRefreshSource;
+            int refreshedAgentCount = 0;
+            int failedAgentCount = 0;
+            foreach (Agent agent in mission.AllAgents)
+            {
+                if (agent == null || !agent.IsActive())
+                    continue;
+
+                try
+                {
+                    agent.UpdateAgentProperties();
+                    refreshedAgentCount++;
+                }
+                catch
+                {
+                    failedAgentCount++;
+                }
+            }
+
+            _lastAppliedClientGlobalCaptainAgentStatRefreshSignature = frozenStateSignature;
+            _pendingClientGlobalCaptainAgentStatRefreshMission = null;
+            _pendingClientGlobalCaptainAgentStatRefreshSignature = string.Empty;
+            _pendingClientGlobalCaptainAgentStatRefreshSource = string.Empty;
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: refreshed client agent properties after authoritative captain state. " +
+                "Signature=" + frozenStateSignature +
+                " RefreshedAgents=" + refreshedAgentCount +
+                " FailedAgents=" + failedAgentCount +
+                " Source=" + (refreshSource ?? "unknown"));
+        }
+
         public static void ResetClientMissionRuntimeState(string source)
         {
             if (GameNetwork.IsServer)
@@ -4949,6 +5040,10 @@ namespace CoopSpectator.MissionBehaviors
             _loggedSuppressedMaterializedEquipmentKeys.Clear();
             _loggedManualMaterializedSiegeRespawnRejectKeys.Clear();
             _lastBattlePhaseAiHoldMission = null;
+            _pendingClientGlobalCaptainAgentStatRefreshMission = null;
+            _pendingClientGlobalCaptainAgentStatRefreshSignature = string.Empty;
+            _pendingClientGlobalCaptainAgentStatRefreshSource = string.Empty;
+            _lastAppliedClientGlobalCaptainAgentStatRefreshSignature = string.Empty;
             _lastMaterializedArmyMission = null;
             _lastClientBattleSnapshotRefreshMission = null;
             _battleLifecycleStartupTraceKeys.Clear();
@@ -6204,6 +6299,14 @@ namespace CoopSpectator.MissionBehaviors
                     affectedAgent.Index,
                     "CoopMissionSpawnLogic.OnAgentRemoved");
             }
+            if (affectedAgent != null)
+            {
+                foreach (MaterializedSiegeReinforcementWaveState waveState in
+                         MaterializedSiegeReinforcementWaveStates.Values)
+                {
+                    waveState?.HeldAgentsByIndex.Remove(affectedAgent.Index);
+                }
+            }
             ClearMaterializedAgentIndexScopedRuntimeCaches(affectedAgent?.Index ?? -1, clearRemovedGuard: false);
             ExactCreateAgentCorridorDiagnostics.ClearServerAgentIndexState(
                 affectedAgent?.Index ?? -1,
@@ -6541,6 +6644,8 @@ namespace CoopSpectator.MissionBehaviors
             _loggedSuppressedMaterializedEquipmentKeys.Clear();
             _loggedManualMaterializedSiegeRespawnRejectKeys.Clear();
             _lastBattlePhaseAiHoldMission = null;
+            _pendingCaptainSynchronizedBattleStartMission = null;
+            _pendingCaptainSynchronizedBattleStartSource = string.Empty;
             _lastAppliedBattlePhaseAiHold = null;
             _lastAppliedFormationHoldPhase = null;
             _battleLifecycleStartupTraceKeys.Clear();
@@ -7107,6 +7212,8 @@ namespace CoopSpectator.MissionBehaviors
             _battlePhaseHeldFormationUnitCounts.Clear();
             _battlePhasePreviousFiringOrdersByFormationKey.Clear();
             _lastBattlePhaseAiHoldMission = null;
+            _pendingCaptainSynchronizedBattleStartMission = null;
+            _pendingCaptainSynchronizedBattleStartSource = string.Empty;
             _lastAppliedBattlePhaseAiHold = null;
             _lastAppliedFormationHoldPhase = null;
             _battleLifecycleStartupTraceKeys.Clear();
@@ -9404,7 +9511,7 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            if (!SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+            if (!SceneRuntimeClassifier.IsExactRangedPossessionSynchronizationScene(mission.SceneName ?? string.Empty))
                 return false;
 
             if (!IsLocalPeerControlledAgent(agent))
@@ -9527,7 +9634,7 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            if (!SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+            if (!SceneRuntimeClassifier.IsExactRangedPossessionSynchronizationScene(mission.SceneName ?? string.Empty))
                 return false;
 
             if (!IsLocalPeerControlledAgent(agent))
@@ -9592,7 +9699,7 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            if (!SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+            if (!SceneRuntimeClassifier.IsExactRangedPossessionSynchronizationScene(mission.SceneName ?? string.Empty))
                 return false;
 
             if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out _))
@@ -9683,7 +9790,7 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            if (!SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+            if (!SceneRuntimeClassifier.IsExactRangedPossessionSynchronizationScene(mission.SceneName ?? string.Empty))
                 return false;
 
             MissionPeer localMissionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
@@ -14749,81 +14856,132 @@ namespace CoopSpectator.MissionBehaviors
             if (mission == null || !GameNetwork.IsServer)
                 return;
 
-            if (!CoopBattlePhaseBridgeFile.ConsumeStartBattleRequest(out string requestSource))
-                return;
-
-            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
-            if (ExactCampaignCommanderDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission))
+            bool hasPendingCaptainSynchronizedStart =
+                ReferenceEquals(_pendingCaptainSynchronizedBattleStartMission, mission);
+            string requestSource;
+            if (!hasPendingCaptainSynchronizedStart)
             {
-                HashSet<BattleSideEnum> activeCommanderDeploymentSides =
-                    CollectActiveSiegeAmbushCommanderDeploymentSides(mission);
-                bool forcedAutoDeploy =
-                    ExactCampaignCommanderDeploymentRuntime.TryForceFinishForBattleStartRequest(
-                        mission,
-                        activeCommanderDeploymentSides,
-                        out string forceDeploymentDiagnostics);
-                bool deploymentStillBlocking =
-                    ExactCampaignCommanderDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission);
-                ModLogger.Info(
-                    "CoopMissionSpawnLogic: processed start battle request during exact siege deployment. " +
-                    "CurrentPhase=" + currentPhase +
-                    " ForcedAutoDeploy=" + forcedAutoDeploy +
-                    " DeploymentStillBlocking=" + deploymentStillBlocking +
-                    " ActiveCommanderSides=[" +
-                    string.Join(",", activeCommanderDeploymentSides) + "]" +
-                    " Diagnostics={" + forceDeploymentDiagnostics + "}" +
-                    " Source=" + (requestSource ?? "unknown"));
-                if (deploymentStillBlocking)
+                if (!CoopBattlePhaseBridgeFile.ConsumeStartBattleRequest(out requestSource))
                     return;
 
-                TryPromoteCommanderDeploymentOrderLeasesAfterForcedFinish(
-                    mission,
-                    "forced-deployment battle-start request");
-                TryPromoteDeferredDeploymentSpawnRequests(
-                    mission,
-                    "forced-deployment battle-start request");
-                TryUpdateBattlePhaseState(
-                    mission,
-                    "forced-deployment battle-start request");
+                CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+                if (ExactCampaignCommanderDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission))
+                {
+                    HashSet<BattleSideEnum> activeCommanderDeploymentSides =
+                        CollectActiveSiegeAmbushCommanderDeploymentSides(mission);
+                    bool forcedAutoDeploy =
+                        ExactCampaignCommanderDeploymentRuntime.TryForceFinishForBattleStartRequest(
+                            mission,
+                            activeCommanderDeploymentSides,
+                            out string forceDeploymentDiagnostics);
+                    bool deploymentStillBlocking =
+                        ExactCampaignCommanderDeploymentRuntime.IsDeploymentPhaseBlockingBattleStart(mission);
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: processed start battle request during exact siege deployment. " +
+                        "CurrentPhase=" + currentPhase +
+                        " ForcedAutoDeploy=" + forcedAutoDeploy +
+                        " DeploymentStillBlocking=" + deploymentStillBlocking +
+                        " ActiveCommanderSides=[" +
+                        string.Join(",", activeCommanderDeploymentSides) + "]" +
+                        " Diagnostics={" + forceDeploymentDiagnostics + "}" +
+                        " Source=" + (requestSource ?? "unknown"));
+                    if (deploymentStillBlocking)
+                        return;
 
-                // A request received while deployment is blocking is deployment-only.
-                // Starting the battle requires a separate request after possession is ready.
-                return;
-            }
+                    TryPromoteCommanderDeploymentOrderLeasesAfterForcedFinish(
+                        mission,
+                        "forced-deployment battle-start request");
+                    TryPromoteDeferredDeploymentSpawnRequests(
+                        mission,
+                        "forced-deployment battle-start request");
+                    TryUpdateBattlePhaseState(
+                        mission,
+                        "forced-deployment battle-start request");
 
-            bool battleStartReady = IsBattleStartReady(mission, out int assignedPeerCount, out int controlledPeerCount);
-            if (currentPhase < CoopBattlePhase.PreBattleHold || !battleStartReady)
-            {
-                bool armiesReady = AreBattlefieldArmiesReadyForStart(mission, out string readinessSource, out int attackerActive, out int defenderActive);
+                    // A request received while deployment is blocking is deployment-only.
+                    // Starting the battle requires a separate request after possession is ready.
+                    return;
+                }
+
+                bool battleStartReady = IsBattleStartReady(mission, out int assignedPeerCount, out int controlledPeerCount);
+                if (currentPhase < CoopBattlePhase.PreBattleHold || !battleStartReady)
+                {
+                    bool armiesReady = AreBattlefieldArmiesReadyForStart(
+                        mission,
+                        out string readinessSource,
+                        out int attackerActive,
+                        out int defenderActive);
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: ignored start battle request because phase is not ready. " +
+                        "CurrentPhase=" + currentPhase +
+                        " BattleStartReady=" + battleStartReady +
+                        " AssignedPeers=" + assignedPeerCount +
+                        " ControlledPeers=" + controlledPeerCount +
+                        " MaterializedArmies=" + _hasMaterializedBattlefieldArmies +
+                        " ArmiesReady=" + armiesReady +
+                        " ArmiesReadySource=" + readinessSource +
+                        " AttackerActive=" + attackerActive +
+                        " DefenderActive=" + defenderActive +
+                        " Source=" + (requestSource ?? "unknown"));
+                    return;
+                }
+
+                bool siegeMachinesReady =
+                    ExactCampaignCommanderDeploymentRuntime.TryEnsureScenarioReadyBeforeBattleStart(
+                        mission,
+                        out string siegeMachineAutoDeployDiagnostics);
                 ModLogger.Info(
-                    "CoopMissionSpawnLogic: ignored start battle request because phase is not ready. " +
+                    "CoopMissionSpawnLogic: processed start battle siege machine auto-deploy guarantee. " +
                     "CurrentPhase=" + currentPhase +
-                    " BattleStartReady=" + battleStartReady +
-                    " AssignedPeers=" + assignedPeerCount +
-                    " ControlledPeers=" + controlledPeerCount +
-                    " MaterializedArmies=" + _hasMaterializedBattlefieldArmies +
-                    " ArmiesReady=" + armiesReady +
-                    " ArmiesReadySource=" + readinessSource +
-                    " AttackerActive=" + attackerActive +
-                    " DefenderActive=" + defenderActive +
+                    " Ready=" + siegeMachinesReady +
+                    " Diagnostics={" + siegeMachineAutoDeployDiagnostics + "}" +
                     " Source=" + (requestSource ?? "unknown"));
+                if (!siegeMachinesReady)
+                    return;
+
+                if (!TryFreezeGlobalCaptainPerks(mission, "start-battle-request"))
+                {
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: blocked battle start because authoritative captain state could not be frozen. " +
+                        "Source=" + (requestSource ?? "unknown"));
+                    return;
+                }
+
+                _pendingCaptainSynchronizedBattleStartMission = mission;
+                _pendingCaptainSynchronizedBattleStartSource = requestSource ?? "unknown";
+                hasPendingCaptainSynchronizedStart = true;
+            }
+            else
+            {
+                requestSource = _pendingCaptainSynchronizedBattleStartSource;
+            }
+
+            if (!hasPendingCaptainSynchronizedStart)
+                return;
+
+            if (CoopBattlePhaseRuntimeState.GetPhase() >= CoopBattlePhase.BattleActive)
+            {
+                _pendingCaptainSynchronizedBattleStartMission = null;
+                _pendingCaptainSynchronizedBattleStartSource = string.Empty;
                 return;
             }
 
-            bool siegeMachinesReady =
-                ExactCampaignCommanderDeploymentRuntime.TryEnsureScenarioReadyBeforeBattleStart(
-                    mission,
-                    out string siegeMachineAutoDeployDiagnostics);
-            ModLogger.Info(
-                "CoopMissionSpawnLogic: processed start battle siege machine auto-deploy guarantee. " +
-                "CurrentPhase=" + currentPhase +
-                " Ready=" + siegeMachinesReady +
-                " Diagnostics={" + siegeMachineAutoDeployDiagnostics + "}" +
-                " Source=" + (requestSource ?? "unknown"));
-            if (!siegeMachinesReady)
+            if (!GlobalCaptainPerkRuntimeState.AreAgentStatEffectsReadyFor(BattleSnapshotRuntimeState.GetState()))
                 return;
 
-            TryFreezeGlobalCaptainPerks(mission, "start-battle-request");
+            if (!CoopMissionNetworkBridge.HasSentFrozenCaptainStateToAllEligiblePeers(
+                    mission,
+                    out string captainStateSendDiagnostics))
+            {
+                return;
+            }
+
+            _pendingCaptainSynchronizedBattleStartMission = null;
+            _pendingCaptainSynchronizedBattleStartSource = string.Empty;
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: authoritative captain state send barrier completed. " +
+                "Diagnostics={" + captainStateSendDiagnostics + "}" +
+                " Source=" + (requestSource ?? "unknown"));
             CoopBattlePhaseRuntimeState.SetPhase(
                 CoopBattlePhase.BattleActive,
                 "bridge-file start battle request from " + (requestSource ?? "unknown"),
@@ -15903,7 +16061,15 @@ namespace CoopSpectator.MissionBehaviors
                     mission);
             }
 
-            TryFreezeGlobalCaptainPerks(mission, "role-matrix-spectator-auto-start");
+            if (!TryFreezeGlobalCaptainPerks(mission, "role-matrix-spectator-auto-start") ||
+                !GlobalCaptainPerkRuntimeState.AreAgentStatEffectsReadyFor(BattleSnapshotRuntimeState.GetState()) ||
+                !CoopMissionNetworkBridge.HasSentFrozenCaptainStateToAllEligiblePeers(
+                    mission,
+                    out _))
+            {
+                return;
+            }
+
             CoopBattlePhaseRuntimeState.SetPhase(
                 CoopBattlePhase.BattleActive,
                 "role-matrix spectator auto-start from " + (source ?? "unknown"),
@@ -18426,7 +18592,7 @@ namespace CoopSpectator.MissionBehaviors
                 if (missionTime < _nextMaterializedSiegeReinforcementCheckMissionTime)
                     return;
 
-                bool hasPendingWave = HasPendingMaterializedSiegeReinforcementWave(mission);
+                bool hasPendingWave = RequiresFrequentMaterializedSiegeReinforcementTick(mission);
                 _nextMaterializedSiegeReinforcementCheckMissionTime =
                     missionTime + (hasPendingWave
                         ? MaterializedSiegeReinforcementBatchIntervalSeconds
@@ -18490,7 +18656,9 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             if (useMaterializedSiegeReinforcements &&
-                (attackerSpawned > 0 || defenderSpawned > 0 || HasPendingMaterializedSiegeReinforcementWave(mission)))
+                (attackerSpawned > 0 ||
+                 defenderSpawned > 0 ||
+                 RequiresFrequentMaterializedSiegeReinforcementTick(mission)))
             {
                 _nextMaterializedSiegeReinforcementBatchFirstSide =
                     _nextMaterializedSiegeReinforcementBatchFirstSide == BattleSideEnum.Attacker
@@ -18504,10 +18672,13 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             int pulsedAgents = 0;
-            if (attackerSpawned > 0)
-                pulsedAgents += TryActivateBattleActiveReinforcementAi(attackerTeam);
-            if (defenderSpawned > 0)
-                pulsedAgents += TryActivateBattleActiveReinforcementAi(defenderTeam);
+            if (!useMaterializedSiegeReinforcements)
+            {
+                if (attackerSpawned > 0)
+                    pulsedAgents += TryActivateBattleActiveReinforcementAi(attackerTeam);
+                if (defenderSpawned > 0)
+                    pulsedAgents += TryActivateBattleActiveReinforcementAi(defenderTeam);
+            }
 
             if (ExperimentalFeatures.EnableExactCampaignArmyRuntimeDiagnostics)
             {
@@ -18611,41 +18782,107 @@ namespace CoopSpectator.MissionBehaviors
                 bool hasPendingPlan = HasPendingMaterializedSiegeReinforcementWave(siegeWaveState);
                 if (!hasPendingPlan)
                 {
-                    if (candidates.Count == 0 || remainingSideNeed <= 0)
-                        return 0;
-
-                    if (!TryGetMaterializedSiegeReinforcementWaveBudget(
-                            mission,
-                            side,
-                            targetActiveForSide,
-                            activeForSide,
-                            spawnableReserveForSide,
-                            source,
-                            out siegeWaveState,
-                            out int siegeWaveBudget))
+                    int wavePreparationTargetCount =
+                        Math.Min(siegeWaveState.WaveSize, spawnableReserveForSide);
+                    if (candidates.Count == 0 ||
+                        (siegeWaveState.MaximumWaveCount > 0 &&
+                         siegeWaveState.SpawnedWaveCount >= siegeWaveState.MaximumWaveCount) ||
+                        wavePreparationTargetCount <= 0)
                     {
                         return 0;
                     }
 
-                    if (!TryInitializePendingMaterializedSiegeReinforcementWavePlan(
+                    if (!TryAdvancePendingMaterializedSiegeReinforcementWavePreparation(
                             siegeWaveState,
                             candidates,
-                            siegeWaveBudget))
+                            wavePreparationTargetCount))
                     {
-                        ExactSiegeMoraleDiagnostics.RecordReinforcementWaveDecision(
-                            mission,
-                            side,
-                            siegeWaveState.InitialActiveCount,
-                            activeForSide,
-                            spawnableReserveForSide,
-                            siegeWaveState.WaveSize,
-                            siegeWaveState.MaximumWaveCount,
-                            siegeWaveState.SpawnedWaveCount,
-                            0,
-                            "wave-plan-empty",
-                            source);
                         return 0;
                     }
+                }
+                else if (!siegeWaveState.PendingWavePreflightStarted &&
+                          siegeWaveState.PendingWavePlannedCount < siegeWaveState.PendingWavePreparationTargetCount)
+                {
+                    if (!TryAdvancePendingMaterializedSiegeReinforcementWavePreparation(
+                            siegeWaveState,
+                            candidates,
+                            siegeWaveState.PendingWavePreparationTargetCount))
+                    {
+                        return 0;
+                    }
+                }
+
+                if (!siegeWaveState.PendingWaveArmed)
+                {
+                    if (!siegeWaveState.PendingWavePreflightStarted)
+                    {
+                        if (siegeWaveState.PendingWavePlannedCount < siegeWaveState.PendingWavePreparationTargetCount ||
+                            remainingSideNeed < siegeWaveState.WaveSize)
+                        {
+                            return 0;
+                        }
+
+                        if (!TryGetMaterializedSiegeReinforcementWaveBudget(
+                                mission,
+                                side,
+                                targetActiveForSide,
+                                activeForSide,
+                                spawnableReserveForSide,
+                                source,
+                                out siegeWaveState,
+                                out int siegeWaveBudget))
+                        {
+                            return 0;
+                        }
+
+                        if (!TryInitializePendingMaterializedSiegeReinforcementWavePlan(
+                                siegeWaveState,
+                                candidates,
+                                siegeWaveBudget))
+                        {
+                            ExactSiegeMoraleDiagnostics.RecordReinforcementWaveDecision(
+                                mission,
+                                side,
+                                siegeWaveState.InitialActiveCount,
+                                activeForSide,
+                                spawnableReserveForSide,
+                                siegeWaveState.WaveSize,
+                                siegeWaveState.MaximumWaveCount,
+                                siegeWaveState.SpawnedWaveCount,
+                                0,
+                                "wave-plan-empty",
+                                source);
+                            return 0;
+                        }
+
+                        siegeWaveState.PendingWavePreparationTargetCount = siegeWaveBudget;
+                        if (!TryBeginPendingMaterializedSiegeReinforcementWavePreflight(
+                                mission,
+                                siegeWaveState,
+                                source))
+                        {
+                            return 0;
+                        }
+                    }
+
+                    if (!CoopMissionNetworkBridge.AreMaterializedReinforcementBatchPeersPrepared(
+                            mission,
+                            siegeWaveState.PendingWaveBatchId))
+                    {
+                        return 0;
+                    }
+
+                    siegeWaveState.PendingWaveArmed = true;
+                }
+
+                if (siegeWaveState.PendingWaveMaterializationComplete)
+                {
+                    TryReleasePendingMaterializedSiegeReinforcementWave(
+                        mission,
+                        team,
+                        siegeWaveState,
+                        source);
+                    return 0;
                 }
 
                 int pendingWaveRemaining = Math.Max(
@@ -18715,14 +18952,11 @@ namespace CoopSpectator.MissionBehaviors
                     siegeWaveState.PendingWavePlannedCount > 0 &&
                     siegeWaveState.PendingWaveSpawnedCount >= siegeWaveState.PendingWavePlannedCount;
                 string decision = spawnedBatchCount > 0
-                    ? (waveCompleted ? "wave-completed" : "wave-batch-spawned")
+                    ? (waveCompleted ? "wave-materialized-awaiting-clients" : "wave-batch-spawned")
                     : "wave-batch-no-progress";
                 if (waveCompleted)
                 {
-                    int completedWaveCount = siegeWaveState.PendingWavePlannedCount;
-                    siegeWaveState.SpawnedWaveCount++;
-                    siegeWaveState.SpawnedReinforcementCount += completedWaveCount;
-                    ClearPendingMaterializedSiegeReinforcementWavePlan(siegeWaveState);
+                    siegeWaveState.PendingWaveMaterializationComplete = true;
                 }
 
                 ExactSiegeMoraleDiagnostics.RecordReinforcementWaveDecision(
@@ -18826,7 +19060,218 @@ namespace CoopSpectator.MissionBehaviors
             return state != null &&
                    state.PendingWavePlan != null &&
                    state.PendingWavePlan.Count > 0 &&
-                   state.PendingWavePlannedCount > state.PendingWaveSpawnedCount;
+                   state.PendingWavePlannedCount > 0;
+        }
+
+        private static bool RequiresFrequentMaterializedSiegeReinforcementTick(Mission mission)
+        {
+            if (mission == null)
+                return false;
+
+            return MaterializedSiegeReinforcementWaveStates.Values.Any(state =>
+                ReferenceEquals(state?.Mission, mission) &&
+                HasPendingMaterializedSiegeReinforcementWave(state) &&
+                (state.PendingWavePlannedCount < state.PendingWavePreparationTargetCount ||
+                 state.PendingWavePreflightStarted ||
+                 state.PendingWaveArmed ||
+                 state.PendingWaveMaterializationComplete));
+        }
+
+        private static bool TryAdvancePendingMaterializedSiegeReinforcementWavePreparation(
+            MaterializedSiegeReinforcementWaveState waveState,
+            IReadOnlyList<MaterializedArmyReinforcementCandidate> candidates,
+            int targetCount)
+        {
+            if (waveState == null || candidates == null || candidates.Count == 0 || targetCount <= 0)
+                return false;
+
+            int nextPreparedCount = Math.Min(
+                targetCount,
+                Math.Max(1, waveState.PendingWavePlannedCount + 1));
+            if (!TryInitializePendingMaterializedSiegeReinforcementWavePlan(
+                    waveState,
+                    candidates,
+                    nextPreparedCount))
+            {
+                return false;
+            }
+
+            waveState.PendingWavePreparationTargetCount = targetCount;
+            return true;
+        }
+
+        private static bool TryBeginPendingMaterializedSiegeReinforcementWavePreflight(
+            Mission mission,
+            MaterializedSiegeReinforcementWaveState waveState,
+            string source)
+        {
+            if (mission == null ||
+                waveState == null ||
+                waveState.PendingWavePreflightStarted ||
+                waveState.PendingWavePlan == null ||
+                waveState.PendingWavePlan.Count <= 0)
+            {
+                return false;
+            }
+
+            var plannedAgentCountByEntryId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (MaterializedSiegeReinforcementPlanEntry plannedEntry in waveState.PendingWavePlan)
+            {
+                string entryId = plannedEntry?.EntryState?.EntryId;
+                int plannedCount = Math.Max(0, plannedEntry?.PlannedCount ?? 0);
+                if (string.IsNullOrWhiteSpace(entryId) || plannedCount <= 0)
+                    continue;
+
+                plannedAgentCountByEntryId.TryGetValue(entryId, out int existingCount);
+                plannedAgentCountByEntryId[entryId] = existingCount + plannedCount;
+            }
+
+            int manifestAgentCount = plannedAgentCountByEntryId.Values.Sum();
+            if (manifestAgentCount != waveState.PendingWavePlannedCount)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: reinforcement batch preflight manifest did not match the frozen wave plan. " +
+                    "Side=" + waveState.Side +
+                    " PlannedAgents=" + waveState.PendingWavePlannedCount +
+                    " ManifestAgents=" + manifestAgentCount +
+                    " Contracts=" + plannedAgentCountByEntryId.Count +
+                    " Source=" + (source ?? "unknown"));
+                return false;
+            }
+
+            if (_nextMaterializedSiegeReinforcementBatchId == int.MaxValue)
+                _nextMaterializedSiegeReinforcementBatchId = 1;
+
+            int batchId = _nextMaterializedSiegeReinforcementBatchId++;
+
+            bool began = CoopMissionNetworkBridge.TryBeginMaterializedReinforcementBatch(
+                mission,
+                batchId,
+                waveState.Side,
+                waveState.PendingWavePlannedCount,
+                plannedAgentCountByEntryId,
+                out string diagnostics);
+            if (!began)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: reinforcement batch preflight could not start; materialization remains blocked. " +
+                    "BatchId=" + batchId +
+                    " Side=" + waveState.Side +
+                    " Diagnostics=" + (diagnostics ?? "unknown") +
+                    " Source=" + (source ?? "unknown"));
+                return false;
+            }
+
+            waveState.PendingWaveBatchId = batchId;
+            waveState.PendingWaveBindingSequence = 0;
+            waveState.PendingWavePreflightStarted = true;
+            waveState.PendingWaveArmed = false;
+            waveState.PendingWaveMaterializationComplete = false;
+            waveState.PendingWaveBindingFailureLogged = false;
+            waveState.HeldAgentsByIndex.Clear();
+            return true;
+        }
+
+        private static void HoldMaterializedSiegeReinforcementAgent(
+            Mission mission,
+            MaterializedSiegeReinforcementWaveState waveState,
+            Agent agent,
+            string entryId,
+            string source)
+        {
+            if (mission == null || waveState == null || agent == null || !agent.IsActive())
+                return;
+
+            var heldState = new MaterializedSiegeReinforcementHeldAgentState
+            {
+                Agent = agent,
+                PreviousMortalityState = agent.CurrentMortalityState,
+                PreviousAiPaused = agent.IsPaused,
+                MountAgent = agent.MountAgent,
+                PreviousMountMortalityState = agent.MountAgent?.CurrentMortalityState ?? Agent.MortalityState.Mortal,
+                PreviousMountAiPaused = agent.MountAgent?.IsPaused == true
+            };
+            waveState.HeldAgentsByIndex[agent.Index] = heldState;
+
+            agent.SetMortalityState(Agent.MortalityState.Invulnerable);
+            agent.SetAutomaticTargetSelection(false);
+            agent.SetFiringOrder(FiringOrder.RangedWeaponUsageOrderEnum.HoldYourFire);
+            agent.SetIsAIPaused(true);
+            if (heldState.MountAgent != null && heldState.MountAgent.IsActive())
+            {
+                heldState.MountAgent.SetMortalityState(Agent.MortalityState.Invulnerable);
+                heldState.MountAgent.SetIsAIPaused(true);
+            }
+
+            waveState.PendingWaveBindingSequence++;
+            bool sent = CoopMissionNetworkBridge.TryBroadcastMaterializedReinforcementAgentBinding(
+                mission,
+                waveState.PendingWaveBatchId,
+                agent.Index,
+                waveState.PendingWaveBindingSequence,
+                waveState.PendingWavePlannedCount,
+                entryId,
+                out string diagnostics);
+            if (!sent && !waveState.PendingWaveBindingFailureLogged)
+            {
+                waveState.PendingWaveBindingFailureLogged = true;
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: reinforcement agent binding send failed; materialization remains held. " +
+                    "BatchId=" + waveState.PendingWaveBatchId +
+                    " AgentIndex=" + agent.Index +
+                    " Diagnostics=" + (diagnostics ?? "unknown") +
+                    " Source=" + (source ?? "unknown"));
+            }
+        }
+
+        private static bool TryReleasePendingMaterializedSiegeReinforcementWave(
+            Mission mission,
+            Team team,
+            MaterializedSiegeReinforcementWaveState waveState,
+            string source)
+        {
+            if (mission == null || team == null || waveState == null || !waveState.PendingWaveMaterializationComplete)
+                return false;
+
+            bool peersReady = CoopMissionNetworkBridge.AreMaterializedReinforcementBatchPeersReady(
+                mission,
+                waveState.PendingWaveBatchId,
+                out _);
+            if (!peersReady)
+                return false;
+
+            foreach (MaterializedSiegeReinforcementHeldAgentState heldState in
+                     waveState.HeldAgentsByIndex.Values.ToArray())
+            {
+                Agent agent = heldState?.Agent;
+                if (agent == null || !agent.IsActive())
+                    continue;
+
+                Agent mountAgent = heldState.MountAgent;
+                if (mountAgent != null && mountAgent.IsActive())
+                {
+                    mountAgent.SetMortalityState(heldState.PreviousMountMortalityState);
+                    mountAgent.SetIsAIPaused(heldState.PreviousMountAiPaused);
+                }
+
+                agent.SetMortalityState(heldState.PreviousMortalityState);
+                agent.SetIsAIPaused(false);
+                agent.SetAlarmState(Agent.AIStateFlag.Alarmed);
+                agent.SetAutomaticTargetSelection(true);
+                agent.SetFiringOrder(FiringOrder.RangedWeaponUsageOrderEnum.FireAtWill);
+                agent.ResetEnemyCaches();
+                agent.HumanAIComponent?.SyncBehaviorParamsIfNecessary();
+            }
+
+            int completedWaveCount = waveState.PendingWavePlannedCount;
+            int completedBatchId = waveState.PendingWaveBatchId;
+            waveState.SpawnedWaveCount++;
+            waveState.SpawnedReinforcementCount += completedWaveCount;
+            CoopMissionNetworkBridge.CompleteMaterializedReinforcementBatch(mission, completedBatchId);
+            ClearPendingMaterializedSiegeReinforcementWavePlan(waveState);
+            TryActivateBattleActiveReinforcementAi(team);
+
+            return true;
         }
 
         private static bool TryInitializePendingMaterializedSiegeReinforcementWavePlan(
@@ -18948,7 +19393,8 @@ namespace CoopSpectator.MissionBehaviors
                     requestedCount,
                     GetMaterializedReinforcementPlacementOffset(true, activeForSide, spawnedForBatch),
                     (source ?? "unknown") + " reinforcement-batch character=" + (plannedEntry.ResolvedTroopSource ?? "unknown"),
-                    isReinforcement: true);
+                    isReinforcement: true,
+                    reinforcementWaveState: waveState);
                 if (spawned <= 0)
                 {
                     noProgressEntryCount++;
@@ -19013,6 +19459,14 @@ namespace CoopSpectator.MissionBehaviors
             waveState.PendingWavePlannedCount = 0;
             waveState.PendingWaveSpawnedCount = 0;
             waveState.PendingWavePlanCursor = 0;
+            waveState.PendingWavePreparationTargetCount = 0;
+            waveState.PendingWavePreflightStarted = false;
+            waveState.PendingWaveArmed = false;
+            waveState.PendingWaveBatchId = 0;
+            waveState.PendingWaveBindingSequence = 0;
+            waveState.PendingWaveMaterializationComplete = false;
+            waveState.PendingWaveBindingFailureLogged = false;
+            waveState.HeldAgentsByIndex?.Clear();
         }
 
         private static int GetMaterializedReinforcementWavePhysicalCost(
@@ -19277,10 +19731,40 @@ namespace CoopSpectator.MissionBehaviors
 
         private static void ResetMaterializedSiegeReinforcementWaveRuntimeState()
         {
+            foreach (MaterializedSiegeReinforcementWaveState waveState in
+                     MaterializedSiegeReinforcementWaveStates.Values)
+            {
+                if (waveState == null)
+                    continue;
+
+                foreach (MaterializedSiegeReinforcementHeldAgentState heldState in
+                         waveState.HeldAgentsByIndex.Values)
+                {
+                    Agent agent = heldState?.Agent;
+                    if (agent != null && agent.IsActive())
+                    {
+                        agent.SetMortalityState(heldState.PreviousMortalityState);
+                        agent.SetIsAIPaused(heldState.PreviousAiPaused);
+                    }
+
+                    Agent mountAgent = heldState?.MountAgent;
+                    if (mountAgent != null && mountAgent.IsActive())
+                    {
+                        mountAgent.SetMortalityState(heldState.PreviousMountMortalityState);
+                        mountAgent.SetIsAIPaused(heldState.PreviousMountAiPaused);
+                    }
+                }
+
+                CoopMissionNetworkBridge.CompleteMaterializedReinforcementBatch(
+                    waveState.Mission,
+                    waveState.PendingWaveBatchId);
+            }
+
             MaterializedSiegeReinforcementWaveStates.Clear();
             _materializedSiegeReinforcementWaveMission = null;
             _nextMaterializedSiegeReinforcementCheckMissionTime = float.MinValue;
             _nextMaterializedSiegeReinforcementBatchFirstSide = BattleSideEnum.Attacker;
+            _nextMaterializedSiegeReinforcementBatchId = 1;
         }
 
         private static int ResolveMaterializedSiegeMaximumReinforcementWaveCount()
@@ -21163,7 +21647,8 @@ namespace CoopSpectator.MissionBehaviors
             int spawnCount,
             int sideOffset,
             string source,
-            bool isReinforcement = false)
+            bool isReinforcement = false,
+            MaterializedSiegeReinforcementWaveState reinforcementWaveState = null)
         {
             if (mission == null || team == null || troop == null || spawnCount <= 0)
                 return 0;
@@ -21316,6 +21801,15 @@ namespace CoopSpectator.MissionBehaviors
                 _materializedArmyEntryIdByAgentIndex[agent.Index] = entryId ?? string.Empty;
                 _materializedArmySideByAgentIndex[agent.Index] = side;
                 RegisterMaterializedBattleResultEntry(agent, entryState, side);
+                if (reinforcementWaveState != null)
+                {
+                    HoldMaterializedSiegeReinforcementAgent(
+                        mission,
+                        reinforcementWaveState,
+                        agent,
+                        entryId,
+                        source);
+                }
                 combatProfileDiagnostics = appliedCombatProfile;
                 identityDiagnostics = appliedIdentity;
                 spawnedCount++;
@@ -26563,7 +27057,10 @@ namespace CoopSpectator.MissionBehaviors
             var appliedSlots = new List<string>();
             bool includeCapeVisual = !honorExactVisualContracts ||
                                      EvaluateExactRuntimeCapeVisualContract(entryState, out _, out _);
-            if (includeWeapons && entryState.IsMounted)
+            bool useMountedWeaponLayout =
+                entryState.IsMounted &&
+                !ShouldUseFieldMaterializedSiegeReplayRuntime(Mission.Current);
+            if (includeWeapons && useMountedWeaponLayout)
             {
                 TryApplyMountedMaterializedWeaponOverrides(spawnEquipment, entryState, appliedSlots, missedSlots, trackCoverage);
             }
@@ -28398,7 +28895,7 @@ namespace CoopSpectator.MissionBehaviors
             {
                 MissionWeapon missionWeapon = missionEquipment[slot];
                 int itemIndex = (int)slot - (int)EquipmentIndex.Weapon0;
-                itemIds[itemIndex] = !missionWeapon.IsEmpty && missionWeapon.Item != null
+                itemIds[itemIndex] = missionWeapon.Item != null
                     ? missionWeapon.Item.StringId
                     : null;
             }
@@ -28955,7 +29452,7 @@ namespace CoopSpectator.MissionBehaviors
             MissionWeapon missionWeapon = default(MissionWeapon);
             if (missionEquipment != null)
                 missionWeapon = missionEquipment[slot];
-            string actualItemId = !missionWeapon.IsEmpty && missionWeapon.Item != null
+            string actualItemId = missionWeapon.Item != null
                 ? missionWeapon.Item.StringId
                 : null;
             AppendEquipmentItemMismatch(mismatches, slotLabel, expectedItemId, actualItemId);
@@ -28972,7 +29469,7 @@ namespace CoopSpectator.MissionBehaviors
             MissionWeapon missionWeapon = default(MissionWeapon);
             if (missionEquipment != null)
                 missionWeapon = missionEquipment[slot];
-            string actualItemId = !missionWeapon.IsEmpty && missionWeapon.Item != null
+            string actualItemId = missionWeapon.Item != null
                 ? missionWeapon.Item.StringId
                 : null;
             AppendRuntimeEquipmentItemMismatch(mismatches, slotLabel, expectedItemId, actualItemId, entryState);
@@ -28991,7 +29488,7 @@ namespace CoopSpectator.MissionBehaviors
             MissionWeapon missionWeapon = default(MissionWeapon);
             if (missionEquipment != null)
                 missionWeapon = missionEquipment[slot];
-            string actualItemId = !missionWeapon.IsEmpty && missionWeapon.Item != null
+            string actualItemId = missionWeapon.Item != null
                 ? missionWeapon.Item.StringId
                 : null;
 
@@ -40346,6 +40843,9 @@ namespace CoopSpectator.MissionBehaviors
                 out string battleDataReadinessStage,
                 out string battleDataReadinessReason);
             EnsureAuthoritativeMaterializedAgentEntryCache(mission);
+            BattleRuntimeState battleRuntimeState = BattleSnapshotRuntimeState.GetState();
+            bool frozenCaptainStateReady =
+                GlobalCaptainPerkRuntimeState.AreAgentStatEffectsReadyFor(battleRuntimeState);
 
             var snapshot = new CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot
             {
@@ -40387,6 +40887,18 @@ namespace CoopSpectator.MissionBehaviors
                 DefenderSelectableEntryCount = defenderSelectableEntryIds?.Count ?? 0,
                 DefenderSelectableEntryIds = CoopBattleEntryStatusBridgeFile.SerializeIdList(defenderSelectableEntryIds),
                 DefenderSelectableEntrySource = defenderSelectableSource,
+                FrozenCaptainBattleInstanceId = frozenCaptainStateReady
+                    ? GlobalCaptainPerkRuntimeState.GetFrozenBattleInstanceId()
+                    : string.Empty,
+                FrozenCaptainStateSignature = frozenCaptainStateReady
+                    ? GlobalCaptainPerkRuntimeState.GetFrozenStateSignature()
+                    : string.Empty,
+                FrozenCaptainEntryIds = frozenCaptainStateReady
+                    ? GlobalCaptainPerkRuntimeState.GetFrozenCaptainEntryIds().ToList()
+                    : new List<string>(),
+                FrozenCaptainCombatGroups = frozenCaptainStateReady
+                    ? GlobalCaptainPerkRuntimeState.GetFrozenCombatGroups().ToList()
+                    : new List<FrozenCaptainCombatGroupSnapshotMessage>(),
                 UpdatedUtc = DateTime.UtcNow
             };
 

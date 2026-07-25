@@ -87,6 +87,7 @@
     <Compile Include="..\Infrastructure\VillageBattle\ExactVillageBattleScenarioContract.cs" Link="Infrastructure\VillageBattle\ExactVillageBattleScenarioContract.cs" />
     <Compile Include="..\Infrastructure\LandBattle\ExactLandBattleScenarioContract.cs" Link="Infrastructure\LandBattle\ExactLandBattleScenarioContract.cs" />
     <Compile Include="..\Infrastructure\CommanderDeployment\ExactLandBattleCommanderDeploymentRuntime.cs" Link="Infrastructure\CommanderDeployment\ExactLandBattleCommanderDeploymentRuntime.cs" />
+    <Compile Include="..\Infrastructure\CommanderDeployment\ExactSallyOutCommanderDeploymentRuntime.cs" Link="Infrastructure\CommanderDeployment\ExactSallyOutCommanderDeploymentRuntime.cs" />
     <Compile Include="..\Infrastructure\CommanderDeployment\ExactFieldBattleCommanderDeploymentRuntime.cs" Link="Infrastructure\CommanderDeployment\ExactFieldBattleCommanderDeploymentRuntime.cs" />
     <Compile Include="..\Infrastructure\CommanderDeployment\ExactVillageBattleCommanderDeploymentRuntime.cs" Link="Infrastructure\CommanderDeployment\ExactVillageBattleCommanderDeploymentRuntime.cs" />
     <Compile Include="..\Infrastructure\CommanderDeployment\ExactCampaignCommanderDeploymentRuntime.cs" Link="Infrastructure\CommanderDeployment\ExactCampaignCommanderDeploymentRuntime.cs" />

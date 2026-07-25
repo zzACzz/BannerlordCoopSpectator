@@ -283,6 +283,7 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 list.Add(new MissionBehaviorDiagnostic());
                 list.Add(new CoopMissionSpawnLogic());
             }
+            AppendExactSallyOutCommanderDeploymentSupport(list, mission, "server");
             AppendExactFieldBattleCommanderDeploymentSupport(list, mission, "server");
             AppendExactVillageBattleCommanderDeploymentSupport(list, mission, "server");
             AppendExactLandBattleCommanderDeploymentSupport(list, mission, "server");
@@ -419,6 +420,7 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                     ModLogger.Info("CoopBattle client: re-enabled custom coop selection overlay for battle-map runtime while retaining native bootstrap behaviors.");
             }
 #endif
+            AppendExactSallyOutCommanderDeploymentSupport(list, mission, "client");
             AppendExactFieldBattleCommanderDeploymentSupport(list, mission, "client");
             AppendExactVillageBattleCommanderDeploymentSupport(list, mission, "client");
             AppendExactLandBattleCommanderDeploymentSupport(list, mission, "client");
@@ -601,6 +603,74 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 " Diagnostics={" + (diagnostics ?? string.Empty) + "}.");
         }
 
+        internal static void AppendExactSallyOutCommanderDeploymentSupport(
+            List<MissionBehavior> list,
+            Mission mission,
+            string peerRole)
+        {
+            if (list == null || mission == null)
+                return;
+
+            BattleScenarioContextMessage scenarioContext =
+                ResolveBattleScenarioContextForMission(
+                    mission,
+                    out string scenarioContextDiagnostics);
+            AppendExactSallyOutCommanderDeploymentSupport(
+                list,
+                mission,
+                peerRole,
+                scenarioContext,
+                mission.SceneName,
+                scenarioContextDiagnostics);
+        }
+
+        internal static void AppendExactSallyOutCommanderDeploymentSupport(
+            List<MissionBehavior> list,
+            Mission mission,
+            string peerRole,
+            BattleScenarioContextMessage scenarioContext,
+            string runtimeScene,
+            string scenarioContextDiagnostics)
+        {
+            if (list == null || mission == null)
+                return;
+
+            string effectiveRuntimeScene = !string.IsNullOrWhiteSpace(runtimeScene)
+                ? runtimeScene
+                : mission.SceneName ?? string.Empty;
+            if (!SallyOutScenarioContract.IsValidatedPreMissionScenario(
+                    scenarioContext,
+                    effectiveRuntimeScene,
+                    out string diagnostics))
+            {
+                if (SallyOutScenarioContract.IsSallyOutScenario(scenarioContext))
+                {
+                    ModLogger.Info(
+                        "CoopBattle " + (peerRole ?? "unknown") +
+                        ": skipped BannerBearerLogic for SallyOut commander deployment. " +
+                        "Scene=" + (effectiveRuntimeScene ?? "null") +
+                        " ScenarioContext={" + scenarioContextDiagnostics + "}" +
+                        " Diagnostics={" + (diagnostics ?? string.Empty) + "}.");
+                }
+
+                return;
+            }
+
+            if (MissionBehaviorHelpers.ListContainsBehaviorType(list, "BannerBearerLogic") ||
+                mission.GetMissionBehavior<BannerBearerLogic>() != null)
+            {
+                return;
+            }
+
+            list.Add(new BannerBearerLogic());
+            ModLogger.Info(
+                "CoopBattle " + (peerRole ?? "unknown") +
+                ": appended BannerBearerLogic for exact SallyOut commander deployment. " +
+                "Scene=" + (effectiveRuntimeScene ?? "null") +
+                " ScenarioContext={" + scenarioContextDiagnostics + "}" +
+                " Diagnostics={" + (diagnostics ?? string.Empty) + "}.");
+        }
+
         internal static void AppendExactLandBattleCommanderDeploymentSupport(
             List<MissionBehavior> list,
             Mission mission,
@@ -613,7 +683,8 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 ResolveBattleScenarioContextForMission(
                     mission,
                     out string scenarioContextDiagnostics);
-            if (ExactVillageBattleScenarioContract.IsVillageBattleScenario(scenarioContext) ||
+            if (SallyOutScenarioContract.IsSallyOutScenario(scenarioContext) ||
+                ExactVillageBattleScenarioContract.IsVillageBattleScenario(scenarioContext) ||
                 ExactLandBattleScenarioContract.IsFieldBattleScenario(scenarioContext))
                 return;
 
