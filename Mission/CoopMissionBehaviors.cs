@@ -967,6 +967,9 @@ namespace CoopSpectator.MissionBehaviors
         protected override void OnEndMission()
         {
             string sceneName = Mission?.SceneName ?? "null";
+            CoopSpectator.Patches.BattleMapSpawnHandoffPatch.ReleaseTrackedExactSiegeClientAgentsBeforeMissionEnd(
+                Mission,
+                "CoopMissionClientLogic.OnEndMission:" + sceneName);
             ResetSelectionUiBridgeStateForNewMission("CoopMissionClientLogic.OnEndMission");
             CoopMissionSpawnLogic.ResetClientMissionRuntimeState(
                 "CoopMissionClientLogic.OnEndMission:" + sceneName);

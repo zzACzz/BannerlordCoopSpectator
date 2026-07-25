@@ -3525,7 +3525,16 @@ namespace CoopSpectator.Infrastructure
             KillingBlow killingBlow)
         {
             Mission mission = affectedAgent?.Mission ?? affectorAgent?.Mission ?? _activeMission;
-            if (IsSiegeAssaultWithDeploymentActive(mission) &&
+            bool exactSiegeClientTrackedAgentHandled =
+                affectedAgent != null &&
+                CoopSpectator.Patches.BattleMapSpawnHandoffPatch.TryReleaseTrackedExactSiegeClientAgentBeforeRemoval(
+                    mission,
+                    affectedAgent,
+                    "mission-onbefore-agent-removed",
+                    out _);
+
+            if (!exactSiegeClientTrackedAgentHandled &&
+                IsSiegeAssaultWithDeploymentActive(mission) &&
                 affectedAgent != null &&
                 CoopSiegeMachineDeploymentController.TryReleaseAgentFromSiegeMachineBeforeRemoval(
                     mission,

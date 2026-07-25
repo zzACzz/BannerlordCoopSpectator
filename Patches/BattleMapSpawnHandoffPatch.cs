@@ -586,7 +586,6 @@ namespace CoopSpectator.Patches
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentRangedSiegeWeaponChangeProjectile), () => PatchMissionNetworkComponentRangedSiegeWeaponChangeProjectile(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetSiegeLadderState), () => PatchMissionNetworkComponentSetSiegeLadderState(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentUseObject), () => PatchMissionNetworkComponentUseObject(harmony));
-            TryApplyPatchStep(nameof(PatchAgentOnRemoveExactSiegeClientCleanup), () => PatchAgentOnRemoveExactSiegeClientCleanup(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetUsableGameObjectIsDisabledForPlayers), () => PatchMissionNetworkComponentSetUsableGameObjectIsDisabledForPlayers(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentStopPhysicsAndSetFrameOfMissionObject), () => PatchMissionNetworkComponentStopPhysicsAndSetFrameOfMissionObject(harmony));
             TryApplyPatchStep(nameof(PatchRequestUseObjectOutgoingMissionObjectId), () => PatchRequestUseObjectOutgoingMissionObjectId(harmony));
@@ -1262,24 +1261,6 @@ namespace CoopSpectator.Patches
 
             harmony.Patch(target, prefix: new HarmonyMethod(prefix));
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventUseObject.");
-        }
-
-        private static void PatchAgentOnRemoveExactSiegeClientCleanup(Harmony harmony)
-        {
-            MethodInfo target = typeof(Agent).GetMethod(
-                "OnRemove",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
-                nameof(Agent_OnRemoveExactSiegeClientCleanup_Prefix),
-                BindingFlags.Static | BindingFlags.NonPublic);
-            if (target == null || prefix == null)
-            {
-                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.OnRemove not found. Skip exact siege client cleanup patch.");
-                return;
-            }
-
-            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
-            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to Agent.OnRemove for exact siege client cleanup.");
         }
 
         private static void PatchMissionNetworkComponentSetUsableGameObjectIsDisabledForPlayers(Harmony harmony)
@@ -2557,7 +2538,16 @@ namespace CoopSpectator.Patches
                     return true;
 
                 if (IsForcedNativeClientCreateAgentReplayActive)
+                {
+                    CoopMissionSpawnLogic.ObserveClientCreateAgentPayloadResolvedEntry(
+                        createAgent,
+                        "battle-map handoff forced native CreateAgent replay prefix");
                     return true;
+                }
+
+                RemoveDeferredClientSetWeaponAmmoDataPayload(
+                    createAgent.AgentIndex,
+                    referenceMessage: null);
 
                 RemoveDeferredClientSetWeaponReloadPhasePayload(
                     createAgent.AgentIndex,
@@ -6774,6 +6764,10 @@ namespace CoopSpectator.Patches
                 Agent existingAgent = Mission.MissionNetworkHelper.GetAgentFromIndex(createAgent.AgentIndex, canBeNull: true);
                 if (existingAgent != null && existingAgent.IsActive())
                 {
+                    BindDeferredClientSetWeaponAmmoDataPayloadsToMaterializedAgent(
+                        createAgent.AgentIndex,
+                        existingAgent,
+                        "existing active agent during deferred CreateAgent replay");
                     RemoveDeferredClientCreateAgentPayload(createAgent.AgentIndex);
                     continue;
                 }
@@ -6784,6 +6778,17 @@ namespace CoopSpectator.Patches
                         mission,
                         createAgent))
                 {
+                    Agent adapterAgent = Mission.MissionNetworkHelper.GetAgentFromIndex(
+                        createAgent.AgentIndex,
+                        canBeNull: true);
+                    if (adapterAgent != null && adapterAgent.IsActive())
+                    {
+                        BindDeferredClientSetWeaponAmmoDataPayloadsToMaterializedAgent(
+                            createAgent.AgentIndex,
+                            adapterAgent,
+                            "exact siege snapshot CreateAgent adapter");
+                    }
+
                     RemoveDeferredClientCreateAgentPayload(createAgent.AgentIndex);
                     if (ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
                     {
@@ -6907,6 +6912,25 @@ namespace CoopSpectator.Patches
                         canBeNull: true);
                     if (replayedAgent != null && replayedAgent.IsActive())
                     {
+                        BindDeferredClientSetWeaponAmmoDataPayloadsToMaterializedAgent(
+                            createAgent.AgentIndex,
+                            replayedAgent,
+                            forceNativeReplay
+                                ? "forced native deferred CreateAgent replay"
+                                : "deferred CreateAgent replay");
+
+                        if (forceNativeReplay &&
+                            CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(
+                                replayedAgent,
+                                out string forcedReplayEntryId) &&
+                            !string.IsNullOrWhiteSpace(forcedReplayEntryId))
+                        {
+                            CoopMissionSpawnLogic.ObserveClientAuthoritativeMaterializedAgentEntry(
+                                replayedAgent.Index,
+                                forcedReplayEntryId,
+                                "battle-map handoff forced native CreateAgent replay");
+                        }
+
                         RemoveDeferredClientCreateAgentPayload(createAgent.AgentIndex);
                         if (forceNativeReplay || ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
                         {
@@ -12357,6 +12381,54 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static void BindDeferredClientSetWeaponAmmoDataPayloadsToMaterializedAgent(
+            int agentIndex,
+            Agent materializedAgent,
+            string source)
+        {
+            if (agentIndex < 0 || materializedAgent == null)
+                return;
+
+            int boundCount = 0;
+            int staleCount = 0;
+            DateTime nowUtc = DateTime.UtcNow;
+            lock (DeferredClientSetWeaponAmmoDataPayloads)
+            {
+                for (int index = DeferredClientSetWeaponAmmoDataPayloads.Count - 1; index >= 0; index--)
+                {
+                    DeferredClientSetWeaponAmmoDataPayload candidate =
+                        DeferredClientSetWeaponAmmoDataPayloads[index];
+                    if (candidate?.Message?.AgentIndex != agentIndex)
+                        continue;
+
+                    if (candidate.Agent != null && !ReferenceEquals(candidate.Agent, materializedAgent))
+                    {
+                        DeferredClientSetWeaponAmmoDataPayloads.RemoveAt(index);
+                        staleCount++;
+                        continue;
+                    }
+
+                    candidate.Agent = materializedAgent;
+                    candidate.DeferredUtc = nowUtc;
+                    candidate.LastAttemptUtc = DateTime.MinValue;
+                    candidate.Attempts = 0;
+                    candidate.DeferralReason = "materialized-agent-bound:" + (source ?? "unknown");
+                    boundCount++;
+                }
+            }
+
+            if (ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics &&
+                (boundCount > 0 || staleCount > 0))
+            {
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: rebound deferred client SetWeaponAmmoData to materialized agent. " +
+                    "AgentIndex=" + agentIndex +
+                    " Bound=" + boundCount +
+                    " StaleRemoved=" + staleCount +
+                    " Source=" + (source ?? "unknown"));
+            }
+        }
+
         private static void RemoveDeferredClientSetWeaponReloadPhasePayload(
             int agentIndex,
             SetWeaponReloadPhase referenceMessage)
@@ -15651,44 +15723,108 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static void Agent_OnRemoveExactSiegeClientCleanup_Prefix(Agent __instance)
+        public static bool TryReleaseTrackedExactSiegeClientAgentBeforeRemoval(
+            Mission mission,
+            Agent agent,
+            string source,
+            out string diagnostics)
         {
+            diagnostics = "Tracked=False";
+            bool tracked = false;
             try
             {
-                if (__instance == null || !GameNetwork.IsClient)
-                    return;
+                if (mission == null || agent == null || !GameNetwork.IsClient)
+                    return false;
 
-                bool tracked;
-                lock (ExactSiegeClientUseObjectAgentsLock)
+                if (!SiegeMissionObjectIdBridge.IsExactSiegeClientContext(mission))
+                    return false;
+
+                Mission agentMission = agent.Mission;
+                if (agentMission != null && !ReferenceEquals(agentMission, mission))
                 {
-                    tracked = ExactSiegeClientUseObjectAgents.Remove(__instance);
+                    diagnostics = "Tracked=False MissionMismatch=True";
+                    return false;
                 }
 
-                Mission mission = __instance.Mission ?? Mission.Current;
-                if (!tracked || !SiegeMissionObjectIdBridge.IsExactSiegeClientContext(mission))
-                    return;
+                lock (ExactSiegeClientUseObjectAgentsLock)
+                {
+                    tracked = ExactSiegeClientUseObjectAgents.Remove(agent);
+                }
+
+                if (!tracked)
+                    return false;
 
                 bool matched = CoopSiegeMachineDeploymentController.TryReleaseAgentFromSiegeMachineBeforeRemoval(
                     mission,
-                    __instance,
-                    "client-agent-onremove",
-                    out string diagnostics);
+                    agent,
+                    source ?? "client-before-agent-removed",
+                    out string releaseDiagnostics);
+                diagnostics =
+                    "Tracked=True Released=" + matched +
+                    " Detail={" + (releaseDiagnostics ?? string.Empty) + "}";
                 if (matched && ExperimentalFeatures.EnableExactCampaignArmyRuntimeDiagnostics)
                 {
                     ModLogger.Info(
                         "BattleMapSpawnHandoffPatch: released exact siege client agent from siege machine before removal. " +
                         diagnostics);
                 }
+
+                return true;
             }
             catch (Exception ex)
             {
+                diagnostics =
+                    "Tracked=" + tracked +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message;
                 if (ExperimentalFeatures.EnableExactCampaignArmyRuntimeDiagnostics)
                 {
                     ModLogger.Info(
-                        "BattleMapSpawnHandoffPatch: exact siege client Agent.OnRemove cleanup failed: " +
-                        ex.GetType().Name + ":" + ex.Message);
+                        "BattleMapSpawnHandoffPatch: exact siege client pre-removal cleanup failed. " +
+                        diagnostics);
+                }
+
+                return tracked;
+            }
+        }
+
+        public static int ReleaseTrackedExactSiegeClientAgentsBeforeMissionEnd(
+            Mission mission,
+            string source)
+        {
+            if (mission == null || !SiegeMissionObjectIdBridge.IsExactSiegeClientContext(mission))
+                return 0;
+
+            Agent[] missionAgents;
+            lock (ExactSiegeClientUseObjectAgentsLock)
+            {
+                missionAgents = ExactSiegeClientUseObjectAgents
+                    .Where(agent => agent != null && ReferenceEquals(agent.Mission, mission))
+                    .ToArray();
+            }
+
+            int processedCount = 0;
+            for (int i = 0; i < missionAgents.Length; i++)
+            {
+                if (TryReleaseTrackedExactSiegeClientAgentBeforeRemoval(
+                        mission,
+                        missionAgents[i],
+                        source ?? "client-before-mission-end",
+                        out _))
+                {
+                    processedCount++;
                 }
             }
+
+            if (processedCount > 0 && ExperimentalFeatures.EnableExactCampaignArmyRuntimeDiagnostics)
+            {
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: processed tracked exact siege client agents before mission end. " +
+                    "Scene=" + (mission.SceneName ?? "null") +
+                    " Count=" + processedCount +
+                    " Source=" + (source ?? "unknown"));
+            }
+
+            return processedCount;
         }
 
         private static void TryLogExactSiegeClientObjectLinkCleanupFailure(
