@@ -2897,6 +2897,9 @@ namespace CoopSpectator.MissionBehaviors
         private readonly Dictionary<int, ClientMaterializedReinforcementBatchState>
             _clientMaterializedReinforcementBatchesById =
                 new Dictionary<int, ClientMaterializedReinforcementBatchState>();
+        private readonly Dictionary<int, ClientMaterializedReinforcementAgentObservation>
+            _clientMaterializedReinforcementAgentObservationByIndex =
+                new Dictionary<int, ClientMaterializedReinforcementAgentObservation>();
         private int _nextTransmissionId = 1;
         private bool _persistedHostedLocalPeerMarker;
         private DateTime _lastClientBattleSnapshotBootstrapRequestUtc = DateTime.MinValue;
@@ -2941,11 +2944,19 @@ namespace CoopSpectator.MissionBehaviors
             public BattleSideEnum Side;
             public int ExpectedAgentCount;
             public int ExpectedContractCount;
+            public DateTime BeganUtc;
             public bool PreparedAckSent;
             public bool ReadyAckSent;
             public readonly Dictionary<int, ClientMaterializedReinforcementContractState> ContractBySequence =
                 new Dictionary<int, ClientMaterializedReinforcementContractState>();
             public readonly Dictionary<int, string> EntryIdByAgentIndex = new Dictionary<int, string>();
+        }
+
+        private sealed class ClientMaterializedReinforcementAgentObservation
+        {
+            public Mission Mission;
+            public Agent Agent;
+            public DateTime ObservedUtc;
         }
 
         internal static bool TryGetClientBattleSnapshotProgress(out ClientBattleSnapshotProgressInfo progress)
@@ -3610,15 +3621,29 @@ namespace CoopSpectator.MissionBehaviors
                 foreach (KeyValuePair<int, string> binding in state.EntryIdByAgentIndex)
                 {
                     int agentIndex = binding.Key;
-                    Agent agent = Mission.MissionNetworkHelper.GetAgentFromIndex(agentIndex, canBeNull: true);
+                    if (!_clientMaterializedReinforcementAgentObservationByIndex.TryGetValue(
+                            agentIndex,
+                            out ClientMaterializedReinforcementAgentObservation observation) ||
+                        observation == null ||
+                        observation.Agent == null ||
+                        !ReferenceEquals(observation.Mission, Mission) ||
+                        observation.ObservedUtc < state.BeganUtc)
+                    {
+                        allAgentsReady = false;
+                        break;
+                    }
+
+                    Agent agent = observation.Agent;
                     if (agent == null ||
                         !agent.IsActive() ||
-                        !CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(
-                            agentIndex,
-                            agent.Character?.StringId,
-                            state.Side,
-                            out string resolvedEntryId) ||
-                        !string.Equals(resolvedEntryId, binding.Value, StringComparison.OrdinalIgnoreCase))
+                        agent.Index != agentIndex ||
+                        !ReferenceEquals(agent.Mission, Mission) ||
+                        agent.Team == null ||
+                        agent.Team.Side != state.Side ||
+                        !ReferenceEquals(
+                            Mission.MissionNetworkHelper.GetAgentFromIndex(agentIndex, canBeNull: true),
+                            agent) ||
+                        BattleSnapshotRuntimeState.GetEntryState(binding.Value) == null)
                     {
                         allAgentsReady = false;
                         break;
@@ -3647,6 +3672,51 @@ namespace CoopSpectator.MissionBehaviors
                         " Error=" + ex.GetType().Name + ":" + ex.Message);
                 }
             }
+        }
+
+        internal static void ObserveClientMaterializedReinforcementAgent(Agent agent)
+        {
+            if (!GameNetwork.IsClient ||
+                agent == null ||
+                agent.Index < 0 ||
+                !agent.IsActive() ||
+                agent.IsMount ||
+                agent.Team == null ||
+                agent.Team.Side == BattleSideEnum.None)
+            {
+                return;
+            }
+
+            Mission mission = agent.Mission ?? Mission.Current;
+            CoopMissionNetworkBridge bridge = mission?.GetMissionBehavior<CoopMissionNetworkBridge>();
+            if (bridge == null || !ReferenceEquals(bridge.Mission, mission))
+                return;
+
+            bridge.ObserveClientMaterializedReinforcementAgentInstance(agent);
+        }
+
+        private void ObserveClientMaterializedReinforcementAgentInstance(Agent agent)
+        {
+            if (agent == null ||
+                Mission == null ||
+                !ReferenceEquals(agent.Mission, Mission) ||
+                !agent.IsActive() ||
+                agent.IsMount ||
+                agent.Team == null ||
+                agent.Team.Side == BattleSideEnum.None)
+            {
+                return;
+            }
+
+            DateTime observedUtc = DateTime.UtcNow;
+            var observation = new ClientMaterializedReinforcementAgentObservation
+            {
+                Mission = Mission,
+                Agent = agent,
+                ObservedUtc = observedUtc
+            };
+            _clientMaterializedReinforcementAgentObservationByIndex[agent.Index] = observation;
+            TrySendClientMaterializedReinforcementBatchReadyAcks();
         }
 
         protected override void AddRemoveMessageHandlers(GameNetwork.NetworkMessageHandlerRegistererContainer registerer)
@@ -3967,6 +4037,7 @@ namespace CoopSpectator.MissionBehaviors
             _expectedMaterializedAgentEntryPayloadHashByPeer.Clear();
             _serverMaterializedReinforcementBatchesById.Clear();
             _clientMaterializedReinforcementBatchesById.Clear();
+            _clientMaterializedReinforcementAgentObservationByIndex.Clear();
             _sentSiegeMissionObjectMapKeysByPeer.Clear();
             _pendingPayloadsByKey.Clear();
             _clientPayloadAssemblies.Clear();
@@ -11000,7 +11071,8 @@ namespace CoopSpectator.MissionBehaviors
                     BatchId = message.BatchId,
                     Side = message.Side,
                     ExpectedAgentCount = message.ExpectedAgentCount,
-                    ExpectedContractCount = message.ExpectedContractCount
+                    ExpectedContractCount = message.ExpectedContractCount,
+                    BeganUtc = DateTime.UtcNow
                 };
         }
 

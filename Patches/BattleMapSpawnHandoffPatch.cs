@@ -423,6 +423,9 @@ namespace CoopSpectator.Patches
             public long Sequence;
             public SetWeaponReloadPhase Message;
             public Agent ExpectedAgent;
+            public string ExpectedWeaponItemId;
+            public int ExpectedWeaponUsageIndex;
+            public bool HasExpectedWeaponUsageState;
             public DateTime DeferredUtc;
             public DateTime LastAttemptUtc;
             public int Attempts;
@@ -2927,6 +2930,7 @@ namespace CoopSpectator.Patches
             return mission != null &&
                    createAgent != null &&
                    !GameNetwork.IsServer &&
+                   !ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseFullNativeArmySpawnRuntime(mission) &&
                    !createAgent.IsPlayerAgent &&
                    createAgent.Peer == null &&
                    createAgent.MountAgentIndex < 0 &&
@@ -4313,6 +4317,15 @@ namespace CoopSpectator.Patches
                 return;
 
             DateTime nowUtc = DateTime.UtcNow;
+            SetWeaponReloadPhase messageCopy = new SetWeaponReloadPhase(
+                setWeaponReloadPhase.AgentIndex,
+                setWeaponReloadPhase.EquipmentIndex,
+                setWeaponReloadPhase.ReloadPhase);
+            bool hasExpectedWeaponUsageState = TryCaptureDeferredClientWeaponReloadPhaseUsageState(
+                expectedAgent,
+                setWeaponReloadPhase.EquipmentIndex,
+                out string expectedWeaponItemId,
+                out int expectedWeaponUsageIndex);
             lock (DeferredClientSetWeaponReloadPhasePayloads)
             {
                 DeferredClientSetWeaponReloadPhasePayload existingPayload = DeferredClientSetWeaponReloadPhasePayloads
@@ -4321,21 +4334,15 @@ namespace CoopSpectator.Patches
                         candidate.Message.EquipmentIndex == setWeaponReloadPhase.EquipmentIndex);
                 if (existingPayload != null)
                 {
-                    bool agentInstanceChanged =
-                        expectedAgent != null &&
-                        existingPayload.ExpectedAgent != null &&
-                        !ReferenceEquals(existingPayload.ExpectedAgent, expectedAgent);
-                    if (agentInstanceChanged)
-                    {
-                        existingPayload.Sequence = ++_nextDeferredClientSetWeaponReloadPhaseSequence;
-                        existingPayload.DeferredUtc = nowUtc;
-                        existingPayload.LastAttemptUtc = DateTime.MinValue;
-                        existingPayload.Attempts = 0;
-                    }
-
-                    existingPayload.Message = setWeaponReloadPhase;
-                    if (expectedAgent != null)
-                        existingPayload.ExpectedAgent = expectedAgent;
+                    existingPayload.Sequence = ++_nextDeferredClientSetWeaponReloadPhaseSequence;
+                    existingPayload.Message = messageCopy;
+                    existingPayload.ExpectedAgent = expectedAgent;
+                    existingPayload.ExpectedWeaponItemId = expectedWeaponItemId;
+                    existingPayload.ExpectedWeaponUsageIndex = expectedWeaponUsageIndex;
+                    existingPayload.HasExpectedWeaponUsageState = hasExpectedWeaponUsageState;
+                    existingPayload.DeferredUtc = nowUtc;
+                    existingPayload.LastAttemptUtc = DateTime.MinValue;
+                    existingPayload.Attempts = 0;
                     existingPayload.DeferralReason = deferralReason;
                     return;
                 }
@@ -4344,14 +4351,96 @@ namespace CoopSpectator.Patches
                     new DeferredClientSetWeaponReloadPhasePayload
                     {
                         Sequence = ++_nextDeferredClientSetWeaponReloadPhaseSequence,
-                        Message = setWeaponReloadPhase,
+                        Message = messageCopy,
                         ExpectedAgent = expectedAgent,
+                        ExpectedWeaponItemId = expectedWeaponItemId,
+                        ExpectedWeaponUsageIndex = expectedWeaponUsageIndex,
+                        HasExpectedWeaponUsageState = hasExpectedWeaponUsageState,
                         DeferredUtc = nowUtc,
                         LastAttemptUtc = DateTime.MinValue,
                         Attempts = 0,
                         DeferralReason = deferralReason
                     });
             }
+        }
+
+        private static bool TryCaptureDeferredClientWeaponReloadPhaseUsageState(
+            Agent agent,
+            EquipmentIndex equipmentIndex,
+            out string weaponItemId,
+            out int weaponUsageIndex)
+        {
+            weaponItemId = null;
+            weaponUsageIndex = -1;
+            if (agent == null ||
+                agent.Equipment == null ||
+                equipmentIndex < EquipmentIndex.Weapon0 ||
+                equipmentIndex > EquipmentIndex.Weapon3)
+            {
+                return false;
+            }
+
+            try
+            {
+                MissionWeapon missionWeapon = agent.Equipment[equipmentIndex];
+                ItemObject weaponItem = missionWeapon.Item;
+                if (weaponItem == null)
+                    return false;
+
+                weaponItemId = weaponItem.StringId ?? string.Empty;
+                weaponUsageIndex = missionWeapon.CurrentUsageIndex;
+                return true;
+            }
+            catch
+            {
+                weaponItemId = null;
+                weaponUsageIndex = -1;
+                return false;
+            }
+        }
+
+        private static bool DoesDeferredClientWeaponReloadPhaseUsageStateStillMatch(
+            DeferredClientSetWeaponReloadPhasePayload deferredPayload,
+            Agent agent,
+            EquipmentIndex equipmentIndex,
+            out string mismatchReason)
+        {
+            mismatchReason = null;
+            if (deferredPayload == null || !deferredPayload.HasExpectedWeaponUsageState)
+                return true;
+
+            if (!TryCaptureDeferredClientWeaponReloadPhaseUsageState(
+                    agent,
+                    equipmentIndex,
+                    out string currentWeaponItemId,
+                    out int currentWeaponUsageIndex))
+            {
+                mismatchReason = "deferred-weapon-usage-state-unavailable";
+                return false;
+            }
+
+            if (!string.Equals(
+                    deferredPayload.ExpectedWeaponItemId ?? string.Empty,
+                    currentWeaponItemId ?? string.Empty,
+                    StringComparison.Ordinal))
+            {
+                mismatchReason =
+                    "deferred-weapon-item-replaced" +
+                    "|Expected=" + (deferredPayload.ExpectedWeaponItemId ?? "null") +
+                    "|Current=" + (currentWeaponItemId ?? "null");
+                return false;
+            }
+
+            if (deferredPayload.ExpectedWeaponUsageIndex != currentWeaponUsageIndex)
+            {
+                mismatchReason =
+                    "deferred-weapon-usage-changed" +
+                    "|Expected=" + deferredPayload.ExpectedWeaponUsageIndex +
+                    "|Current=" + currentWeaponUsageIndex;
+                return false;
+            }
+
+            return true;
         }
 
         private static void RegisterDeferredClientCreateMissilePayload(
@@ -8347,6 +8436,17 @@ namespace CoopSpectator.Patches
                     continue;
                 }
 
+                if (IsRedundantFullNativeExactSiegeClientWeaponAmmoZeroUpdate(
+                        mission,
+                        agent,
+                        setWeaponAmmoData))
+                {
+                    RemoveDeferredClientSetWeaponAmmoDataPayload(
+                        setWeaponAmmoData.AgentIndex,
+                        setWeaponAmmoData);
+                    continue;
+                }
+
                 if (!IsClientWeaponAmmoDataNativeSafe(
                         mission,
                         agent,
@@ -8411,6 +8511,53 @@ namespace CoopSpectator.Patches
                             " Message=" + ex.GetBaseException().Message);
                     }
                 }
+            }
+        }
+
+        private static bool IsRedundantFullNativeExactSiegeClientWeaponAmmoZeroUpdate(
+            Mission mission,
+            Agent agent,
+            SetWeaponAmmoData setWeaponAmmoData)
+        {
+            if (mission == null ||
+                agent == null ||
+                setWeaponAmmoData == null ||
+                GameNetwork.IsServer ||
+                !ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseFullNativeArmySpawnRuntime(mission) ||
+                !agent.IsActive() ||
+                agent.IsMount ||
+                agent.MissionPeer != null ||
+                IsLocalMissionPeerControlledAgent(agent) ||
+                agent.Character?.IsHero == true ||
+                (agent.Character?.StringId ?? string.Empty).EndsWith("_hero", StringComparison.Ordinal) ||
+                setWeaponAmmoData.Ammo != 0 ||
+                setWeaponAmmoData.AmmoEquipmentIndex != EquipmentIndex.None)
+            {
+                return false;
+            }
+
+            EquipmentIndex weaponEquipmentIndex = setWeaponAmmoData.WeaponEquipmentIndex;
+            if (weaponEquipmentIndex < EquipmentIndex.Weapon0 ||
+                weaponEquipmentIndex > EquipmentIndex.Weapon3 ||
+                agent.Equipment == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                MissionWeapon missionWeapon = agent.Equipment[weaponEquipmentIndex];
+                ItemObject weaponItem = missionWeapon.Item;
+                WeaponComponentData weaponUsage = missionWeapon.CurrentUsageItem;
+                return weaponItem != null &&
+                       weaponUsage != null &&
+                       IsExactSiegeWeaponUsageRangedCompatible(weaponItem, weaponUsage) &&
+                       missionWeapon.Ammo == 0 &&
+                       missionWeapon.AmmoWeapon.Item == null;
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -10585,6 +10732,9 @@ namespace CoopSpectator.Patches
             if (CoopMissionSpawnLogic.ShouldUseFieldMaterializedSiegeReplayRuntime(mission))
                 return false;
 
+            if (ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseFullNativeArmySpawnRuntime(mission))
+                return false;
+
             string entryId = null;
             if (!CoopMissionSpawnLogic.TryResolveAuthoritativeTrackedEntryId(agent, out entryId) &&
                 !CoopMissionSpawnLogic.TryResolveSelectableEntryId(agent, out entryId) &&
@@ -10659,6 +10809,9 @@ namespace CoopSpectator.Patches
             }
 
             if (CoopMissionSpawnLogic.ShouldUseFieldMaterializedSiegeReplayRuntime(mission))
+                return false;
+
+            if (ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseFullNativeArmySpawnRuntime(mission))
                 return false;
 
             EquipmentIndex weaponEquipmentIndex = setWeaponAmmoData.WeaponEquipmentIndex;
@@ -11327,6 +11480,25 @@ namespace CoopSpectator.Patches
                             source);
                     }
 
+                    continue;
+                }
+
+                if (ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseFullNativeArmySpawnRuntime(mission) &&
+                    !DoesDeferredClientWeaponReloadPhaseUsageStateStillMatch(
+                        deferredPayload,
+                        agent,
+                        setWeaponReloadPhase.EquipmentIndex,
+                        out string deferredWeaponUsageMismatchReason))
+                {
+                    RemoveDeferredClientSetWeaponReloadPhasePayload(
+                        setWeaponReloadPhase.AgentIndex,
+                        setWeaponReloadPhase);
+                    LogSuppressedExactSiegeUnsafeWeaponState(
+                        nameof(SetWeaponReloadPhase),
+                        setWeaponReloadPhase.AgentIndex,
+                        setWeaponReloadPhase.EquipmentIndex,
+                        deferredWeaponUsageMismatchReason,
+                        source);
                     continue;
                 }
 
@@ -12436,11 +12608,33 @@ namespace CoopSpectator.Patches
             if (agentIndex < 0)
                 return;
 
+            if (referenceMessage != null)
+            {
+                RemoveDeferredClientSetWeaponReloadPhasePayload(
+                    agentIndex,
+                    referenceMessage.EquipmentIndex);
+                return;
+            }
+
+            lock (DeferredClientSetWeaponReloadPhasePayloads)
+            {
+                DeferredClientSetWeaponReloadPhasePayloads.RemoveAll(candidate =>
+                    candidate?.Message?.AgentIndex == agentIndex);
+            }
+        }
+
+        private static void RemoveDeferredClientSetWeaponReloadPhasePayload(
+            int agentIndex,
+            EquipmentIndex equipmentIndex)
+        {
+            if (agentIndex < 0)
+                return;
+
             lock (DeferredClientSetWeaponReloadPhasePayloads)
             {
                 DeferredClientSetWeaponReloadPhasePayloads.RemoveAll(candidate =>
                     candidate?.Message?.AgentIndex == agentIndex &&
-                    (referenceMessage == null || candidate.Message.EquipmentIndex == referenceMessage.EquipmentIndex));
+                    candidate.Message.EquipmentIndex == equipmentIndex);
             }
         }
 
@@ -12694,6 +12888,7 @@ namespace CoopSpectator.Patches
                     " SnapshotReadinessReason=" + (snapshotReadinessSummary ?? "unknown") +
                     " ExactVisualApplied=" + exactVisualApplied +
                     " TroopExactVisualApplied=" + troopExactVisualApplied);
+                CoopMissionNetworkBridge.ObserveClientMaterializedReinforcementAgent(agent);
                 if (!exactVisualApplied && !troopExactVisualApplied)
                     return;
 
@@ -12949,6 +13144,7 @@ namespace CoopSpectator.Patches
             if (mission == null ||
                 createAgent == null ||
                 GameNetwork.IsServer ||
+                ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseFullNativeArmySpawnRuntime(mission) ||
                 createAgent.IsPlayerAgent ||
                 createAgent.Peer != null ||
                 createAgent.MountAgentIndex >= 0 ||
@@ -16828,6 +17024,17 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                if (IsRedundantFullNativeExactSiegeClientWeaponAmmoZeroUpdate(
+                        mission,
+                        agent,
+                        setWeaponAmmoData))
+                {
+                    RemoveDeferredClientSetWeaponAmmoDataPayload(
+                        setWeaponAmmoData.AgentIndex,
+                        setWeaponAmmoData);
+                    return false;
+                }
+
                 if (!IsClientWeaponAmmoDataNativeSafe(
                         mission,
                         agent,
@@ -17111,6 +17318,25 @@ namespace CoopSpectator.Patches
                         " DeferredReason=" + (exactSiegeUnsafeReason ?? "unknown"),
                         "deferred-exact-native-unsafe",
                         "prefix");
+                    if (ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseFullNativeArmySpawnRuntime(mission) &&
+                        !string.IsNullOrWhiteSpace(exactSiegeUnsafeReason) &&
+                        exactSiegeUnsafeReason.StartsWith(
+                            "mission-weapon-current-usage-not-ranged:",
+                            StringComparison.Ordinal))
+                    {
+                        RemoveDeferredClientSetWeaponReloadPhasePayload(
+                            setWeaponReloadPhase.AgentIndex,
+                            setWeaponReloadPhase.EquipmentIndex);
+                        LogSuppressedExactSiegeUnsafeWeaponState(
+                            nameof(SetWeaponReloadPhase),
+                            setWeaponReloadPhase.AgentIndex,
+                            setWeaponReloadPhase.EquipmentIndex,
+                            "full-native-live-reload-phase-superseded-by-weapon-usage-transition" +
+                            "|Reason=" + exactSiegeUnsafeReason,
+                            "prefix");
+                        return false;
+                    }
+
                     RegisterDeferredClientSetWeaponReloadPhasePayload(
                         setWeaponReloadPhase,
                         "exact-siege-native-weapon-slot-not-ready:" + (exactSiegeUnsafeReason ?? "unknown"),
@@ -17121,6 +17347,13 @@ namespace CoopSpectator.Patches
                         0,
                         "prefix");
                     return false;
+                }
+
+                if (ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseFullNativeArmySpawnRuntime(mission))
+                {
+                    RemoveDeferredClientSetWeaponReloadPhasePayload(
+                        setWeaponReloadPhase.AgentIndex,
+                        setWeaponReloadPhase.EquipmentIndex);
                 }
 
                 if (setWeaponReloadPhase.ReloadPhase == 2 &&
@@ -17389,6 +17622,13 @@ namespace CoopSpectator.Patches
                         weaponUsageIndexChangeMessage,
                         "exact-siege-native-weapon-usage-not-ready:" + (exactSiegeUnsafeReason ?? "unknown"));
                     return false;
+                }
+
+                if (ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseFullNativeArmySpawnRuntime(mission))
+                {
+                    RemoveDeferredClientSetWeaponReloadPhasePayload(
+                        weaponUsageIndexChangeMessage.AgentIndex,
+                        weaponUsageIndexChangeMessage.SlotIndex);
                 }
 
                 return true;
@@ -18482,6 +18722,15 @@ namespace CoopSpectator.Patches
                 return true;
             }
 
+            Mission mission = Mission.Current;
+            if (ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseFullNativeArmySpawnRuntime(mission) &&
+                !IsLocalMissionPeerControlledAgent(agent) &&
+                agent.Character?.IsHero != true &&
+                !(agent.Character?.StringId ?? string.Empty).EndsWith("_hero", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
             int expectedWeaponCount = -1;
             string entryId = null;
             RosterEntryState resolvedEntryState = null;
@@ -18561,6 +18810,9 @@ namespace CoopSpectator.Patches
             {
                 return false;
             }
+
+            if (ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseFullNativeArmySpawnRuntime(mission))
+                return false;
 
             Equipment expectedEquipment = CoopMissionSpawnLogic.BuildSnapshotEquipmentForExactRuntime(
                 entryState,

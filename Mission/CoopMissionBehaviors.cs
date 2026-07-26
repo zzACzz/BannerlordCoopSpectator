@@ -7411,6 +7411,9 @@ namespace CoopSpectator.MissionBehaviors
             try { missionTime = mission.CurrentTime; } catch { }
             try { isExactCampaignBattleScene = SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty); } catch { }
             bool useFieldMaterializedSiegeReplayRuntime = ShouldUseFieldMaterializedSiegeReplayRuntime(mission);
+            bool useFullNativeSiegeArmySpawnRuntime =
+                ExactCampaignSiegeAssaultWithDeploymentRuntime
+                    .ShouldUseFullNativeArmySpawnRuntime(mission);
 
             if (GameNetwork.NetworkPeers != null)
             {
@@ -7438,6 +7441,21 @@ namespace CoopSpectator.MissionBehaviors
                         " FieldMaterializedSiegeStartupGate=ready" +
                         " Phase=" + currentPhase +
                         " SnapshotReadiness={" + fieldMaterializedSnapshotReadiness + "}";
+                    return false;
+                }
+
+                if (useFullNativeSiegeArmySpawnRuntime &&
+                    missionTime >= 1.5f &&
+                    synchronizedPeerCount > 0 &&
+                    IsBattleSnapshotReadyForMaterialization(mission, out string fullNativeSnapshotReadiness))
+                {
+                    reason =
+                        "MissionMode=" + missionMode +
+                        " MissionTime=" + missionTime.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture) +
+                        " SynchronizedPeers=" + synchronizedPeerCount +
+                        " FullNativeSiegeStartupGate=ready" +
+                        " Phase=" + currentPhase +
+                        " SnapshotReadiness={" + fullNativeSnapshotReadiness + "}";
                     return false;
                 }
 
@@ -14343,7 +14361,9 @@ namespace CoopSpectator.MissionBehaviors
         internal static bool ShouldUseFieldMaterializedSiegeReplayRuntime(Mission mission)
         {
             if (!ExperimentalFeatures.EnableSiegeReplayFieldMaterializedArmyRuntime ||
-                mission == null)
+                mission == null ||
+                ExactCampaignSiegeAssaultWithDeploymentRuntime
+                    .ShouldUseFullNativeArmySpawnRuntime(mission))
             {
                 return false;
             }
@@ -14360,7 +14380,8 @@ namespace CoopSpectator.MissionBehaviors
 
         private static bool ShouldUseMaterializedSiegeReinforcements(Mission mission)
         {
-            if (mission == null ||
+            if (!ExperimentalFeatures.EnableMaterializedSiegeReinforcementRuntime ||
+                mission == null ||
                 !GameNetwork.IsServer ||
                 (!ExactCampaignArmyBootstrap.IsSiegeAssaultWithDeploymentActive(mission) &&
                  !ShouldUseFieldMaterializedSiegeReplayRuntime(mission)) ||
@@ -18362,8 +18383,15 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             bool useFieldMaterializedSiegeReplayRuntime = ShouldUseFieldMaterializedSiegeReplayRuntime(mission);
-            if (IsUsingNativeExactCampaignArmyBootstrap(mission) && !useFieldMaterializedSiegeReplayRuntime)
+            bool useFullNativeSiegeArmySpawnRuntime =
+                ExactCampaignSiegeAssaultWithDeploymentRuntime
+                    .ShouldUseFullNativeArmySpawnRuntime(mission);
+            if (IsUsingNativeExactCampaignArmyBootstrap(mission) &&
+                !useFieldMaterializedSiegeReplayRuntime &&
+                !useFullNativeSiegeArmySpawnRuntime)
+            {
                 return;
+            }
 
             Team attackerTeam = mission.Teams?.Attacker;
             Team defenderTeam = mission.Teams?.Defender;
@@ -18371,6 +18399,7 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             if (!useFieldMaterializedSiegeReplayRuntime &&
+                !useFullNativeSiegeArmySpawnRuntime &&
                 ShouldDeferOpenSiegeBattlefieldMaterializationUntilSpawnPath(mission, out string siegeSpawnPathDeferReason))
             {
                 CampaignMapPatchMissionInit.TryRepairLiveMissionContract(
@@ -18389,7 +18418,8 @@ namespace CoopSpectator.MissionBehaviors
                 return;
             }
 
-            if (ShouldDeferExactSceneInitialBattlefieldMaterialization(mission, out string exactSceneMaterializationDeferReason))
+            if (!useFullNativeSiegeArmySpawnRuntime &&
+                ShouldDeferExactSceneInitialBattlefieldMaterialization(mission, out string exactSceneMaterializationDeferReason))
             {
                 DateTime nowUtc = DateTime.UtcNow;
                 if (nowUtc >= _nextExactSceneMaterializationDeferLogUtc)
@@ -18404,7 +18434,8 @@ namespace CoopSpectator.MissionBehaviors
                 return;
             }
 
-            if (ShouldDeferExactScenePostPossessionMaterialization(mission, out string exactScenePostPossessionDeferReason))
+            if (!useFullNativeSiegeArmySpawnRuntime &&
+                ShouldDeferExactScenePostPossessionMaterialization(mission, out string exactScenePostPossessionDeferReason))
             {
                 DateTime nowUtc = DateTime.UtcNow;
                 if (nowUtc >= _nextExactSceneMaterializationDeferLogUtc)
@@ -18442,6 +18473,58 @@ namespace CoopSpectator.MissionBehaviors
                 }
 
                 _nextIncompleteBattleSnapshotLogUtc = DateTime.MinValue;
+            }
+
+            if (useFullNativeSiegeArmySpawnRuntime)
+            {
+                if (!ExactCampaignArmyBootstrap.TryStartNativeInitialSpawners(
+                        mission,
+                        source + " full-native-initial-armies",
+                        out string nativeStartDiagnostics))
+                {
+                    DateTime nowUtc = DateTime.UtcNow;
+                    if (nowUtc >= _nextExactSceneMaterializationDeferLogUtc)
+                    {
+                        _nextExactSceneMaterializationDeferLogUtc = nowUtc.AddSeconds(2);
+                        ModLogger.Info(
+                            "CoopMissionSpawnLogic: waiting to start native initial siege armies. " +
+                            "Diagnostics=" + nativeStartDiagnostics +
+                            " Source=" + (source ?? "unknown"));
+                    }
+
+                    return;
+                }
+
+                if (!ExactCampaignArmyBootstrap.IsInitialSpawnMaterializationComplete(
+                        mission,
+                        out string nativeInitialSpawnDiagnostics))
+                {
+                    DateTime nowUtc = DateTime.UtcNow;
+                    if (nowUtc >= _nextExactSceneMaterializationDeferLogUtc)
+                    {
+                        _nextExactSceneMaterializationDeferLogUtc = nowUtc.AddSeconds(2);
+                        ModLogger.Info(
+                            "CoopMissionSpawnLogic: native initial siege armies are still spawning. " +
+                            "Diagnostics=" + nativeInitialSpawnDiagnostics +
+                            " Source=" + (source ?? "unknown"));
+                    }
+
+                    return;
+                }
+
+                int nativeAttackerCount = CountActiveTeamAgents(mission, BattleSideEnum.Attacker);
+                int nativeDefenderCount = CountActiveTeamAgents(mission, BattleSideEnum.Defender);
+                if (nativeAttackerCount <= 0 || nativeDefenderCount <= 0)
+                    return;
+
+                _hasMaterializedBattlefieldArmies = true;
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: native initial siege armies are ready. " +
+                    "AttackerAgents=" + nativeAttackerCount +
+                    " DefenderAgents=" + nativeDefenderCount +
+                    " InitialSpawn={" + nativeInitialSpawnDiagnostics + "}" +
+                    " Source=" + (source ?? "unknown"));
+                return;
             }
 
             DateTime pulseNowUtc = DateTime.UtcNow;

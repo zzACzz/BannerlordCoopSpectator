@@ -465,6 +465,23 @@ namespace CoopSpectator.Infrastructure
             return true;
         }
 
+        public static bool ShouldUseFullNativeArmySpawnRuntime(Mission mission)
+        {
+            if (!ExperimentalFeatures.EnableExactSiegeFullNativeArmySpawnRuntime ||
+                mission == null)
+            {
+                return false;
+            }
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            return SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(
+                       mission.SceneName ?? string.Empty) &&
+                   IsSiegeAssaultScenario(scenarioContext);
+        }
+
         public static bool TryEnsureMissionBehaviorContract(
             Mission mission,
             BattleScenarioContextMessage scenarioContext,
@@ -2202,8 +2219,11 @@ namespace CoopSpectator.Infrastructure
                     BattleSnapshotRuntimeState.GetScenarioContext() ??
                     BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                     BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+                bool useFullNativeArmySpawnRuntime =
+                    ShouldUseFullNativeArmySpawnRuntime(mission);
                 bool useFieldMaterializedSiegeRuntime =
                     ExperimentalFeatures.EnableSiegeReplayFieldMaterializedArmyRuntime &&
+                    !useFullNativeArmySpawnRuntime &&
                     mission != null &&
                     SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(
                         mission.SceneName ?? string.Empty) &&
@@ -2241,8 +2261,14 @@ namespace CoopSpectator.Infrastructure
                 diagnostics =
                     "SpawnHorses={Defender=" + isSiegeAmbush + " Attacker=False} " +
                     "SinglePhaseInitialized=True " +
-                    "SpawnMode=" + (useFieldMaterializedSiegeRuntime ? "FieldMaterializedDependencyOnlyZeroInitial" : "NativeWithDeploymentFalseFalse") + " " +
+                    "SpawnMode=" +
+                    (useFieldMaterializedSiegeRuntime
+                        ? "FieldMaterializedDependencyOnlyZeroInitial"
+                        : useFullNativeArmySpawnRuntime
+                            ? "FullNativeArmyOwnershipDeferredStart"
+                            : "NativeWithDeploymentFalseFalse") + " " +
                     "FieldMaterializedSiegeRuntime=" + useFieldMaterializedSiegeRuntime +
+                    " FullNativeArmySpawnRuntime=" + useFullNativeArmySpawnRuntime +
                     " " +
                     "LiveDeploymentControllers=" + (shouldMountLiveDeploymentControllers ? "Enabled" : "Suppressed") +
                     " LiveDeploymentControllerPolicy=" + liveDeploymentControllerPolicy +

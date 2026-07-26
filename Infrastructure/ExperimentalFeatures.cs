@@ -83,6 +83,20 @@ namespace CoopSpectator.Infrastructure
         public const bool EnableSiegeReplayFieldMaterializedArmyRuntime = true;
 
         /// <summary>
+        /// Exact external-siege experiment: let the native spawn logic own both the
+        /// initial armies and later reinforcement waves while the coop deployment
+        /// phase keeps ownership of commander selection and formation placement.
+        /// </summary>
+        public const bool EnableExactSiegeFullNativeArmySpawnRuntime = true;
+
+        /// <summary>
+        /// Experimental staged siege reinforcement runtime: preflight exact contracts,
+        /// materialize agents incrementally, and hold the wave until every client is ready.
+        /// Keep disabled while the client materialization corridor is being redesigned.
+        /// </summary>
+        public const bool EnableMaterializedSiegeReinforcementRuntime = false;
+
+        /// <summary>
         /// Exact SiegeMissionWithDeployment scene initializer profile: mirror the
         /// native campaign siege initializer fields that affect scene material
         /// and campaign-mode object setup, while keeping map-patch repair out of

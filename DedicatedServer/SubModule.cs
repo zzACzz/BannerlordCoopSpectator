@@ -229,14 +229,23 @@ namespace CoopSpectator
                 missionState != Mission.State.Initializing;
             bool strictReadyRequired =
                 CoopMissionSpawnLogic.ShouldDedicatedObserverUseStrictNativeReadyGate(mission);
-            bool fieldMaterializedSiegeStartupModeAccepted =
+            bool exactSiegeStartupShellReady =
                 strictReadyRequired &&
                 !modeReady &&
                 missionStateReady &&
                 hasLobbyComponent &&
                 hasTimerComponent &&
-                hasTeamSelectComponent &&
+                hasTeamSelectComponent;
+            bool fieldMaterializedSiegeStartupModeAccepted =
+                exactSiegeStartupShellReady &&
                 CoopMissionSpawnLogic.ShouldUseFieldMaterializedSiegeReplayRuntime(mission);
+            bool fullNativeSiegeStartupModeAccepted =
+                exactSiegeStartupShellReady &&
+                ExactCampaignSiegeAssaultWithDeploymentRuntime
+                    .ShouldUseFullNativeArmySpawnRuntime(mission);
+            bool coopManagedSiegeStartupModeAccepted =
+                fieldMaterializedSiegeStartupModeAccepted ||
+                fullNativeSiegeStartupModeAccepted;
 
             details =
                 "Scene=" + (string.IsNullOrWhiteSpace(sceneName) ? "(empty)" : sceneName) +
@@ -248,14 +257,16 @@ namespace CoopSpectator
                 " HasTimerComponent=" + hasTimerComponent +
                 " HasTeamSelectComponent=" + hasTeamSelectComponent +
                 " StrictReadyRequired=" + strictReadyRequired +
-                " FieldMaterializedSiegeStartupModeAccepted=" + fieldMaterializedSiegeStartupModeAccepted;
+                " FieldMaterializedSiegeStartupModeAccepted=" + fieldMaterializedSiegeStartupModeAccepted +
+                " FullNativeSiegeStartupModeAccepted=" + fullNativeSiegeStartupModeAccepted +
+                " CoopManagedSiegeStartupModeAccepted=" + coopManagedSiegeStartupModeAccepted;
 
             if (string.IsNullOrWhiteSpace(sceneName))
                 return false;
 
             if (strictReadyRequired)
             {
-                if (fieldMaterializedSiegeStartupModeAccepted)
+                if (coopManagedSiegeStartupModeAccepted)
                     return true;
 
                 return modeReady && missionStateReady && hasLobbyComponent && hasTimerComponent && hasTeamSelectComponent;

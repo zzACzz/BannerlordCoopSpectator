@@ -16,6 +16,8 @@ Read in this order when opening a new window:
 
 ## Active Runtime Status
 
+- `docs/MATERIALIZED_SIEGE_REINFORCEMENT_RUNTIME_2026-07-25.md`
+  Заморожена реалізація поетапної матеріалізації облогових підкріплень: поточна архітектура, відомі падіння і зависання, причина повернення до штатних хвиль та умови майбутнього відновлення роботи.
 - `docs/SIEGE_BATTLE_STATUS_AND_PROGRESS_2026-06-11.md`
   Current siege-battle status and progress: subtype routing, exact bootstrap split, LordsHall indoor controller, Blockade guardrails, and the remaining live test matrix.
 - `docs/COOP_BATTLE_STABILIZATION_AND_CONNECTIVITY_HANDOFF_2026-04-18.md`

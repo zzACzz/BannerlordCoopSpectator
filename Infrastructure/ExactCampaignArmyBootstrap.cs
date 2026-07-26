@@ -38,6 +38,7 @@ namespace CoopSpectator.Infrastructure
         private static Team _activePlayerTeam;
         private static Team _activePlayerEnemyTeam;
         private static bool _reinforcementsEnabled;
+        private static Mission _nativeInitialSpawnersStartedMission;
         private static Mission _initialStackSpawnLogicMission;
         private static NativeMissionAgentSpawnLogic _initialStackSpawnLogic;
         private static IMissionTroopSupplier[] _initialStackSuppliers;
@@ -256,6 +257,7 @@ namespace CoopSpectator.Infrastructure
             _activePlayerTeam = null;
             _activePlayerEnemyTeam = null;
             _reinforcementsEnabled = false;
+            _nativeInitialSpawnersStartedMission = null;
             SpawnLogicInitTemporaryNonBattleTeams.Clear();
             if (!ReferenceEquals(_initialStackSpawnLogicMission, mission))
             {
@@ -3648,6 +3650,64 @@ namespace CoopSpectator.Infrastructure
                 " PlayerSide=" + _activePlayerSide +
                 " Source=" + (source ?? "unknown"));
             TryLogRuntimeDiagnostics(mission, source + " gate-change", force: true);
+        }
+
+        public static bool TryStartNativeInitialSpawners(
+            Mission mission,
+            string source,
+            out string diagnostics)
+        {
+            diagnostics = "bootstrap-inactive";
+            if (!IsActive(mission) ||
+                _activeSpawnLogic == null ||
+                _activeMode != ActiveBootstrapMode.SiegeAssaultWithDeployment)
+            {
+                return false;
+            }
+
+            try
+            {
+                if (_activeSpawnLogic.IsInitialSpawnOver)
+                {
+                    _nativeInitialSpawnersStartedMission = mission;
+                    diagnostics =
+                        "already-complete ActiveDefender=" + _activeSpawnLogic.NumberOfActiveDefenderTroops +
+                        " ActiveAttacker=" + _activeSpawnLogic.NumberOfActiveAttackerTroops;
+                    return true;
+                }
+
+                if (ReferenceEquals(_nativeInitialSpawnersStartedMission, mission))
+                {
+                    diagnostics =
+                        "already-started DefenderEnabled=" + _activeSpawnLogic.IsSideSpawnEnabled(BattleSideEnum.Defender) +
+                        " AttackerEnabled=" + _activeSpawnLogic.IsSideSpawnEnabled(BattleSideEnum.Attacker);
+                    return true;
+                }
+
+                _activeSpawnLogic.StartSpawner(BattleSideEnum.Defender);
+                _activeSpawnLogic.StartSpawner(BattleSideEnum.Attacker);
+                _nativeInitialSpawnersStartedMission = mission;
+                diagnostics = "started-both-sides";
+                ModLogger.Info(
+                    "ExactCampaignArmyBootstrap: started native initial army spawners. " +
+                    "Scene=" + (mission.SceneName ?? "null") +
+                    " Mode=" + _activeMode +
+                    " PlayerSide=" + _activePlayerSide +
+                    " Source=" + (source ?? "unknown"));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                diagnostics = "start-failed:" + ex.GetType().Name + ":" + ex.Message;
+                ModLogger.Info(
+                    "ExactCampaignArmyBootstrap: failed to start native initial army spawners. " +
+                    "Scene=" + (mission?.SceneName ?? "null") +
+                    " Mode=" + _activeMode +
+                    " PlayerSide=" + _activePlayerSide +
+                    " Source=" + (source ?? "unknown") +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message);
+                return false;
+            }
         }
 
         public static void TryStopNativeReinforcementSpawnersAtBattleEnd(
