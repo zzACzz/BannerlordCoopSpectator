@@ -143,14 +143,11 @@ namespace CoopSpectator.Patches
         private static PendingLocalCommanderOrderControlFinalization _pendingLocalCommanderOrderControlFinalization;
         private static readonly Dictionary<int, DeferredMountedHeroCreateAgentPayload> DeferredMountedHeroCreateAgentPayloads =
             new Dictionary<int, DeferredMountedHeroCreateAgentPayload>();
-        private static readonly List<DeferredClientCreateAgentPayload> DeferredClientCreateAgentPayloads =
-            new List<DeferredClientCreateAgentPayload>();
-        private static readonly List<DeferredClientAgentSetFormationPayload> DeferredClientAgentSetFormationPayloads =
-            new List<DeferredClientAgentSetFormationPayload>();
-        private static readonly List<DeferredClientSetAgentActionSetPayload> DeferredClientSetAgentActionSetPayloads =
-            new List<DeferredClientSetAgentActionSetPayload>();
-        private static readonly List<DeferredClientSynchronizeAgentEquipmentPayload> DeferredClientSynchronizeAgentEquipmentPayloads =
-            new List<DeferredClientSynchronizeAgentEquipmentPayload>();
+        private static readonly object DeferredClientAgentBootstrapBundleLock = new object();
+        private static readonly Dictionary<int, DeferredClientAgentBootstrapBundle> DeferredClientAgentBootstrapBundles =
+            new Dictionary<int, DeferredClientAgentBootstrapBundle>();
+        private static readonly Queue<DeferredClientAgentBootstrapReplayQueueEntry> DeferredClientAgentBootstrapReplayQueue =
+            new Queue<DeferredClientAgentBootstrapReplayQueueEntry>();
         private static readonly List<DeferredClientSynchronizeMissionObjectPayload> DeferredClientSynchronizeMissionObjectPayloads =
             new List<DeferredClientSynchronizeMissionObjectPayload>();
         private static readonly List<DeferredClientSetMissionObjectVisibilityPayload> DeferredClientSetMissionObjectVisibilityPayloads =
@@ -165,34 +162,14 @@ namespace CoopSpectator.Patches
             new List<DeferredClientSpawnAttachedWeaponOnSpawnedWeaponPayload>();
         private static readonly List<DeferredClientSpawnAttachedWeaponOnCorpsePayload> DeferredClientSpawnAttachedWeaponOnCorpsePayloads =
             new List<DeferredClientSpawnAttachedWeaponOnCorpsePayload>();
-        private static readonly List<DeferredClientAttachWeaponToAgentPayload> DeferredClientAttachWeaponToAgentPayloads =
-            new List<DeferredClientAttachWeaponToAgentPayload>();
-        private static readonly List<DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayload> DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads =
-            new List<DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayload>();
-        private static readonly List<DeferredClientSetWeaponNetworkDataPayload> DeferredClientSetWeaponNetworkDataPayloads =
-            new List<DeferredClientSetWeaponNetworkDataPayload>();
-        private static readonly List<DeferredClientSetWeaponAmmoDataPayload> DeferredClientSetWeaponAmmoDataPayloads =
-            new List<DeferredClientSetWeaponAmmoDataPayload>();
         private static readonly object DeferredClientBootstrapMissionLock = new object();
         private static Mission _deferredClientBootstrapMission;
-        private static readonly List<DeferredClientSetWeaponReloadPhasePayload> DeferredClientSetWeaponReloadPhasePayloads =
-            new List<DeferredClientSetWeaponReloadPhasePayload>();
-        private static readonly List<DeferredClientStartSwitchingWeaponUsageIndexPayload> DeferredClientStartSwitchingWeaponUsageIndexPayloads =
-            new List<DeferredClientStartSwitchingWeaponUsageIndexPayload>();
-        private static readonly List<DeferredClientWeaponUsageIndexChangePayload> DeferredClientWeaponUsageIndexChangePayloads =
-            new List<DeferredClientWeaponUsageIndexChangePayload>();
         private static readonly List<DeferredClientCreateMissilePayload> DeferredClientCreateMissilePayloads =
             new List<DeferredClientCreateMissilePayload>();
         private static readonly List<DeferredClientHandleMissileCollisionReactionPayload> DeferredClientHandleMissileCollisionReactionPayloads =
             new List<DeferredClientHandleMissileCollisionReactionPayload>();
         private static readonly HashSet<int> ClientMissileIndicesAwaitingReuseRemoval =
             new HashSet<int>();
-        private static readonly List<DeferredClientSetWieldedItemIndexPayload> DeferredClientSetWieldedItemIndexPayloads =
-            new List<DeferredClientSetWieldedItemIndexPayload>();
-        private static readonly List<DeferredClientSetAgentHealthPayload> DeferredClientSetAgentHealthPayloads =
-            new List<DeferredClientSetAgentHealthPayload>();
-        private static readonly List<DeferredClientMakeAgentDeadPayload> DeferredClientMakeAgentDeadPayloads =
-            new List<DeferredClientMakeAgentDeadPayload>();
         private static readonly List<DelayedLocalControlledWeaponStatePayload> DelayedLocalControlledWeaponStatePayloads =
             new List<DelayedLocalControlledWeaponStatePayload>();
         private static int _remainingExactSiegeMissionObjectSyncDiagnosticBudget = ExactSiegeMissionObjectSyncDiagnosticBudget;
@@ -584,6 +561,150 @@ namespace CoopSpectator.Patches
             public string DeferralReason;
         }
 
+        private sealed class DeferredClientAgentBootstrapBundle
+        {
+            public int AgentIndex;
+            public long Generation;
+            public bool CreateAgentObserved;
+            public bool IsReplayQueued;
+            public DeferredClientCreateAgentPayload CreateAgent;
+            public DeferredClientAgentSetFormationPayload AgentSetFormation;
+            public DeferredClientSetAgentActionSetPayload SetAgentActionSet;
+            public DeferredClientSynchronizeAgentEquipmentPayload SynchronizeAgentEquipment;
+            public readonly List<DeferredClientAttachWeaponToAgentPayload> AttachWeaponToAgent =
+                new List<DeferredClientAttachWeaponToAgentPayload>();
+            public readonly List<DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayload> AttachWeaponToEquipmentSlot =
+                new List<DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayload>();
+            public readonly List<DeferredClientSetWeaponNetworkDataPayload> WeaponNetworkData =
+                new List<DeferredClientSetWeaponNetworkDataPayload>();
+            public readonly List<DeferredClientSetWeaponAmmoDataPayload> WeaponAmmoData =
+                new List<DeferredClientSetWeaponAmmoDataPayload>();
+            public readonly List<DeferredClientSetWeaponReloadPhasePayload> WeaponReloadPhase =
+                new List<DeferredClientSetWeaponReloadPhasePayload>();
+            public readonly List<DeferredClientStartSwitchingWeaponUsageIndexPayload> StartSwitchingWeaponUsage =
+                new List<DeferredClientStartSwitchingWeaponUsageIndexPayload>();
+            public readonly List<DeferredClientWeaponUsageIndexChangePayload> WeaponUsageIndexChange =
+                new List<DeferredClientWeaponUsageIndexChangePayload>();
+            public readonly List<DeferredClientSetWieldedItemIndexPayload> WieldedItemState =
+                new List<DeferredClientSetWieldedItemIndexPayload>();
+            public DeferredClientSetAgentHealthPayload AgentHealth;
+            public DeferredClientMakeAgentDeadPayload MakeAgentDead;
+
+            public int PendingCount =>
+                (CreateAgent != null ? 1 : 0) +
+                (AgentSetFormation != null ? 1 : 0) +
+                (SetAgentActionSet != null ? 1 : 0) +
+                (SynchronizeAgentEquipment != null ? 1 : 0) +
+                AttachWeaponToAgent.Count +
+                AttachWeaponToEquipmentSlot.Count +
+                WeaponNetworkData.Count +
+                WeaponAmmoData.Count +
+                WeaponReloadPhase.Count +
+                StartSwitchingWeaponUsage.Count +
+                WeaponUsageIndexChange.Count +
+                WieldedItemState.Count +
+                (AgentHealth != null ? 1 : 0) +
+                (MakeAgentDead != null ? 1 : 0);
+
+            public bool HasPendingPayloads => PendingCount > 0;
+
+            public void ResetForCreateAgentGeneration()
+            {
+                Generation++;
+                CreateAgentObserved = false;
+                IsReplayQueued = false;
+                CreateAgent = null;
+                AgentSetFormation = null;
+                SetAgentActionSet = null;
+                SynchronizeAgentEquipment = null;
+                AttachWeaponToAgent.Clear();
+                AttachWeaponToEquipmentSlot.Clear();
+                WeaponNetworkData.Clear();
+                WeaponAmmoData.Clear();
+                WeaponReloadPhase.Clear();
+                StartSwitchingWeaponUsage.Clear();
+                WeaponUsageIndexChange.Clear();
+                WieldedItemState.Clear();
+                AgentHealth = null;
+                MakeAgentDead = null;
+            }
+        }
+
+        private sealed class DeferredClientAgentBootstrapReplayQueueEntry
+        {
+            public DeferredClientAgentBootstrapBundle Bundle;
+            public long Generation;
+        }
+
+        private sealed class DeferredClientAgentBootstrapReplaySnapshot
+        {
+            public readonly List<DeferredClientAgentBootstrapBundle> Bundles =
+                new List<DeferredClientAgentBootstrapBundle>();
+            public readonly List<DeferredClientCreateAgentPayload> CreateAgents =
+                new List<DeferredClientCreateAgentPayload>();
+            public readonly List<DeferredClientAgentSetFormationPayload> AgentSetFormations =
+                new List<DeferredClientAgentSetFormationPayload>();
+            public readonly List<DeferredClientSetAgentActionSetPayload> AgentActionSets =
+                new List<DeferredClientSetAgentActionSetPayload>();
+            public readonly List<DeferredClientSynchronizeAgentEquipmentPayload> AgentEquipment =
+                new List<DeferredClientSynchronizeAgentEquipmentPayload>();
+            public readonly List<DeferredClientAttachWeaponToAgentPayload> AttachWeaponToAgent =
+                new List<DeferredClientAttachWeaponToAgentPayload>();
+            public readonly List<DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayload> AttachWeaponToEquipmentSlot =
+                new List<DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayload>();
+            public readonly List<DeferredClientSetWeaponNetworkDataPayload> WeaponNetworkData =
+                new List<DeferredClientSetWeaponNetworkDataPayload>();
+            public readonly List<DeferredClientSetWeaponAmmoDataPayload> WeaponAmmoData =
+                new List<DeferredClientSetWeaponAmmoDataPayload>();
+            public readonly List<DeferredClientSetWeaponReloadPhasePayload> WeaponReloadPhase =
+                new List<DeferredClientSetWeaponReloadPhasePayload>();
+            public readonly List<DeferredClientStartSwitchingWeaponUsageIndexPayload> StartSwitchingWeaponUsage =
+                new List<DeferredClientStartSwitchingWeaponUsageIndexPayload>();
+            public readonly List<DeferredClientWeaponUsageIndexChangePayload> WeaponUsageIndexChange =
+                new List<DeferredClientWeaponUsageIndexChangePayload>();
+            public readonly List<DeferredClientSetWieldedItemIndexPayload> WieldedItemState =
+                new List<DeferredClientSetWieldedItemIndexPayload>();
+            public readonly List<DeferredClientSetAgentHealthPayload> AgentHealth =
+                new List<DeferredClientSetAgentHealthPayload>();
+            public readonly List<DeferredClientMakeAgentDeadPayload> MakeAgentDead =
+                new List<DeferredClientMakeAgentDeadPayload>();
+        }
+
+        private sealed class DeferredClientAgentBootstrapCounts
+        {
+            public int BundleCount;
+            public int CreateAgent;
+            public int AgentSetFormation;
+            public int SetAgentActionSet;
+            public int SynchronizeAgentEquipment;
+            public int AttachWeaponToAgent;
+            public int AttachWeaponToEquipmentSlot;
+            public int SetWeaponNetworkData;
+            public int SetWeaponAmmoData;
+            public int SetWeaponReloadPhase;
+            public int StartSwitchingWeaponUsageIndex;
+            public int WeaponUsageIndexChange;
+            public int SetWieldedItemIndex;
+            public int SetAgentHealth;
+            public int MakeAgentDead;
+
+            public int Total =>
+                CreateAgent +
+                AgentSetFormation +
+                SetAgentActionSet +
+                SynchronizeAgentEquipment +
+                AttachWeaponToAgent +
+                AttachWeaponToEquipmentSlot +
+                SetWeaponNetworkData +
+                SetWeaponAmmoData +
+                SetWeaponReloadPhase +
+                StartSwitchingWeaponUsageIndex +
+                WeaponUsageIndexChange +
+                SetWieldedItemIndex +
+                SetAgentHealth +
+                MakeAgentDead;
+        }
+
         public static void Apply(Harmony harmony)
         {
             TryApplyPatchStep(nameof(CoopBotsControlledCountPatch), () => CoopBotsControlledCountPatch.Apply(harmony));
@@ -689,22 +810,7 @@ namespace CoopSpectator.Patches
                 {
                     DeferredMountedHeroCreateAgentPayloads.Clear();
                 }
-                lock (DeferredClientCreateAgentPayloads)
-                {
-                    DeferredClientCreateAgentPayloads.Clear();
-                }
-                lock (DeferredClientAgentSetFormationPayloads)
-                {
-                    DeferredClientAgentSetFormationPayloads.Clear();
-                }
-                lock (DeferredClientSetAgentActionSetPayloads)
-                {
-                    DeferredClientSetAgentActionSetPayloads.Clear();
-                }
-                lock (DeferredClientSynchronizeAgentEquipmentPayloads)
-                {
-                    DeferredClientSynchronizeAgentEquipmentPayloads.Clear();
-                }
+                ClearDeferredClientAgentBootstrapBundles();
                 lock (DeferredClientSynchronizeMissionObjectPayloads)
                 {
                     DeferredClientSynchronizeMissionObjectPayloads.Clear();
@@ -733,34 +839,6 @@ namespace CoopSpectator.Patches
                 {
                     DeferredClientSpawnAttachedWeaponOnCorpsePayloads.Clear();
                 }
-                lock (DeferredClientAttachWeaponToAgentPayloads)
-                {
-                    DeferredClientAttachWeaponToAgentPayloads.Clear();
-                }
-                lock (DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads)
-                {
-                    DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads.Clear();
-                }
-                lock (DeferredClientSetWeaponNetworkDataPayloads)
-                {
-                    DeferredClientSetWeaponNetworkDataPayloads.Clear();
-                }
-                lock (DeferredClientSetWeaponAmmoDataPayloads)
-                {
-                    DeferredClientSetWeaponAmmoDataPayloads.Clear();
-                }
-                lock (DeferredClientSetWeaponReloadPhasePayloads)
-                {
-                    DeferredClientSetWeaponReloadPhasePayloads.Clear();
-                }
-                lock (DeferredClientStartSwitchingWeaponUsageIndexPayloads)
-                {
-                    DeferredClientStartSwitchingWeaponUsageIndexPayloads.Clear();
-                }
-                lock (DeferredClientWeaponUsageIndexChangePayloads)
-                {
-                    DeferredClientWeaponUsageIndexChangePayloads.Clear();
-                }
                 lock (DeferredClientCreateMissilePayloads)
                 {
                     DeferredClientCreateMissilePayloads.Clear();
@@ -772,18 +850,6 @@ namespace CoopSpectator.Patches
                 lock (ClientMissileIndicesAwaitingReuseRemoval)
                 {
                     ClientMissileIndicesAwaitingReuseRemoval.Clear();
-                }
-                lock (DeferredClientSetWieldedItemIndexPayloads)
-                {
-                    DeferredClientSetWieldedItemIndexPayloads.Clear();
-                }
-                lock (DeferredClientSetAgentHealthPayloads)
-                {
-                    DeferredClientSetAgentHealthPayloads.Clear();
-                }
-                lock (DeferredClientMakeAgentDeadPayloads)
-                {
-                    DeferredClientMakeAgentDeadPayloads.Clear();
                 }
                 lock (DelayedLocalControlledWeaponStatePayloads)
                 {
@@ -2914,6 +2980,223 @@ namespace CoopSpectator.Patches
             return shouldRun;
         }
 
+        private static DeferredClientAgentBootstrapBundle GetOrCreateDeferredClientAgentBootstrapBundleNoLock(
+            int agentIndex)
+        {
+            if (!DeferredClientAgentBootstrapBundles.TryGetValue(
+                    agentIndex,
+                    out DeferredClientAgentBootstrapBundle bundle) ||
+                bundle == null)
+            {
+                bundle = new DeferredClientAgentBootstrapBundle
+                {
+                    AgentIndex = agentIndex,
+                    Generation = 1
+                };
+                DeferredClientAgentBootstrapBundles[agentIndex] = bundle;
+            }
+
+            return bundle;
+        }
+
+        private static void ScheduleDeferredClientAgentBootstrapBundleNoLock(
+            DeferredClientAgentBootstrapBundle bundle)
+        {
+            if (bundle == null || bundle.IsReplayQueued)
+                return;
+
+            bundle.IsReplayQueued = true;
+            DeferredClientAgentBootstrapReplayQueue.Enqueue(
+                new DeferredClientAgentBootstrapReplayQueueEntry
+                {
+                    Bundle = bundle,
+                    Generation = bundle.Generation
+                });
+        }
+
+        private static void RemoveDeferredClientAgentBootstrapBundleIfEmptyNoLock(
+            DeferredClientAgentBootstrapBundle bundle)
+        {
+            if (bundle == null || bundle.HasPendingPayloads)
+                return;
+
+            if (DeferredClientAgentBootstrapBundles.TryGetValue(
+                    bundle.AgentIndex,
+                    out DeferredClientAgentBootstrapBundle currentBundle) &&
+                ReferenceEquals(currentBundle, bundle))
+            {
+                DeferredClientAgentBootstrapBundles.Remove(bundle.AgentIndex);
+                bundle.IsReplayQueued = false;
+            }
+        }
+
+        private static DeferredClientAgentBootstrapReplaySnapshot DequeueDeferredClientAgentBootstrapReplaySnapshot()
+        {
+            var snapshot = new DeferredClientAgentBootstrapReplaySnapshot();
+            lock (DeferredClientAgentBootstrapBundleLock)
+            {
+                int scheduledCount = DeferredClientAgentBootstrapReplayQueue.Count;
+                for (int index = 0; index < scheduledCount; index++)
+                {
+                    DeferredClientAgentBootstrapReplayQueueEntry queueEntry =
+                        DeferredClientAgentBootstrapReplayQueue.Dequeue();
+                    DeferredClientAgentBootstrapBundle bundle = queueEntry?.Bundle;
+                    if (bundle == null || queueEntry.Generation != bundle.Generation)
+                        continue;
+
+                    bundle.IsReplayQueued = false;
+                    if (!DeferredClientAgentBootstrapBundles.TryGetValue(
+                            bundle.AgentIndex,
+                            out DeferredClientAgentBootstrapBundle currentBundle) ||
+                        !ReferenceEquals(currentBundle, bundle) ||
+                        !bundle.HasPendingPayloads)
+                    {
+                        continue;
+                    }
+
+                    snapshot.Bundles.Add(bundle);
+                    if (bundle.CreateAgent != null)
+                        snapshot.CreateAgents.Add(bundle.CreateAgent);
+                    if (bundle.AgentSetFormation != null)
+                        snapshot.AgentSetFormations.Add(bundle.AgentSetFormation);
+                    if (bundle.SetAgentActionSet != null)
+                        snapshot.AgentActionSets.Add(bundle.SetAgentActionSet);
+                    if (bundle.SynchronizeAgentEquipment != null)
+                        snapshot.AgentEquipment.Add(bundle.SynchronizeAgentEquipment);
+                    snapshot.AttachWeaponToAgent.AddRange(bundle.AttachWeaponToAgent);
+                    snapshot.AttachWeaponToEquipmentSlot.AddRange(bundle.AttachWeaponToEquipmentSlot);
+                    snapshot.WeaponNetworkData.AddRange(bundle.WeaponNetworkData);
+                    snapshot.WeaponAmmoData.AddRange(bundle.WeaponAmmoData);
+                    snapshot.WeaponReloadPhase.AddRange(bundle.WeaponReloadPhase);
+                    snapshot.StartSwitchingWeaponUsage.AddRange(bundle.StartSwitchingWeaponUsage);
+                    snapshot.WeaponUsageIndexChange.AddRange(bundle.WeaponUsageIndexChange);
+                    snapshot.WieldedItemState.AddRange(bundle.WieldedItemState);
+                    if (bundle.AgentHealth != null)
+                        snapshot.AgentHealth.Add(bundle.AgentHealth);
+                    if (bundle.MakeAgentDead != null)
+                        snapshot.MakeAgentDead.Add(bundle.MakeAgentDead);
+                }
+            }
+
+            snapshot.CreateAgents.Sort((left, right) => left.Sequence.CompareTo(right.Sequence));
+            snapshot.AgentSetFormations.Sort((left, right) => left.Sequence.CompareTo(right.Sequence));
+            snapshot.AgentActionSets.Sort((left, right) => left.Sequence.CompareTo(right.Sequence));
+            snapshot.AgentEquipment.Sort((left, right) => left.Sequence.CompareTo(right.Sequence));
+            snapshot.AttachWeaponToAgent.Sort((left, right) => left.Sequence.CompareTo(right.Sequence));
+            snapshot.AttachWeaponToEquipmentSlot.Sort((left, right) => left.Sequence.CompareTo(right.Sequence));
+            snapshot.WeaponNetworkData.Sort((left, right) => left.Sequence.CompareTo(right.Sequence));
+            snapshot.WeaponAmmoData.Sort((left, right) => left.Sequence.CompareTo(right.Sequence));
+            snapshot.WeaponReloadPhase.Sort((left, right) => left.Sequence.CompareTo(right.Sequence));
+            snapshot.StartSwitchingWeaponUsage.Sort((left, right) => left.Sequence.CompareTo(right.Sequence));
+            snapshot.WeaponUsageIndexChange.Sort((left, right) => left.Sequence.CompareTo(right.Sequence));
+            snapshot.WieldedItemState.Sort((left, right) => left.Sequence.CompareTo(right.Sequence));
+            snapshot.AgentHealth.Sort((left, right) => left.Sequence.CompareTo(right.Sequence));
+            snapshot.MakeAgentDead.Sort((left, right) => left.Sequence.CompareTo(right.Sequence));
+            return snapshot;
+        }
+
+        private static void RescheduleDeferredClientAgentBootstrapReplaySnapshot(
+            DeferredClientAgentBootstrapReplaySnapshot snapshot)
+        {
+            if (snapshot == null || snapshot.Bundles.Count <= 0)
+                return;
+
+            lock (DeferredClientAgentBootstrapBundleLock)
+            {
+                foreach (DeferredClientAgentBootstrapBundle bundle in snapshot.Bundles)
+                {
+                    if (bundle == null ||
+                        !DeferredClientAgentBootstrapBundles.TryGetValue(
+                            bundle.AgentIndex,
+                            out DeferredClientAgentBootstrapBundle currentBundle) ||
+                        !ReferenceEquals(currentBundle, bundle))
+                    {
+                        continue;
+                    }
+
+                    if (bundle.HasPendingPayloads)
+                        ScheduleDeferredClientAgentBootstrapBundleNoLock(bundle);
+                    else
+                        RemoveDeferredClientAgentBootstrapBundleIfEmptyNoLock(bundle);
+                }
+            }
+        }
+
+        private static void ClearDeferredClientAgentBootstrapBundles()
+        {
+            lock (DeferredClientAgentBootstrapBundleLock)
+            {
+                DeferredClientAgentBootstrapBundles.Clear();
+                DeferredClientAgentBootstrapReplayQueue.Clear();
+            }
+        }
+
+        private static DeferredClientAgentBootstrapCounts GetDeferredClientAgentBootstrapCounts()
+        {
+            DeferredClientAgentBootstrapCounts counts = new DeferredClientAgentBootstrapCounts();
+            lock (DeferredClientAgentBootstrapBundleLock)
+            {
+                foreach (DeferredClientAgentBootstrapBundle bundle in DeferredClientAgentBootstrapBundles.Values)
+                {
+                    if (bundle == null || !bundle.HasPendingPayloads)
+                        continue;
+
+                    counts.BundleCount++;
+                    counts.CreateAgent += bundle.CreateAgent != null ? 1 : 0;
+                    counts.AgentSetFormation += bundle.AgentSetFormation != null ? 1 : 0;
+                    counts.SetAgentActionSet += bundle.SetAgentActionSet != null ? 1 : 0;
+                    counts.SynchronizeAgentEquipment += bundle.SynchronizeAgentEquipment != null ? 1 : 0;
+                    counts.AttachWeaponToAgent += bundle.AttachWeaponToAgent.Count;
+                    counts.AttachWeaponToEquipmentSlot += bundle.AttachWeaponToEquipmentSlot.Count;
+                    counts.SetWeaponNetworkData += bundle.WeaponNetworkData.Count;
+                    counts.SetWeaponAmmoData += bundle.WeaponAmmoData.Count;
+                    counts.SetWeaponReloadPhase += bundle.WeaponReloadPhase.Count;
+                    counts.StartSwitchingWeaponUsageIndex += bundle.StartSwitchingWeaponUsage.Count;
+                    counts.WeaponUsageIndexChange += bundle.WeaponUsageIndexChange.Count;
+                    counts.SetWieldedItemIndex += bundle.WieldedItemState.Count;
+                    counts.SetAgentHealth += bundle.AgentHealth != null ? 1 : 0;
+                    counts.MakeAgentDead += bundle.MakeAgentDead != null ? 1 : 0;
+                }
+            }
+
+            return counts;
+        }
+
+        private static bool IsCurrentDeferredClientAgentBootstrapPayload(
+            int agentIndex,
+            object payload)
+        {
+            if (agentIndex < 0 || payload == null)
+                return false;
+
+            lock (DeferredClientAgentBootstrapBundleLock)
+            {
+                if (!DeferredClientAgentBootstrapBundles.TryGetValue(
+                        agentIndex,
+                        out DeferredClientAgentBootstrapBundle bundle) ||
+                    bundle == null)
+                {
+                    return false;
+                }
+
+                return
+                    ReferenceEquals(bundle.CreateAgent, payload) ||
+                    ReferenceEquals(bundle.AgentSetFormation, payload) ||
+                    ReferenceEquals(bundle.SetAgentActionSet, payload) ||
+                    ReferenceEquals(bundle.SynchronizeAgentEquipment, payload) ||
+                    bundle.AttachWeaponToAgent.Any(candidate => ReferenceEquals(candidate, payload)) ||
+                    bundle.AttachWeaponToEquipmentSlot.Any(candidate => ReferenceEquals(candidate, payload)) ||
+                    bundle.WeaponNetworkData.Any(candidate => ReferenceEquals(candidate, payload)) ||
+                    bundle.WeaponAmmoData.Any(candidate => ReferenceEquals(candidate, payload)) ||
+                    bundle.WeaponReloadPhase.Any(candidate => ReferenceEquals(candidate, payload)) ||
+                    bundle.StartSwitchingWeaponUsage.Any(candidate => ReferenceEquals(candidate, payload)) ||
+                    bundle.WeaponUsageIndexChange.Any(candidate => ReferenceEquals(candidate, payload)) ||
+                    bundle.WieldedItemState.Any(candidate => ReferenceEquals(candidate, payload)) ||
+                    ReferenceEquals(bundle.AgentHealth, payload) ||
+                    ReferenceEquals(bundle.MakeAgentDead, payload);
+            }
+        }
+
         private static bool ShouldUseInitialSallyOutCreateAgentPacing(
             Mission mission,
             out string reason)
@@ -2967,12 +3250,15 @@ namespace CoopSpectator.Patches
             }
 
             DeferredClientCreateAgentPayload deferredMountPayload;
-            lock (DeferredClientCreateAgentPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                deferredMountPayload = DeferredClientCreateAgentPayloads.FirstOrDefault(
-                    candidate =>
-                        candidate?.Message?.AgentIndex == mountAgentIndex &&
-                        candidate.UseSallyOutNativeStartupPacing);
+                deferredMountPayload =
+                    DeferredClientAgentBootstrapBundles.TryGetValue(
+                        mountAgentIndex,
+                        out DeferredClientAgentBootstrapBundle bundle) &&
+                    bundle?.CreateAgent?.UseSallyOutNativeStartupPacing == true
+                        ? bundle.CreateAgent
+                        : null;
             }
 
             if (deferredMountPayload?.Message == null)
@@ -3139,81 +3425,20 @@ namespace CoopSpectator.Patches
             if (agentIndex < 0)
                 return false;
 
-            lock (DeferredClientAgentSetFormationPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                if (DeferredClientAgentSetFormationPayloads.Any(candidate => candidate?.Message?.AgentIndex == agentIndex))
+                if (DeferredClientAgentBootstrapBundles.TryGetValue(
+                        agentIndex,
+                        out DeferredClientAgentBootstrapBundle bundle) &&
+                    bundle?.HasPendingPayloads == true)
+                {
                     return true;
-            }
-
-            lock (DeferredClientSetAgentActionSetPayloads)
-            {
-                if (DeferredClientSetAgentActionSetPayloads.Any(candidate => candidate?.Message?.AgentIndex == agentIndex))
-                    return true;
-            }
-
-            lock (DeferredClientSynchronizeAgentEquipmentPayloads)
-            {
-                if (DeferredClientSynchronizeAgentEquipmentPayloads.Any(candidate => candidate?.Message?.AgentIndex == agentIndex))
-                    return true;
-            }
-
-            lock (DeferredClientAttachWeaponToAgentPayloads)
-            {
-                if (DeferredClientAttachWeaponToAgentPayloads.Any(candidate => candidate?.Message?.AgentIndex == agentIndex))
-                    return true;
-            }
-
-            lock (DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads)
-            {
-                if (DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads.Any(candidate => candidate?.Message?.AgentIndex == agentIndex))
-                    return true;
-            }
-
-            lock (DeferredClientSetWeaponNetworkDataPayloads)
-            {
-                if (DeferredClientSetWeaponNetworkDataPayloads.Any(candidate => candidate?.Message?.AgentIndex == agentIndex))
-                    return true;
-            }
-
-            lock (DeferredClientSetWeaponAmmoDataPayloads)
-            {
-                if (DeferredClientSetWeaponAmmoDataPayloads.Any(candidate => candidate?.Message?.AgentIndex == agentIndex))
-                    return true;
-            }
-
-            lock (DeferredClientSetWeaponReloadPhasePayloads)
-            {
-                if (DeferredClientSetWeaponReloadPhasePayloads.Any(candidate => candidate?.Message?.AgentIndex == agentIndex))
-                    return true;
-            }
-
-            lock (DeferredClientStartSwitchingWeaponUsageIndexPayloads)
-            {
-                if (DeferredClientStartSwitchingWeaponUsageIndexPayloads.Any(candidate => candidate?.Message?.AgentIndex == agentIndex))
-                    return true;
-            }
-
-            lock (DeferredClientWeaponUsageIndexChangePayloads)
-            {
-                if (DeferredClientWeaponUsageIndexChangePayloads.Any(candidate => candidate?.Message?.AgentIndex == agentIndex))
-                    return true;
+                }
             }
 
             lock (DeferredClientCreateMissilePayloads)
             {
                 if (DeferredClientCreateMissilePayloads.Any(candidate => candidate?.Message?.AgentIndex == agentIndex))
-                    return true;
-            }
-
-            lock (DeferredClientSetWieldedItemIndexPayloads)
-            {
-                if (DeferredClientSetWieldedItemIndexPayloads.Any(candidate => candidate?.Message?.AgentIndex == agentIndex))
-                    return true;
-            }
-
-            lock (DeferredClientMakeAgentDeadPayloads)
-            {
-                if (DeferredClientMakeAgentDeadPayloads.Any(candidate => candidate?.Message?.AgentIndex == agentIndex))
                     return true;
             }
 
@@ -3252,41 +3477,21 @@ namespace CoopSpectator.Patches
                     removedCount++;
             }
 
-            removedCount += RemoveDeferredAgentPayloads(
-                DeferredClientCreateAgentPayloads,
-                payload => payload?.Message?.AgentIndex == agentIndex);
-            removedCount += RemoveDeferredAgentPayloads(
-                DeferredClientAgentSetFormationPayloads,
-                payload => payload?.Message?.AgentIndex == agentIndex);
-            removedCount += RemoveDeferredAgentPayloads(
-                DeferredClientSetAgentActionSetPayloads,
-                payload => payload?.Message?.AgentIndex == agentIndex);
-            removedCount += RemoveDeferredAgentPayloads(
-                DeferredClientSynchronizeAgentEquipmentPayloads,
-                payload => payload?.Message?.AgentIndex == agentIndex);
+            lock (DeferredClientAgentBootstrapBundleLock)
+            {
+                if (DeferredClientAgentBootstrapBundles.TryGetValue(
+                        agentIndex,
+                        out DeferredClientAgentBootstrapBundle bundle) &&
+                    bundle != null)
+                {
+                    removedCount += bundle.PendingCount;
+                    DeferredClientAgentBootstrapBundles.Remove(agentIndex);
+                    bundle.IsReplayQueued = false;
+                }
+            }
+
             removedCount += RemoveDeferredAgentPayloads(
                 DeferredClientSpawnAttachedWeaponOnCorpsePayloads,
-                payload => payload?.Message?.AgentIndex == agentIndex);
-            removedCount += RemoveDeferredAgentPayloads(
-                DeferredClientAttachWeaponToAgentPayloads,
-                payload => payload?.Message?.AgentIndex == agentIndex);
-            removedCount += RemoveDeferredAgentPayloads(
-                DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads,
-                payload => payload?.Message?.AgentIndex == agentIndex);
-            removedCount += RemoveDeferredAgentPayloads(
-                DeferredClientSetWeaponNetworkDataPayloads,
-                payload => payload?.Message?.AgentIndex == agentIndex);
-            removedCount += RemoveDeferredAgentPayloads(
-                DeferredClientSetWeaponAmmoDataPayloads,
-                payload => payload?.Message?.AgentIndex == agentIndex);
-            removedCount += RemoveDeferredAgentPayloads(
-                DeferredClientSetWeaponReloadPhasePayloads,
-                payload => payload?.Message?.AgentIndex == agentIndex);
-            removedCount += RemoveDeferredAgentPayloads(
-                DeferredClientStartSwitchingWeaponUsageIndexPayloads,
-                payload => payload?.Message?.AgentIndex == agentIndex);
-            removedCount += RemoveDeferredAgentPayloads(
-                DeferredClientWeaponUsageIndexChangePayloads,
                 payload => payload?.Message?.AgentIndex == agentIndex);
             removedCount += RemoveDeferredAgentPayloads(
                 DeferredClientCreateMissilePayloads,
@@ -3297,16 +3502,6 @@ namespace CoopSpectator.Patches
                     payload?.Message != null &&
                     (payload.Message.AttackerAgentIndex == agentIndex ||
                      payload.Message.AttachedAgentIndex == agentIndex));
-            removedCount += RemoveDeferredAgentPayloads(
-                DeferredClientSetWieldedItemIndexPayloads,
-                payload => payload?.Message?.AgentIndex == agentIndex);
-            removedCount += RemoveDeferredAgentPayloads(
-                DeferredClientSetAgentHealthPayloads,
-                payload => payload?.Message?.AgentIndex == agentIndex);
-            removedCount += RemoveDeferredAgentPayloads(
-                DeferredClientMakeAgentDeadPayloads,
-                payload => payload?.Message?.AgentIndex == agentIndex);
-
             if (removedCount > 0 &&
                 ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
             {
@@ -3336,9 +3531,7 @@ namespace CoopSpectator.Patches
         internal static int GetDeferredClientRecoveryPendingCount(out string summary)
         {
             int mountedHeroCreateAgentCount = DeferredMountedHeroCreateAgentPayloads.Count;
-            int createAgentCount = DeferredClientCreateAgentPayloads.Count;
-            int setAgentActionSetCount = DeferredClientSetAgentActionSetPayloads.Count;
-            int synchronizeAgentEquipmentCount = DeferredClientSynchronizeAgentEquipmentPayloads.Count;
+            DeferredClientAgentBootstrapCounts agentCounts = GetDeferredClientAgentBootstrapCounts();
             int synchronizeMissionObjectCount = DeferredClientSynchronizeMissionObjectPayloads.Count;
             int setMissionObjectVisibilityCount = DeferredClientSetMissionObjectVisibilityPayloads.Count;
             int exactSiegeMissionObjectMessageCount = DeferredClientExactSiegeMissionObjectMessagePayloads.Count;
@@ -3346,24 +3539,12 @@ namespace CoopSpectator.Patches
             int attachWeaponToSpawnedWeaponCount = DeferredClientAttachWeaponToSpawnedWeaponPayloads.Count;
             int spawnAttachedWeaponOnSpawnedWeaponCount = DeferredClientSpawnAttachedWeaponOnSpawnedWeaponPayloads.Count;
             int spawnAttachedWeaponOnCorpseCount = DeferredClientSpawnAttachedWeaponOnCorpsePayloads.Count;
-            int attachWeaponToAgentCount = DeferredClientAttachWeaponToAgentPayloads.Count;
-            int attachWeaponToWeaponInAgentEquipmentSlotCount = DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads.Count;
-            int setWeaponNetworkDataCount = DeferredClientSetWeaponNetworkDataPayloads.Count;
-            int setWeaponAmmoDataCount = DeferredClientSetWeaponAmmoDataPayloads.Count;
-            int setWeaponReloadPhaseCount = DeferredClientSetWeaponReloadPhasePayloads.Count;
-            int startSwitchingWeaponUsageIndexCount = DeferredClientStartSwitchingWeaponUsageIndexPayloads.Count;
-            int weaponUsageIndexChangeCount = DeferredClientWeaponUsageIndexChangePayloads.Count;
             int createMissileCount = DeferredClientCreateMissilePayloads.Count;
             int handleMissileCollisionReactionCount = DeferredClientHandleMissileCollisionReactionPayloads.Count;
-            int setWieldedItemIndexCount = DeferredClientSetWieldedItemIndexPayloads.Count;
-            int setAgentHealthCount = DeferredClientSetAgentHealthPayloads.Count;
-            int makeAgentDeadCount = DeferredClientMakeAgentDeadPayloads.Count;
 
             int totalPending =
                 mountedHeroCreateAgentCount +
-                createAgentCount +
-                setAgentActionSetCount +
-                synchronizeAgentEquipmentCount +
+                agentCounts.Total +
                 synchronizeMissionObjectCount +
                 setMissionObjectVisibilityCount +
                 exactSiegeMissionObjectMessageCount +
@@ -3371,25 +3552,17 @@ namespace CoopSpectator.Patches
                 attachWeaponToSpawnedWeaponCount +
                 spawnAttachedWeaponOnSpawnedWeaponCount +
                 spawnAttachedWeaponOnCorpseCount +
-                attachWeaponToAgentCount +
-                attachWeaponToWeaponInAgentEquipmentSlotCount +
-                setWeaponNetworkDataCount +
-                setWeaponAmmoDataCount +
-                setWeaponReloadPhaseCount +
-                startSwitchingWeaponUsageIndexCount +
-                weaponUsageIndexChangeCount +
                 createMissileCount +
-                handleMissileCollisionReactionCount +
-                setWieldedItemIndexCount +
-                setAgentHealthCount +
-                makeAgentDeadCount;
+                handleMissileCollisionReactionCount;
 
             summary =
                 "TotalPending=" + totalPending +
                 " MountedHeroCreateAgent=" + mountedHeroCreateAgentCount +
-                " CreateAgent=" + createAgentCount +
-                " SetAgentActionSet=" + setAgentActionSetCount +
-                " SynchronizeAgentEquipment=" + synchronizeAgentEquipmentCount +
+                " AgentBundles=" + agentCounts.BundleCount +
+                " CreateAgent=" + agentCounts.CreateAgent +
+                " AgentSetFormation=" + agentCounts.AgentSetFormation +
+                " SetAgentActionSet=" + agentCounts.SetAgentActionSet +
+                " SynchronizeAgentEquipment=" + agentCounts.SynchronizeAgentEquipment +
                 " SynchronizeMissionObject=" + synchronizeMissionObjectCount +
                 " SetMissionObjectVisibility=" + setMissionObjectVisibilityCount +
                 " ExactSiegeMissionObjectMessages=" + exactSiegeMissionObjectMessageCount +
@@ -3397,70 +3570,46 @@ namespace CoopSpectator.Patches
                 " AttachWeaponToSpawnedWeapon=" + attachWeaponToSpawnedWeaponCount +
                 " SpawnAttachedWeaponOnSpawnedWeapon=" + spawnAttachedWeaponOnSpawnedWeaponCount +
                 " SpawnAttachedWeaponOnCorpse=" + spawnAttachedWeaponOnCorpseCount +
-                " AttachWeaponToAgent=" + attachWeaponToAgentCount +
-                " AttachWeaponToWeaponInAgentEquipmentSlot=" + attachWeaponToWeaponInAgentEquipmentSlotCount +
-                " SetWeaponNetworkData=" + setWeaponNetworkDataCount +
-                " SetWeaponAmmoData=" + setWeaponAmmoDataCount +
-                " SetWeaponReloadPhase=" + setWeaponReloadPhaseCount +
-                " StartSwitchingWeaponUsageIndex=" + startSwitchingWeaponUsageIndexCount +
-                " WeaponUsageIndexChange=" + weaponUsageIndexChangeCount +
+                " AttachWeaponToAgent=" + agentCounts.AttachWeaponToAgent +
+                " AttachWeaponToWeaponInAgentEquipmentSlot=" + agentCounts.AttachWeaponToEquipmentSlot +
+                " SetWeaponNetworkData=" + agentCounts.SetWeaponNetworkData +
+                " SetWeaponAmmoData=" + agentCounts.SetWeaponAmmoData +
+                " SetWeaponReloadPhase=" + agentCounts.SetWeaponReloadPhase +
+                " StartSwitchingWeaponUsageIndex=" + agentCounts.StartSwitchingWeaponUsageIndex +
+                " WeaponUsageIndexChange=" + agentCounts.WeaponUsageIndexChange +
                 " CreateMissile=" + createMissileCount +
                 " HandleMissileCollisionReaction=" + handleMissileCollisionReactionCount +
-                " SetWieldedItemIndex=" + setWieldedItemIndexCount +
-                " SetAgentHealth=" + setAgentHealthCount +
-                " MakeAgentDead=" + makeAgentDeadCount;
+                " SetWieldedItemIndex=" + agentCounts.SetWieldedItemIndex +
+                " SetAgentHealth=" + agentCounts.SetAgentHealth +
+                " MakeAgentDead=" + agentCounts.MakeAgentDead;
             return totalPending;
         }
 
         internal static int GetDeferredClientAgentMaterializationPendingCount(out string summary)
         {
             int mountedHeroCreateAgentCount = DeferredMountedHeroCreateAgentPayloads.Count;
-            int createAgentCount = DeferredClientCreateAgentPayloads.Count;
-            int setAgentActionSetCount = DeferredClientSetAgentActionSetPayloads.Count;
-            int synchronizeAgentEquipmentCount = DeferredClientSynchronizeAgentEquipmentPayloads.Count;
-            int attachWeaponToAgentCount = DeferredClientAttachWeaponToAgentPayloads.Count;
-            int attachWeaponToWeaponInAgentEquipmentSlotCount = DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads.Count;
-            int setWeaponNetworkDataCount = DeferredClientSetWeaponNetworkDataPayloads.Count;
-            int setWeaponAmmoDataCount = DeferredClientSetWeaponAmmoDataPayloads.Count;
-            int setWeaponReloadPhaseCount = DeferredClientSetWeaponReloadPhasePayloads.Count;
-            int startSwitchingWeaponUsageIndexCount = DeferredClientStartSwitchingWeaponUsageIndexPayloads.Count;
-            int weaponUsageIndexChangeCount = DeferredClientWeaponUsageIndexChangePayloads.Count;
-            int setWieldedItemIndexCount = DeferredClientSetWieldedItemIndexPayloads.Count;
-            int setAgentHealthCount = DeferredClientSetAgentHealthPayloads.Count;
-            int makeAgentDeadCount = DeferredClientMakeAgentDeadPayloads.Count;
+            DeferredClientAgentBootstrapCounts agentCounts = GetDeferredClientAgentBootstrapCounts();
 
-            int totalPending =
-                mountedHeroCreateAgentCount +
-                createAgentCount +
-                setAgentActionSetCount +
-                synchronizeAgentEquipmentCount +
-                attachWeaponToAgentCount +
-                attachWeaponToWeaponInAgentEquipmentSlotCount +
-                setWeaponNetworkDataCount +
-                setWeaponAmmoDataCount +
-                setWeaponReloadPhaseCount +
-                startSwitchingWeaponUsageIndexCount +
-                weaponUsageIndexChangeCount +
-                setWieldedItemIndexCount +
-                setAgentHealthCount +
-                makeAgentDeadCount;
+            int totalPending = mountedHeroCreateAgentCount + agentCounts.Total;
 
             summary =
                 "TotalPending=" + totalPending +
                 " MountedHeroCreateAgent=" + mountedHeroCreateAgentCount +
-                " CreateAgent=" + createAgentCount +
-                " SetAgentActionSet=" + setAgentActionSetCount +
-                " SynchronizeAgentEquipment=" + synchronizeAgentEquipmentCount +
-                " AttachWeaponToAgent=" + attachWeaponToAgentCount +
-                " AttachWeaponToWeaponInAgentEquipmentSlot=" + attachWeaponToWeaponInAgentEquipmentSlotCount +
-                " SetWeaponNetworkData=" + setWeaponNetworkDataCount +
-                " SetWeaponAmmoData=" + setWeaponAmmoDataCount +
-                " SetWeaponReloadPhase=" + setWeaponReloadPhaseCount +
-                " StartSwitchingWeaponUsageIndex=" + startSwitchingWeaponUsageIndexCount +
-                " WeaponUsageIndexChange=" + weaponUsageIndexChangeCount +
-                " SetWieldedItemIndex=" + setWieldedItemIndexCount +
-                " SetAgentHealth=" + setAgentHealthCount +
-                " MakeAgentDead=" + makeAgentDeadCount;
+                " AgentBundles=" + agentCounts.BundleCount +
+                " CreateAgent=" + agentCounts.CreateAgent +
+                " AgentSetFormation=" + agentCounts.AgentSetFormation +
+                " SetAgentActionSet=" + agentCounts.SetAgentActionSet +
+                " SynchronizeAgentEquipment=" + agentCounts.SynchronizeAgentEquipment +
+                " AttachWeaponToAgent=" + agentCounts.AttachWeaponToAgent +
+                " AttachWeaponToWeaponInAgentEquipmentSlot=" + agentCounts.AttachWeaponToEquipmentSlot +
+                " SetWeaponNetworkData=" + agentCounts.SetWeaponNetworkData +
+                " SetWeaponAmmoData=" + agentCounts.SetWeaponAmmoData +
+                " SetWeaponReloadPhase=" + agentCounts.SetWeaponReloadPhase +
+                " StartSwitchingWeaponUsageIndex=" + agentCounts.StartSwitchingWeaponUsageIndex +
+                " WeaponUsageIndexChange=" + agentCounts.WeaponUsageIndexChange +
+                " SetWieldedItemIndex=" + agentCounts.SetWieldedItemIndex +
+                " SetAgentHealth=" + agentCounts.SetAgentHealth +
+                " MakeAgentDead=" + agentCounts.MakeAgentDead;
             return totalPending;
         }
 
@@ -3521,31 +3670,96 @@ namespace CoopSpectator.Patches
             string replayReadinessSummary =
                 snapshotReadinessSummary +
                 " MaterializedMap={" + materializedMapReadinessSummary + "}";
-            TryReplayDeferredClientCreateAgents(mission, source, replayReadinessSummary);
-            TryReplayDeferredClientAgentSetFormation(mission, source, replayReadinessSummary);
-            TryReplayDeferredClientSetAgentActionSet(mission, source, replayReadinessSummary);
-            TryReplayDeferredClientSynchronizeAgentEquipment(mission, source, replayReadinessSummary);
-            TryReplayDeferredClientSpawnWeaponWithNewEntity(mission, source, replayReadinessSummary);
-            TryReplayDeferredClientAttachWeaponToSpawnedWeapon(mission, source, replayReadinessSummary);
-            TryReplayDeferredClientSpawnAttachedWeaponOnSpawnedWeapon(mission, source, replayReadinessSummary);
-            TryReplayDeferredClientSpawnAttachedWeaponOnCorpse(mission, source, replayReadinessSummary);
-            TryReplayDeferredClientSynchronizeMissionObject(mission, source, replayReadinessSummary);
-            TryReplayDeferredClientSetMissionObjectVisibility(mission, source, replayReadinessSummary);
-            TryReplayDeferredClientExactSiegeMissionObjectMessages(mission, source);
-            TryReplayDeferredClientAttachWeaponToAgent(mission, source, replayReadinessSummary);
-            TryReplayDeferredClientAttachWeaponToWeaponInAgentEquipmentSlot(mission, source, replayReadinessSummary);
-            TryReplayDeferredClientSetWeaponNetworkData(mission, source, replayReadinessSummary);
-            TryReplayDeferredClientSetWeaponAmmoData(mission, source, replayReadinessSummary);
-            TryReplayDeferredClientSetWeaponReloadPhase(mission, source, replayReadinessSummary);
-            TryProcessDelayedLocalControlledWeaponStateMessages(mission, source);
-            TryReplayDeferredClientCreateMissile(mission, source, replayReadinessSummary);
-            TryReplayDeferredClientHandleMissileCollisionReaction(mission, source, replayReadinessSummary);
-            TryReplayDeferredClientSetWieldedItemIndex(mission, source, replayReadinessSummary);
-            TryReplayDeferredClientStartSwitchingWeaponUsageIndex(mission, source, replayReadinessSummary);
-            TryReplayDeferredClientWeaponUsageIndexChangeMessage(mission, source, replayReadinessSummary);
-            TryReplayDeferredClientSetAgentHealth(mission, source, replayReadinessSummary);
-            TryReplayDeferredClientMakeAgentDead(mission, source, replayReadinessSummary);
-            TryApplyLocalControlledRangedTerminalReloadCompletion(mission);
+            DeferredClientAgentBootstrapReplaySnapshot agentBootstrapSnapshot =
+                DequeueDeferredClientAgentBootstrapReplaySnapshot();
+            try
+            {
+                TryReplayDeferredClientCreateAgents(
+                    mission,
+                    source,
+                    replayReadinessSummary,
+                    agentBootstrapSnapshot.CreateAgents);
+                TryReplayDeferredClientAgentSetFormation(
+                    mission,
+                    source,
+                    replayReadinessSummary,
+                    agentBootstrapSnapshot.AgentSetFormations);
+                TryReplayDeferredClientSetAgentActionSet(
+                    mission,
+                    source,
+                    replayReadinessSummary,
+                    agentBootstrapSnapshot.AgentActionSets);
+                TryReplayDeferredClientSynchronizeAgentEquipment(
+                    mission,
+                    source,
+                    replayReadinessSummary,
+                    agentBootstrapSnapshot.AgentEquipment);
+                TryReplayDeferredClientSpawnWeaponWithNewEntity(mission, source, replayReadinessSummary);
+                TryReplayDeferredClientAttachWeaponToSpawnedWeapon(mission, source, replayReadinessSummary);
+                TryReplayDeferredClientSpawnAttachedWeaponOnSpawnedWeapon(mission, source, replayReadinessSummary);
+                TryReplayDeferredClientSpawnAttachedWeaponOnCorpse(mission, source, replayReadinessSummary);
+                TryReplayDeferredClientSynchronizeMissionObject(mission, source, replayReadinessSummary);
+                TryReplayDeferredClientSetMissionObjectVisibility(mission, source, replayReadinessSummary);
+                TryReplayDeferredClientExactSiegeMissionObjectMessages(mission, source);
+                TryReplayDeferredClientAttachWeaponToAgent(
+                    mission,
+                    source,
+                    replayReadinessSummary,
+                    agentBootstrapSnapshot.AttachWeaponToAgent);
+                TryReplayDeferredClientAttachWeaponToWeaponInAgentEquipmentSlot(
+                    mission,
+                    source,
+                    replayReadinessSummary,
+                    agentBootstrapSnapshot.AttachWeaponToEquipmentSlot);
+                TryReplayDeferredClientSetWeaponNetworkData(
+                    mission,
+                    source,
+                    replayReadinessSummary,
+                    agentBootstrapSnapshot.WeaponNetworkData);
+                TryReplayDeferredClientSetWeaponAmmoData(
+                    mission,
+                    source,
+                    replayReadinessSummary,
+                    agentBootstrapSnapshot.WeaponAmmoData);
+                TryReplayDeferredClientSetWeaponReloadPhase(
+                    mission,
+                    source,
+                    replayReadinessSummary,
+                    agentBootstrapSnapshot.WeaponReloadPhase);
+                TryProcessDelayedLocalControlledWeaponStateMessages(mission, source);
+                TryReplayDeferredClientCreateMissile(mission, source, replayReadinessSummary);
+                TryReplayDeferredClientHandleMissileCollisionReaction(mission, source, replayReadinessSummary);
+                TryReplayDeferredClientSetWieldedItemIndex(
+                    mission,
+                    source,
+                    replayReadinessSummary,
+                    agentBootstrapSnapshot.WieldedItemState);
+                TryReplayDeferredClientStartSwitchingWeaponUsageIndex(
+                    mission,
+                    source,
+                    replayReadinessSummary,
+                    agentBootstrapSnapshot.StartSwitchingWeaponUsage);
+                TryReplayDeferredClientWeaponUsageIndexChangeMessage(
+                    mission,
+                    source,
+                    replayReadinessSummary,
+                    agentBootstrapSnapshot.WeaponUsageIndexChange);
+                TryReplayDeferredClientSetAgentHealth(
+                    mission,
+                    source,
+                    replayReadinessSummary,
+                    agentBootstrapSnapshot.AgentHealth);
+                TryReplayDeferredClientMakeAgentDead(
+                    mission,
+                    source,
+                    replayReadinessSummary,
+                    agentBootstrapSnapshot.MakeAgentDead);
+                TryApplyLocalControlledRangedTerminalReloadCompletion(mission);
+            }
+            finally
+            {
+                RescheduleDeferredClientAgentBootstrapReplaySnapshot(agentBootstrapSnapshot);
+            }
         }
 
         internal static void TryProcessDeferredClientMountedHeroCreateAgents(Mission mission, string source)
@@ -3648,29 +3862,25 @@ namespace CoopSpectator.Patches
             if (createAgent == null)
                 return;
 
-            lock (DeferredClientCreateAgentPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                DeferredClientCreateAgentPayload existingPayload = DeferredClientCreateAgentPayloads
-                    .FirstOrDefault(candidate => candidate?.Message?.AgentIndex == createAgent.AgentIndex);
-                if (existingPayload != null)
-                {
-                    existingPayload.Message = createAgent;
-                    existingPayload.DeferralReason = snapshotReadinessSummary;
-                    existingPayload.UseSallyOutNativeStartupPacing |= useSallyOutNativeStartupPacing;
-                    return;
-                }
+                DeferredClientAgentBootstrapBundle bundle =
+                    GetOrCreateDeferredClientAgentBootstrapBundleNoLock(createAgent.AgentIndex);
+                if (bundle.CreateAgentObserved)
+                    bundle.ResetForCreateAgentGeneration();
 
-                DeferredClientCreateAgentPayloads.Add(
-                    new DeferredClientCreateAgentPayload
-                    {
-                        Sequence = ++_nextDeferredClientCreateAgentSequence,
-                        Message = createAgent,
-                        DeferredUtc = DateTime.UtcNow,
-                        LastAttemptUtc = DateTime.MinValue,
-                        Attempts = 0,
-                        UseSallyOutNativeStartupPacing = useSallyOutNativeStartupPacing,
-                        DeferralReason = snapshotReadinessSummary
-                    });
+                bundle.CreateAgentObserved = true;
+                bundle.CreateAgent = new DeferredClientCreateAgentPayload
+                {
+                    Sequence = ++_nextDeferredClientCreateAgentSequence,
+                    Message = createAgent,
+                    DeferredUtc = DateTime.UtcNow,
+                    LastAttemptUtc = DateTime.MinValue,
+                    Attempts = 0,
+                    UseSallyOutNativeStartupPacing = useSallyOutNativeStartupPacing,
+                    DeferralReason = snapshotReadinessSummary
+                };
+                ScheduleDeferredClientAgentBootstrapBundleNoLock(bundle);
             }
         }
 
@@ -3679,9 +3889,12 @@ namespace CoopSpectator.Patches
             if (agentIndex < 0)
                 return false;
 
-            lock (DeferredClientCreateAgentPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                return DeferredClientCreateAgentPayloads.Any(candidate => candidate?.Message?.AgentIndex == agentIndex);
+                return DeferredClientAgentBootstrapBundles.TryGetValue(
+                           agentIndex,
+                           out DeferredClientAgentBootstrapBundle bundle) &&
+                       bundle?.CreateAgent?.Message != null;
             }
         }
 
@@ -3693,10 +3906,14 @@ namespace CoopSpectator.Patches
             if (agentIndex < 0)
                 return false;
 
-            lock (DeferredClientCreateAgentPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                DeferredClientCreateAgentPayload payload = DeferredClientCreateAgentPayloads
-                    .FirstOrDefault(candidate => candidate?.Message?.AgentIndex == agentIndex);
+                DeferredClientCreateAgentPayload payload =
+                    DeferredClientAgentBootstrapBundles.TryGetValue(
+                        agentIndex,
+                        out DeferredClientAgentBootstrapBundle bundle)
+                        ? bundle?.CreateAgent
+                        : null;
                 if (payload?.Message == null)
                     return false;
 
@@ -3735,14 +3952,15 @@ namespace CoopSpectator.Patches
                 return false;
 
             List<DeferredClientCreateAgentPayload> deferredCreateAgentPayloads;
-            lock (DeferredClientCreateAgentPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                if (DeferredClientCreateAgentPayloads.Count <= 0)
-                    return false;
-
-                deferredCreateAgentPayloads = DeferredClientCreateAgentPayloads
-                    .OrderBy(candidate => candidate.Sequence)
+                deferredCreateAgentPayloads = DeferredClientAgentBootstrapBundles.Values
+                    .Select(bundle => bundle?.CreateAgent)
+                    .Where(payload => payload?.Message != null)
+                    .OrderBy(payload => payload.Sequence)
                     .ToList();
+                if (deferredCreateAgentPayloads.Count <= 0)
+                    return false;
             }
 
             HashSet<int> selectedAgentIndices = new HashSet<int> { focusAgentIndex };
@@ -3771,9 +3989,10 @@ namespace CoopSpectator.Patches
                 return false;
 
             List<DeferredClientSetAgentActionSetPayload> deferredSetAgentActionSetPayloads;
-            lock (DeferredClientSetAgentActionSetPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                deferredSetAgentActionSetPayloads = DeferredClientSetAgentActionSetPayloads
+                deferredSetAgentActionSetPayloads = DeferredClientAgentBootstrapBundles.Values
+                    .Select(bundle => bundle?.SetAgentActionSet)
                     .Where(candidate =>
                         candidate?.Message != null &&
                         selectedAgentIndices.Contains(candidate.Message.AgentIndex))
@@ -3944,27 +4163,20 @@ namespace CoopSpectator.Patches
             if (synchronizeAgentSpawnEquipment == null)
                 return;
 
-            lock (DeferredClientSynchronizeAgentEquipmentPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                DeferredClientSynchronizeAgentEquipmentPayload existingPayload = DeferredClientSynchronizeAgentEquipmentPayloads
-                    .FirstOrDefault(candidate => candidate?.Message?.AgentIndex == synchronizeAgentSpawnEquipment.AgentIndex);
-                if (existingPayload != null)
+                DeferredClientAgentBootstrapBundle bundle =
+                    GetOrCreateDeferredClientAgentBootstrapBundleNoLock(synchronizeAgentSpawnEquipment.AgentIndex);
+                bundle.SynchronizeAgentEquipment = new DeferredClientSynchronizeAgentEquipmentPayload
                 {
-                    existingPayload.Message = synchronizeAgentSpawnEquipment;
-                    existingPayload.DeferralReason = deferralReason;
-                    return;
-                }
-
-                DeferredClientSynchronizeAgentEquipmentPayloads.Add(
-                    new DeferredClientSynchronizeAgentEquipmentPayload
-                    {
-                        Sequence = ++_nextDeferredClientSynchronizeAgentEquipmentSequence,
-                        Message = synchronizeAgentSpawnEquipment,
-                        DeferredUtc = DateTime.UtcNow,
-                        LastAttemptUtc = DateTime.MinValue,
-                        Attempts = 0,
-                        DeferralReason = deferralReason
-                    });
+                    Sequence = ++_nextDeferredClientSynchronizeAgentEquipmentSequence,
+                    Message = synchronizeAgentSpawnEquipment,
+                    DeferredUtc = DateTime.UtcNow,
+                    LastAttemptUtc = DateTime.MinValue,
+                    Attempts = 0,
+                    DeferralReason = deferralReason
+                };
+                ScheduleDeferredClientAgentBootstrapBundleNoLock(bundle);
             }
         }
 
@@ -4253,21 +4465,27 @@ namespace CoopSpectator.Patches
             if (attachWeaponToAgent == null)
                 return;
 
-            lock (DeferredClientAttachWeaponToAgentPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
+                DeferredClientAgentBootstrapBundle bundle =
+                    GetOrCreateDeferredClientAgentBootstrapBundleNoLock(attachWeaponToAgent.AgentIndex);
                 DeferredClientAttachWeaponToAgentPayload existingPayload =
-                    DeferredClientAttachWeaponToAgentPayloads.FirstOrDefault(
+                    bundle.AttachWeaponToAgent.FirstOrDefault(
                         candidate =>
-                            candidate?.Message?.AgentIndex == attachWeaponToAgent.AgentIndex &&
-                            candidate.Message.BoneIndex == attachWeaponToAgent.BoneIndex);
+                            candidate?.Message?.BoneIndex == attachWeaponToAgent.BoneIndex);
                 if (existingPayload != null)
                 {
+                    existingPayload.Sequence = ++_nextDeferredClientAttachWeaponToAgentSequence;
                     existingPayload.Message = attachWeaponToAgent;
+                    existingPayload.DeferredUtc = DateTime.UtcNow;
+                    existingPayload.LastAttemptUtc = DateTime.MinValue;
+                    existingPayload.Attempts = 0;
                     existingPayload.DeferralReason = deferralReason;
+                    ScheduleDeferredClientAgentBootstrapBundleNoLock(bundle);
                     return;
                 }
 
-                DeferredClientAttachWeaponToAgentPayloads.Add(
+                bundle.AttachWeaponToAgent.Add(
                     new DeferredClientAttachWeaponToAgentPayload
                     {
                         Sequence = ++_nextDeferredClientAttachWeaponToAgentSequence,
@@ -4287,27 +4505,20 @@ namespace CoopSpectator.Patches
             if (agentSetFormation == null)
                 return;
 
-            lock (DeferredClientAgentSetFormationPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                DeferredClientAgentSetFormationPayload existingPayload = DeferredClientAgentSetFormationPayloads
-                    .FirstOrDefault(candidate => candidate?.Message?.AgentIndex == agentSetFormation.AgentIndex);
-                if (existingPayload != null)
+                DeferredClientAgentBootstrapBundle bundle =
+                    GetOrCreateDeferredClientAgentBootstrapBundleNoLock(agentSetFormation.AgentIndex);
+                bundle.AgentSetFormation = new DeferredClientAgentSetFormationPayload
                 {
-                    existingPayload.Message = agentSetFormation;
-                    existingPayload.DeferralReason = deferralReason;
-                    return;
-                }
-
-                DeferredClientAgentSetFormationPayloads.Add(
-                    new DeferredClientAgentSetFormationPayload
-                    {
-                        Sequence = ++_nextDeferredClientAgentSetFormationSequence,
-                        Message = agentSetFormation,
-                        DeferredUtc = DateTime.UtcNow,
-                        LastAttemptUtc = DateTime.MinValue,
-                        Attempts = 0,
-                        DeferralReason = deferralReason
-                    });
+                    Sequence = ++_nextDeferredClientAgentSetFormationSequence,
+                    Message = agentSetFormation,
+                    DeferredUtc = DateTime.UtcNow,
+                    LastAttemptUtc = DateTime.MinValue,
+                    Attempts = 0,
+                    DeferralReason = deferralReason
+                };
+                ScheduleDeferredClientAgentBootstrapBundleNoLock(bundle);
             }
         }
 
@@ -4318,27 +4529,20 @@ namespace CoopSpectator.Patches
             if (setAgentActionSet == null)
                 return;
 
-            lock (DeferredClientSetAgentActionSetPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                DeferredClientSetAgentActionSetPayload existingPayload = DeferredClientSetAgentActionSetPayloads
-                    .FirstOrDefault(candidate => candidate?.Message?.AgentIndex == setAgentActionSet.AgentIndex);
-                if (existingPayload != null)
+                DeferredClientAgentBootstrapBundle bundle =
+                    GetOrCreateDeferredClientAgentBootstrapBundleNoLock(setAgentActionSet.AgentIndex);
+                bundle.SetAgentActionSet = new DeferredClientSetAgentActionSetPayload
                 {
-                    existingPayload.Message = setAgentActionSet;
-                    existingPayload.DeferralReason = deferralReason;
-                    return;
-                }
-
-                DeferredClientSetAgentActionSetPayloads.Add(
-                    new DeferredClientSetAgentActionSetPayload
-                    {
-                        Sequence = ++_nextDeferredClientSetAgentActionSetSequence,
-                        Message = setAgentActionSet,
-                        DeferredUtc = DateTime.UtcNow,
-                        LastAttemptUtc = DateTime.MinValue,
-                        Attempts = 0,
-                        DeferralReason = deferralReason
-                    });
+                    Sequence = ++_nextDeferredClientSetAgentActionSetSequence,
+                    Message = setAgentActionSet,
+                    DeferredUtc = DateTime.UtcNow,
+                    LastAttemptUtc = DateTime.MinValue,
+                    Attempts = 0,
+                    DeferralReason = deferralReason
+                };
+                ScheduleDeferredClientAgentBootstrapBundleNoLock(bundle);
             }
         }
 
@@ -4349,12 +4553,13 @@ namespace CoopSpectator.Patches
             if (setWieldedItemIndex == null)
                 return;
 
-            lock (DeferredClientSetWieldedItemIndexPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                DeferredClientSetWieldedItemIndexPayload existingPayload = DeferredClientSetWieldedItemIndexPayloads
+                DeferredClientAgentBootstrapBundle bundle =
+                    GetOrCreateDeferredClientAgentBootstrapBundleNoLock(setWieldedItemIndex.AgentIndex);
+                DeferredClientSetWieldedItemIndexPayload existingPayload = bundle.WieldedItemState
                     .FirstOrDefault(candidate =>
-                        candidate?.Message?.AgentIndex == setWieldedItemIndex.AgentIndex &&
-                        candidate.Message.IsLeftHand == setWieldedItemIndex.IsLeftHand);
+                        candidate?.Message?.IsLeftHand == setWieldedItemIndex.IsLeftHand);
                 if (existingPayload != null)
                 {
                     existingPayload.Sequence = ++_nextDeferredClientSetWieldedItemIndexSequence;
@@ -4363,10 +4568,11 @@ namespace CoopSpectator.Patches
                     existingPayload.LastAttemptUtc = DateTime.MinValue;
                     existingPayload.Attempts = 0;
                     existingPayload.DeferralReason = deferralReason;
+                    ScheduleDeferredClientAgentBootstrapBundleNoLock(bundle);
                     return;
                 }
 
-                DeferredClientSetWieldedItemIndexPayloads.Add(
+                bundle.WieldedItemState.Add(
                     new DeferredClientSetWieldedItemIndexPayload
                     {
                         Sequence = ++_nextDeferredClientSetWieldedItemIndexSequence,
@@ -4376,6 +4582,7 @@ namespace CoopSpectator.Patches
                         Attempts = 0,
                         DeferralReason = deferralReason
                     });
+                ScheduleDeferredClientAgentBootstrapBundleNoLock(bundle);
             }
         }
 
@@ -4386,21 +4593,26 @@ namespace CoopSpectator.Patches
             if (attachWeapon == null)
                 return;
 
-            lock (DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
+                DeferredClientAgentBootstrapBundle bundle =
+                    GetOrCreateDeferredClientAgentBootstrapBundleNoLock(attachWeapon.AgentIndex);
                 DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayload existingPayload =
-                    DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads.FirstOrDefault(
-                        candidate =>
-                            candidate?.Message?.AgentIndex == attachWeapon.AgentIndex &&
-                            candidate.Message.SlotIndex == attachWeapon.SlotIndex);
+                    bundle.AttachWeaponToEquipmentSlot.FirstOrDefault(
+                        candidate => candidate?.Message?.SlotIndex == attachWeapon.SlotIndex);
                 if (existingPayload != null)
                 {
+                    existingPayload.Sequence = ++_nextDeferredClientAttachWeaponToWeaponInAgentEquipmentSlotSequence;
                     existingPayload.Message = attachWeapon;
+                    existingPayload.DeferredUtc = DateTime.UtcNow;
+                    existingPayload.LastAttemptUtc = DateTime.MinValue;
+                    existingPayload.Attempts = 0;
                     existingPayload.DeferralReason = deferralReason;
+                    ScheduleDeferredClientAgentBootstrapBundleNoLock(bundle);
                     return;
                 }
 
-                DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads.Add(
+                bundle.AttachWeaponToEquipmentSlot.Add(
                     new DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayload
                     {
                         Sequence = ++_nextDeferredClientAttachWeaponToWeaponInAgentEquipmentSlotSequence,
@@ -4410,6 +4622,7 @@ namespace CoopSpectator.Patches
                         Attempts = 0,
                         DeferralReason = deferralReason
                     });
+                ScheduleDeferredClientAgentBootstrapBundleNoLock(bundle);
             }
         }
 
@@ -4420,20 +4633,26 @@ namespace CoopSpectator.Patches
             if (setWeaponNetworkData == null)
                 return;
 
-            lock (DeferredClientSetWeaponNetworkDataPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                DeferredClientSetWeaponNetworkDataPayload existingPayload = DeferredClientSetWeaponNetworkDataPayloads
+                DeferredClientAgentBootstrapBundle bundle =
+                    GetOrCreateDeferredClientAgentBootstrapBundleNoLock(setWeaponNetworkData.AgentIndex);
+                DeferredClientSetWeaponNetworkDataPayload existingPayload = bundle.WeaponNetworkData
                     .FirstOrDefault(candidate =>
-                        candidate?.Message?.AgentIndex == setWeaponNetworkData.AgentIndex &&
-                        candidate.Message.WeaponEquipmentIndex == setWeaponNetworkData.WeaponEquipmentIndex);
+                        candidate?.Message?.WeaponEquipmentIndex == setWeaponNetworkData.WeaponEquipmentIndex);
                 if (existingPayload != null)
                 {
+                    existingPayload.Sequence = ++_nextDeferredClientSetWeaponNetworkDataSequence;
                     existingPayload.Message = setWeaponNetworkData;
+                    existingPayload.DeferredUtc = DateTime.UtcNow;
+                    existingPayload.LastAttemptUtc = DateTime.MinValue;
+                    existingPayload.Attempts = 0;
                     existingPayload.DeferralReason = deferralReason;
+                    ScheduleDeferredClientAgentBootstrapBundleNoLock(bundle);
                     return;
                 }
 
-                DeferredClientSetWeaponNetworkDataPayloads.Add(
+                bundle.WeaponNetworkData.Add(
                     new DeferredClientSetWeaponNetworkDataPayload
                     {
                         Sequence = ++_nextDeferredClientSetWeaponNetworkDataSequence,
@@ -4443,6 +4662,7 @@ namespace CoopSpectator.Patches
                         Attempts = 0,
                         DeferralReason = deferralReason
                     });
+                ScheduleDeferredClientAgentBootstrapBundleNoLock(bundle);
             }
         }
 
@@ -4464,15 +4684,17 @@ namespace CoopSpectator.Patches
             {
             }
 
-            lock (DeferredClientSetWeaponAmmoDataPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                DeferredClientSetWeaponAmmoDataPayload existingPayload = DeferredClientSetWeaponAmmoDataPayloads
+                DeferredClientAgentBootstrapBundle bundle =
+                    GetOrCreateDeferredClientAgentBootstrapBundleNoLock(setWeaponAmmoData.AgentIndex);
+                DeferredClientSetWeaponAmmoDataPayload existingPayload = bundle.WeaponAmmoData
                     .FirstOrDefault(candidate =>
-                        candidate?.Message?.AgentIndex == setWeaponAmmoData.AgentIndex &&
-                        candidate.Message.WeaponEquipmentIndex == setWeaponAmmoData.WeaponEquipmentIndex &&
+                        candidate?.Message?.WeaponEquipmentIndex == setWeaponAmmoData.WeaponEquipmentIndex &&
                         candidate.Message.AmmoEquipmentIndex == setWeaponAmmoData.AmmoEquipmentIndex);
                 if (existingPayload != null)
                 {
+                    existingPayload.Sequence = ++_nextDeferredClientSetWeaponAmmoDataSequence;
                     if (resolvedAgent != null &&
                         !ReferenceEquals(existingPayload.Agent, resolvedAgent))
                     {
@@ -4484,10 +4706,11 @@ namespace CoopSpectator.Patches
 
                     existingPayload.Message = setWeaponAmmoData;
                     existingPayload.DeferralReason = deferralReason;
+                    ScheduleDeferredClientAgentBootstrapBundleNoLock(bundle);
                     return;
                 }
 
-                DeferredClientSetWeaponAmmoDataPayloads.Add(
+                bundle.WeaponAmmoData.Add(
                     new DeferredClientSetWeaponAmmoDataPayload
                     {
                         Sequence = ++_nextDeferredClientSetWeaponAmmoDataSequence,
@@ -4498,6 +4721,7 @@ namespace CoopSpectator.Patches
                         Attempts = 0,
                         DeferralReason = deferralReason
                     });
+                ScheduleDeferredClientAgentBootstrapBundleNoLock(bundle);
             }
         }
 
@@ -4519,12 +4743,13 @@ namespace CoopSpectator.Patches
                 setWeaponReloadPhase.EquipmentIndex,
                 out string expectedWeaponItemId,
                 out int expectedWeaponUsageIndex);
-            lock (DeferredClientSetWeaponReloadPhasePayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                DeferredClientSetWeaponReloadPhasePayload existingPayload = DeferredClientSetWeaponReloadPhasePayloads
+                DeferredClientAgentBootstrapBundle bundle =
+                    GetOrCreateDeferredClientAgentBootstrapBundleNoLock(setWeaponReloadPhase.AgentIndex);
+                DeferredClientSetWeaponReloadPhasePayload existingPayload = bundle.WeaponReloadPhase
                     .FirstOrDefault(candidate =>
-                        candidate?.Message?.AgentIndex == setWeaponReloadPhase.AgentIndex &&
-                        candidate.Message.EquipmentIndex == setWeaponReloadPhase.EquipmentIndex);
+                        candidate?.Message?.EquipmentIndex == setWeaponReloadPhase.EquipmentIndex);
                 if (existingPayload != null)
                 {
                     existingPayload.Sequence = ++_nextDeferredClientSetWeaponReloadPhaseSequence;
@@ -4537,10 +4762,11 @@ namespace CoopSpectator.Patches
                     existingPayload.LastAttemptUtc = DateTime.MinValue;
                     existingPayload.Attempts = 0;
                     existingPayload.DeferralReason = deferralReason;
+                    ScheduleDeferredClientAgentBootstrapBundleNoLock(bundle);
                     return;
                 }
 
-                DeferredClientSetWeaponReloadPhasePayloads.Add(
+                bundle.WeaponReloadPhase.Add(
                     new DeferredClientSetWeaponReloadPhasePayload
                     {
                         Sequence = ++_nextDeferredClientSetWeaponReloadPhaseSequence,
@@ -4554,6 +4780,7 @@ namespace CoopSpectator.Patches
                         Attempts = 0,
                         DeferralReason = deferralReason
                     });
+                ScheduleDeferredClientAgentBootstrapBundleNoLock(bundle);
             }
         }
 
@@ -6884,21 +7111,26 @@ namespace CoopSpectator.Patches
             if (startSwitchingWeaponUsageIndex == null)
                 return;
 
-            lock (DeferredClientStartSwitchingWeaponUsageIndexPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
+                DeferredClientAgentBootstrapBundle bundle =
+                    GetOrCreateDeferredClientAgentBootstrapBundleNoLock(startSwitchingWeaponUsageIndex.AgentIndex);
                 DeferredClientStartSwitchingWeaponUsageIndexPayload existingPayload =
-                    DeferredClientStartSwitchingWeaponUsageIndexPayloads.FirstOrDefault(candidate =>
-                        candidate?.Message?.AgentIndex == startSwitchingWeaponUsageIndex.AgentIndex &&
-                        candidate.Message.EquipmentIndex == startSwitchingWeaponUsageIndex.EquipmentIndex &&
-                        candidate.Message.UsageIndex == startSwitchingWeaponUsageIndex.UsageIndex);
+                    bundle.StartSwitchingWeaponUsage.FirstOrDefault(candidate =>
+                        candidate?.Message?.EquipmentIndex == startSwitchingWeaponUsageIndex.EquipmentIndex);
                 if (existingPayload != null)
                 {
+                    existingPayload.Sequence = ++_nextDeferredClientStartSwitchingWeaponUsageIndexSequence;
                     existingPayload.Message = startSwitchingWeaponUsageIndex;
+                    existingPayload.DeferredUtc = DateTime.UtcNow;
+                    existingPayload.LastAttemptUtc = DateTime.MinValue;
+                    existingPayload.Attempts = 0;
                     existingPayload.DeferralReason = deferralReason;
+                    ScheduleDeferredClientAgentBootstrapBundleNoLock(bundle);
                     return;
                 }
 
-                DeferredClientStartSwitchingWeaponUsageIndexPayloads.Add(
+                bundle.StartSwitchingWeaponUsage.Add(
                     new DeferredClientStartSwitchingWeaponUsageIndexPayload
                     {
                         Sequence = ++_nextDeferredClientStartSwitchingWeaponUsageIndexSequence,
@@ -6908,6 +7140,7 @@ namespace CoopSpectator.Patches
                         Attempts = 0,
                         DeferralReason = deferralReason
                     });
+                ScheduleDeferredClientAgentBootstrapBundleNoLock(bundle);
             }
         }
 
@@ -6918,21 +7151,26 @@ namespace CoopSpectator.Patches
             if (weaponUsageIndexChangeMessage == null)
                 return;
 
-            lock (DeferredClientWeaponUsageIndexChangePayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
+                DeferredClientAgentBootstrapBundle bundle =
+                    GetOrCreateDeferredClientAgentBootstrapBundleNoLock(weaponUsageIndexChangeMessage.AgentIndex);
                 DeferredClientWeaponUsageIndexChangePayload existingPayload =
-                    DeferredClientWeaponUsageIndexChangePayloads.FirstOrDefault(candidate =>
-                        candidate?.Message?.AgentIndex == weaponUsageIndexChangeMessage.AgentIndex &&
-                        candidate.Message.SlotIndex == weaponUsageIndexChangeMessage.SlotIndex &&
-                        candidate.Message.UsageIndex == weaponUsageIndexChangeMessage.UsageIndex);
+                    bundle.WeaponUsageIndexChange.FirstOrDefault(candidate =>
+                        candidate?.Message?.SlotIndex == weaponUsageIndexChangeMessage.SlotIndex);
                 if (existingPayload != null)
                 {
+                    existingPayload.Sequence = ++_nextDeferredClientWeaponUsageIndexChangeSequence;
                     existingPayload.Message = weaponUsageIndexChangeMessage;
+                    existingPayload.DeferredUtc = DateTime.UtcNow;
+                    existingPayload.LastAttemptUtc = DateTime.MinValue;
+                    existingPayload.Attempts = 0;
                     existingPayload.DeferralReason = deferralReason;
+                    ScheduleDeferredClientAgentBootstrapBundleNoLock(bundle);
                     return;
                 }
 
-                DeferredClientWeaponUsageIndexChangePayloads.Add(
+                bundle.WeaponUsageIndexChange.Add(
                     new DeferredClientWeaponUsageIndexChangePayload
                     {
                         Sequence = ++_nextDeferredClientWeaponUsageIndexChangeSequence,
@@ -6942,6 +7180,7 @@ namespace CoopSpectator.Patches
                         Attempts = 0,
                         DeferralReason = deferralReason
                     });
+                ScheduleDeferredClientAgentBootstrapBundleNoLock(bundle);
             }
         }
 
@@ -6952,19 +7191,22 @@ namespace CoopSpectator.Patches
             if (setAgentHealth == null)
                 return;
 
-            lock (DeferredClientSetAgentHealthPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                DeferredClientSetAgentHealthPayload existingPayload = DeferredClientSetAgentHealthPayloads
-                    .FirstOrDefault(candidate => candidate?.Message?.AgentIndex == setAgentHealth.AgentIndex);
-                if (existingPayload != null)
+                DeferredClientAgentBootstrapBundle bundle =
+                    GetOrCreateDeferredClientAgentBootstrapBundleNoLock(setAgentHealth.AgentIndex);
+                if (bundle.AgentHealth != null)
                 {
-                    existingPayload.Message = setAgentHealth;
-                    existingPayload.DeferralReason = deferralReason;
-                    return;
+                    bundle.AgentHealth.Sequence = ++_nextDeferredClientSetAgentHealthSequence;
+                    bundle.AgentHealth.Message = setAgentHealth;
+                    bundle.AgentHealth.DeferredUtc = DateTime.UtcNow;
+                    bundle.AgentHealth.LastAttemptUtc = DateTime.MinValue;
+                    bundle.AgentHealth.Attempts = 0;
+                    bundle.AgentHealth.DeferralReason = deferralReason;
                 }
-
-                DeferredClientSetAgentHealthPayloads.Add(
-                    new DeferredClientSetAgentHealthPayload
+                else
+                {
+                    bundle.AgentHealth = new DeferredClientSetAgentHealthPayload
                     {
                         Sequence = ++_nextDeferredClientSetAgentHealthSequence,
                         Message = setAgentHealth,
@@ -6972,7 +7214,9 @@ namespace CoopSpectator.Patches
                         LastAttemptUtc = DateTime.MinValue,
                         Attempts = 0,
                         DeferralReason = deferralReason
-                    });
+                    };
+                }
+                ScheduleDeferredClientAgentBootstrapBundleNoLock(bundle);
             }
         }
 
@@ -6983,19 +7227,22 @@ namespace CoopSpectator.Patches
             if (makeAgentDead == null)
                 return;
 
-            lock (DeferredClientMakeAgentDeadPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                DeferredClientMakeAgentDeadPayload existingPayload = DeferredClientMakeAgentDeadPayloads
-                    .FirstOrDefault(candidate => candidate?.Message?.AgentIndex == makeAgentDead.AgentIndex);
-                if (existingPayload != null)
+                DeferredClientAgentBootstrapBundle bundle =
+                    GetOrCreateDeferredClientAgentBootstrapBundleNoLock(makeAgentDead.AgentIndex);
+                if (bundle.MakeAgentDead != null)
                 {
-                    existingPayload.Message = makeAgentDead;
-                    existingPayload.DeferralReason = deferralReason;
-                    return;
+                    bundle.MakeAgentDead.Sequence = ++_nextDeferredClientMakeAgentDeadSequence;
+                    bundle.MakeAgentDead.Message = makeAgentDead;
+                    bundle.MakeAgentDead.DeferredUtc = DateTime.UtcNow;
+                    bundle.MakeAgentDead.LastAttemptUtc = DateTime.MinValue;
+                    bundle.MakeAgentDead.Attempts = 0;
+                    bundle.MakeAgentDead.DeferralReason = deferralReason;
                 }
-
-                DeferredClientMakeAgentDeadPayloads.Add(
-                    new DeferredClientMakeAgentDeadPayload
+                else
+                {
+                    bundle.MakeAgentDead = new DeferredClientMakeAgentDeadPayload
                     {
                         Sequence = ++_nextDeferredClientMakeAgentDeadSequence,
                         Message = makeAgentDead,
@@ -7003,28 +7250,23 @@ namespace CoopSpectator.Patches
                         LastAttemptUtc = DateTime.MinValue,
                         Attempts = 0,
                         DeferralReason = deferralReason
-                    });
+                    };
+                }
+                ScheduleDeferredClientAgentBootstrapBundleNoLock(bundle);
             }
         }
 
         private static void TryReplayDeferredClientCreateAgents(
             Mission mission,
             string source,
-            string snapshotReadinessSummary)
+            string snapshotReadinessSummary,
+            IReadOnlyList<DeferredClientCreateAgentPayload> deferredPayloads)
         {
             if (_missionNetworkComponentHandleServerEventCreateAgentMethod == null)
                 return;
 
-            List<DeferredClientCreateAgentPayload> deferredPayloads;
-            lock (DeferredClientCreateAgentPayloads)
-            {
-                if (DeferredClientCreateAgentPayloads.Count <= 0)
-                    return;
-
-                deferredPayloads = DeferredClientCreateAgentPayloads
-                    .OrderBy(candidate => candidate.Sequence)
-                    .ToList();
-            }
+            if (deferredPayloads == null || deferredPayloads.Count <= 0)
+                return;
 
             MissionNetworkComponent missionNetworkComponent = mission.GetMissionBehavior<MissionNetworkComponent>();
             if (missionNetworkComponent == null)
@@ -7081,6 +7323,8 @@ namespace CoopSpectator.Patches
             {
                 CreateAgent createAgent = deferredPayload?.Message;
                 if (createAgent == null)
+                    continue;
+                if (!IsCurrentDeferredClientAgentBootstrapPayload(createAgent.AgentIndex, deferredPayload))
                     continue;
 
                 if (deferredPayload.UseSallyOutNativeStartupPacing)
@@ -7392,21 +7636,14 @@ namespace CoopSpectator.Patches
         private static void TryReplayDeferredClientAgentSetFormation(
             Mission mission,
             string source,
-            string snapshotReadinessSummary)
+            string snapshotReadinessSummary,
+            IReadOnlyList<DeferredClientAgentSetFormationPayload> deferredPayloads)
         {
             if (_missionNetworkComponentHandleServerEventAgentSetFormationMethod == null)
                 return;
 
-            List<DeferredClientAgentSetFormationPayload> deferredPayloads;
-            lock (DeferredClientAgentSetFormationPayloads)
-            {
-                if (DeferredClientAgentSetFormationPayloads.Count <= 0)
-                    return;
-
-                deferredPayloads = DeferredClientAgentSetFormationPayloads
-                    .OrderBy(candidate => candidate.Sequence)
-                    .ToList();
-            }
+            if (deferredPayloads == null || deferredPayloads.Count <= 0)
+                return;
 
             MissionNetworkComponent missionNetworkComponent = mission.GetMissionBehavior<MissionNetworkComponent>();
             if (missionNetworkComponent == null)
@@ -7417,6 +7654,8 @@ namespace CoopSpectator.Patches
             {
                 AgentSetFormation agentSetFormation = deferredPayload?.Message;
                 if (agentSetFormation == null)
+                    continue;
+                if (!IsCurrentDeferredClientAgentBootstrapPayload(agentSetFormation.AgentIndex, deferredPayload))
                     continue;
 
                 if (deferredPayload.LastAttemptUtc != DateTime.MinValue &&
@@ -7475,21 +7714,14 @@ namespace CoopSpectator.Patches
         private static void TryReplayDeferredClientSetAgentActionSet(
             Mission mission,
             string source,
-            string snapshotReadinessSummary)
+            string snapshotReadinessSummary,
+            IReadOnlyList<DeferredClientSetAgentActionSetPayload> deferredPayloads)
         {
             if (_missionNetworkComponentHandleServerEventSetAgentActionSetMethod == null)
                 return;
 
-            List<DeferredClientSetAgentActionSetPayload> deferredPayloads;
-            lock (DeferredClientSetAgentActionSetPayloads)
-            {
-                if (DeferredClientSetAgentActionSetPayloads.Count <= 0)
-                    return;
-
-                deferredPayloads = DeferredClientSetAgentActionSetPayloads
-                    .OrderBy(candidate => candidate.Sequence)
-                    .ToList();
-            }
+            if (deferredPayloads == null || deferredPayloads.Count <= 0)
+                return;
 
             MissionNetworkComponent missionNetworkComponent = mission.GetMissionBehavior<MissionNetworkComponent>();
             if (missionNetworkComponent == null)
@@ -7500,6 +7732,8 @@ namespace CoopSpectator.Patches
             {
                 SetAgentActionSet setAgentActionSet = deferredPayload?.Message;
                 if (setAgentActionSet == null)
+                    continue;
+                if (!IsCurrentDeferredClientAgentBootstrapPayload(setAgentActionSet.AgentIndex, deferredPayload))
                     continue;
 
                 if (deferredPayload.LastAttemptUtc != DateTime.MinValue &&
@@ -7544,21 +7778,14 @@ namespace CoopSpectator.Patches
         private static void TryReplayDeferredClientSynchronizeAgentEquipment(
             Mission mission,
             string source,
-            string snapshotReadinessSummary)
+            string snapshotReadinessSummary,
+            IReadOnlyList<DeferredClientSynchronizeAgentEquipmentPayload> deferredPayloads)
         {
             if (_missionNetworkComponentHandleServerEventSynchronizeAgentEquipmentMethod == null)
                 return;
 
-            List<DeferredClientSynchronizeAgentEquipmentPayload> deferredPayloads;
-            lock (DeferredClientSynchronizeAgentEquipmentPayloads)
-            {
-                if (DeferredClientSynchronizeAgentEquipmentPayloads.Count <= 0)
-                    return;
-
-                deferredPayloads = DeferredClientSynchronizeAgentEquipmentPayloads
-                    .OrderBy(candidate => candidate.Sequence)
-                    .ToList();
-            }
+            if (deferredPayloads == null || deferredPayloads.Count <= 0)
+                return;
 
             MissionNetworkComponent missionNetworkComponent = mission.GetMissionBehavior<MissionNetworkComponent>();
             if (missionNetworkComponent == null)
@@ -7570,6 +7797,12 @@ namespace CoopSpectator.Patches
                 SynchronizeAgentSpawnEquipment synchronizeAgentSpawnEquipment = deferredPayload?.Message;
                 if (synchronizeAgentSpawnEquipment == null)
                     continue;
+                if (!IsCurrentDeferredClientAgentBootstrapPayload(
+                        synchronizeAgentSpawnEquipment.AgentIndex,
+                        deferredPayload))
+                {
+                    continue;
+                }
 
                 if (deferredPayload.LastAttemptUtc != DateTime.MinValue &&
                     nowUtc - deferredPayload.LastAttemptUtc < TimeSpan.FromMilliseconds(100))
@@ -8453,21 +8686,14 @@ namespace CoopSpectator.Patches
         private static void TryReplayDeferredClientAttachWeaponToWeaponInAgentEquipmentSlot(
             Mission mission,
             string source,
-            string snapshotReadinessSummary)
+            string snapshotReadinessSummary,
+            IReadOnlyList<DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayload> deferredPayloads)
         {
             if (_missionNetworkComponentHandleServerEventAttachWeaponToWeaponInAgentEquipmentSlotMethod == null)
                 return;
 
-            List<DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayload> deferredPayloads;
-            lock (DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads)
-            {
-                if (DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads.Count <= 0)
-                    return;
-
-                deferredPayloads = DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads
-                    .OrderBy(candidate => candidate.Sequence)
-                    .ToList();
-            }
+            if (deferredPayloads == null || deferredPayloads.Count <= 0)
+                return;
 
             MissionNetworkComponent missionNetworkComponent = mission.GetMissionBehavior<MissionNetworkComponent>();
             if (missionNetworkComponent == null)
@@ -8478,6 +8704,8 @@ namespace CoopSpectator.Patches
             {
                 AttachWeaponToWeaponInAgentEquipmentSlot attachWeapon = deferredPayload?.Message;
                 if (attachWeapon == null)
+                    continue;
+                if (!IsCurrentDeferredClientAgentBootstrapPayload(attachWeapon.AgentIndex, deferredPayload))
                     continue;
 
                 if (deferredPayload.LastAttemptUtc != DateTime.MinValue &&
@@ -8526,21 +8754,14 @@ namespace CoopSpectator.Patches
         private static void TryReplayDeferredClientAttachWeaponToAgent(
             Mission mission,
             string source,
-            string snapshotReadinessSummary)
+            string snapshotReadinessSummary,
+            IReadOnlyList<DeferredClientAttachWeaponToAgentPayload> deferredPayloads)
         {
             if (_missionNetworkComponentHandleServerEventAttachWeaponToAgentMethod == null)
                 return;
 
-            List<DeferredClientAttachWeaponToAgentPayload> deferredPayloads;
-            lock (DeferredClientAttachWeaponToAgentPayloads)
-            {
-                if (DeferredClientAttachWeaponToAgentPayloads.Count <= 0)
-                    return;
-
-                deferredPayloads = DeferredClientAttachWeaponToAgentPayloads
-                    .OrderBy(candidate => candidate.Sequence)
-                    .ToList();
-            }
+            if (deferredPayloads == null || deferredPayloads.Count <= 0)
+                return;
 
             MissionNetworkComponent missionNetworkComponent = mission.GetMissionBehavior<MissionNetworkComponent>();
             if (missionNetworkComponent == null)
@@ -8551,6 +8772,8 @@ namespace CoopSpectator.Patches
             {
                 AttachWeaponToAgent attachWeaponToAgent = deferredPayload?.Message;
                 if (attachWeaponToAgent == null)
+                    continue;
+                if (!IsCurrentDeferredClientAgentBootstrapPayload(attachWeaponToAgent.AgentIndex, deferredPayload))
                     continue;
 
                 if (deferredPayload.LastAttemptUtc != DateTime.MinValue &&
@@ -8599,21 +8822,14 @@ namespace CoopSpectator.Patches
         private static void TryReplayDeferredClientSetWeaponNetworkData(
             Mission mission,
             string source,
-            string snapshotReadinessSummary)
+            string snapshotReadinessSummary,
+            IReadOnlyList<DeferredClientSetWeaponNetworkDataPayload> deferredPayloads)
         {
             if (_missionNetworkComponentHandleServerEventSetWeaponNetworkDataMethod == null)
                 return;
 
-            List<DeferredClientSetWeaponNetworkDataPayload> deferredPayloads;
-            lock (DeferredClientSetWeaponNetworkDataPayloads)
-            {
-                if (DeferredClientSetWeaponNetworkDataPayloads.Count <= 0)
-                    return;
-
-                deferredPayloads = DeferredClientSetWeaponNetworkDataPayloads
-                    .OrderBy(candidate => candidate.Sequence)
-                    .ToList();
-            }
+            if (deferredPayloads == null || deferredPayloads.Count <= 0)
+                return;
 
             MissionNetworkComponent missionNetworkComponent = mission.GetMissionBehavior<MissionNetworkComponent>();
             if (missionNetworkComponent == null)
@@ -8624,6 +8840,8 @@ namespace CoopSpectator.Patches
             {
                 SetWeaponNetworkData setWeaponNetworkData = deferredPayload?.Message;
                 if (setWeaponNetworkData == null)
+                    continue;
+                if (!IsCurrentDeferredClientAgentBootstrapPayload(setWeaponNetworkData.AgentIndex, deferredPayload))
                     continue;
 
                 if (deferredPayload.LastAttemptUtc != DateTime.MinValue &&
@@ -8672,21 +8890,14 @@ namespace CoopSpectator.Patches
         private static void TryReplayDeferredClientSetWeaponAmmoData(
             Mission mission,
             string source,
-            string snapshotReadinessSummary)
+            string snapshotReadinessSummary,
+            IReadOnlyList<DeferredClientSetWeaponAmmoDataPayload> deferredPayloads)
         {
             if (_missionNetworkComponentHandleServerEventSetWeaponAmmoDataMethod == null)
                 return;
 
-            List<DeferredClientSetWeaponAmmoDataPayload> deferredPayloads;
-            lock (DeferredClientSetWeaponAmmoDataPayloads)
-            {
-                if (DeferredClientSetWeaponAmmoDataPayloads.Count <= 0)
-                    return;
-
-                deferredPayloads = DeferredClientSetWeaponAmmoDataPayloads
-                    .OrderBy(candidate => candidate.Sequence)
-                    .ToList();
-            }
+            if (deferredPayloads == null || deferredPayloads.Count <= 0)
+                return;
 
             MissionNetworkComponent missionNetworkComponent = mission.GetMissionBehavior<MissionNetworkComponent>();
             if (missionNetworkComponent == null)
@@ -8697,6 +8908,8 @@ namespace CoopSpectator.Patches
             {
                 SetWeaponAmmoData setWeaponAmmoData = deferredPayload?.Message;
                 if (setWeaponAmmoData == null)
+                    continue;
+                if (!IsCurrentDeferredClientAgentBootstrapPayload(setWeaponAmmoData.AgentIndex, deferredPayload))
                     continue;
 
                 if (deferredPayload.LastAttemptUtc != DateTime.MinValue &&
@@ -11750,21 +11963,14 @@ namespace CoopSpectator.Patches
         private static void TryReplayDeferredClientSetWeaponReloadPhase(
             Mission mission,
             string source,
-            string snapshotReadinessSummary)
+            string snapshotReadinessSummary,
+            IReadOnlyList<DeferredClientSetWeaponReloadPhasePayload> deferredPayloads)
         {
             if (_missionNetworkComponentHandleServerEventSetWeaponReloadPhaseMethod == null)
                 return;
 
-            List<DeferredClientSetWeaponReloadPhasePayload> deferredPayloads;
-            lock (DeferredClientSetWeaponReloadPhasePayloads)
-            {
-                if (DeferredClientSetWeaponReloadPhasePayloads.Count <= 0)
-                    return;
-
-                deferredPayloads = DeferredClientSetWeaponReloadPhasePayloads
-                    .OrderBy(candidate => candidate.Sequence)
-                    .ToList();
-            }
+            if (deferredPayloads == null || deferredPayloads.Count <= 0)
+                return;
 
             MissionNetworkComponent missionNetworkComponent = mission.GetMissionBehavior<MissionNetworkComponent>();
             if (missionNetworkComponent == null)
@@ -11775,6 +11981,8 @@ namespace CoopSpectator.Patches
             {
                 SetWeaponReloadPhase setWeaponReloadPhase = deferredPayload?.Message;
                 if (setWeaponReloadPhase == null)
+                    continue;
+                if (!IsCurrentDeferredClientAgentBootstrapPayload(setWeaponReloadPhase.AgentIndex, deferredPayload))
                     continue;
 
                 if (deferredPayload.LastAttemptUtc != DateTime.MinValue &&
@@ -12236,21 +12444,14 @@ namespace CoopSpectator.Patches
         private static void TryReplayDeferredClientSetWieldedItemIndex(
             Mission mission,
             string source,
-            string snapshotReadinessSummary)
+            string snapshotReadinessSummary,
+            IReadOnlyList<DeferredClientSetWieldedItemIndexPayload> deferredPayloads)
         {
             if (_missionNetworkComponentHandleServerEventSetWieldedItemIndexMethod == null)
                 return;
 
-            List<DeferredClientSetWieldedItemIndexPayload> deferredPayloads;
-            lock (DeferredClientSetWieldedItemIndexPayloads)
-            {
-                if (DeferredClientSetWieldedItemIndexPayloads.Count <= 0)
-                    return;
-
-                deferredPayloads = DeferredClientSetWieldedItemIndexPayloads
-                    .OrderBy(candidate => candidate.Sequence)
-                    .ToList();
-            }
+            if (deferredPayloads == null || deferredPayloads.Count <= 0)
+                return;
 
             MissionNetworkComponent missionNetworkComponent = mission.GetMissionBehavior<MissionNetworkComponent>();
             if (missionNetworkComponent == null)
@@ -12261,6 +12462,8 @@ namespace CoopSpectator.Patches
             {
                 SetWieldedItemIndex setWieldedItemIndex = deferredPayload?.Message;
                 if (setWieldedItemIndex == null)
+                    continue;
+                if (!IsCurrentDeferredClientAgentBootstrapPayload(setWieldedItemIndex.AgentIndex, deferredPayload))
                     continue;
 
                 if (deferredPayload.LastAttemptUtc != DateTime.MinValue &&
@@ -12307,21 +12510,14 @@ namespace CoopSpectator.Patches
         private static void TryReplayDeferredClientStartSwitchingWeaponUsageIndex(
             Mission mission,
             string source,
-            string snapshotReadinessSummary)
+            string snapshotReadinessSummary,
+            IReadOnlyList<DeferredClientStartSwitchingWeaponUsageIndexPayload> deferredPayloads)
         {
             if (_missionNetworkComponentHandleServerEventStartSwitchingWeaponUsageIndexMethod == null)
                 return;
 
-            List<DeferredClientStartSwitchingWeaponUsageIndexPayload> deferredPayloads;
-            lock (DeferredClientStartSwitchingWeaponUsageIndexPayloads)
-            {
-                if (DeferredClientStartSwitchingWeaponUsageIndexPayloads.Count <= 0)
-                    return;
-
-                deferredPayloads = DeferredClientStartSwitchingWeaponUsageIndexPayloads
-                    .OrderBy(candidate => candidate.Sequence)
-                    .ToList();
-            }
+            if (deferredPayloads == null || deferredPayloads.Count <= 0)
+                return;
 
             MissionNetworkComponent missionNetworkComponent = mission.GetMissionBehavior<MissionNetworkComponent>();
             if (missionNetworkComponent == null)
@@ -12333,6 +12529,12 @@ namespace CoopSpectator.Patches
                 StartSwitchingWeaponUsageIndex startSwitchingWeaponUsageIndex = deferredPayload?.Message;
                 if (startSwitchingWeaponUsageIndex == null)
                     continue;
+                if (!IsCurrentDeferredClientAgentBootstrapPayload(
+                        startSwitchingWeaponUsageIndex.AgentIndex,
+                        deferredPayload))
+                {
+                    continue;
+                }
 
                 if (deferredPayload.LastAttemptUtc != DateTime.MinValue &&
                     nowUtc - deferredPayload.LastAttemptUtc < TimeSpan.FromMilliseconds(100))
@@ -12410,21 +12612,14 @@ namespace CoopSpectator.Patches
         private static void TryReplayDeferredClientWeaponUsageIndexChangeMessage(
             Mission mission,
             string source,
-            string snapshotReadinessSummary)
+            string snapshotReadinessSummary,
+            IReadOnlyList<DeferredClientWeaponUsageIndexChangePayload> deferredPayloads)
         {
             if (_missionNetworkComponentHandleServerEventWeaponUsageIndexChangeMessageMethod == null)
                 return;
 
-            List<DeferredClientWeaponUsageIndexChangePayload> deferredPayloads;
-            lock (DeferredClientWeaponUsageIndexChangePayloads)
-            {
-                if (DeferredClientWeaponUsageIndexChangePayloads.Count <= 0)
-                    return;
-
-                deferredPayloads = DeferredClientWeaponUsageIndexChangePayloads
-                    .OrderBy(candidate => candidate.Sequence)
-                    .ToList();
-            }
+            if (deferredPayloads == null || deferredPayloads.Count <= 0)
+                return;
 
             MissionNetworkComponent missionNetworkComponent = mission.GetMissionBehavior<MissionNetworkComponent>();
             if (missionNetworkComponent == null)
@@ -12436,6 +12631,12 @@ namespace CoopSpectator.Patches
                 WeaponUsageIndexChangeMessage weaponUsageIndexChangeMessage = deferredPayload?.Message;
                 if (weaponUsageIndexChangeMessage == null)
                     continue;
+                if (!IsCurrentDeferredClientAgentBootstrapPayload(
+                        weaponUsageIndexChangeMessage.AgentIndex,
+                        deferredPayload))
+                {
+                    continue;
+                }
 
                 if (deferredPayload.LastAttemptUtc != DateTime.MinValue &&
                     nowUtc - deferredPayload.LastAttemptUtc < TimeSpan.FromMilliseconds(100))
@@ -12513,21 +12714,14 @@ namespace CoopSpectator.Patches
         private static void TryReplayDeferredClientSetAgentHealth(
             Mission mission,
             string source,
-            string snapshotReadinessSummary)
+            string snapshotReadinessSummary,
+            IReadOnlyList<DeferredClientSetAgentHealthPayload> deferredPayloads)
         {
             if (_missionNetworkComponentHandleServerEventSetAgentHealthMethod == null)
                 return;
 
-            List<DeferredClientSetAgentHealthPayload> deferredPayloads;
-            lock (DeferredClientSetAgentHealthPayloads)
-            {
-                if (DeferredClientSetAgentHealthPayloads.Count <= 0)
-                    return;
-
-                deferredPayloads = DeferredClientSetAgentHealthPayloads
-                    .OrderBy(candidate => candidate.Sequence)
-                    .ToList();
-            }
+            if (deferredPayloads == null || deferredPayloads.Count <= 0)
+                return;
 
             MissionNetworkComponent missionNetworkComponent = mission.GetMissionBehavior<MissionNetworkComponent>();
             if (missionNetworkComponent == null)
@@ -12538,6 +12732,8 @@ namespace CoopSpectator.Patches
             {
                 SetAgentHealth setAgentHealth = deferredPayload?.Message;
                 if (setAgentHealth == null)
+                    continue;
+                if (!IsCurrentDeferredClientAgentBootstrapPayload(setAgentHealth.AgentIndex, deferredPayload))
                     continue;
 
                 if (deferredPayload.LastAttemptUtc != DateTime.MinValue &&
@@ -12584,21 +12780,14 @@ namespace CoopSpectator.Patches
         private static void TryReplayDeferredClientMakeAgentDead(
             Mission mission,
             string source,
-            string snapshotReadinessSummary)
+            string snapshotReadinessSummary,
+            IReadOnlyList<DeferredClientMakeAgentDeadPayload> deferredPayloads)
         {
             if (_missionNetworkComponentHandleServerEventMakeAgentDeadMethod == null)
                 return;
 
-            List<DeferredClientMakeAgentDeadPayload> deferredPayloads;
-            lock (DeferredClientMakeAgentDeadPayloads)
-            {
-                if (DeferredClientMakeAgentDeadPayloads.Count <= 0)
-                    return;
-
-                deferredPayloads = DeferredClientMakeAgentDeadPayloads
-                    .OrderBy(candidate => candidate.Sequence)
-                    .ToList();
-            }
+            if (deferredPayloads == null || deferredPayloads.Count <= 0)
+                return;
 
             MissionNetworkComponent missionNetworkComponent = mission.GetMissionBehavior<MissionNetworkComponent>();
             if (missionNetworkComponent == null)
@@ -12609,6 +12798,8 @@ namespace CoopSpectator.Patches
             {
                 MakeAgentDead makeAgentDead = deferredPayload?.Message;
                 if (makeAgentDead == null)
+                    continue;
+                if (!IsCurrentDeferredClientAgentBootstrapPayload(makeAgentDead.AgentIndex, deferredPayload))
                     continue;
 
                 if (deferredPayload.LastAttemptUtc != DateTime.MinValue &&
@@ -12652,14 +12843,29 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static void RemoveDeferredClientCreateAgentPayload(int agentIndex)
+        private static void RemoveDeferredClientCreateAgentPayload(
+            int agentIndex,
+            CreateAgent referenceMessage = null)
         {
             if (agentIndex < 0)
                 return;
 
-            lock (DeferredClientCreateAgentPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                DeferredClientCreateAgentPayloads.RemoveAll(candidate => candidate?.Message?.AgentIndex == agentIndex);
+                if (!DeferredClientAgentBootstrapBundles.TryGetValue(
+                        agentIndex,
+                        out DeferredClientAgentBootstrapBundle bundle) ||
+                    bundle == null)
+                {
+                    return;
+                }
+
+                if (referenceMessage == null ||
+                    ReferenceEquals(bundle.CreateAgent?.Message, referenceMessage))
+                {
+                    bundle.CreateAgent = null;
+                }
+                RemoveDeferredClientAgentBootstrapBundleIfEmptyNoLock(bundle);
             }
         }
 
@@ -12668,10 +12874,18 @@ namespace CoopSpectator.Patches
             if (agentIndex < 0)
                 return;
 
-            lock (DeferredClientAgentSetFormationPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                DeferredClientAgentSetFormationPayloads.RemoveAll(
-                    candidate => candidate?.Message?.AgentIndex == agentIndex);
+                if (!DeferredClientAgentBootstrapBundles.TryGetValue(
+                        agentIndex,
+                        out DeferredClientAgentBootstrapBundle bundle) ||
+                    bundle == null)
+                {
+                    return;
+                }
+
+                bundle.AgentSetFormation = null;
+                RemoveDeferredClientAgentBootstrapBundleIfEmptyNoLock(bundle);
             }
         }
 
@@ -12680,9 +12894,18 @@ namespace CoopSpectator.Patches
             if (agentIndex < 0)
                 return;
 
-            lock (DeferredClientSetAgentActionSetPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                DeferredClientSetAgentActionSetPayloads.RemoveAll(candidate => candidate?.Message?.AgentIndex == agentIndex);
+                if (!DeferredClientAgentBootstrapBundles.TryGetValue(
+                        agentIndex,
+                        out DeferredClientAgentBootstrapBundle bundle) ||
+                    bundle == null)
+                {
+                    return;
+                }
+
+                bundle.SetAgentActionSet = null;
+                RemoveDeferredClientAgentBootstrapBundleIfEmptyNoLock(bundle);
             }
         }
 
@@ -12691,9 +12914,18 @@ namespace CoopSpectator.Patches
             if (agentIndex < 0)
                 return;
 
-            lock (DeferredClientSynchronizeAgentEquipmentPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                DeferredClientSynchronizeAgentEquipmentPayloads.RemoveAll(candidate => candidate?.Message?.AgentIndex == agentIndex);
+                if (!DeferredClientAgentBootstrapBundles.TryGetValue(
+                        agentIndex,
+                        out DeferredClientAgentBootstrapBundle bundle) ||
+                    bundle == null)
+                {
+                    return;
+                }
+
+                bundle.SynchronizeAgentEquipment = null;
+                RemoveDeferredClientAgentBootstrapBundleIfEmptyNoLock(bundle);
             }
         }
 
@@ -12835,11 +13067,20 @@ namespace CoopSpectator.Patches
             if (agentIndex < 0)
                 return;
 
-            lock (DeferredClientAttachWeaponToAgentPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                DeferredClientAttachWeaponToAgentPayloads.RemoveAll(candidate =>
-                    candidate?.Message?.AgentIndex == agentIndex &&
-                    (referenceMessage == null || candidate.Message.BoneIndex == referenceMessage.BoneIndex));
+                if (!DeferredClientAgentBootstrapBundles.TryGetValue(
+                        agentIndex,
+                        out DeferredClientAgentBootstrapBundle bundle) ||
+                    bundle == null)
+                {
+                    return;
+                }
+
+                bundle.AttachWeaponToAgent.RemoveAll(candidate =>
+                    candidate?.Message != null &&
+                    (referenceMessage == null || ReferenceEquals(candidate.Message, referenceMessage)));
+                RemoveDeferredClientAgentBootstrapBundleIfEmptyNoLock(bundle);
             }
         }
 
@@ -12850,11 +13091,20 @@ namespace CoopSpectator.Patches
             if (agentIndex < 0)
                 return;
 
-            lock (DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                DeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayloads.RemoveAll(candidate =>
-                    candidate?.Message?.AgentIndex == agentIndex &&
-                    (referenceMessage == null || candidate.Message.SlotIndex == referenceMessage.SlotIndex));
+                if (!DeferredClientAgentBootstrapBundles.TryGetValue(
+                        agentIndex,
+                        out DeferredClientAgentBootstrapBundle bundle) ||
+                    bundle == null)
+                {
+                    return;
+                }
+
+                bundle.AttachWeaponToEquipmentSlot.RemoveAll(candidate =>
+                    candidate?.Message != null &&
+                    (referenceMessage == null || ReferenceEquals(candidate.Message, referenceMessage)));
+                RemoveDeferredClientAgentBootstrapBundleIfEmptyNoLock(bundle);
             }
         }
 
@@ -12865,11 +13115,20 @@ namespace CoopSpectator.Patches
             if (agentIndex < 0)
                 return;
 
-            lock (DeferredClientSetWeaponNetworkDataPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                DeferredClientSetWeaponNetworkDataPayloads.RemoveAll(candidate =>
-                    candidate?.Message?.AgentIndex == agentIndex &&
-                    (referenceMessage == null || candidate.Message.WeaponEquipmentIndex == referenceMessage.WeaponEquipmentIndex));
+                if (!DeferredClientAgentBootstrapBundles.TryGetValue(
+                        agentIndex,
+                        out DeferredClientAgentBootstrapBundle bundle) ||
+                    bundle == null)
+                {
+                    return;
+                }
+
+                bundle.WeaponNetworkData.RemoveAll(candidate =>
+                    candidate?.Message != null &&
+                    (referenceMessage == null || ReferenceEquals(candidate.Message, referenceMessage)));
+                RemoveDeferredClientAgentBootstrapBundleIfEmptyNoLock(bundle);
             }
         }
 
@@ -12880,13 +13139,20 @@ namespace CoopSpectator.Patches
             if (agentIndex < 0)
                 return;
 
-            lock (DeferredClientSetWeaponAmmoDataPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                DeferredClientSetWeaponAmmoDataPayloads.RemoveAll(candidate =>
-                    candidate?.Message?.AgentIndex == agentIndex &&
-                    (referenceMessage == null ||
-                     (candidate.Message.WeaponEquipmentIndex == referenceMessage.WeaponEquipmentIndex &&
-                      candidate.Message.AmmoEquipmentIndex == referenceMessage.AmmoEquipmentIndex)));
+                if (!DeferredClientAgentBootstrapBundles.TryGetValue(
+                        agentIndex,
+                        out DeferredClientAgentBootstrapBundle bundle) ||
+                    bundle == null)
+                {
+                    return;
+                }
+
+                bundle.WeaponAmmoData.RemoveAll(candidate =>
+                    candidate?.Message != null &&
+                    (referenceMessage == null || ReferenceEquals(candidate.Message, referenceMessage)));
+                RemoveDeferredClientAgentBootstrapBundleIfEmptyNoLock(bundle);
             }
         }
 
@@ -12901,18 +13167,24 @@ namespace CoopSpectator.Patches
             int boundCount = 0;
             int staleCount = 0;
             DateTime nowUtc = DateTime.UtcNow;
-            lock (DeferredClientSetWeaponAmmoDataPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                for (int index = DeferredClientSetWeaponAmmoDataPayloads.Count - 1; index >= 0; index--)
+                if (!DeferredClientAgentBootstrapBundles.TryGetValue(
+                        agentIndex,
+                        out DeferredClientAgentBootstrapBundle bundle) ||
+                    bundle == null)
+                {
+                    return;
+                }
+
+                for (int index = bundle.WeaponAmmoData.Count - 1; index >= 0; index--)
                 {
                     DeferredClientSetWeaponAmmoDataPayload candidate =
-                        DeferredClientSetWeaponAmmoDataPayloads[index];
-                    if (candidate?.Message?.AgentIndex != agentIndex)
-                        continue;
+                        bundle.WeaponAmmoData[index];
 
                     if (candidate.Agent != null && !ReferenceEquals(candidate.Agent, materializedAgent))
                     {
-                        DeferredClientSetWeaponAmmoDataPayloads.RemoveAt(index);
+                        bundle.WeaponAmmoData.RemoveAt(index);
                         staleCount++;
                         continue;
                     }
@@ -12924,6 +13196,8 @@ namespace CoopSpectator.Patches
                     candidate.DeferralReason = "materialized-agent-bound:" + (source ?? "unknown");
                     boundCount++;
                 }
+
+                RemoveDeferredClientAgentBootstrapBundleIfEmptyNoLock(bundle);
             }
 
             if (ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics &&
@@ -12947,16 +13221,35 @@ namespace CoopSpectator.Patches
 
             if (referenceMessage != null)
             {
-                RemoveDeferredClientSetWeaponReloadPhasePayload(
-                    agentIndex,
-                    referenceMessage.EquipmentIndex);
+                lock (DeferredClientAgentBootstrapBundleLock)
+                {
+                    if (!DeferredClientAgentBootstrapBundles.TryGetValue(
+                            agentIndex,
+                            out DeferredClientAgentBootstrapBundle bundle) ||
+                        bundle == null)
+                    {
+                        return;
+                    }
+
+                    bundle.WeaponReloadPhase.RemoveAll(candidate =>
+                        ReferenceEquals(candidate?.Message, referenceMessage));
+                    RemoveDeferredClientAgentBootstrapBundleIfEmptyNoLock(bundle);
+                }
                 return;
             }
 
-            lock (DeferredClientSetWeaponReloadPhasePayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                DeferredClientSetWeaponReloadPhasePayloads.RemoveAll(candidate =>
-                    candidate?.Message?.AgentIndex == agentIndex);
+                if (!DeferredClientAgentBootstrapBundles.TryGetValue(
+                        agentIndex,
+                        out DeferredClientAgentBootstrapBundle bundle) ||
+                    bundle == null)
+                {
+                    return;
+                }
+
+                bundle.WeaponReloadPhase.Clear();
+                RemoveDeferredClientAgentBootstrapBundleIfEmptyNoLock(bundle);
             }
         }
 
@@ -12967,11 +13260,19 @@ namespace CoopSpectator.Patches
             if (agentIndex < 0)
                 return;
 
-            lock (DeferredClientSetWeaponReloadPhasePayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                DeferredClientSetWeaponReloadPhasePayloads.RemoveAll(candidate =>
-                    candidate?.Message?.AgentIndex == agentIndex &&
-                    candidate.Message.EquipmentIndex == equipmentIndex);
+                if (!DeferredClientAgentBootstrapBundles.TryGetValue(
+                        agentIndex,
+                        out DeferredClientAgentBootstrapBundle bundle) ||
+                    bundle == null)
+                {
+                    return;
+                }
+
+                bundle.WeaponReloadPhase.RemoveAll(candidate =>
+                    candidate?.Message?.EquipmentIndex == equipmentIndex);
+                RemoveDeferredClientAgentBootstrapBundleIfEmptyNoLock(bundle);
             }
         }
 
@@ -13054,13 +13355,20 @@ namespace CoopSpectator.Patches
             if (agentIndex < 0)
                 return;
 
-            lock (DeferredClientStartSwitchingWeaponUsageIndexPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                DeferredClientStartSwitchingWeaponUsageIndexPayloads.RemoveAll(candidate =>
-                    candidate?.Message?.AgentIndex == agentIndex &&
-                    (referenceMessage == null ||
-                     (candidate.Message.EquipmentIndex == referenceMessage.EquipmentIndex &&
-                      candidate.Message.UsageIndex == referenceMessage.UsageIndex)));
+                if (!DeferredClientAgentBootstrapBundles.TryGetValue(
+                        agentIndex,
+                        out DeferredClientAgentBootstrapBundle bundle) ||
+                    bundle == null)
+                {
+                    return;
+                }
+
+                bundle.StartSwitchingWeaponUsage.RemoveAll(candidate =>
+                    candidate?.Message != null &&
+                    (referenceMessage == null || ReferenceEquals(candidate.Message, referenceMessage)));
+                RemoveDeferredClientAgentBootstrapBundleIfEmptyNoLock(bundle);
             }
         }
 
@@ -13071,13 +13379,20 @@ namespace CoopSpectator.Patches
             if (agentIndex < 0)
                 return;
 
-            lock (DeferredClientWeaponUsageIndexChangePayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                DeferredClientWeaponUsageIndexChangePayloads.RemoveAll(candidate =>
-                    candidate?.Message?.AgentIndex == agentIndex &&
-                    (referenceMessage == null ||
-                     (candidate.Message.SlotIndex == referenceMessage.SlotIndex &&
-                      candidate.Message.UsageIndex == referenceMessage.UsageIndex)));
+                if (!DeferredClientAgentBootstrapBundles.TryGetValue(
+                        agentIndex,
+                        out DeferredClientAgentBootstrapBundle bundle) ||
+                    bundle == null)
+                {
+                    return;
+                }
+
+                bundle.WeaponUsageIndexChange.RemoveAll(candidate =>
+                    candidate?.Message != null &&
+                    (referenceMessage == null || ReferenceEquals(candidate.Message, referenceMessage)));
+                RemoveDeferredClientAgentBootstrapBundleIfEmptyNoLock(bundle);
             }
         }
 
@@ -13086,14 +13401,20 @@ namespace CoopSpectator.Patches
             if (agentIndex < 0)
                 return;
 
-            lock (DeferredClientSetWieldedItemIndexPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                DeferredClientSetWieldedItemIndexPayloads.RemoveAll(candidate =>
-                    candidate?.Message?.AgentIndex == agentIndex &&
-                    (referenceMessage == null ||
-                     (candidate.Message.WieldedItemIndex == referenceMessage.WieldedItemIndex &&
-                      candidate.Message.IsWieldedOnSpawn == referenceMessage.IsWieldedOnSpawn &&
-                      candidate.Message.IsLeftHand == referenceMessage.IsLeftHand)));
+                if (!DeferredClientAgentBootstrapBundles.TryGetValue(
+                        agentIndex,
+                        out DeferredClientAgentBootstrapBundle bundle) ||
+                    bundle == null)
+                {
+                    return;
+                }
+
+                bundle.WieldedItemState.RemoveAll(candidate =>
+                    candidate?.Message != null &&
+                    (referenceMessage == null || ReferenceEquals(candidate.Message, referenceMessage)));
+                RemoveDeferredClientAgentBootstrapBundleIfEmptyNoLock(bundle);
             }
         }
 
@@ -13102,9 +13423,18 @@ namespace CoopSpectator.Patches
             if (agentIndex < 0)
                 return;
 
-            lock (DeferredClientSetAgentHealthPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                DeferredClientSetAgentHealthPayloads.RemoveAll(candidate => candidate?.Message?.AgentIndex == agentIndex);
+                if (!DeferredClientAgentBootstrapBundles.TryGetValue(
+                        agentIndex,
+                        out DeferredClientAgentBootstrapBundle bundle) ||
+                    bundle == null)
+                {
+                    return;
+                }
+
+                bundle.AgentHealth = null;
+                RemoveDeferredClientAgentBootstrapBundleIfEmptyNoLock(bundle);
             }
         }
 
@@ -13113,9 +13443,18 @@ namespace CoopSpectator.Patches
             if (agentIndex < 0)
                 return;
 
-            lock (DeferredClientMakeAgentDeadPayloads)
+            lock (DeferredClientAgentBootstrapBundleLock)
             {
-                DeferredClientMakeAgentDeadPayloads.RemoveAll(candidate => candidate?.Message?.AgentIndex == agentIndex);
+                if (!DeferredClientAgentBootstrapBundles.TryGetValue(
+                        agentIndex,
+                        out DeferredClientAgentBootstrapBundle bundle) ||
+                    bundle == null)
+                {
+                    return;
+                }
+
+                bundle.MakeAgentDead = null;
+                RemoveDeferredClientAgentBootstrapBundleIfEmptyNoLock(bundle);
             }
         }
 
