@@ -2601,6 +2601,28 @@ namespace CoopSpectator.Patches
                     "battle-map handoff CreateAgent prefix");
 
                 if (useInitialSallyOutCreateAgentPacing &&
+                    !createAgent.IsPlayerAgent &&
+                    createAgent.Peer == null)
+                {
+                    RegisterDeferredClientCreateAgentPayload(
+                        createAgent,
+                        sallyOutPacingReason,
+                        useSallyOutNativeStartupPacing: true);
+                    if (ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+                    {
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: deferred initial SallyOut CreateAgent for paced client replay. " +
+                            "AgentIndex=" + createAgent.AgentIndex +
+                            " MountAgentIndex=" + createAgent.MountAgentIndex +
+                            " TeamIndex=" + createAgent.TeamIndex +
+                            " HeroLike=" + IsHeroLikeCreateAgentPayload(createAgent) +
+                            " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
+                            " Reason=" + (sallyOutPacingReason ?? "unknown"));
+                    }
+                    return false;
+                }
+
+                if (useInitialSallyOutCreateAgentPacing &&
                     mountedHeroPayloadCandidate &&
                     !TryMaterializeDeferredSallyOutMountBeforeHero(
                         mission,
@@ -2619,28 +2641,6 @@ namespace CoopSpectator.Patches
                             " MountAgentIndex=" + createAgent.MountAgentIndex +
                             " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
                             " Reason=" + mountDeferralReason);
-                    }
-                    return false;
-                }
-
-                if (useInitialSallyOutCreateAgentPacing &&
-                    !createAgent.IsPlayerAgent &&
-                    createAgent.Peer == null &&
-                    !IsHeroLikeCreateAgentPayload(createAgent))
-                {
-                    RegisterDeferredClientCreateAgentPayload(
-                        createAgent,
-                        sallyOutPacingReason,
-                        useSallyOutNativeStartupPacing: true);
-                    if (ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
-                    {
-                        ModLogger.Info(
-                            "BattleMapSpawnHandoffPatch: deferred initial SallyOut CreateAgent for paced native client replay. " +
-                            "AgentIndex=" + createAgent.AgentIndex +
-                            " MountAgentIndex=" + createAgent.MountAgentIndex +
-                            " TeamIndex=" + createAgent.TeamIndex +
-                            " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
-                            " Reason=" + (sallyOutPacingReason ?? "unknown"));
                     }
                     return false;
                 }
@@ -2936,7 +2936,7 @@ namespace CoopSpectator.Patches
                 return false;
             }
 
-            if (CoopMissionNetworkBridge.IsClientCurrentMaterializedAgentEntrySnapshotApplied(
+            if (CoopMissionNetworkBridge.HasClientCurrentMaterializedAgentEntrySnapshotApplied(
                     out string materializedMapReadinessSummary))
             {
                 reason = "authoritative-materialized-agent-map-already-applied";
@@ -4354,11 +4354,14 @@ namespace CoopSpectator.Patches
                 DeferredClientSetWieldedItemIndexPayload existingPayload = DeferredClientSetWieldedItemIndexPayloads
                     .FirstOrDefault(candidate =>
                         candidate?.Message?.AgentIndex == setWieldedItemIndex.AgentIndex &&
-                        candidate.Message.WieldedItemIndex == setWieldedItemIndex.WieldedItemIndex &&
-                        candidate.Message.IsWieldedOnSpawn == setWieldedItemIndex.IsWieldedOnSpawn);
+                        candidate.Message.IsLeftHand == setWieldedItemIndex.IsLeftHand);
                 if (existingPayload != null)
                 {
+                    existingPayload.Sequence = ++_nextDeferredClientSetWieldedItemIndexSequence;
                     existingPayload.Message = setWieldedItemIndex;
+                    existingPayload.DeferredUtc = DateTime.UtcNow;
+                    existingPayload.LastAttemptUtc = DateTime.MinValue;
+                    existingPayload.Attempts = 0;
                     existingPayload.DeferralReason = deferralReason;
                     return;
                 }
@@ -7130,6 +7133,53 @@ namespace CoopSpectator.Patches
 
                 deferredPayload.LastAttemptUtc = nowUtc;
                 deferredPayload.Attempts++;
+                bool pacedSallyOutHero =
+                    deferredPayload.UseSallyOutNativeStartupPacing &&
+                    IsHeroLikeCreateAgentPayload(createAgent);
+                if (pacedSallyOutHero)
+                {
+                    bool strictExactHeroCandidate = false;
+                    bool handledPacedHero = TryHandleStrictExactHeroCreateAgentViaContract(
+                        mission,
+                        createAgent,
+                        out strictExactHeroCandidate);
+                    if (!handledPacedHero)
+                    {
+                        handledPacedHero = TryHandleMountedHeroCreateAgentViaPayloadAdapter(
+                            mission,
+                            createAgent,
+                            out bool _);
+                    }
+
+                    if (handledPacedHero)
+                    {
+                        Agent pacedHeroAgent = Mission.MissionNetworkHelper.GetAgentFromIndex(
+                            createAgent.AgentIndex,
+                            canBeNull: true);
+                        if (pacedHeroAgent != null && pacedHeroAgent.IsActive())
+                        {
+                            BindDeferredClientSetWeaponAmmoDataPayloadsToMaterializedAgent(
+                                createAgent.AgentIndex,
+                                pacedHeroAgent,
+                                "paced SallyOut exact hero CreateAgent adapter");
+                        }
+
+                        RemoveDeferredClientCreateAgentPayload(createAgent.AgentIndex);
+                        if (ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+                        {
+                            ModLogger.Info(
+                                "BattleMapSpawnHandoffPatch: materialized paced SallyOut hero through exact CreateAgent adapter. " +
+                                "AgentIndex=" + createAgent.AgentIndex +
+                                " MountAgentIndex=" + createAgent.MountAgentIndex +
+                                " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
+                                " StrictExactCandidate=" + strictExactHeroCandidate +
+                                " Attempts=" + deferredPayload.Attempts +
+                                " Source=" + (source ?? "unknown"));
+                        }
+                        continue;
+                    }
+                }
+
                 if (TryHandleExactSiegeTroopCreateAgentViaSnapshot(
                         mission,
                         createAgent))
@@ -13363,7 +13413,12 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
-                CoopMissionSpawnLogic.TryApplyEntryIdentityToAgent(agent, entryState);
+                CoopMissionSpawnLogic.TryApplyEntryIdentityToAgent(
+                    agent,
+                    entryState,
+                    applyBodyProperties: !CoopMissionSpawnLogic.ShouldPreserveSallyOutCreateTimeBodyProperties(
+                        agent,
+                        entryState));
                 ExactTransferContractRuntimeCache.ObserveClientMaterialized(
                     agent.Index,
                     agent,
@@ -13530,7 +13585,12 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
-                CoopMissionSpawnLogic.TryApplyEntryIdentityToAgent(agent, entryState);
+                CoopMissionSpawnLogic.TryApplyEntryIdentityToAgent(
+                    agent,
+                    entryState,
+                    applyBodyProperties: !CoopMissionSpawnLogic.ShouldPreserveSallyOutCreateTimeBodyProperties(
+                        agent,
+                        entryState));
                 CoopMissionSpawnLogic.ObserveClientAuthoritativeMaterializedAgentEntry(
                     agent.Index,
                     entryId,
@@ -13786,7 +13846,12 @@ namespace CoopSpectator.Patches
                 if (agent == null)
                     return false;
 
-                CoopMissionSpawnLogic.TryApplyEntryIdentityToAgent(agent, entryState);
+                CoopMissionSpawnLogic.TryApplyEntryIdentityToAgent(
+                    agent,
+                    entryState,
+                    applyBodyProperties: !CoopMissionSpawnLogic.ShouldPreserveSallyOutCreateTimeBodyProperties(
+                        agent,
+                        entryState));
                 if (resolvedStrictExactContract)
                     ExactTransferContractRuntimeCache.ObserveClientMaterialized(
                         agent.Index,
@@ -18254,16 +18319,22 @@ namespace CoopSpectator.Patches
                     ShouldUseSafeStringIdCreateAgentPathOnClient(mission);
                 bool snapshotReadyForCurrentBattle =
                     CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string snapshotReadinessSummary);
+                Agent agentBeforeHealthApply = Mission.MissionNetworkHelper.GetAgentFromIndex(
+                    setAgentHealth.AgentIndex,
+                    canBeNull: true);
+                bool deferredDeathBaselineMaterialized =
+                    safeStringIdCreateAgentPathActive &&
+                    setAgentHealth.Health <= 0 &&
+                    agentBeforeHealthApply == null &&
+                    HasDeferredClientCreateAgentPayload(setAgentHealth.AgentIndex) &&
+                    TryEmergencyMaterializeDeferredClientAgentBaselineForDeathCorridor(
+                        mission,
+                        setAgentHealth.AgentIndex,
+                        "battle-map handoff SetAgentHealth death corridor",
+                        snapshotReadinessSummary);
                 if (safeStringIdCreateAgentPathActive && !snapshotReadyForCurrentBattle)
                 {
-                    bool allowImmediateDeathHealthApply =
-                        setAgentHealth.Health <= 0 &&
-                        TryEmergencyMaterializeDeferredClientAgentBaselineForDeathCorridor(
-                            mission,
-                            setAgentHealth.AgentIndex,
-                            "battle-map handoff SetAgentHealth death corridor",
-                            snapshotReadinessSummary);
-                    if (!allowImmediateDeathHealthApply)
+                    if (!deferredDeathBaselineMaterialized)
                     {
                         RegisterDeferredClientSetAgentHealthPayload(
                             setAgentHealth,
@@ -18276,11 +18347,15 @@ namespace CoopSpectator.Patches
                             " Reason=" + (snapshotReadinessSummary ?? "unknown"));
                         return false;
                     }
+                }
 
+                if (deferredDeathBaselineMaterialized)
+                {
                     ModLogger.Info(
-                        "BattleMapSpawnHandoffPatch: allowed client SetAgentHealth during snapshot wait after emergency death-corridor baseline materialization. " +
+                        "BattleMapSpawnHandoffPatch: allowed client SetAgentHealth after emergency death-corridor baseline materialization. " +
                         "AgentIndex=" + setAgentHealth.AgentIndex +
                         " Health=" + setAgentHealth.Health +
+                        " SnapshotReady=" + snapshotReadyForCurrentBattle +
                         " Reason=" + (snapshotReadinessSummary ?? "unknown"));
                 }
 
@@ -18403,15 +18478,22 @@ namespace CoopSpectator.Patches
                 if (!ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
                     return true;
 
-                if (!CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string snapshotReadinessSummary))
+                bool snapshotReadyForCurrentBattle =
+                    CoopMissionNetworkBridge.IsClientCurrentBattleSnapshotApplied(out string snapshotReadinessSummary);
+                Agent agentBeforeDeathApply = Mission.MissionNetworkHelper.GetAgentFromIndex(
+                    makeAgentDead.AgentIndex,
+                    canBeNull: true);
+                bool deferredDeathBaselineMaterialized =
+                    agentBeforeDeathApply == null &&
+                    HasDeferredClientCreateAgentPayload(makeAgentDead.AgentIndex) &&
+                    TryEmergencyMaterializeDeferredClientAgentBaselineForDeathCorridor(
+                        mission,
+                        makeAgentDead.AgentIndex,
+                        "battle-map handoff MakeAgentDead death corridor",
+                        snapshotReadinessSummary);
+                if (!snapshotReadyForCurrentBattle)
                 {
-                    bool allowImmediateMakeAgentDead =
-                        TryEmergencyMaterializeDeferredClientAgentBaselineForDeathCorridor(
-                            mission,
-                            makeAgentDead.AgentIndex,
-                            "battle-map handoff MakeAgentDead death corridor",
-                            snapshotReadinessSummary);
-                    if (!allowImmediateMakeAgentDead)
+                    if (!deferredDeathBaselineMaterialized)
                     {
                         RegisterDeferredClientMakeAgentDeadPayload(
                             makeAgentDead,
@@ -18423,11 +18505,15 @@ namespace CoopSpectator.Patches
                             " Reason=" + (snapshotReadinessSummary ?? "unknown"));
                         return false;
                     }
+                }
 
+                if (deferredDeathBaselineMaterialized)
+                {
                     ModLogger.Info(
-                        "BattleMapSpawnHandoffPatch: allowed client MakeAgentDead during snapshot wait after emergency death-corridor baseline materialization. " +
+                        "BattleMapSpawnHandoffPatch: allowed client MakeAgentDead after emergency death-corridor baseline materialization. " +
                         "AgentIndex=" + makeAgentDead.AgentIndex +
                         " IsKilled=" + makeAgentDead.IsKilled +
+                        " SnapshotReady=" + snapshotReadyForCurrentBattle +
                         " Reason=" + (snapshotReadinessSummary ?? "unknown"));
                 }
 

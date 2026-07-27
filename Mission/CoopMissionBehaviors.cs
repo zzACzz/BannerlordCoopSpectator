@@ -7793,7 +7793,10 @@ namespace CoopSpectator.MissionBehaviors
 
             _exactNativeClientVisualOverlayAgentByIndex[agent.Index] = agent;
             _exactNativeClientVisualOverlayEntryIdByAgentIndex[agent.Index] = entryId;
-            TryApplyEntryIdentityToAgent(agent, entryState);
+            TryApplyEntryIdentityToAgent(
+                agent,
+                entryState,
+                applyBodyProperties: !ShouldPreserveSallyOutCreateTimeBodyProperties(agent, entryState));
 
             if (!force &&
                 (_exactNativeClientVisualOverlayAppliedAgentIndices.Contains(agent.Index) ||
@@ -13181,7 +13184,10 @@ namespace CoopSpectator.MissionBehaviors
                     return false;
                 }
 
-                TryApplyEntryIdentityToAgent(agent, entryState);
+                TryApplyEntryIdentityToAgent(
+                    agent,
+                    entryState,
+                    applyBodyProperties: !ShouldPreserveSallyOutCreateTimeBodyProperties(agent, entryState));
                 includeMountVisualsForOverlayRefresh =
                     clientHeroEntry &&
                     entryState.IsMounted &&
@@ -22995,7 +23001,38 @@ namespace CoopSpectator.MissionBehaviors
                 : "AppliedIdentity=" + string.Join(", ", parts);
         }
 
-        internal static void TryApplyEntryIdentityToAgent(Agent agent, RosterEntryState entryState)
+        internal static bool ShouldPreserveSallyOutCreateTimeBodyProperties(
+            Agent agent,
+            RosterEntryState entryState)
+        {
+            if (GameNetwork.IsServer ||
+                agent == null ||
+                entryState == null ||
+                !IsHeroEntryEligibleForExactPersonalPerks(entryState) ||
+                string.IsNullOrWhiteSpace(entryState.HeroBodyProperties))
+            {
+                return false;
+            }
+
+            Mission mission = agent.Mission ?? Mission.Current;
+            if (mission == null)
+                return false;
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext ??
+                CoopPreMissionTopologyRuntimeState.GetActiveScenarioContext();
+            return SallyOutScenarioContract.IsValidatedScenario(
+                scenarioContext,
+                mission.SceneName ?? string.Empty,
+                out string _);
+        }
+
+        internal static void TryApplyEntryIdentityToAgent(
+            Agent agent,
+            RosterEntryState entryState,
+            bool applyBodyProperties = true)
         {
             if (agent == null || entryState == null)
                 return;
@@ -23021,7 +23058,8 @@ namespace CoopSpectator.MissionBehaviors
                     }
                 }
 
-                if (TryResolveEntryBodyProperties(entryState, out BodyProperties bodyProperties))
+                if (applyBodyProperties &&
+                    TryResolveEntryBodyProperties(entryState, out BodyProperties bodyProperties))
                 {
                     try
                     {

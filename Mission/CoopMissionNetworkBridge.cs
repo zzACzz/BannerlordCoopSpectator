@@ -13821,6 +13821,26 @@ namespace CoopSpectator.MissionBehaviors
                 return true;
             }
 
+            return HasClientCurrentMaterializedAgentEntrySnapshotApplied(out readinessSummary);
+        }
+
+        internal static bool HasClientCurrentMaterializedAgentEntrySnapshotApplied(
+            out string readinessSummary)
+        {
+            readinessSummary = string.Empty;
+            if (!GameNetwork.IsClient)
+            {
+                readinessSummary = "not-client";
+                return false;
+            }
+
+            Mission mission = Mission.Current;
+            if (mission == null)
+            {
+                readinessSummary = "mission-null";
+                return false;
+            }
+
             bool applied =
                 ReferenceEquals(_clientObservedMaterializedAgentEntryMission, mission) &&
                 _clientObservedMaterializedAgentEntryTransmissionId > 0 &&
