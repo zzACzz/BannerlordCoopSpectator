@@ -87,6 +87,7 @@ namespace CoopSpectator.GameMode
             }
 
             CoopMissionSpawnLogic.TryRunClientExactCampaignVisualObserver(mission);
+            CoopMissionSpawnLogic.TryRunClientGlobalCaptainAgentStatRefresh(mission);
         }
 
         private static bool ContainsBehavior(List<MissionBehavior> behaviors, string typeName)

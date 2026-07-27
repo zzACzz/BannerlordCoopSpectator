@@ -3751,6 +3751,14 @@ namespace CoopSpectator.MissionBehaviors
             new Dictionary<int, PendingClientExactVisualOverlayState>();
         private static readonly Dictionary<int, ClientCreateAgentExactVisualRuntimeState> _clientCreateAgentExactVisualStateByAgentIndex =
             new Dictionary<int, ClientCreateAgentExactVisualRuntimeState>();
+        private sealed class ClientServerAuthoritativeRemovedWeaponSlotState
+        {
+            public readonly HashSet<EquipmentIndex> RemovedSlots = new HashSet<EquipmentIndex>();
+        }
+
+        private static ConditionalWeakTable<Agent, ClientServerAuthoritativeRemovedWeaponSlotState>
+            _clientServerAuthoritativeRemovedWeaponSlots =
+                new ConditionalWeakTable<Agent, ClientServerAuthoritativeRemovedWeaponSlotState>();
         private static readonly Dictionary<int, StrictExactHeroTransferRuntimeState> _strictExactHeroTransferStateByRiderAgentIndex =
             new Dictionary<int, StrictExactHeroTransferRuntimeState>();
         private static readonly Dictionary<int, DateTime> _clientHeroExactVisualWatchdogFirstSeenUtcByAgentIndex =
@@ -5036,6 +5044,8 @@ namespace CoopSpectator.MissionBehaviors
             _exactNativeSnapshotOverlayLoggedEntryIds.Clear();
             ResetClientExactCampaignVisualOverlayAssignmentState(source);
             _clientCreateAgentExactVisualStateByAgentIndex.Clear();
+            _clientServerAuthoritativeRemovedWeaponSlots =
+                new ConditionalWeakTable<Agent, ClientServerAuthoritativeRemovedWeaponSlotState>();
             _battlePhaseHeldFormationKeys.Clear();
             _battlePhaseHeldFormationUnitCounts.Clear();
             _battlePhasePreviousFiringOrdersByFormationKey.Clear();
@@ -11751,14 +11761,17 @@ namespace CoopSpectator.MissionBehaviors
 
             if (!IsClientTroopExactVisualInitReady(agent, entryState, out string initReadinessReason))
             {
-                ModLogger.Info(
-                    "CoopMissionSpawnLogic: deferred client troop exact visual finalize until client init state is ready. " +
-                    "AgentIndex=" + agent.Index +
-                    " EntryId=" + entryId +
-                    " RequestedIncludeWeapons=" + includeWeaponsForClientRefresh +
-                    " EffectiveIncludeWeapons=" + effectiveIncludeWeaponsForClientRefresh +
-                    " Reason=" + (initReadinessReason ?? "unknown") +
-                    " Source=" + (source ?? "unknown"));
+                if (ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+                {
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: deferred client troop exact visual finalize until client init state is ready. " +
+                        "AgentIndex=" + agent.Index +
+                        " EntryId=" + entryId +
+                        " RequestedIncludeWeapons=" + includeWeaponsForClientRefresh +
+                        " EffectiveIncludeWeapons=" + effectiveIncludeWeaponsForClientRefresh +
+                        " Reason=" + (initReadinessReason ?? "unknown") +
+                        " Source=" + (source ?? "unknown"));
+                }
                 return false;
             }
 
@@ -28989,6 +29002,132 @@ namespace CoopSpectator.MissionBehaviors
             return itemIds;
         }
 
+        internal static void ObserveClientServerAuthoritativeRemovedWeaponSlot(
+            Agent agent,
+            EquipmentIndex slot,
+            string source)
+        {
+            if (GameNetwork.IsServer ||
+                agent == null ||
+                slot < EquipmentIndex.Weapon0 ||
+                slot > EquipmentIndex.Weapon3)
+            {
+                return;
+            }
+
+            Mission mission = agent.Mission ?? Mission.Current;
+            if (mission == null ||
+                !SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty))
+            {
+                return;
+            }
+
+            ClientServerAuthoritativeRemovedWeaponSlotState state =
+                _clientServerAuthoritativeRemovedWeaponSlots.GetValue(
+                    agent,
+                    _ => new ClientServerAuthoritativeRemovedWeaponSlotState());
+            bool added;
+            lock (state.RemovedSlots)
+            {
+                added = state.RemovedSlots.Add(slot);
+            }
+
+            if (added && ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: observed server-authoritative removed weapon slot. " +
+                    "AgentIndex=" + agent.Index +
+                    " CharacterId=" + (agent.Character?.StringId ?? "null") +
+                    " Slot=" + slot +
+                    " Source=" + (source ?? "unknown"));
+            }
+        }
+
+        internal static bool IsClientServerAuthoritativeRemovedWeaponSlot(
+            Agent agent,
+            EquipmentIndex slot,
+            out string reason)
+        {
+            reason = null;
+            if (GameNetwork.IsServer ||
+                agent == null ||
+                slot < EquipmentIndex.Weapon0 ||
+                slot > EquipmentIndex.Weapon3 ||
+                !_clientServerAuthoritativeRemovedWeaponSlots.TryGetValue(
+                    agent,
+                    out ClientServerAuthoritativeRemovedWeaponSlotState state) ||
+                state == null)
+            {
+                return false;
+            }
+
+            bool observed;
+            lock (state.RemovedSlots)
+            {
+                observed = state.RemovedSlots.Contains(slot);
+            }
+
+            if (!observed)
+                return false;
+
+            reason =
+                "server-authoritative-remove-equipped-weapon" +
+                "|AgentIndex=" + agent.Index +
+                "|Slot=" + slot;
+            return true;
+        }
+
+        internal static bool AreClientMissingExpectedWeaponSlotsServerAuthoritativeRemoved(
+            Agent agent,
+            RosterEntryState entryState,
+            out string reason)
+        {
+            reason = null;
+            if (GameNetwork.IsServer ||
+                agent == null ||
+                entryState == null ||
+                agent.Equipment == null)
+            {
+                return false;
+            }
+
+            Equipment expectedEquipment = BuildSnapshotEquipmentForExactRuntime(
+                entryState,
+                includeWeapons: true,
+                includeArmorVisuals: false,
+                includeMountVisuals: false);
+            if (expectedEquipment == null)
+                return false;
+
+            var acceptedSlots = new List<string>();
+            for (EquipmentIndex slot = EquipmentIndex.Weapon0;
+                 slot <= EquipmentIndex.Weapon3;
+                 slot++)
+            {
+                string expectedItemId = expectedEquipment[slot].Item?.StringId;
+                string actualItemId = agent.Equipment[slot].Item?.StringId;
+                if (string.IsNullOrWhiteSpace(expectedItemId) ||
+                    !string.IsNullOrWhiteSpace(actualItemId))
+                {
+                    continue;
+                }
+
+                if (!IsClientServerAuthoritativeRemovedWeaponSlot(agent, slot, out _))
+                    return false;
+
+                acceptedSlots.Add(slot.ToString());
+            }
+
+            if (acceptedSlots.Count == 0)
+                return false;
+
+            reason =
+                "all-missing-expected-weapon-slots-server-authoritative" +
+                "|AgentIndex=" + agent.Index +
+                "|Slots=" + string.Join(",", acceptedSlots);
+            return true;
+        }
+
         internal static bool ShouldTreatClientExactSiegeMissingWeaponsAsRuntimeAttrition(
             Agent agent,
             RosterEntryState entryState,
@@ -29579,11 +29718,18 @@ namespace CoopSpectator.MissionBehaviors
                 : null;
 
             if (!string.IsNullOrWhiteSpace(expectedItemId) &&
-                string.IsNullOrWhiteSpace(actualItemId) &&
-                ShouldTreatClientExactSiegeMissingWeaponsAsRuntimeAttrition(agent, entryState, out _))
+                string.IsNullOrWhiteSpace(actualItemId))
             {
-                acceptedRuntimeWeaponAttritionSlots?.Add(slotLabel);
-                return;
+                bool serverAuthoritativeSlotRemoval =
+                    IsClientServerAuthoritativeRemovedWeaponSlot(agent, slot, out _);
+                bool legacyExactSiegeRuntimeAttrition =
+                    !serverAuthoritativeSlotRemoval &&
+                    ShouldTreatClientExactSiegeMissingWeaponsAsRuntimeAttrition(agent, entryState, out _);
+                if (serverAuthoritativeSlotRemoval || legacyExactSiegeRuntimeAttrition)
+                {
+                    acceptedRuntimeWeaponAttritionSlots?.Add(slotLabel);
+                    return;
+                }
             }
 
             AppendRuntimeEquipmentItemMismatch(mismatches, slotLabel, expectedItemId, actualItemId, entryState);
