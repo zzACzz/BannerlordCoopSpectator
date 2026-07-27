@@ -221,6 +221,10 @@ namespace CoopSpectator.Patches
         private static int _unsafeImmediateClientAgentBaselineMaterializationDepth;
         private static int _forcedNativeClientCreateAgentReplayDepth;
         private static DateTime _nextSallyOutClientCreateAgentReplayUtc = DateTime.MinValue;
+        private static DateTime _lastSallyOutClientAdaptiveReplayTickUtc = DateTime.MinValue;
+        private static DateTime _lastDeferredClientAgentBootstrapMutationUtc = DateTime.MinValue;
+        private static int _sallyOutClientAdaptiveReplayGroupLimit = 1;
+        private static int _sallyOutClientAdaptiveStableTickCount;
         private static readonly TimeSpan LocalFollowEchoSuppressionWindow = TimeSpan.FromSeconds(2);
         private static readonly TimeSpan DeferredClientSiegeMissionObjectReplayDelay = TimeSpan.FromMilliseconds(750);
         private static readonly TimeSpan DeferredClientSiegeMissingMissionObjectDropDelay = TimeSpan.FromSeconds(8);
@@ -231,9 +235,12 @@ namespace CoopSpectator.Patches
         private static readonly TimeSpan ExactSiegeTroopAuthoritativeMappingFallbackDelay = TimeSpan.FromSeconds(2);
         private static readonly TimeSpan SallyOutClientCreateAgentReplayInterval = TimeSpan.FromMilliseconds(16);
         private static readonly TimeSpan SallyOutClientCreateAgentReplayTimeBudget = TimeSpan.FromMilliseconds(2);
+        private static readonly TimeSpan SallyOutClientAdaptiveReplaySlowFrameGap = TimeSpan.FromMilliseconds(35);
         private const int MaxDeferredClientSetWeaponReloadPhaseAttempts = 30;
         private const int MaxDeferredExactSiegeTroopAdapterMissAttempts = 30;
-        private const int MaxSallyOutClientCreateAgentReplayGroupsPerTick = 1;
+        private const int MinSallyOutClientCreateAgentReplayGroupsPerTick = 1;
+        private const int MaxSallyOutClientCreateAgentReplayGroupsPerTick = 3;
+        private const int SallyOutClientAdaptiveStableTicksBeforeIncrease = 12;
         private static DateTime _localFollowEchoSuppressionUntilUtc = DateTime.MinValue;
         private static int _localFollowEchoSuppressionAgentIndex = -1;
 
@@ -880,6 +887,10 @@ namespace CoopSpectator.Patches
                 _nextDeferredClientMakeAgentDeadSequence = 0;
                 _nextDelayedLocalControlledWeaponStateSequence = 0;
                 _nextSallyOutClientCreateAgentReplayUtc = DateTime.MinValue;
+                _lastSallyOutClientAdaptiveReplayTickUtc = DateTime.MinValue;
+                _lastDeferredClientAgentBootstrapMutationUtc = DateTime.MinValue;
+                _sallyOutClientAdaptiveReplayGroupLimit = MinSallyOutClientCreateAgentReplayGroupsPerTick;
+                _sallyOutClientAdaptiveStableTickCount = 0;
             }
             _delayedLocalControlledWeaponStateReplayDepth = 0;
             _unsafeImmediateClientAgentBaselineMaterializationDepth = 0;
@@ -2983,6 +2994,7 @@ namespace CoopSpectator.Patches
         private static DeferredClientAgentBootstrapBundle GetOrCreateDeferredClientAgentBootstrapBundleNoLock(
             int agentIndex)
         {
+            _lastDeferredClientAgentBootstrapMutationUtc = DateTime.UtcNow;
             if (!DeferredClientAgentBootstrapBundles.TryGetValue(
                     agentIndex,
                     out DeferredClientAgentBootstrapBundle bundle) ||
@@ -3030,13 +3042,17 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static DeferredClientAgentBootstrapReplaySnapshot DequeueDeferredClientAgentBootstrapReplaySnapshot()
+        private static DeferredClientAgentBootstrapReplaySnapshot DequeueDeferredClientAgentBootstrapReplaySnapshot(
+            int maxBundleCount)
         {
             var snapshot = new DeferredClientAgentBootstrapReplaySnapshot();
+            int boundedBundleCount = maxBundleCount <= 0 ? 1 : maxBundleCount;
             lock (DeferredClientAgentBootstrapBundleLock)
             {
                 int scheduledCount = DeferredClientAgentBootstrapReplayQueue.Count;
-                for (int index = 0; index < scheduledCount; index++)
+                for (int index = 0;
+                     index < scheduledCount && snapshot.Bundles.Count < boundedBundleCount;
+                     index++)
                 {
                     DeferredClientAgentBootstrapReplayQueueEntry queueEntry =
                         DeferredClientAgentBootstrapReplayQueue.Dequeue();
@@ -3128,6 +3144,36 @@ namespace CoopSpectator.Patches
             {
                 DeferredClientAgentBootstrapBundles.Clear();
                 DeferredClientAgentBootstrapReplayQueue.Clear();
+                _lastDeferredClientAgentBootstrapMutationUtc = DateTime.MinValue;
+            }
+        }
+
+        internal static bool IsDeferredClientAgentBootstrapQuiet(
+            TimeSpan requiredQuietPeriod,
+            out string summary)
+        {
+            lock (DeferredClientAgentBootstrapBundleLock)
+            {
+                DateTime nowUtc = DateTime.UtcNow;
+                TimeSpan quietAge = _lastDeferredClientAgentBootstrapMutationUtc == DateTime.MinValue
+                    ? TimeSpan.Zero
+                    : nowUtc - _lastDeferredClientAgentBootstrapMutationUtc;
+                bool quiet =
+                    DeferredClientAgentBootstrapBundles.Count == 0 &&
+                    DeferredClientAgentBootstrapReplayQueue.Count == 0 &&
+                    _lastDeferredClientAgentBootstrapMutationUtc != DateTime.MinValue &&
+                    quietAge >= requiredQuietPeriod;
+                summary =
+                    "Quiet=" + quiet +
+                    " Bundles=" + DeferredClientAgentBootstrapBundles.Count +
+                    " Scheduled=" + DeferredClientAgentBootstrapReplayQueue.Count +
+                    " QuietAgeMilliseconds=" + quietAge.TotalMilliseconds.ToString(
+                        "F0",
+                        System.Globalization.CultureInfo.InvariantCulture) +
+                    " RequiredQuietMilliseconds=" + requiredQuietPeriod.TotalMilliseconds.ToString(
+                        "F0",
+                        System.Globalization.CultureInfo.InvariantCulture);
+                return quiet;
             }
         }
 
@@ -3649,6 +3695,111 @@ namespace CoopSpectator.Patches
                 "Source=" + (source ?? "unknown"));
         }
 
+        private static bool ShouldUseAdaptiveInitialSallyOutClientReplay(Mission mission)
+        {
+            if (!GameNetwork.IsClient ||
+                GameNetwork.IsServer ||
+                mission == null ||
+                CoopBattlePhaseRuntimeState.GetPhase() >= CoopBattlePhase.BattleActive)
+            {
+                return false;
+            }
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext ??
+                CoopPreMissionTopologyRuntimeState.GetActiveScenarioContext();
+            return SallyOutScenarioContract.IsValidatedScenario(
+                scenarioContext,
+                mission.SceneName ?? string.Empty,
+                out _);
+        }
+
+        private static int PrepareAdaptiveInitialSallyOutClientReplay(
+            DateTime nowUtc,
+            out TimeSpan replayTickGap)
+        {
+            replayTickGap = _lastSallyOutClientAdaptiveReplayTickUtc == DateTime.MinValue
+                ? TimeSpan.Zero
+                : nowUtc - _lastSallyOutClientAdaptiveReplayTickUtc;
+            _lastSallyOutClientAdaptiveReplayTickUtc = nowUtc;
+
+            if (replayTickGap > SallyOutClientAdaptiveReplaySlowFrameGap)
+            {
+                _sallyOutClientAdaptiveReplayGroupLimit =
+                    MinSallyOutClientCreateAgentReplayGroupsPerTick;
+                _sallyOutClientAdaptiveStableTickCount = 0;
+            }
+
+            return Math.Max(
+                MinSallyOutClientCreateAgentReplayGroupsPerTick,
+                Math.Min(
+                    MaxSallyOutClientCreateAgentReplayGroupsPerTick,
+                    _sallyOutClientAdaptiveReplayGroupLimit));
+        }
+
+        private static void ObserveAdaptiveInitialSallyOutClientReplay(
+            TimeSpan elapsed,
+            TimeSpan replayTickGap,
+            int admittedPacedGroupCount,
+            int selectedBundleCount,
+            string source)
+        {
+            if (selectedBundleCount <= 0)
+                return;
+
+            int previousLimit = _sallyOutClientAdaptiveReplayGroupLimit;
+            bool exceededTimeBudget = elapsed >= SallyOutClientCreateAgentReplayTimeBudget;
+            bool slowFrameGap = replayTickGap > SallyOutClientAdaptiveReplaySlowFrameGap;
+            if (exceededTimeBudget || slowFrameGap)
+            {
+                _sallyOutClientAdaptiveReplayGroupLimit =
+                    MinSallyOutClientCreateAgentReplayGroupsPerTick;
+                _sallyOutClientAdaptiveStableTickCount = 0;
+            }
+            else
+            {
+                bool inexpensiveReplay =
+                    admittedPacedGroupCount > 0 &&
+                    elapsed.TotalMilliseconds <= 0.85d;
+                if (inexpensiveReplay)
+                {
+                    _sallyOutClientAdaptiveStableTickCount++;
+                    if (_sallyOutClientAdaptiveStableTickCount >=
+                        SallyOutClientAdaptiveStableTicksBeforeIncrease)
+                    {
+                        _sallyOutClientAdaptiveReplayGroupLimit = Math.Min(
+                            MaxSallyOutClientCreateAgentReplayGroupsPerTick,
+                            _sallyOutClientAdaptiveReplayGroupLimit + 1);
+                        _sallyOutClientAdaptiveStableTickCount = 0;
+                    }
+                }
+                else
+                {
+                    _sallyOutClientAdaptiveStableTickCount = 0;
+                }
+            }
+
+            if (previousLimit != _sallyOutClientAdaptiveReplayGroupLimit &&
+                ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+            {
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: adjusted adaptive initial SallyOut client replay pacing. " +
+                    "PreviousGroupLimit=" + previousLimit +
+                    " CurrentGroupLimit=" + _sallyOutClientAdaptiveReplayGroupLimit +
+                    " ElapsedMilliseconds=" + elapsed.TotalMilliseconds.ToString(
+                        "F2",
+                        System.Globalization.CultureInfo.InvariantCulture) +
+                    " ReplayTickGapMilliseconds=" + replayTickGap.TotalMilliseconds.ToString(
+                        "F2",
+                        System.Globalization.CultureInfo.InvariantCulture) +
+                    " AdmittedGroups=" + admittedPacedGroupCount +
+                    " SelectedBundles=" + selectedBundleCount +
+                    " Source=" + (source ?? "unknown"));
+            }
+        }
+
         internal static void TryProcessDeferredClientCreateAgentMessages(Mission mission, string source)
         {
             if (!GameNetwork.IsClient ||
@@ -3670,15 +3821,35 @@ namespace CoopSpectator.Patches
             string replayReadinessSummary =
                 snapshotReadinessSummary +
                 " MaterializedMap={" + materializedMapReadinessSummary + "}";
+
+            DateTime replayTickUtc = DateTime.UtcNow;
+            bool useAdaptiveSallyOutReplay = ShouldUseAdaptiveInitialSallyOutClientReplay(mission);
+            int pacedGroupLimit = MaxSallyOutClientCreateAgentReplayGroupsPerTick;
+            TimeSpan replayTickGap = TimeSpan.Zero;
+            if (useAdaptiveSallyOutReplay)
+            {
+                pacedGroupLimit = PrepareAdaptiveInitialSallyOutClientReplay(
+                    replayTickUtc,
+                    out replayTickGap);
+                if (replayTickUtc < _nextSallyOutClientCreateAgentReplayUtc)
+                    return;
+            }
+
+            int maxBundleCount = useAdaptiveSallyOutReplay
+                ? pacedGroupLimit
+                : int.MaxValue;
+            var replayStopwatch = System.Diagnostics.Stopwatch.StartNew();
             DeferredClientAgentBootstrapReplaySnapshot agentBootstrapSnapshot =
-                DequeueDeferredClientAgentBootstrapReplaySnapshot();
+                DequeueDeferredClientAgentBootstrapReplaySnapshot(maxBundleCount);
+            int admittedPacedGroupCount = 0;
             try
             {
-                TryReplayDeferredClientCreateAgents(
+                admittedPacedGroupCount = TryReplayDeferredClientCreateAgents(
                     mission,
                     source,
                     replayReadinessSummary,
-                    agentBootstrapSnapshot.CreateAgents);
+                    agentBootstrapSnapshot.CreateAgents,
+                    pacedGroupLimit);
                 TryReplayDeferredClientAgentSetFormation(
                     mission,
                     source,
@@ -3759,6 +3930,16 @@ namespace CoopSpectator.Patches
             finally
             {
                 RescheduleDeferredClientAgentBootstrapReplaySnapshot(agentBootstrapSnapshot);
+                replayStopwatch.Stop();
+                if (useAdaptiveSallyOutReplay)
+                {
+                    ObserveAdaptiveInitialSallyOutClientReplay(
+                        replayStopwatch.Elapsed,
+                        replayTickGap,
+                        admittedPacedGroupCount,
+                        agentBootstrapSnapshot.Bundles.Count,
+                        source);
+                }
             }
         }
 
@@ -7256,21 +7437,26 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static void TryReplayDeferredClientCreateAgents(
+        private static int TryReplayDeferredClientCreateAgents(
             Mission mission,
             string source,
             string snapshotReadinessSummary,
-            IReadOnlyList<DeferredClientCreateAgentPayload> deferredPayloads)
+            IReadOnlyList<DeferredClientCreateAgentPayload> deferredPayloads,
+            int maxPacedGroupCount)
         {
             if (_missionNetworkComponentHandleServerEventCreateAgentMethod == null)
-                return;
+                return 0;
 
             if (deferredPayloads == null || deferredPayloads.Count <= 0)
-                return;
+                return 0;
 
             MissionNetworkComponent missionNetworkComponent = mission.GetMissionBehavior<MissionNetworkComponent>();
             if (missionNetworkComponent == null)
-                return;
+                return 0;
+
+            int boundedPacedGroupCount = Math.Max(
+                MinSallyOutClientCreateAgentReplayGroupsPerTick,
+                Math.Min(MaxSallyOutClientCreateAgentReplayGroupsPerTick, maxPacedGroupCount));
 
             DateTime nowUtc = DateTime.UtcNow;
             Dictionary<int, int> pacedMountToRiderAgentIndex = deferredPayloads
@@ -7341,7 +7527,7 @@ namespace CoopSpectator.Patches
                             DateTime.UtcNow - pacedSallyOutReplayStartUtc < SallyOutClientCreateAgentReplayTimeBudget;
                         if (!canStartPacedSallyOutGroup ||
                             !groupRetryReady ||
-                            admittedPacedSallyOutGroupCount >= MaxSallyOutClientCreateAgentReplayGroupsPerTick ||
+                            admittedPacedSallyOutGroupCount >= boundedPacedGroupCount ||
                             !timeBudgetAvailable)
                         {
                             continue;
@@ -7614,6 +7800,8 @@ namespace CoopSpectator.Patches
                     }
                 }
             }
+
+            return admittedPacedSallyOutGroupCount;
         }
 
         private static int ResolveSallyOutCreateAgentReplayGroupKey(
