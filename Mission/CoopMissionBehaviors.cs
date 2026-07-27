@@ -3700,6 +3700,9 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly Dictionary<Agent, RemovedAgentExactDisplayNameState> _removedAgentExactDisplayNames =
             new Dictionary<Agent, RemovedAgentExactDisplayNameState>();
         private static Mission _authoritativeMaterializedAgentEntryCacheMission;
+        private static Mission _authoritativeMaterializedAgentEntryLedgerMission;
+        private static readonly Dictionary<int, string> _authoritativeMaterializedAgentEntryLedgerByAgentIndex =
+            new Dictionary<int, string>();
         private static int _authoritativeMaterializedAgentEntryDirtyGeneration = 1;
         private static int _authoritativeMaterializedAgentEntryBuiltGeneration;
         private static long _authoritativeMaterializedAgentEntryContentRevision;
@@ -6612,6 +6615,7 @@ namespace CoopSpectator.MissionBehaviors
             _commanderDeploymentOrderLeasesByPeer.Clear();
             _deferredDeploymentSpawnsByPeer.Clear();
             _materializedArmyEntryIdByAgentIndex.Clear();
+            ResetAuthoritativeMaterializedAgentEntryLedger(null);
             MarkAuthoritativeMaterializedAgentEntryCacheDirty();
             _materializedArmySideByAgentIndex.Clear();
             _materializedAgentInstanceByIndex.Clear();
@@ -7194,6 +7198,7 @@ namespace CoopSpectator.MissionBehaviors
             _commanderDeploymentOrderLeasesByPeer.Clear();
             _deferredDeploymentSpawnsByPeer.Clear();
             _materializedArmyEntryIdByAgentIndex.Clear();
+            ResetAuthoritativeMaterializedAgentEntryLedger(mission);
             MarkAuthoritativeMaterializedAgentEntryCacheDirty();
             _materializedArmySideByAgentIndex.Clear();
             _materializedAgentInstanceByIndex.Clear();
@@ -17225,6 +17230,7 @@ namespace CoopSpectator.MissionBehaviors
             _authoritativeBattleCompletionReason = string.Empty;
             _authoritativeBattleWinnerSide = string.Empty;
             _materializedArmyEntryIdByAgentIndex.Clear();
+            ResetAuthoritativeMaterializedAgentEntryLedger(mission);
             MarkAuthoritativeMaterializedAgentEntryCacheDirty();
             _materializedArmySideByAgentIndex.Clear();
             _materializedAgentInstanceByIndex.Clear();
@@ -18373,6 +18379,7 @@ namespace CoopSpectator.MissionBehaviors
                 _commanderDeploymentOrderLeasesByPeer.Clear();
                 _deferredDeploymentSpawnsByPeer.Clear();
                 _materializedArmyEntryIdByAgentIndex.Clear();
+                ResetAuthoritativeMaterializedAgentEntryLedger(mission);
                 MarkAuthoritativeMaterializedAgentEntryCacheDirty();
                 _materializedArmySideByAgentIndex.Clear();
                 _materializedAgentInstanceByIndex.Clear();
@@ -23663,7 +23670,10 @@ namespace CoopSpectator.MissionBehaviors
             EnsureMaterializedBattleResultMission(agent.Mission);
             _materializedAgentInstanceByIndex[agent.Index] = agent;
             _materializedArmyEntryIdByAgentIndex[agent.Index] = entryState.EntryId;
-            MarkAuthoritativeMaterializedAgentEntryCacheDirty();
+            TrackAuthoritativeMaterializedAgentEntryLedgerMapping(
+                agent.Mission,
+                agent.Index,
+                entryState.EntryId);
             if (side != BattleSideEnum.None)
                 _materializedArmySideByAgentIndex[agent.Index] = side;
             _materializedBattleResultRemovedAgentIndices.Remove(agent.Index);
@@ -24178,7 +24188,10 @@ namespace CoopSpectator.MissionBehaviors
             if (GameNetwork.IsServer &&
                 (agentIndexRebound || entryChanged || sideChanged || !hadCachedEntry))
             {
-                MarkAuthoritativeMaterializedAgentEntryCacheDirty();
+                TrackAuthoritativeMaterializedAgentEntryLedgerMapping(
+                    agent.Mission,
+                    agent.Index,
+                    resolvedEntryId);
             }
             if (resolvedSide != BattleSideEnum.None)
                 _materializedArmySideByAgentIndex[agent.Index] = resolvedSide;
@@ -33791,7 +33804,10 @@ namespace CoopSpectator.MissionBehaviors
             {
                 _materializedArmyEntryIdByAgentIndex[targetAgent.Index] = entryId;
                 _materializedArmyEntryIdByAgentIndex.Remove(sourceAgent.Index);
-                MarkAuthoritativeMaterializedAgentEntryCacheDirty();
+                TrackAuthoritativeMaterializedAgentEntryLedgerMapping(
+                    targetAgent.Mission,
+                    targetAgent.Index,
+                    entryId);
                 if (_clientAuthoritativeMaterializedEntryObservedAgentIndices.Remove(sourceAgent.Index))
                     _clientAuthoritativeMaterializedEntryObservedAgentIndices.Add(targetAgent.Index);
             }
@@ -41269,6 +41285,44 @@ namespace CoopSpectator.MissionBehaviors
             _authoritativeMaterializedAgentEntryDirtyGeneration++;
         }
 
+        private static void ResetAuthoritativeMaterializedAgentEntryLedger(Mission mission)
+        {
+            _authoritativeMaterializedAgentEntryLedgerMission = mission;
+            _authoritativeMaterializedAgentEntryLedgerByAgentIndex.Clear();
+            _authoritativeMaterializedAgentEntryCacheMission = null;
+            _authoritativeMaterializedAgentEntryCachedCount = 0;
+            _authoritativeMaterializedAgentEntryCachedSerializedMap = string.Empty;
+            _nextAuthoritativeMaterializedAgentEntryCacheAuditUtc = DateTime.MinValue;
+        }
+
+        private static void TrackAuthoritativeMaterializedAgentEntryLedgerMapping(
+            Mission mission,
+            int agentIndex,
+            string entryId)
+        {
+            if (!GameNetwork.IsServer ||
+                mission == null ||
+                agentIndex < 0 ||
+                string.IsNullOrWhiteSpace(entryId))
+            {
+                return;
+            }
+
+            if (!ReferenceEquals(_authoritativeMaterializedAgentEntryLedgerMission, mission))
+                ResetAuthoritativeMaterializedAgentEntryLedger(mission);
+
+            if (_authoritativeMaterializedAgentEntryLedgerByAgentIndex.TryGetValue(
+                    agentIndex,
+                    out string existingEntryId) &&
+                string.Equals(existingEntryId, entryId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _authoritativeMaterializedAgentEntryLedgerByAgentIndex[agentIndex] = entryId;
+            MarkAuthoritativeMaterializedAgentEntryCacheDirty();
+        }
+
         private static void EnsureAuthoritativeMaterializedAgentEntryCache(
             Mission mission,
             bool forceRefresh = false)
@@ -41311,9 +41365,12 @@ namespace CoopSpectator.MissionBehaviors
 
         private static Dictionary<int, string> BuildAuthoritativeMaterializedAgentEntryMapSnapshot(Mission mission)
         {
-            var mappings = new Dictionary<int, string>();
+            if (!ReferenceEquals(_authoritativeMaterializedAgentEntryLedgerMission, mission))
+                ResetAuthoritativeMaterializedAgentEntryLedger(mission);
+
+            var liveMappings = new Dictionary<int, string>();
             if (mission?.AllAgents == null)
-                return mappings;
+                return new Dictionary<int, string>(_authoritativeMaterializedAgentEntryLedgerByAgentIndex);
 
             for (int i = 0; i < mission.AllAgents.Count; i++)
             {
@@ -41331,11 +41388,14 @@ namespace CoopSpectator.MissionBehaviors
                 if (TryResolveAuthoritativeTrackedEntryId(agent, out string entryId) &&
                     !string.IsNullOrWhiteSpace(entryId))
                 {
-                    mappings[agent.Index] = entryId;
+                    liveMappings[agent.Index] = entryId;
                 }
             }
 
-            return mappings;
+            foreach (KeyValuePair<int, string> mapping in liveMappings)
+                _authoritativeMaterializedAgentEntryLedgerByAgentIndex[mapping.Key] = mapping.Value;
+
+            return new Dictionary<int, string>(_authoritativeMaterializedAgentEntryLedgerByAgentIndex);
         }
 
         private static bool ShouldIncludeAgentInNativeExistingObjectSync(Mission mission, Agent agent)
