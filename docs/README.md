@@ -16,8 +16,10 @@ Read in this order when opening a new window:
 
 ## Active Runtime Status
 
+- `docs/CURRENT_EXACT_BATTLE_MATERIALIZATION_RUNTIME_2026-07-27.md`
+  Головний актуальний опис гібридної системи точного створення та синхронізації бійців: кампанійський знімок, єдиний штатний фізичний творець, клієнтські початкові пакети, адаптивна матеріалізація польової вилазки, штатні підкріплення, оптимізація великих битв і повернення результату до кампанії.
 - `docs/MATERIALIZED_SIEGE_REINFORCEMENT_RUNTIME_2026-07-25.md`
-  Заморожена реалізація поетапної матеріалізації облогових підкріплень: поточна архітектура, відомі падіння і зависання, причина повернення до штатних хвиль та умови майбутнього відновлення роботи.
+  Історичний опис замороженої експериментальної системи поетапної матеріалізації облогових підкріплень: відомі падіння і зависання, причина повернення до штатних хвиль та умови майбутнього відновлення роботи. Не використовувати як опис поточної стабільної архітектури.
 - `docs/SIEGE_BATTLE_STATUS_AND_PROGRESS_2026-06-11.md`
   Current siege-battle status and progress: subtype routing, exact bootstrap split, LordsHall indoor controller, Blockade guardrails, and the remaining live test matrix.
 - `docs/COOP_BATTLE_STABILIZATION_AND_CONNECTIVITY_HANDOFF_2026-04-18.md`

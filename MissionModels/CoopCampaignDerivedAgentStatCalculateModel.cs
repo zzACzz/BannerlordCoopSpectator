@@ -60,6 +60,12 @@ namespace CoopSpectator.MissionModels
         public override void UpdateAgentStats(Agent agent, AgentDrivenProperties agentDrivenProperties)
         {
             _baseModel.UpdateAgentStats(agent, agentDrivenProperties);
+#if COOPSPECTATOR_DEDICATED
+            // The dedicated runtime intentionally avoids the Harmony UpdateAgentStats
+            // postfix. Apply the registered exact combat profile inside the model call
+            // so native property updates remain authoritative and event-driven.
+            CoopMissionSpawnLogic.TryApplyDrivenSkillCombatProfile(agent, agentDrivenProperties);
+#endif
             TryApplyCampaignEquipmentArmor(agent, agent?.SpawnEquipment, agentDrivenProperties);
             bool exactRangedDrivenPropertiesApplied = TryApplyExactRangedCampaignDrivenPropertyOverrides(agent, agentDrivenProperties);
             TryApplyExactDefenseDrivenPropertyOverrides(agent, agentDrivenProperties);

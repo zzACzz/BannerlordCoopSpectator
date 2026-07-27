@@ -792,7 +792,7 @@ namespace CoopSpectator
                     _harmony = new Harmony("com.coopspectator.dedicated");
 
                 if (CampaignCombatProfileAgentStatsPatch.ApplyWeaponDamageOnly(_harmony))
-                    ModLogger.Info("CoopSpectatorDedicated: applied CampaignCombatProfileAgentStatsPatch weapon damage postfix on dedicated; UpdateAgentStats remains manual.");
+                    ModLogger.Info("CoopSpectatorDedicated: applied CampaignCombatProfileAgentStatsPatch weapon damage postfix on dedicated; UpdateAgentStats is handled by the coop mission model.");
                 else
                     ModLogger.Info("CoopSpectatorDedicated: failed to apply CampaignCombatProfileAgentStatsPatch weapon damage postfix on dedicated; using OnScoreHit fallback path.");
             }

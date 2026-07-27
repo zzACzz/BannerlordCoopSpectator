@@ -3874,12 +3874,18 @@ namespace CoopSpectator.MissionBehaviors
         private static DateTime _nextMaterializedArmyReinforcementPulseUtc;
         private static DateTime _nextExactCampaignBattlefieldRuntimeSyncUtc;
         private static DateTime _nextBattleCompletionFallbackCheckUtc;
+        private static DateTime _nextBattleCompletionLiveReconciliationUtc;
         private static DateTime _nextEntryStatusSnapshotBuildUtc;
         private static DateTime _nextClientExactVisualWatchdogUtc;
+        private static int _clientPeerHeroExactVisualWatchdogCursor;
+        private static int _clientTroopExactVisualWatchdogCursor;
         private static readonly TimeSpan ExactCampaignBattlefieldRuntimeSyncInterval = TimeSpan.FromMilliseconds(250);
         private static readonly TimeSpan BattleCompletionFallbackCheckInterval = TimeSpan.FromMilliseconds(250);
+        private static readonly TimeSpan BattleCompletionLiveReconciliationInterval = TimeSpan.FromSeconds(2);
         private static readonly TimeSpan EntryStatusSnapshotBuildInterval = TimeSpan.FromMilliseconds(200);
         private static readonly TimeSpan ClientExactVisualWatchdogInterval = TimeSpan.FromMilliseconds(250);
+        private const int ClientExactVisualPreBattleWatchdogScanBudget = 256;
+        private const int ClientExactVisualActiveBattleWatchdogScanBudget = 32;
         private static Mission _materializedSiegeReinforcementWaveMission;
         private static float _nextMaterializedSiegeReinforcementCheckMissionTime = float.MinValue;
         private static BattleSideEnum _nextMaterializedSiegeReinforcementBatchFirstSide = BattleSideEnum.Attacker;
@@ -4273,6 +4279,8 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly Dictionary<string, int> MaterializedEquipmentNormalizedFallbackCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, int> MaterializedCombatProfileApplyCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<int, MaterializedCombatProfileRuntimeState> _materializedCombatProfilesByAgentIndex = new Dictionary<int, MaterializedCombatProfileRuntimeState>();
+        private static readonly Queue<int> _pendingMaterializedCombatProfileRefreshAgentIndices = new Queue<int>();
+        private static readonly Dictionary<int, Agent> _pendingMaterializedCombatProfileRefreshAgentsByIndex = new Dictionary<int, Agent>();
         private static readonly Dictionary<string, MaterializedBattleResultEntryRuntimeState> _materializedBattleResultEntriesByEntryId = new Dictionary<string, MaterializedBattleResultEntryRuntimeState>(StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<int> _materializedBattleResultRemovedAgentIndices = new HashSet<int>();
         private static readonly Dictionary<int, string> _materializedBattleResultSpawnInstanceIdsByAgentIndex = new Dictionary<int, string>();
@@ -4309,6 +4317,7 @@ namespace CoopSpectator.MissionBehaviors
         private const int MaxRecordedBattleResultCombatEvents = 16384;
         private const int MaxBattleResultDebugSampleCount = 24;
         private const int MountedCombatDamageDiagnosticBudget = 96;
+        private const int MaterializedCombatProfileRefreshBatchPerTick = 32;
         private const int AgentFlagHorseMasterBit = 0x1000000;
         private const int AgentFlagMountedCrossbowmanBit = 0x2000000;
         private const int AgentFlagProjectileDeflectionBit = 0x4000000;
@@ -5113,6 +5122,8 @@ namespace CoopSpectator.MissionBehaviors
             _lastPendingClientExactVisualPauseReason = string.Empty;
             _pendingClientExactVisualSelectionPauseSticky = false;
             _nextClientExactVisualWatchdogUtc = DateTime.MinValue;
+            _clientPeerHeroExactVisualWatchdogCursor = 0;
+            _clientTroopExactVisualWatchdogCursor = 0;
             ModLogger.Info(
                 "CoopMissionSpawnLogic: reset client exact visual overlay assignment state. " +
                 "Source=" + (source ?? "unknown"));
@@ -6682,6 +6693,7 @@ namespace CoopSpectator.MissionBehaviors
             _nextMaterializedArmyReinforcementPulseUtc = DateTime.MinValue;
             _nextExactCampaignBattlefieldRuntimeSyncUtc = DateTime.MinValue;
             _nextBattleCompletionFallbackCheckUtc = DateTime.MinValue;
+            _nextBattleCompletionLiveReconciliationUtc = DateTime.MinValue;
             _nextEntryStatusSnapshotBuildUtc = DateTime.MinValue;
             _nextNativeBattleMapWarmupFallbackRefreshUtc = DateTime.MinValue;
             _lastNativeBattleMapWarmupFallbackLogKey = string.Empty;
@@ -7256,6 +7268,7 @@ namespace CoopSpectator.MissionBehaviors
             _nextMaterializedArmyReinforcementPulseUtc = DateTime.MinValue;
             _nextExactCampaignBattlefieldRuntimeSyncUtc = DateTime.MinValue;
             _nextBattleCompletionFallbackCheckUtc = DateTime.MinValue;
+            _nextBattleCompletionLiveReconciliationUtc = DateTime.MinValue;
             _nextEntryStatusSnapshotBuildUtc = DateTime.MinValue;
             _nextBattleMapStartupDeferLogUtc = DateTime.MinValue;
             _nextExactSceneMaterializationDeferLogUtc = DateTime.MinValue;
@@ -11380,6 +11393,33 @@ namespace CoopSpectator.MissionBehaviors
             return droppedAgentIndices.Count;
         }
 
+        private static int ResolveClientExactVisualWatchdogScanBudget()
+        {
+            CoopBattlePhase phase = CoopBattlePhaseRuntimeState.GetPhase();
+            return phase >= CoopBattlePhase.BattleActive && phase < CoopBattlePhase.BattleEnded
+                ? ClientExactVisualActiveBattleWatchdogScanBudget
+                : ClientExactVisualPreBattleWatchdogScanBudget;
+        }
+
+        private static int ReserveClientExactVisualWatchdogScanWindow(
+            int agentCount,
+            int scanBudget,
+            ref int cursor,
+            out int startIndex)
+        {
+            startIndex = 0;
+            if (agentCount <= 0 || scanBudget <= 0)
+            {
+                cursor = 0;
+                return 0;
+            }
+
+            startIndex = cursor >= 0 && cursor < agentCount ? cursor : 0;
+            int scanCount = Math.Min(agentCount, scanBudget);
+            cursor = (startIndex + scanCount) % agentCount;
+            return scanCount;
+        }
+
         private static void TryMaintainClientPeerHeroExactVisualOverlays(Mission mission)
         {
             if (mission?.AllAgents == null || GameNetwork.IsServer)
@@ -11393,9 +11433,16 @@ namespace CoopSpectator.MissionBehaviors
             if (ShouldPausePendingClientExactVisualOverlaysForSelectionScreen(out _))
                 return;
 
+            int agentCount = mission.AllAgents.Count;
+            int scanCount = ReserveClientExactVisualWatchdogScanWindow(
+                agentCount,
+                ResolveClientExactVisualWatchdogScanBudget(),
+                ref _clientPeerHeroExactVisualWatchdogCursor,
+                out int scanStartIndex);
             DateTime nowUtc = DateTime.UtcNow;
-            for (int i = 0; i < mission.AllAgents.Count; i++)
+            for (int scanOffset = 0; scanOffset < scanCount; scanOffset++)
             {
+                int i = (scanStartIndex + scanOffset) % agentCount;
                 Agent agent = mission.AllAgents[i];
                 if (agent == null ||
                     !agent.IsActive() ||
@@ -11617,9 +11664,16 @@ namespace CoopSpectator.MissionBehaviors
             if (ShouldPauseClientPostPossessionExactVisualForAgent(agent: null, out _))
                 return;
 
+            int agentCount = mission.AllAgents.Count;
+            int scanCount = ReserveClientExactVisualWatchdogScanWindow(
+                agentCount,
+                ResolveClientExactVisualWatchdogScanBudget(),
+                ref _clientTroopExactVisualWatchdogCursor,
+                out int scanStartIndex);
             DateTime nowUtc = DateTime.UtcNow;
-            for (int i = 0; i < mission.AllAgents.Count; i++)
+            for (int scanOffset = 0; scanOffset < scanCount; scanOffset++)
             {
+                int i = (scanStartIndex + scanOffset) % agentCount;
                 Agent agent = mission.AllAgents[i];
                 if (agent == null ||
                     !agent.IsActive() ||
@@ -23677,6 +23731,8 @@ namespace CoopSpectator.MissionBehaviors
         private static void ResetMaterializedCombatProfileRuntimeState()
         {
             _materializedCombatProfilesByAgentIndex.Clear();
+            _pendingMaterializedCombatProfileRefreshAgentIndices.Clear();
+            _pendingMaterializedCombatProfileRefreshAgentsByIndex.Clear();
             MaterializedCombatProfileApplyCounts.Clear();
             _lastMaterializedCombatProfileMission = null;
             _lastCombatProfileDrivenRefreshMission = null;
@@ -23717,6 +23773,8 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             _materializedCombatProfilesByAgentIndex.Clear();
+            _pendingMaterializedCombatProfileRefreshAgentIndices.Clear();
+            _pendingMaterializedCombatProfileRefreshAgentsByIndex.Clear();
             MaterializedCombatProfileApplyCounts.Clear();
             _lastMaterializedCombatProfileMission = mission;
             _lastCombatProfileDrivenRefreshMission = null;
@@ -23815,6 +23873,7 @@ namespace CoopSpectator.MissionBehaviors
             IncrementMaterializedEquipmentCounter(MaterializedCombatProfileApplyCounts, "registered");
             if (profile.PerkIds.Count > 0)
                 CountMaterializedCombatProfileApply(profile, "perks", ref profile.CountedPerkRegistration);
+            QueueMaterializedCombatProfilePropertyRefresh(agent);
         }
 
         private static void RegisterMaterializedBattleResultEntry(Agent agent, RosterEntryState entryState, BattleSideEnum side)
@@ -25257,6 +25316,26 @@ namespace CoopSpectator.MissionBehaviors
 
         private static void ResolveActiveBattleSideCounts(Mission mission, out int attackerActive, out int defenderActive, out string countSource)
         {
+            bool hasMaterializedRuntimeCounts = TryResolveMaterializedActiveBattleSideCounts(
+                out int materializedRuntimeAttackerActive,
+                out int materializedRuntimeDefenderActive);
+            DateTime nowUtc = DateTime.UtcNow;
+            bool completionIsNear =
+                !hasMaterializedRuntimeCounts ||
+                materializedRuntimeAttackerActive <= 2 ||
+                materializedRuntimeDefenderActive <= 2;
+            if (hasMaterializedRuntimeCounts &&
+                !completionIsNear &&
+                nowUtc < _nextBattleCompletionLiveReconciliationUtc)
+            {
+                attackerActive = materializedRuntimeAttackerActive;
+                defenderActive = materializedRuntimeDefenderActive;
+                countSource = "materialized-runtime-fast";
+                return;
+            }
+
+            _nextBattleCompletionLiveReconciliationUtc =
+                nowUtc + BattleCompletionLiveReconciliationInterval;
             int missionTeamAttackerActive = CountActiveTeamAgents(mission, BattleSideEnum.Attacker);
             int missionTeamDefenderActive = CountActiveTeamAgents(mission, BattleSideEnum.Defender);
 
@@ -25276,7 +25355,7 @@ namespace CoopSpectator.MissionBehaviors
                     " | mission-teams Attacker=" + missionTeamAttackerActive +
                     " Defender=" + missionTeamDefenderActive;
 
-                if (TryResolveMaterializedActiveBattleSideCounts(out int materializedRuntimeAttackerActive, out int materializedRuntimeDefenderActive))
+                if (hasMaterializedRuntimeCounts)
                 {
                     countSource +=
                         " | materialized-runtime Attacker=" + materializedRuntimeAttackerActive +
@@ -25289,12 +25368,12 @@ namespace CoopSpectator.MissionBehaviors
             attackerActive = missionTeamAttackerActive;
             defenderActive = missionTeamDefenderActive;
 
-            if (TryResolveMaterializedActiveBattleSideCounts(out int materializedAttackerActive, out int materializedDefenderActive))
+            if (hasMaterializedRuntimeCounts)
             {
                 countSource =
                     "mission-teams" +
-                    " | materialized-runtime Attacker=" + materializedAttackerActive +
-                    " Defender=" + materializedDefenderActive;
+                    " | materialized-runtime Attacker=" + materializedRuntimeAttackerActive +
+                    " Defender=" + materializedRuntimeDefenderActive;
                 return;
             }
 
@@ -25468,12 +25547,102 @@ namespace CoopSpectator.MissionBehaviors
             return count;
         }
 
+        private static void QueueMaterializedCombatProfilePropertyRefresh(Agent agent)
+        {
+            if (!GameNetwork.IsServer || agent?.Mission == null || agent.Index < 0)
+                return;
+
+            if (_pendingMaterializedCombatProfileRefreshAgentsByIndex.TryGetValue(
+                    agent.Index,
+                    out Agent pendingAgent))
+            {
+                if (!ReferenceEquals(pendingAgent, agent))
+                    _pendingMaterializedCombatProfileRefreshAgentsByIndex[agent.Index] = agent;
+                return;
+            }
+
+            _pendingMaterializedCombatProfileRefreshAgentsByIndex[agent.Index] = agent;
+            _pendingMaterializedCombatProfileRefreshAgentIndices.Enqueue(agent.Index);
+        }
+
+        private static int ProcessPendingMaterializedCombatProfilePropertyRefreshes(
+            Mission mission,
+            int batchSize,
+            string source)
+        {
+            if (mission == null || batchSize <= 0)
+                return 0;
+
+            int refreshedAgentCount = 0;
+            int processedCount = 0;
+            while (_pendingMaterializedCombatProfileRefreshAgentIndices.Count > 0 &&
+                   processedCount < batchSize)
+            {
+                int agentIndex = _pendingMaterializedCombatProfileRefreshAgentIndices.Dequeue();
+                processedCount++;
+                if (!_pendingMaterializedCombatProfileRefreshAgentsByIndex.TryGetValue(
+                        agentIndex,
+                        out Agent agent))
+                {
+                    continue;
+                }
+
+                _pendingMaterializedCombatProfileRefreshAgentsByIndex.Remove(agentIndex);
+                if (agent == null ||
+                    !ReferenceEquals(agent.Mission, mission) ||
+                    !agent.IsActive() ||
+                    !_materializedCombatProfilesByAgentIndex.ContainsKey(agentIndex))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    agent.UpdateAgentProperties();
+                    Agent mountAgent = agent.MountAgent;
+                    if (mountAgent != null && mountAgent.IsActive())
+                        mountAgent.UpdateAgentProperties();
+                    refreshedAgentCount++;
+                }
+                catch (Exception ex)
+                {
+                    if (CoopDebugConfig.CombatModelDiagnostics)
+                    {
+                        ModLogger.Info(
+                            "CoopMissionSpawnLogic: queued combat-profile property refresh failed. " +
+                            "AgentIndex=" + agentIndex +
+                            " Error=" + ex.GetType().Name + ":" + ex.Message +
+                            " Source=" + (source ?? "unknown"));
+                    }
+                }
+            }
+
+            return refreshedAgentCount;
+        }
+
         private static void TryRefreshMaterializedCombatProfileDrivenStats(Mission mission, string source)
         {
             if (mission == null || _materializedCombatProfilesByAgentIndex.Count == 0)
                 return;
 
             EnsureMaterializedCombatProfileMission(mission);
+
+            if (CoopCampaignDerivedAgentStatCalculateModel.IsActiveForMission(mission))
+            {
+                int refreshedAgentCount = ProcessPendingMaterializedCombatProfilePropertyRefreshes(
+                    mission,
+                    MaterializedCombatProfileRefreshBatchPerTick,
+                    source);
+                if (refreshedAgentCount > 0 && !_hasLoggedManualCombatProfileRefreshForMission)
+                {
+                    _hasLoggedManualCombatProfileRefreshForMission = true;
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: activated event-driven combat-profile property refresh. " +
+                        "InitialBatch=" + refreshedAgentCount +
+                        " Source=" + (source ?? "unknown"));
+                }
+                return;
+            }
 
             float currentMissionTime = mission.CurrentTime;
             if (ReferenceEquals(_lastCombatProfileDrivenRefreshMission, mission) &&

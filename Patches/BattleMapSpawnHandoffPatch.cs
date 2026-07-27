@@ -6971,23 +6971,26 @@ namespace CoopSpectator.Patches
                 if (!IsSuppressibleServerProjectileStickItem(attachedItem))
                     return true;
 
-                string logKey =
-                    "spawned-weapon|" +
-                    GetMissionObjectIdValue(spawnedWeapon.Id) + "|" +
-                    (parentItem?.StringId ?? "null") + "|" +
-                    attachmentIndex + "|" +
-                    (attachedItem?.StringId ?? "null") + "|" +
-                    forcedSpawnIndex;
-                if (!string.Equals(_lastSuppressedServerSpawnedWeaponAttachmentKey, logKey, StringComparison.Ordinal))
+                if (CoopDebugConfig.CombatModelDiagnostics)
                 {
-                    _lastSuppressedServerSpawnedWeaponAttachmentKey = logKey;
-                    ModLogger.Info(
-                        "BattleMapSpawnHandoffPatch: suppressed server SpawnAttachedWeaponOnSpawnedWeapon for dropped shield in exact battle. " +
-                        "SpawnedWeaponId=" + GetMissionObjectIdValue(spawnedWeapon.Id) +
-                        " ParentItem=" + (parentItem?.StringId ?? "null") +
-                        " AttachmentIndex=" + attachmentIndex +
-                        " AttachedItem=" + (attachedItem?.StringId ?? "null") +
-                        " ForcedSpawnIndex=" + forcedSpawnIndex);
+                    string logKey =
+                        "spawned-weapon|" +
+                        GetMissionObjectIdValue(spawnedWeapon.Id) + "|" +
+                        (parentItem?.StringId ?? "null") + "|" +
+                        attachmentIndex + "|" +
+                        (attachedItem?.StringId ?? "null") + "|" +
+                        forcedSpawnIndex;
+                    if (!string.Equals(_lastSuppressedServerSpawnedWeaponAttachmentKey, logKey, StringComparison.Ordinal))
+                    {
+                        _lastSuppressedServerSpawnedWeaponAttachmentKey = logKey;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: suppressed server SpawnAttachedWeaponOnSpawnedWeapon for dropped shield in exact battle. " +
+                            "SpawnedWeaponId=" + GetMissionObjectIdValue(spawnedWeapon.Id) +
+                            " ParentItem=" + (parentItem?.StringId ?? "null") +
+                            " AttachmentIndex=" + attachmentIndex +
+                            " AttachedItem=" + (attachedItem?.StringId ?? "null") +
+                            " ForcedSpawnIndex=" + forcedSpawnIndex);
+                    }
                 }
 
                 return false;
@@ -7036,7 +7039,8 @@ namespace CoopSpectator.Patches
             int forcedSpawnIndex,
             string suppressionReason)
         {
-            if (!ExperimentalFeatures.EnableExactCreateAgentCorridorDiagnostics)
+            if (!CoopDebugConfig.CombatModelDiagnostics ||
+                !ExperimentalFeatures.EnableExactCreateAgentCorridorDiagnostics)
                 return;
 
             string logKey =
@@ -7132,29 +7136,32 @@ namespace CoopSpectator.Patches
 
                 collisionReaction = Mission.MissileCollisionReaction.BecomeInvisible;
 
-                string logKey =
-                    missileIndex + "|" +
-                    (missileItem?.StringId ?? "null") + "|" +
-                    (attachedAgent?.Index ?? -1) + "|" +
-                    (attachedAgent?.RiderAgent?.Index ?? -1) + "|" +
-                    attachedToShield + "|" +
-                    attachedBoneIndex + "|" +
-                    GetMissionObjectIdValue(attachedMissionObject?.Id ?? MissionObjectId.Invalid);
-                if (!string.Equals(_lastSuppressedServerProjectileStickKey, logKey, StringComparison.Ordinal))
+                if (CoopDebugConfig.CombatModelDiagnostics)
                 {
-                    _lastSuppressedServerProjectileStickKey = logKey;
-                    ModLogger.Info(
-                        "BattleMapSpawnHandoffPatch: suppressed server projectile stick reaction and downgraded to BecomeInvisible. " +
-                        "MissileIndex=" + missileIndex +
-                        " MissileItem=" + (missileItem?.StringId ?? "null") +
-                        " AttackerAgent=" + (attackerAgent?.Index ?? -1) +
-                        " AttachedAgent=" + (attachedAgent?.Index ?? -1) +
-                        " AttachedAgentIsMount=" + (attachedAgent?.IsMount ?? false) +
-                        " RiderAgent=" + (attachedAgent?.RiderAgent?.Index ?? -1) +
-                        " AttachedToShield=" + attachedToShield +
-                        " AttachedBoneIndex=" + attachedBoneIndex +
-                        " SuppressionReason=" + (suppressionReason ?? "unknown") +
-                        " ForcedSpawnIndex=" + forcedSpawnIndex);
+                    string logKey =
+                        missileIndex + "|" +
+                        (missileItem?.StringId ?? "null") + "|" +
+                        (attachedAgent?.Index ?? -1) + "|" +
+                        (attachedAgent?.RiderAgent?.Index ?? -1) + "|" +
+                        attachedToShield + "|" +
+                        attachedBoneIndex + "|" +
+                        GetMissionObjectIdValue(attachedMissionObject?.Id ?? MissionObjectId.Invalid);
+                    if (!string.Equals(_lastSuppressedServerProjectileStickKey, logKey, StringComparison.Ordinal))
+                    {
+                        _lastSuppressedServerProjectileStickKey = logKey;
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: suppressed server projectile stick reaction and downgraded to BecomeInvisible. " +
+                            "MissileIndex=" + missileIndex +
+                            " MissileItem=" + (missileItem?.StringId ?? "null") +
+                            " AttackerAgent=" + (attackerAgent?.Index ?? -1) +
+                            " AttachedAgent=" + (attachedAgent?.Index ?? -1) +
+                            " AttachedAgentIsMount=" + (attachedAgent?.IsMount ?? false) +
+                            " RiderAgent=" + (attachedAgent?.RiderAgent?.Index ?? -1) +
+                            " AttachedToShield=" + attachedToShield +
+                            " AttachedBoneIndex=" + attachedBoneIndex +
+                            " SuppressionReason=" + (suppressionReason ?? "unknown") +
+                            " ForcedSpawnIndex=" + forcedSpawnIndex);
+                    }
                 }
 
                 return true;
