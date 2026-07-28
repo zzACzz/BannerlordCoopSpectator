@@ -16,6 +16,8 @@ Read in this order when opening a new window:
 
 ## Active Runtime Status
 
+- `docs/EXACT_VILLAGE_BATTLE_DEPLOYMENT_AND_MATERIALIZATION_2026-07-28.md`
+  Опис окремих меж розстановки, адаптивної початкової матеріалізації та підтвердження готовності битви в малому поселенні. Код зібрано; практичне підтвердження ще очікується.
 - `docs/EXACT_FIELD_BATTLE_DEPLOYMENT_BOUNDARIES_2026-07-28.md`
   Підтверджений двомашинним прогоном опис правильних логічних і візуальних меж розстановки звичайної польової битви: прив'язка прапорців до фактичних армій, захист від одиночної аномальної точки, безпечне прийняття контуру та діагностика.
 - `docs/CURRENT_EXACT_BATTLE_MATERIALIZATION_RUNTIME_2026-07-27.md`

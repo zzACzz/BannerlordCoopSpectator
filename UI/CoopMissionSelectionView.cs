@@ -6,6 +6,7 @@ using System.Reflection;
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.Infrastructure.SiegeAmbush;
+using CoopSpectator.Infrastructure.VillageBattle;
 using CoopSpectator.MissionBehaviors;
 using CoopSpectator.Network.Messages;
 using CoopSpectator.Patches;
@@ -1464,6 +1465,26 @@ namespace CoopSpectator.UI
             if (side == BattleSideEnum.None)
             {
                 diagnostics = "side-none";
+                return false;
+            }
+
+            BattleScenarioContextMessage scenarioContext =
+                snapshot?.BattleState?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetScenarioContext();
+            if (GameNetwork.IsClient &&
+                !GameNetwork.IsServer &&
+                ExactCampaignCommanderDeploymentRuntime.IsExactVillageBattleScenario(
+                    mission,
+                    scenarioContext) &&
+                !ExactVillageBattleDeploymentBoundaryRuntime.IsClientApplied(
+                    mission,
+                    out _,
+                    out _,
+                    out string boundaryReadinessDiagnostics))
+            {
+                diagnostics =
+                    "authoritative-village-boundary-not-ready " +
+                    (boundaryReadinessDiagnostics ?? "unknown");
                 return false;
             }
 
@@ -4703,7 +4724,8 @@ namespace CoopSpectator.UI
             {
                 bool mayRemainUnrestrictedWithoutReadyBoundaries =
                     IsCurrentExactSallyOutCommanderDeploymentScenario(mission) ||
-                    IsCurrentExactFieldBattleCommanderDeploymentScenario(mission);
+                    IsCurrentExactFieldBattleCommanderDeploymentScenario(mission) ||
+                    IsCurrentExactVillageBattleCommanderDeploymentScenario(mission);
                 bool restrictToBoundaries =
                     boundariesReady ||
                     !mayRemainUnrestrictedWithoutReadyBoundaries;
@@ -5806,6 +5828,23 @@ namespace CoopSpectator.UI
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
             return ExactCampaignCommanderDeploymentRuntime.IsExactFieldBattleScenario(
+                mission,
+                scenarioContext);
+        }
+
+        private static bool IsCurrentExactVillageBattleCommanderDeploymentScenario(Mission mission)
+        {
+            if (mission == null ||
+                !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+            {
+                return false;
+            }
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            return ExactCampaignCommanderDeploymentRuntime.IsExactVillageBattleScenario(
                 mission,
                 scenarioContext);
         }

@@ -85,6 +85,8 @@
     <Compile Include="..\Infrastructure\SallyOut\SallyOutScenarioContract.cs" Link="Infrastructure\SallyOut\SallyOutScenarioContract.cs" />
     <Compile Include="..\Infrastructure\SiegeAmbush\SiegeAmbushScenarioContract.cs" Link="Infrastructure\SiegeAmbush\SiegeAmbushScenarioContract.cs" />
     <Compile Include="..\Infrastructure\VillageBattle\ExactVillageBattleScenarioContract.cs" Link="Infrastructure\VillageBattle\ExactVillageBattleScenarioContract.cs" />
+    <Compile Include="..\Infrastructure\VillageBattle\ExactVillageBattleInitialMaterializationRuntime.cs" Link="Infrastructure\VillageBattle\ExactVillageBattleInitialMaterializationRuntime.cs" />
+    <Compile Include="..\Infrastructure\VillageBattle\ExactVillageBattleDeploymentBoundaryRuntime.cs" Link="Infrastructure\VillageBattle\ExactVillageBattleDeploymentBoundaryRuntime.cs" />
     <Compile Include="..\Infrastructure\LandBattle\ExactLandBattleScenarioContract.cs" Link="Infrastructure\LandBattle\ExactLandBattleScenarioContract.cs" />
     <Compile Include="..\Infrastructure\LandBattle\ExactFieldBattleInitialMaterializationRuntime.cs" Link="Infrastructure\LandBattle\ExactFieldBattleInitialMaterializationRuntime.cs" />
     <Compile Include="..\Infrastructure\CommanderDeployment\ExactLandBattleCommanderDeploymentRuntime.cs" Link="Infrastructure\CommanderDeployment\ExactLandBattleCommanderDeploymentRuntime.cs" />

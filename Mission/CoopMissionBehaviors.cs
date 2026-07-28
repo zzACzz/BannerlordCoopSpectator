@@ -9084,6 +9084,138 @@ namespace CoopSpectator.MissionBehaviors
             return true;
         }
 
+        internal static bool IsClientInitialVillageBattleMaterializationReady(
+            out int readyAgentCount,
+            out string readinessSummary)
+        {
+            readyAgentCount = 0;
+            readinessSummary = string.Empty;
+            if (GameNetwork.IsServer)
+            {
+                readinessSummary = "not-client";
+                return false;
+            }
+
+            Mission mission = Mission.Current;
+            if (mission == null)
+            {
+                readinessSummary = "mission-null";
+                return false;
+            }
+
+            if (!ExactVillageBattleInitialMaterializationRuntime.IsValidatedScenario(
+                    mission,
+                    out string scenarioDiagnostics))
+            {
+                readinessSummary =
+                    "village-battle-scenario-not-validated " +
+                    (scenarioDiagnostics ?? "unknown");
+                return false;
+            }
+
+            if (!CoopMissionNetworkBridge.TryGetClientCurrentMaterializedAgentEntrySnapshotIdentity(
+                    out int transmissionId,
+                    out int expectedAgentCount,
+                    out string payloadHash,
+                    out string mapReadinessSummary))
+            {
+                readinessSummary =
+                    "materialized-map-not-ready " +
+                    (mapReadinessSummary ?? "unknown");
+                return false;
+            }
+
+            int deferredAgentMaterializationPendingCount =
+                BattleMapSpawnHandoffPatch.GetDeferredClientAgentMaterializationPendingCount(
+                    out string deferredAgentMaterializationSummary);
+            if (deferredAgentMaterializationPendingCount > 0)
+            {
+                readinessSummary =
+                    "deferred-agent-materialization-pending " +
+                    (deferredAgentMaterializationSummary ?? "unknown");
+                return false;
+            }
+
+            if (!BattleMapSpawnHandoffPatch.IsDeferredClientAgentBootstrapQuiet(
+                    TimeSpan.FromMilliseconds(250),
+                    out string quietSummary))
+            {
+                readinessSummary =
+                    "initial-agent-bootstrap-settle-pending " +
+                    (quietSummary ?? "unknown");
+                return false;
+            }
+
+            if (_lastClientAuthoritativeMaterializedEntrySnapshotObservedUtc == DateTime.MinValue)
+            {
+                readinessSummary = "authoritative-materialized-entry-snapshot-unobserved";
+                return false;
+            }
+
+            TimeSpan observedAge =
+                DateTime.UtcNow - _lastClientAuthoritativeMaterializedEntrySnapshotObservedUtc;
+            if (observedAge < ClientReconnectFinalizeSettleDelay)
+            {
+                readinessSummary =
+                    "authoritative-materialized-entry-snapshot-settle-pending" +
+                    " ObservedAgeSeconds=" + observedAge.TotalSeconds.ToString("F2") +
+                    " PendingSettleSeconds=" + ClientReconnectFinalizeSettleDelay.TotalSeconds.ToString("F2");
+                return false;
+            }
+
+            if (expectedAgentCount <= 0 ||
+                _clientAuthoritativeMaterializedEntryObservedAgentIndices.Count < expectedAgentCount)
+            {
+                readinessSummary =
+                    "authoritative-materialized-entry-map-incomplete" +
+                    " TransmissionId=" + transmissionId +
+                    " ExpectedAgentCount=" + expectedAgentCount +
+                    " ObservedAgentCount=" +
+                    _clientAuthoritativeMaterializedEntryObservedAgentIndices.Count;
+                return false;
+            }
+
+            int inactiveAgentCount = 0;
+            var inactiveSamples = new List<int>();
+            foreach (int agentIndex in _clientAuthoritativeMaterializedEntryObservedAgentIndices)
+            {
+                if (!TryGetActiveMissionAgentByIndex(mission, agentIndex, out Agent agent) ||
+                    agent == null ||
+                    agent.IsMount ||
+                    !agent.IsHuman ||
+                    !agent.IsActive() ||
+                    agent.Team == null ||
+                    agent.Team.Side == BattleSideEnum.None)
+                {
+                    inactiveAgentCount++;
+                    if (inactiveSamples.Count < 6)
+                        inactiveSamples.Add(agentIndex);
+                    continue;
+                }
+
+                readyAgentCount++;
+            }
+
+            if (readyAgentCount != expectedAgentCount || inactiveAgentCount > 0)
+            {
+                readinessSummary =
+                    "active-authoritative-materialized-agents-pending" +
+                    " ExpectedAgentCount=" + expectedAgentCount +
+                    " ReadyAgentCount=" + readyAgentCount +
+                    " InactiveAgentCount=" + inactiveAgentCount +
+                    " Samples=[" + string.Join(",", inactiveSamples) + "]";
+                return false;
+            }
+
+            readinessSummary =
+                "ready" +
+                " TransmissionId=" + transmissionId +
+                " ExpectedAgentCount=" + expectedAgentCount +
+                " ReadyAgentCount=" + readyAgentCount +
+                " PayloadHash=" + payloadHash;
+            return true;
+        }
+
         internal static bool IsClientExactSiegePreSelectionMaterializationReady(
             CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot status,
             string currentMissionName,
@@ -14965,11 +15097,17 @@ namespace CoopSpectator.MissionBehaviors
                     mission,
                     assignedPeerIndices,
                     out _);
+            bool assignedPeersInitialVillageBattleMaterializationReady =
+                CoopMissionNetworkBridge.AreAssignedPeersInitialVillageBattleMaterializationReady(
+                    mission,
+                    assignedPeerIndices,
+                    out _);
             return AreBattlefieldArmiesReadyForStart(mission, out _, out _, out _) &&
                 assignedPeerCount > 0 &&
                 controlledPeerCount >= assignedPeerCount &&
                 assignedPeersInitialMaterializationReady &&
-                assignedPeersInitialFieldBattleMaterializationReady;
+                assignedPeersInitialFieldBattleMaterializationReady &&
+                assignedPeersInitialVillageBattleMaterializationReady;
         }
 
         private static bool AreBattlefieldArmiesReadyForStart(

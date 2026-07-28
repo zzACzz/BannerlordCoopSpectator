@@ -104,6 +104,13 @@ namespace CoopSpectator.Infrastructure
         public const bool EnableExactFieldBattleInitialMaterializationRuntime = true;
 
         /// <summary>
+        /// Exact village-battle initial materialization: pace native client
+        /// CreateAgent replay and require a village-specific readiness acknowledgement
+        /// before battle start. State remains independent from FieldBattle and SallyOut.
+        /// </summary>
+        public const bool EnableExactVillageBattleInitialMaterializationRuntime = true;
+
+        /// <summary>
         /// Exact SiegeMissionWithDeployment scene initializer profile: mirror the
         /// native campaign siege initializer fields that affect scene material
         /// and campaign-mode object setup, while keeping map-patch repair out of

@@ -11,6 +11,7 @@ using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.Infrastructure.SallyOut;
 using CoopSpectator.Infrastructure.SiegeAmbush;
+using CoopSpectator.Infrastructure.VillageBattle;
 using CoopSpectator.Network.Messages;
 using CoopSpectator.Patches;
 using Newtonsoft.Json;
@@ -1453,8 +1454,14 @@ namespace CoopSpectator.MissionBehaviors
         private static Mission _fieldBattleBoundaryAlignmentMission;
         private static readonly Dictionary<BattleSideEnum, string> FieldBattleAlignedBoundaryGeometrySignatures =
             new Dictionary<BattleSideEnum, string>();
+        private static Mission _villageBattleBoundaryAlignmentMission;
+        private static readonly Dictionary<BattleSideEnum, string> VillageBattleAlignedBoundaryGeometrySignatures =
+            new Dictionary<BattleSideEnum, string>();
         private static Mission _fieldBattleBoundaryDiagnosticsMission;
         private static readonly HashSet<string> FieldBattleBoundaryDiagnosticsKeys =
+            new HashSet<string>(StringComparer.Ordinal);
+        private static Mission _villageBattleBoundaryDiagnosticsMission;
+        private static readonly HashSet<string> VillageBattleBoundaryDiagnosticsKeys =
             new HashSet<string>(StringComparer.Ordinal);
 #if !COOPSPECTATOR_DEDICATED
         private static Mission _cachedCoopBoundaryMarkerMission;
@@ -1568,6 +1575,20 @@ namespace CoopSpectator.MissionBehaviors
                 scenarioContext);
         }
 
+        private static bool IsExactVillageBattleDeploymentScenario(Mission mission)
+        {
+            if (mission == null)
+                return false;
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            return ExactCampaignCommanderDeploymentRuntime.IsExactVillageBattleScenario(
+                mission,
+                scenarioContext);
+        }
+
         public static bool TryEnsureDeploymentPlanBoundaries(Mission mission, Team team, string source)
         {
             if (!IsCoopCommanderDeploymentPlacementMission(mission) ||
@@ -1602,6 +1623,19 @@ namespace CoopSpectator.MissionBehaviors
                     ExactCampaignCommanderDeploymentRuntime.IsExactFieldBattleScenario(
                         mission,
                         scenarioContext);
+                bool isExactVillageBattle =
+                    ExactCampaignCommanderDeploymentRuntime.IsExactVillageBattleScenario(
+                        mission,
+                        scenarioContext);
+
+                if (isExactVillageBattle && GameNetwork.IsClient && !GameNetwork.IsServer)
+                {
+                    return TryEnsureExactVillageBattleDeploymentBoundaryContract(
+                        mission,
+                        deploymentPlan,
+                        team,
+                        source);
+                }
 
                 if (!TryHasDeploymentBoundaries(deploymentPlan, team))
                 {
@@ -1654,6 +1688,18 @@ namespace CoopSpectator.MissionBehaviors
                             team,
                             source);
                     return exactFieldBattleBoundaryReady ||
+                           TryHasDeploymentBoundaries(deploymentPlan, team);
+                }
+
+                if (isExactVillageBattle)
+                {
+                    bool exactVillageBattleBoundaryReady =
+                        TryEnsureExactVillageBattleDeploymentBoundaryContract(
+                            mission,
+                            deploymentPlan,
+                            team,
+                            source);
+                    return exactVillageBattleBoundaryReady ||
                            TryHasDeploymentBoundaries(deploymentPlan, team);
                 }
 
@@ -1746,7 +1792,9 @@ namespace CoopSpectator.MissionBehaviors
             bool hasTeamDeploymentPlanBoundaries = TryEnsureDeploymentPlanBoundaries(mission, team, source);
             bool isExactSallyOut = IsExactSallyOutDeploymentScenario(mission);
             bool isExactFieldBattle = IsExactFieldBattleDeploymentScenario(mission);
-            bool preferNativeBoundaryMarker = isExactSallyOut || isExactFieldBattle;
+            bool isExactVillageBattle = IsExactVillageBattleDeploymentScenario(mission);
+            bool preferNativeBoundaryMarker =
+                isExactSallyOut || isExactFieldBattle || isExactVillageBattle;
             float preferredNativeMarkerInterval = isExactSallyOut
                 ? SallyOutBoundaryMarkerInterval
                 : BoundaryMarkerInterval;
@@ -1757,11 +1805,11 @@ namespace CoopSpectator.MissionBehaviors
                     team,
                     source,
                     preferredNativeMarkerInterval,
-                    refreshOnGeometryChange: isExactFieldBattle);
+                    refreshOnGeometryChange: isExactFieldBattle || isExactVillageBattle);
             if (ensuredNativeBoundaryMarkers)
             {
 #if !COOPSPECTATOR_DEDICATED
-                if (isExactFieldBattle)
+                if (isExactFieldBattle || isExactVillageBattle)
                 {
                     TryEnsureProminentFieldBattleFrontBoundaryMarkers(
                         mission,
@@ -2146,6 +2194,324 @@ namespace CoopSpectator.MissionBehaviors
                 deploymentBoundaries);
         }
 
+        private static bool TryEnsureExactVillageBattleDeploymentBoundaryContract(
+            Mission mission,
+            DefaultMissionDeploymentPlan deploymentPlan,
+            Team team,
+            string source)
+        {
+            if (GameNetwork.IsServer &&
+                ExactVillageBattleDeploymentBoundaryRuntime.TryGetServerContract(
+                    mission,
+                    out ExactVillageBattleDeploymentBoundaryContract serverContract,
+                    out int serverRevision,
+                    out string serverPayloadHash,
+                    out _))
+            {
+                return TryApplyAuthoritativeVillageBattleDeploymentBoundaryContract(
+                    mission,
+                    deploymentPlan,
+                    serverContract,
+                    serverRevision,
+                    serverPayloadHash,
+                    (source ?? "unknown") + " server-frozen-contract");
+            }
+
+            if (GameNetwork.IsClient && !GameNetwork.IsServer)
+            {
+                if (!ExactVillageBattleDeploymentBoundaryRuntime.TryGetClientContract(
+                        mission,
+                        out ExactVillageBattleDeploymentBoundaryContract contract,
+                        out int revision,
+                        out string payloadHash))
+                {
+                    return false;
+                }
+
+                return TryApplyAuthoritativeVillageBattleDeploymentBoundaryContract(
+                    mission,
+                    deploymentPlan,
+                    contract,
+                    revision,
+                    payloadHash,
+                    source);
+            }
+
+            // VillageBattle owns its deployment lifecycle separately, but the proven
+            // open-battle geometry repair is deliberately shared as a pure operation
+            // over the authoritative server mission deployment plan. Its cache is
+            // mission-scoped and clients never rebuild this geometry independently.
+            return TryEnsureExactFieldBattleDeploymentBoundaryContract(
+                mission,
+                deploymentPlan,
+                team,
+                (source ?? "unknown") + " village-battle");
+        }
+
+        internal static bool TryCaptureAuthoritativeVillageBattleDeploymentBoundaryContract(
+            Mission mission,
+            out ExactVillageBattleDeploymentBoundaryContract contract,
+            out string diagnostics,
+            string source)
+        {
+            contract = null;
+            diagnostics = "invalid-server-village-boundary-context";
+            if (!GameNetwork.IsServer ||
+                mission == null ||
+                !IsExactVillageBattleDeploymentScenario(mission) ||
+                !mission.GetDeploymentPlan<DefaultMissionDeploymentPlan>(
+                    out DefaultMissionDeploymentPlan deploymentPlan) ||
+                deploymentPlan == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                var captured = new ExactVillageBattleDeploymentBoundaryContract
+                {
+                    SchemaVersion = ExactVillageBattleDeploymentBoundaryRuntime.CurrentSchemaVersion,
+                    Revision = ExactVillageBattleDeploymentBoundaryRuntime.InitialRevision,
+                    BattleId = BattleSnapshotRuntimeState.GetCurrent()?.BattleId ?? string.Empty,
+                    SceneName = mission.SceneName ?? string.Empty
+                };
+
+                foreach (BattleSideEnum side in new[]
+                         {
+                             BattleSideEnum.Attacker,
+                             BattleSideEnum.Defender
+                         })
+                {
+                    Team sideTeam = mission.Teams?.FirstOrDefault(
+                        candidate => candidate != null && candidate.Side == side);
+                    if (sideTeam == null ||
+                        !TryEnsureDeploymentPlanBoundaries(
+                            mission,
+                            sideTeam,
+                            (source ?? "unknown") + " capture-" + side) ||
+                        !TryEnsureDeploymentPlanHasTeamPlan(deploymentPlan, sideTeam))
+                    {
+                        diagnostics = "server-side-boundary-not-ready Side=" + side;
+                        return false;
+                    }
+
+                    DefaultTeamDeploymentPlan teamPlan =
+                        TryGetTeamDeploymentPlan(deploymentPlan, sideTeam);
+                    if (teamPlan == null ||
+                        !(DefaultTeamDeploymentPlanDeploymentBoundariesField.GetValue(teamPlan) is
+                          MBList<(string id, MBList<Vec2> points)> deploymentBoundaries) ||
+                        !(DefaultTeamDeploymentPlanDeploymentFrameField.GetValue(teamPlan) is
+                          MatrixFrame deploymentFrame))
+                    {
+                        diagnostics = "server-side-plan-state-unavailable Side=" + side;
+                        return false;
+                    }
+
+                    Vec2 forward = deploymentFrame.rotation.f.AsVec2;
+                    var capturedSide = new ExactVillageBattleDeploymentSideBoundary
+                    {
+                        Side = side,
+                        FrameOriginX = deploymentFrame.origin.x,
+                        FrameOriginY = deploymentFrame.origin.y,
+                        FrameOriginZ = deploymentFrame.origin.z,
+                        FrameForwardX = forward.x,
+                        FrameForwardY = forward.y
+                    };
+                    foreach (var deploymentBoundary in deploymentBoundaries)
+                    {
+                        if (deploymentBoundary.points == null ||
+                            deploymentBoundary.points.Count <= 2)
+                        {
+                            continue;
+                        }
+
+                        var capturedBoundary = new ExactVillageBattleDeploymentPolygon
+                        {
+                            Id = deploymentBoundary.id ?? string.Empty
+                        };
+                        foreach (Vec2 point in deploymentBoundary.points)
+                        {
+                            capturedBoundary.Points.Add(
+                                new ExactVillageBattleDeploymentPoint(point.x, point.y));
+                        }
+
+                        capturedSide.Boundaries.Add(capturedBoundary);
+                    }
+
+                    if (capturedSide.Boundaries.Count <= 0)
+                    {
+                        diagnostics = "server-side-boundaries-empty Side=" + side;
+                        return false;
+                    }
+
+                    captured.Sides.Add(capturedSide);
+                }
+
+                contract = captured;
+                diagnostics =
+                    "captured Sides=" + captured.Sides.Count +
+                    " Source=" + (source ?? "unknown");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                contract = null;
+                diagnostics =
+                    "server-capture-exception " +
+                    ex.GetType().Name + ":" + ex.Message;
+                return false;
+            }
+        }
+
+        internal static bool TryApplyAuthoritativeVillageBattleDeploymentBoundaryContract(
+            Mission mission,
+            ExactVillageBattleDeploymentBoundaryContract contract,
+            int revision,
+            string payloadHash,
+            out string diagnostics,
+            string source)
+        {
+            diagnostics = "invalid-client-village-boundary-context";
+            if ((!GameNetwork.IsClient && !GameNetwork.IsServer) ||
+                mission == null ||
+                contract == null ||
+                revision <= 0 ||
+                string.IsNullOrWhiteSpace(payloadHash) ||
+                !IsExactVillageBattleDeploymentScenario(mission) ||
+                !mission.GetDeploymentPlan<DefaultMissionDeploymentPlan>(
+                    out DefaultMissionDeploymentPlan deploymentPlan) ||
+                deploymentPlan == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                if (!TryApplyAuthoritativeVillageBattleDeploymentBoundaryContract(
+                        mission,
+                        deploymentPlan,
+                        contract,
+                        revision,
+                        payloadHash,
+                        source))
+                {
+                    diagnostics = "native-plan-apply-failed";
+                    return false;
+                }
+
+                diagnostics =
+                    "applied Revision=" + revision +
+                    " Hash=" +
+                    (payloadHash.Length <= 12 ? payloadHash : payloadHash.Substring(0, 12)) +
+                    " Source=" + (source ?? "unknown");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                diagnostics =
+                    "native-plan-apply-exception " +
+                    ex.GetType().Name + ":" + ex.Message;
+                return false;
+            }
+        }
+
+        private static bool TryApplyAuthoritativeVillageBattleDeploymentBoundaryContract(
+            Mission mission,
+            DefaultMissionDeploymentPlan deploymentPlan,
+            ExactVillageBattleDeploymentBoundaryContract contract,
+            int revision,
+            string payloadHash,
+            string source)
+        {
+            if (mission == null ||
+                deploymentPlan == null ||
+                contract == null ||
+                revision != contract.Revision ||
+                DefaultTeamDeploymentPlanDeploymentBoundariesField == null ||
+                DefaultTeamDeploymentPlanDeploymentFrameField == null)
+            {
+                return false;
+            }
+
+            EnsureExactOpenBattleBoundaryAlignmentState(mission, isVillageBattle: true);
+            foreach (ExactVillageBattleDeploymentSideBoundary sideContract in contract.Sides)
+            {
+                Team team = mission.Teams?.FirstOrDefault(
+                    candidate => candidate != null && candidate.Side == sideContract.Side);
+                if (team == null || !TryEnsureDeploymentPlanHasTeamPlan(deploymentPlan, team))
+                    return false;
+
+                DefaultTeamDeploymentPlan teamPlan = TryGetTeamDeploymentPlan(deploymentPlan, team);
+                if (teamPlan == null ||
+                    !(DefaultTeamDeploymentPlanDeploymentBoundariesField.GetValue(teamPlan) is
+                      MBList<(string id, MBList<Vec2> points)> deploymentBoundaries))
+                {
+                    return false;
+                }
+
+                var authoritativeBoundaries =
+                    new List<(string id, MBList<Vec2> points)>();
+                foreach (ExactVillageBattleDeploymentPolygon boundaryContract in
+                         sideContract.Boundaries)
+                {
+                    var points = new MBList<Vec2>();
+                    foreach (ExactVillageBattleDeploymentPoint point in boundaryContract.Points)
+                        points.Add(new Vec2(point.X, point.Y));
+                    authoritativeBoundaries.Add((boundaryContract.Id ?? string.Empty, points));
+                }
+
+                Vec2 forward = new Vec2(
+                    sideContract.FrameForwardX,
+                    sideContract.FrameForwardY);
+                if (!forward.IsValid || forward.LengthSquared <= 0.0001f)
+                    return false;
+                forward = forward.Normalized();
+                Mat3 rotation = Mat3.Identity;
+                rotation.RotateAboutUp(forward.RotationInRadians);
+                var deploymentFrame = new MatrixFrame(
+                    in rotation,
+                    new Vec3(
+                        sideContract.FrameOriginX,
+                        sideContract.FrameOriginY,
+                        sideContract.FrameOriginZ));
+
+                string authoritativeSignature =
+                    BuildExactFieldBattleBoundaryGeometrySignature(authoritativeBoundaries);
+                string currentSignature =
+                    BuildExactFieldBattleBoundaryGeometrySignature(deploymentBoundaries);
+                if (!string.Equals(
+                        currentSignature,
+                        authoritativeSignature,
+                        StringComparison.Ordinal))
+                {
+                    deploymentBoundaries.Clear();
+                    foreach (var authoritativeBoundary in authoritativeBoundaries)
+                        deploymentBoundaries.Add(authoritativeBoundary);
+                }
+
+                DefaultTeamDeploymentPlanDeploymentFrameField.SetValue(
+                    teamPlan,
+                    deploymentFrame);
+                VillageBattleAlignedBoundaryGeometrySignatures[team.Side] =
+                    authoritativeSignature;
+            }
+
+            ExactVillageBattleDeploymentBoundaryRuntime.MarkClientApplied(
+                mission,
+                revision,
+                payloadHash);
+            if (CoopDebugConfig.VillageBattleBoundaryDiagnostics)
+            {
+                ModLogger.Info(
+                    "CoopSiegeDeploymentBoundaryRuntime: applied authoritative VillageBattle deployment boundaries. " +
+                    "Revision=" + revision +
+                    " Sides=" + contract.Sides.Count +
+                    " Source=" + (source ?? "unknown"));
+            }
+
+            return true;
+        }
+
         private static bool TryEnsureExactFieldBattleDeploymentBoundaryContract(
             Mission mission,
             DefaultMissionDeploymentPlan deploymentPlan,
@@ -2201,10 +2567,18 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            EnsureExactFieldBattleBoundaryAlignmentState(mission);
+            bool isVillageBattleBoundaryContract =
+                IsExactVillageBattleDeploymentScenario(mission);
+            Dictionary<BattleSideEnum, string> alignedBoundaryGeometrySignatures =
+                isVillageBattleBoundaryContract
+                    ? VillageBattleAlignedBoundaryGeometrySignatures
+                    : FieldBattleAlignedBoundaryGeometrySignatures;
+            EnsureExactOpenBattleBoundaryAlignmentState(
+                mission,
+                isVillageBattleBoundaryContract);
             string currentGeometrySignature =
                 BuildExactFieldBattleBoundaryGeometrySignature(deploymentBoundaries);
-            if (FieldBattleAlignedBoundaryGeometrySignatures.TryGetValue(
+            if (alignedBoundaryGeometrySignatures.TryGetValue(
                     team.Side,
                     out string alignedGeometrySignature) &&
                 string.Equals(
@@ -2213,7 +2587,8 @@ namespace CoopSpectator.MissionBehaviors
                     StringComparison.Ordinal) &&
                 HasUsableExactSallyOutDeploymentBoundaryPoints(deploymentBoundaries))
             {
-                if (CoopDebugConfig.FieldBattleBoundaryDiagnostics)
+                if (CoopDebugConfig.FieldBattleBoundaryDiagnostics ||
+                    CoopDebugConfig.VillageBattleBoundaryDiagnostics)
                 {
                     List<Vec2> cachedPlacementSamples =
                         CollectExactSallyOutPlacementSamples(mission, team);
@@ -2498,7 +2873,7 @@ namespace CoopSpectator.MissionBehaviors
 
                 string repairedGeometrySignature =
                     BuildExactFieldBattleBoundaryGeometrySignature(deploymentBoundaries);
-                FieldBattleAlignedBoundaryGeometrySignatures[team.Side] =
+                alignedBoundaryGeometrySignatures[team.Side] =
                     repairedGeometrySignature;
                 LogExactFieldBattleBoundaryDiagnosticsOnce(
                     mission,
@@ -2570,21 +2945,43 @@ namespace CoopSpectator.MissionBehaviors
             string stage,
             Func<string> detailsFactory)
         {
-            if (!CoopDebugConfig.FieldBattleBoundaryDiagnostics)
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            bool isVillageBattle =
+                ExactCampaignCommanderDeploymentRuntime.IsExactVillageBattleScenario(
+                    mission,
+                    scenarioContext);
+            bool diagnosticsEnabled = isVillageBattle
+                ? CoopDebugConfig.VillageBattleBoundaryDiagnostics
+                : CoopDebugConfig.FieldBattleBoundaryDiagnostics;
+            if (!diagnosticsEnabled)
                 return;
 
-            if (!ReferenceEquals(_fieldBattleBoundaryDiagnosticsMission, mission))
+            HashSet<string> diagnosticsKeys = isVillageBattle
+                ? VillageBattleBoundaryDiagnosticsKeys
+                : FieldBattleBoundaryDiagnosticsKeys;
+            Mission diagnosticsMission = isVillageBattle
+                ? _villageBattleBoundaryDiagnosticsMission
+                : _fieldBattleBoundaryDiagnosticsMission;
+            if (!ReferenceEquals(diagnosticsMission, mission))
             {
-                _fieldBattleBoundaryDiagnosticsMission = mission;
-                FieldBattleBoundaryDiagnosticsKeys.Clear();
+                if (isVillageBattle)
+                    _villageBattleBoundaryDiagnosticsMission = mission;
+                else
+                    _fieldBattleBoundaryDiagnosticsMission = mission;
+                diagnosticsKeys.Clear();
             }
 
             string key = side + "|" + (stage ?? "unknown");
-            if (!FieldBattleBoundaryDiagnosticsKeys.Add(key))
+            if (!diagnosticsKeys.Add(key))
                 return;
 
             ModLogger.Info(
-                "CoopSiegeDeploymentBoundaryRuntime: exact field-battle boundary diagnostics. " +
+                "CoopSiegeDeploymentBoundaryRuntime: exact " +
+                (isVillageBattle ? "village-battle" : "field-battle") +
+                " boundary diagnostics. " +
                 "Stage=" + (stage ?? "unknown") +
                 " Side=" + side +
                 " " + (detailsFactory?.Invoke() ?? string.Empty));
@@ -2997,6 +3394,10 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
+            string boundaryIdPrefix = IsExactVillageBattleDeploymentScenario(mission)
+                ? "coop_village_battle_"
+                : "coop_field_battle_";
+
             forwardDirection = forwardDirection.Normalized();
             Vec2 lateralDirection = new Vec2(-forwardDirection.y, forwardDirection.x);
             float frontProjection = float.MinValue;
@@ -3078,8 +3479,8 @@ namespace CoopSpectator.MissionBehaviors
                 }
 
                 string boundaryId = string.IsNullOrWhiteSpace(missionBoundary.Key)
-                    ? "coop_field_battle_" + team.Side + "_" + repairedBoundaries.Count
-                    : "coop_field_battle_" + team.Side + "_" + missionBoundary.Key;
+                    ? boundaryIdPrefix + team.Side + "_" + repairedBoundaries.Count
+                    : boundaryIdPrefix + team.Side + "_" + missionBoundary.Key;
                 repairedBoundaries.Add((boundaryId, repairedBoundary));
             }
 
@@ -3150,8 +3551,20 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        private static void EnsureExactFieldBattleBoundaryAlignmentState(Mission mission)
+        private static void EnsureExactOpenBattleBoundaryAlignmentState(
+            Mission mission,
+            bool isVillageBattle)
         {
+            if (isVillageBattle)
+            {
+                if (ReferenceEquals(_villageBattleBoundaryAlignmentMission, mission))
+                    return;
+
+                _villageBattleBoundaryAlignmentMission = mission;
+                VillageBattleAlignedBoundaryGeometrySignatures.Clear();
+                return;
+            }
+
             if (ReferenceEquals(_fieldBattleBoundaryAlignmentMission, mission))
                 return;
 
@@ -4443,6 +4856,13 @@ namespace CoopSpectator.MissionBehaviors
                 out _);
         }
 
+        private static bool IsValidatedInitialVillageBattleMaterializationScenario(Mission mission)
+        {
+            return ExactVillageBattleInitialMaterializationRuntime.IsValidatedScenario(
+                mission,
+                out _);
+        }
+
         internal readonly struct ClientBattleSnapshotProgressInfo
         {
             public ClientBattleSnapshotProgressInfo(
@@ -4491,6 +4911,7 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly TimeSpan InitialAgentMaterializationReadyRetryDelay = TimeSpan.FromMilliseconds(900);
         private static readonly TimeSpan InitialAgentMaterializationReadinessPollInterval = TimeSpan.FromMilliseconds(250);
         private static readonly TimeSpan BootstrapDependentPeerPayloadSyncInterval = TimeSpan.FromMilliseconds(200);
+        private static readonly TimeSpan VillageBattleDeploymentBoundaryRetryDelay = TimeSpan.FromMilliseconds(900);
         private static readonly FieldInfo FormationEnforceNotSplittableByAiField =
             typeof(Formation).GetField("_enforceNotSplittableByAI", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo CommanderDeploymentPointWeaponsField =
@@ -4566,6 +4987,12 @@ namespace CoopSpectator.MissionBehaviors
             new Dictionary<int, int>();
         private readonly Dictionary<int, int> _acknowledgedInitialFieldBattleMaterializationTransmissionIdByPeer =
             new Dictionary<int, int>();
+        private readonly Dictionary<int, int> _acknowledgedInitialVillageBattleMaterializationTransmissionIdByPeer =
+            new Dictionary<int, int>();
+        private readonly Dictionary<int, int> _acknowledgedVillageBattleDeploymentBoundaryRevisionByPeer =
+            new Dictionary<int, int>();
+        private readonly Dictionary<int, DateTime> _lastSentVillageBattleDeploymentBoundaryUtcByPeer =
+            new Dictionary<int, DateTime>();
         private readonly Dictionary<int, PendingPayloadTransmission> _completedMaterializedAgentEntryTransmissionByPeer =
             new Dictionary<int, PendingPayloadTransmission>();
         private readonly Dictionary<int, DateTime> _completedMaterializedAgentEntryTransmissionUtcByPeer =
@@ -4613,15 +5040,23 @@ namespace CoopSpectator.MissionBehaviors
         private DateTime _lastClientInitialAgentMaterializationReadySentUtc = DateTime.MinValue;
         private DateTime _nextClientInitialFieldBattleMaterializationReadinessPollUtc = DateTime.MinValue;
         private DateTime _lastClientInitialFieldBattleMaterializationReadySentUtc = DateTime.MinValue;
+        private DateTime _nextClientInitialVillageBattleMaterializationReadinessPollUtc = DateTime.MinValue;
+        private DateTime _lastClientInitialVillageBattleMaterializationReadySentUtc = DateTime.MinValue;
+        private DateTime _lastClientVillageBattleDeploymentBoundaryReadySentUtc = DateTime.MinValue;
+        private int _lastClientVillageBattleDeploymentBoundaryReadyRevision;
+        private string _lastClientVillageBattleDeploymentBoundaryReadyHash = string.Empty;
         private DateTime _nextBootstrapDependentPeerPayloadSyncUtc = DateTime.MinValue;
         private int _lastClientBattleReconnectFinalizeReadyAckTransmissionId;
         private int _clientConfirmedInitialAgentMaterializationTransmissionId;
         private int _clientConfirmedInitialAgentMaterializationReadyAgentCount;
         private int _clientConfirmedInitialFieldBattleMaterializationTransmissionId;
         private int _clientConfirmedInitialFieldBattleMaterializationReadyAgentCount;
+        private int _clientConfirmedInitialVillageBattleMaterializationTransmissionId;
+        private int _clientConfirmedInitialVillageBattleMaterializationReadyAgentCount;
         private string _lastClientBattleReconnectFinalizeReadinessSummary = string.Empty;
         private string _lastClientInitialAgentMaterializationReadinessSummary = string.Empty;
         private string _lastClientInitialFieldBattleMaterializationReadinessSummary = string.Empty;
+        private string _lastClientInitialVillageBattleMaterializationReadinessSummary = string.Empty;
         private string _clientAppliedBattleDataReadinessStage = string.Empty;
         private bool _delayedClientAgentControlDiagnosticsPending;
         private int _delayedClientAgentControlDiagnosticsTicksRemaining;
@@ -5453,6 +5888,10 @@ namespace CoopSpectator.MissionBehaviors
                     HandleClientInitialAgentMaterializationReady);
                 registerer.RegisterBaseHandler<CoopInitialFieldBattleMaterializationReadyMessage>(
                     HandleClientInitialFieldBattleMaterializationReady);
+                registerer.RegisterBaseHandler<CoopInitialVillageBattleMaterializationReadyMessage>(
+                    HandleClientInitialVillageBattleMaterializationReady);
+                registerer.RegisterBaseHandler<CoopVillageBattleDeploymentBoundaryReadyMessage>(
+                    HandleClientVillageBattleDeploymentBoundaryReady);
                 registerer.RegisterBaseHandler<CoopMaterializedReinforcementBatchPreparedMessage>(
                     HandleClientMaterializedReinforcementBatchPrepared);
                 registerer.RegisterBaseHandler<CoopMaterializedReinforcementBatchReadyMessage>(
@@ -5477,6 +5916,8 @@ namespace CoopSpectator.MissionBehaviors
                     HandleServerMaterializedReinforcementBatchContract);
                 registerer.RegisterBaseHandler<CoopMaterializedReinforcementAgentBindingMessage>(
                     HandleServerMaterializedReinforcementAgentBinding);
+                registerer.RegisterBaseHandler<CoopVillageBattleDeploymentBoundaryContractMessage>(
+                    HandleServerVillageBattleDeploymentBoundaryContract);
                 ModLogger.Info("CoopMissionNetworkBridge: registered client payload chunk handler.");
             }
         }
@@ -5503,7 +5944,119 @@ namespace CoopSpectator.MissionBehaviors
             TrySyncEarlySiegeMissionObjectIdMaps();
             TrySyncAgentControlStates();
             TrySyncMaterializedAgentEntryPayloads();
+            TrySyncVillageBattleDeploymentBoundaryContract();
             TrySyncEntryStatusPayloads();
+        }
+
+        private void TrySyncVillageBattleDeploymentBoundaryContract()
+        {
+            if (!GameNetwork.IsServer ||
+                Mission == null ||
+                !IsValidatedInitialVillageBattleMaterializationScenario(Mission) ||
+                CoopBattlePhaseRuntimeState.GetPhase() >= CoopBattlePhase.BattleActive)
+            {
+                return;
+            }
+
+            if (!ExactVillageBattleDeploymentBoundaryRuntime.TryGetServerContract(
+                    Mission,
+                    out _,
+                    out int revision,
+                    out string payloadHash,
+                    out byte[] payload))
+            {
+                int expectedHumanAgentCount = _expectedMaterializedAgentEntryCountByPeer.Count > 0
+                    ? _expectedMaterializedAgentEntryCountByPeer.Values.Max()
+                    : 0;
+                int activeHumanAgentCount = Mission.AllAgents?.Count(
+                    agent =>
+                        agent != null &&
+                        agent.IsHuman &&
+                        agent.State == AgentState.Active) ?? 0;
+                if (expectedHumanAgentCount <= 0 || activeHumanAgentCount < expectedHumanAgentCount)
+                    return;
+
+                string captureDiagnostics = "not-attempted";
+                string publishDiagnostics = "not-attempted";
+                if (!CoopSiegeDeploymentBoundaryRuntime
+                        .TryCaptureAuthoritativeVillageBattleDeploymentBoundaryContract(
+                            Mission,
+                            out ExactVillageBattleDeploymentBoundaryContract capturedContract,
+                            out captureDiagnostics,
+                            "CoopMissionNetworkBridge.TrySyncVillageBattleDeploymentBoundaryContract") ||
+                    !ExactVillageBattleDeploymentBoundaryRuntime.TryPublishServerContract(
+                        Mission,
+                        capturedContract,
+                        out revision,
+                        out payloadHash,
+                        out payload,
+                        out publishDiagnostics))
+                {
+                    if (CoopDebugConfig.VillageBattleBoundaryDiagnostics)
+                    {
+                        ModLogger.Info(
+                            "CoopMissionNetworkBridge: VillageBattle deployment boundary contract is not ready. " +
+                            "ExpectedHumanAgents=" + expectedHumanAgentCount +
+                            " ActiveHumanAgents=" + activeHumanAgentCount +
+                            " Capture={" + (captureDiagnostics ?? "unknown") + "}" +
+                            " Publish={" + (publishDiagnostics ?? "not-attempted") + "}");
+                    }
+                    return;
+                }
+
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: published authoritative VillageBattle deployment boundary contract. " +
+                    (publishDiagnostics ?? "unknown"));
+            }
+
+            if (payload == null ||
+                payload.Length <= 0 ||
+                payload.Length > CoopVillageBattleDeploymentBoundaryContractMessage.MaxBoundaryPayloadBytes ||
+                GameNetwork.NetworkPeers == null)
+            {
+                return;
+            }
+
+            DateTime nowUtc = DateTime.UtcNow;
+            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+            {
+                if (!IsEligibleRemotePeer(peer))
+                    continue;
+
+                _acknowledgedVillageBattleDeploymentBoundaryRevisionByPeer.TryGetValue(
+                    peer.Index,
+                    out int acknowledgedRevision);
+                if (acknowledgedRevision == revision)
+                    continue;
+
+                if (_lastSentVillageBattleDeploymentBoundaryUtcByPeer.TryGetValue(
+                        peer.Index,
+                        out DateTime lastSentUtc) &&
+                    nowUtc - lastSentUtc < VillageBattleDeploymentBoundaryRetryDelay)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    GameNetwork.BeginModuleEventAsServer(peer);
+                    GameNetwork.WriteMessage(
+                        new CoopVillageBattleDeploymentBoundaryContractMessage(
+                            revision,
+                            payloadHash,
+                            payload));
+                    GameNetwork.EndModuleEventAsServer();
+                    _lastSentVillageBattleDeploymentBoundaryUtcByPeer[peer.Index] = nowUtc;
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Info(
+                        "CoopMissionNetworkBridge: VillageBattle deployment boundary contract send failed. " +
+                        "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                        " Revision=" + revision +
+                        " Error=" + ex.GetType().Name + ":" + ex.Message);
+                }
+            }
         }
 
         public override void OnPreMissionTick(float dt)
@@ -5535,6 +6088,8 @@ namespace CoopSpectator.MissionBehaviors
                     "CoopMissionNetworkBridge.TryRunClientBattleSnapshotRecoveryTick");
                 TrySendClientInitialAgentMaterializationReadyIfNeeded();
                 TrySendClientInitialFieldBattleMaterializationReadyIfNeeded();
+                TrySendClientInitialVillageBattleMaterializationReadyIfNeeded();
+                TrySendClientVillageBattleDeploymentBoundaryReadyIfNeeded();
                 TrySendClientMaterializedReinforcementBatchPreparedAcks();
                 TrySendClientMaterializedReinforcementBatchReadyAcks();
                 TrySendClientBattleReconnectFinalizeReadyAckIfNeeded();
@@ -5852,6 +6407,156 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
+        private void TrySendClientInitialVillageBattleMaterializationReadyIfNeeded()
+        {
+            if (!GameNetwork.IsClient ||
+                !GameNetwork.IsSessionActive ||
+                Mission == null ||
+                !IsValidatedInitialVillageBattleMaterializationScenario(Mission) ||
+                CoopBattlePhaseRuntimeState.GetPhase() >= CoopBattlePhase.BattleActive ||
+                HasClientBattleProgressedBeyondInitialMaterializationReadiness())
+            {
+                return;
+            }
+
+            if (!TryGetClientCurrentMaterializedAgentEntrySnapshotIdentity(
+                    out int transmissionId,
+                    out int entryCount,
+                    out string payloadHash,
+                    out string mapReadinessSummary))
+            {
+                _lastClientInitialVillageBattleMaterializationReadinessSummary =
+                    "materialized-map-not-ready " + (mapReadinessSummary ?? "unknown");
+                return;
+            }
+
+            DateTime nowUtc = DateTime.UtcNow;
+            if (_clientConfirmedInitialVillageBattleMaterializationTransmissionId != transmissionId)
+            {
+                if (nowUtc < _nextClientInitialVillageBattleMaterializationReadinessPollUtc)
+                    return;
+
+                _nextClientInitialVillageBattleMaterializationReadinessPollUtc =
+                    nowUtc + InitialAgentMaterializationReadinessPollInterval;
+                if (!CoopMissionSpawnLogic.IsClientInitialVillageBattleMaterializationReady(
+                        out int readyAgentCount,
+                        out string readinessSummary))
+                {
+                    _lastClientInitialVillageBattleMaterializationReadinessSummary =
+                        readinessSummary ?? "unknown";
+                    return;
+                }
+
+                if (readyAgentCount != entryCount)
+                {
+                    _lastClientInitialVillageBattleMaterializationReadinessSummary =
+                        "ready-agent-count-mismatch" +
+                        " ReadyAgentCount=" + readyAgentCount +
+                        " EntryCount=" + entryCount;
+                    return;
+                }
+
+                _clientConfirmedInitialVillageBattleMaterializationTransmissionId = transmissionId;
+                _clientConfirmedInitialVillageBattleMaterializationReadyAgentCount = readyAgentCount;
+                _lastClientInitialVillageBattleMaterializationReadySentUtc = DateTime.MinValue;
+                _lastClientInitialVillageBattleMaterializationReadinessSummary =
+                    readinessSummary ?? "ready";
+            }
+
+            if (_lastClientInitialVillageBattleMaterializationReadySentUtc != DateTime.MinValue &&
+                nowUtc - _lastClientInitialVillageBattleMaterializationReadySentUtc <
+                    InitialAgentMaterializationReadyRetryDelay)
+            {
+                return;
+            }
+
+            bool firstSend =
+                _lastClientInitialVillageBattleMaterializationReadySentUtc == DateTime.MinValue;
+            try
+            {
+                GameNetwork.BeginModuleEventAsClient();
+                GameNetwork.WriteMessage(
+                    new CoopInitialVillageBattleMaterializationReadyMessage(
+                        transmissionId,
+                        entryCount,
+                        _clientConfirmedInitialVillageBattleMaterializationReadyAgentCount,
+                        payloadHash));
+                GameNetwork.EndModuleEventAsClient();
+                _lastClientInitialVillageBattleMaterializationReadySentUtc = nowUtc;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: client village-battle initial materialization readiness send failed. " +
+                    "Error=" + ex.Message);
+                return;
+            }
+
+            if (firstSend || ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: sent client village-battle initial materialization readiness. " +
+                    "TransmissionId=" + transmissionId +
+                    " EntryCount=" + entryCount +
+                    " ReadyAgentCount=" +
+                    _clientConfirmedInitialVillageBattleMaterializationReadyAgentCount +
+                    " ReadinessSummary={" +
+                    (_lastClientInitialVillageBattleMaterializationReadinessSummary ?? "unknown") + "}");
+            }
+        }
+
+        private void TrySendClientVillageBattleDeploymentBoundaryReadyIfNeeded()
+        {
+            if (!GameNetwork.IsClient ||
+                !GameNetwork.IsSessionActive ||
+                Mission == null ||
+                !IsValidatedInitialVillageBattleMaterializationScenario(Mission) ||
+                CoopBattlePhaseRuntimeState.GetPhase() >= CoopBattlePhase.BattleActive ||
+                !ExactVillageBattleDeploymentBoundaryRuntime.IsClientApplied(
+                    Mission,
+                    out int revision,
+                    out string payloadHash,
+                    out _))
+            {
+                return;
+            }
+
+            DateTime nowUtc = DateTime.UtcNow;
+            bool identityChanged =
+                revision != _lastClientVillageBattleDeploymentBoundaryReadyRevision ||
+                !string.Equals(
+                    payloadHash,
+                    _lastClientVillageBattleDeploymentBoundaryReadyHash,
+                    StringComparison.OrdinalIgnoreCase);
+            if (!identityChanged &&
+                _lastClientVillageBattleDeploymentBoundaryReadySentUtc != DateTime.MinValue &&
+                nowUtc - _lastClientVillageBattleDeploymentBoundaryReadySentUtc <
+                    VillageBattleDeploymentBoundaryRetryDelay)
+            {
+                return;
+            }
+
+            try
+            {
+                GameNetwork.BeginModuleEventAsClient();
+                GameNetwork.WriteMessage(
+                    new CoopVillageBattleDeploymentBoundaryReadyMessage(
+                        revision,
+                        payloadHash));
+                GameNetwork.EndModuleEventAsClient();
+                _lastClientVillageBattleDeploymentBoundaryReadyRevision = revision;
+                _lastClientVillageBattleDeploymentBoundaryReadyHash = payloadHash;
+                _lastClientVillageBattleDeploymentBoundaryReadySentUtc = nowUtc;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: client VillageBattle deployment boundary readiness send failed. " +
+                    "Revision=" + revision +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message);
+            }
+        }
+
         private void TryPersistHostedLocalPeerMarker()
         {
             if (_persistedHostedLocalPeerMarker || !GameNetwork.IsClient || !GameNetwork.IsSessionActive)
@@ -5913,6 +6618,8 @@ namespace CoopSpectator.MissionBehaviors
             _lastSentAgentControlRevisionByPeer.Remove(networkPeer.Index);
             _earlySiegeMissionObjectMapSideMaskByPeer.Remove(networkPeer.Index);
             _earlySiegeMachineStateSideMaskByPeer.Remove(networkPeer.Index);
+            _acknowledgedVillageBattleDeploymentBoundaryRevisionByPeer.Remove(networkPeer.Index);
+            _lastSentVillageBattleDeploymentBoundaryUtcByPeer.Remove(networkPeer.Index);
             ClearPeerMaterializedAgentEntrySyncState(networkPeer.Index);
             _sentSiegeMissionObjectMapKeysByPeer.Remove(networkPeer);
             _pendingPayloadsByKey.Remove(BuildPendingTransmissionKey(networkPeer.Index, CoopBattlePayloadKind.AuthoritativeMaterializedAgentEntrySnapshot));
@@ -5953,6 +6660,9 @@ namespace CoopSpectator.MissionBehaviors
             _expectedMaterializedAgentEntryPayloadHashByPeer.Clear();
             _acknowledgedInitialAgentMaterializationTransmissionIdByPeer.Clear();
             _acknowledgedInitialFieldBattleMaterializationTransmissionIdByPeer.Clear();
+            _acknowledgedInitialVillageBattleMaterializationTransmissionIdByPeer.Clear();
+            _acknowledgedVillageBattleDeploymentBoundaryRevisionByPeer.Clear();
+            _lastSentVillageBattleDeploymentBoundaryUtcByPeer.Clear();
             _completedMaterializedAgentEntryTransmissionByPeer.Clear();
             _completedMaterializedAgentEntryTransmissionUtcByPeer.Clear();
             _serverMaterializedReinforcementBatchesById.Clear();
@@ -5989,6 +6699,9 @@ namespace CoopSpectator.MissionBehaviors
             _clientConfirmedInitialFieldBattleMaterializationTransmissionId = 0;
             _clientConfirmedInitialFieldBattleMaterializationReadyAgentCount = 0;
             _lastClientInitialFieldBattleMaterializationReadinessSummary = string.Empty;
+            _lastClientVillageBattleDeploymentBoundaryReadySentUtc = DateTime.MinValue;
+            _lastClientVillageBattleDeploymentBoundaryReadyRevision = 0;
+            _lastClientVillageBattleDeploymentBoundaryReadyHash = string.Empty;
             _clientAppliedBattleDataReadinessStage = string.Empty;
             _cachedMaterializedAgentEntryContentRevision = -1;
             _cachedMaterializedAgentEntrySnapshot = null;
@@ -5997,6 +6710,8 @@ namespace CoopSpectator.MissionBehaviors
                 CoopBattleAgentControlRuntimeState.ResetServer("CoopMissionNetworkBridge.OnRemoveBehavior");
             if (GameNetwork.IsClient)
                 CoopBattleAgentControlRuntimeState.ResetClient("CoopMissionNetworkBridge.OnRemoveBehavior");
+            ExactVillageBattleDeploymentBoundaryRuntime.Reset(
+                "CoopMissionNetworkBridge.OnRemoveBehavior");
             base.OnRemoveBehavior();
         }
 
@@ -13049,6 +13764,170 @@ namespace CoopSpectator.MissionBehaviors
             return true;
         }
 
+        private bool HandleClientInitialVillageBattleMaterializationReady(
+            NetworkCommunicator peer,
+            GameNetworkMessage baseMessage)
+        {
+            if (!(baseMessage is CoopInitialVillageBattleMaterializationReadyMessage message))
+                return false;
+
+            if (peer == null || Mission == null)
+                return true;
+
+            if (IsValidatedInitialVillageBattleMaterializationScenario(Mission) &&
+                CoopBattlePhaseRuntimeState.GetPhase() >= CoopBattlePhase.BattleActive)
+            {
+                return true;
+            }
+
+            _expectedMaterializedAgentEntryTransmissionIdByPeer.TryGetValue(
+                peer.Index,
+                out int expectedTransmissionId);
+            _acknowledgedMaterializedAgentEntryTransmissionIdByPeer.TryGetValue(
+                peer.Index,
+                out int acknowledgedMapTransmissionId);
+            _expectedMaterializedAgentEntryCountByPeer.TryGetValue(
+                peer.Index,
+                out int expectedEntryCount);
+            _expectedMaterializedAgentEntryPayloadHashByPeer.TryGetValue(
+                peer.Index,
+                out string expectedPayloadHash);
+
+            bool accepted =
+                IsValidatedInitialVillageBattleMaterializationScenario(Mission) &&
+                CoopBattlePhaseRuntimeState.GetPhase() < CoopBattlePhase.BattleActive &&
+                expectedTransmissionId > 0 &&
+                message.TransmissionId == expectedTransmissionId &&
+                acknowledgedMapTransmissionId == expectedTransmissionId &&
+                message.EntryCount == expectedEntryCount &&
+                message.ReadyAgentCount == expectedEntryCount &&
+                !string.IsNullOrWhiteSpace(expectedPayloadHash) &&
+                string.Equals(message.PayloadHash, expectedPayloadHash, StringComparison.Ordinal);
+            if (accepted)
+            {
+                _acknowledgedInitialVillageBattleMaterializationTransmissionIdByPeer[peer.Index] =
+                    message.TransmissionId;
+            }
+
+            if (!accepted || ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: processed client village-battle initial materialization readiness. " +
+                    "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                    " TransmissionId=" + message.TransmissionId +
+                    " ExpectedTransmissionId=" + expectedTransmissionId +
+                    " AcknowledgedMapTransmissionId=" + acknowledgedMapTransmissionId +
+                    " EntryCount=" + message.EntryCount +
+                    " ExpectedEntryCount=" + expectedEntryCount +
+                    " ReadyAgentCount=" + message.ReadyAgentCount +
+                    " HashMatched=" + string.Equals(
+                        message.PayloadHash,
+                        expectedPayloadHash,
+                        StringComparison.Ordinal) +
+                    " Accepted=" + accepted);
+            }
+
+            return true;
+        }
+
+        private bool HandleClientVillageBattleDeploymentBoundaryReady(
+            NetworkCommunicator peer,
+            GameNetworkMessage baseMessage)
+        {
+            if (!(baseMessage is CoopVillageBattleDeploymentBoundaryReadyMessage message))
+                return false;
+            if (peer == null || Mission == null)
+                return true;
+
+            bool contractAvailable =
+                ExactVillageBattleDeploymentBoundaryRuntime.TryGetServerContract(
+                    Mission,
+                    out _,
+                    out int expectedRevision,
+                    out string expectedPayloadHash,
+                    out _);
+            bool accepted =
+                IsValidatedInitialVillageBattleMaterializationScenario(Mission) &&
+                CoopBattlePhaseRuntimeState.GetPhase() < CoopBattlePhase.BattleActive &&
+                contractAvailable &&
+                message.Revision == expectedRevision &&
+                !string.IsNullOrWhiteSpace(expectedPayloadHash) &&
+                string.Equals(
+                    message.PayloadHash,
+                    expectedPayloadHash,
+                    StringComparison.OrdinalIgnoreCase);
+            if (accepted)
+            {
+                _acknowledgedVillageBattleDeploymentBoundaryRevisionByPeer[peer.Index] =
+                    message.Revision;
+                _lastSentVillageBattleDeploymentBoundaryUtcByPeer.Remove(peer.Index);
+            }
+
+            if (!accepted || CoopDebugConfig.VillageBattleBoundaryDiagnostics)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: processed client VillageBattle deployment boundary readiness. " +
+                    "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                    " Revision=" + message.Revision +
+                    " ExpectedRevision=" + expectedRevision +
+                    " HashMatched=" + string.Equals(
+                        message.PayloadHash,
+                        expectedPayloadHash,
+                        StringComparison.OrdinalIgnoreCase) +
+                    " Accepted=" + accepted);
+            }
+
+            return true;
+        }
+
+        private void HandleServerVillageBattleDeploymentBoundaryContract(
+            GameNetworkMessage baseMessage)
+        {
+            if (!(baseMessage is CoopVillageBattleDeploymentBoundaryContractMessage message))
+                return;
+            if (Mission == null)
+                return;
+
+            ExactVillageBattleDeploymentBoundaryContract contract = null;
+            string acceptDiagnostics = "not-attempted";
+            bool accepted =
+                IsValidatedInitialVillageBattleMaterializationScenario(Mission) &&
+                CoopBattlePhaseRuntimeState.GetPhase() < CoopBattlePhase.BattleActive &&
+                ExactVillageBattleDeploymentBoundaryRuntime.TryAcceptClientContract(
+                    Mission,
+                    message.Revision,
+                    message.PayloadHash,
+                    message.PayloadBytes,
+                    out contract,
+                    out acceptDiagnostics);
+            string applyDiagnostics = "not-attempted";
+            bool applied =
+                accepted &&
+                CoopSiegeDeploymentBoundaryRuntime
+                    .TryApplyAuthoritativeVillageBattleDeploymentBoundaryContract(
+                        Mission,
+                        contract,
+                        message.Revision,
+                        message.PayloadHash,
+                        out applyDiagnostics,
+                        "CoopMissionNetworkBridge.HandleServerVillageBattleDeploymentBoundaryContract");
+            if (applied)
+                TrySendClientVillageBattleDeploymentBoundaryReadyIfNeeded();
+
+            if (!applied || CoopDebugConfig.VillageBattleBoundaryDiagnostics)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: processed server VillageBattle deployment boundary contract. " +
+                    "Revision=" + message.Revision +
+                    " Bytes=" + (message.PayloadBytes?.Length ?? 0) +
+                    " Accepted=" + accepted +
+                    " Applied=" + applied +
+                    " Accept={" + (acceptDiagnostics ?? "unknown") + "}" +
+                    " Apply={" + (applyDiagnostics ?? "unknown") + "}");
+            }
+
+        }
+
         private bool HandleClientMaterializedReinforcementBatchPrepared(
             NetworkCommunicator peer,
             GameNetworkMessage baseMessage)
@@ -16127,6 +17006,9 @@ namespace CoopSpectator.MissionBehaviors
             _acknowledgedMaterializedAgentEntryTransmissionIdByPeer.Remove(peerIndex);
             _acknowledgedInitialAgentMaterializationTransmissionIdByPeer.Remove(peerIndex);
             _acknowledgedInitialFieldBattleMaterializationTransmissionIdByPeer.Remove(peerIndex);
+            _acknowledgedInitialVillageBattleMaterializationTransmissionIdByPeer.Remove(peerIndex);
+            _acknowledgedVillageBattleDeploymentBoundaryRevisionByPeer.Remove(peerIndex);
+            _lastSentVillageBattleDeploymentBoundaryUtcByPeer.Remove(peerIndex);
             _completedMaterializedAgentEntryTransmissionByPeer.Remove(peerIndex);
             _completedMaterializedAgentEntryTransmissionUtcByPeer.Remove(peerIndex);
         }
@@ -16142,6 +17024,9 @@ namespace CoopSpectator.MissionBehaviors
             _expectedMaterializedAgentEntryPayloadHashByPeer.Remove(peerIndex);
             _acknowledgedInitialAgentMaterializationTransmissionIdByPeer.Remove(peerIndex);
             _acknowledgedInitialFieldBattleMaterializationTransmissionIdByPeer.Remove(peerIndex);
+            _acknowledgedInitialVillageBattleMaterializationTransmissionIdByPeer.Remove(peerIndex);
+            _acknowledgedVillageBattleDeploymentBoundaryRevisionByPeer.Remove(peerIndex);
+            _lastSentVillageBattleDeploymentBoundaryUtcByPeer.Remove(peerIndex);
             _completedMaterializedAgentEntryTransmissionByPeer.Remove(peerIndex);
             _completedMaterializedAgentEntryTransmissionUtcByPeer.Remove(peerIndex);
         }
@@ -16332,6 +17217,99 @@ namespace CoopSpectator.MissionBehaviors
             return ready;
         }
 
+        internal static bool AreAssignedPeersInitialVillageBattleMaterializationReady(
+            Mission mission,
+            IReadOnlyCollection<int> assignedPeerIndices,
+            out string readinessSummary)
+        {
+            readinessSummary = string.Empty;
+            if (!GameNetwork.IsServer || mission == null)
+            {
+                readinessSummary = "invalid-server-mission-context";
+                return false;
+            }
+
+            if (!IsValidatedInitialVillageBattleMaterializationScenario(mission))
+            {
+                readinessSummary = "not-village-battle";
+                return true;
+            }
+
+            if (assignedPeerIndices == null || assignedPeerIndices.Count <= 0)
+            {
+                readinessSummary = "assigned-peers-empty";
+                return false;
+            }
+
+            CoopMissionNetworkBridge bridge = mission.GetMissionBehavior<CoopMissionNetworkBridge>();
+            if (bridge == null)
+            {
+                readinessSummary = "bridge-null";
+                return false;
+            }
+
+            bool boundaryContractAvailable =
+                ExactVillageBattleDeploymentBoundaryRuntime.TryGetServerContract(
+                    mission,
+                    out _,
+                    out int expectedBoundaryRevision,
+                    out string expectedBoundaryHash,
+                    out _);
+
+            int readyPeerCount = 0;
+            var pendingPeerSummaries = new List<string>();
+            foreach (int peerIndex in assignedPeerIndices.Distinct())
+            {
+                bridge._expectedMaterializedAgentEntryTransmissionIdByPeer.TryGetValue(
+                    peerIndex,
+                    out int expectedTransmissionId);
+                bridge._acknowledgedMaterializedAgentEntryTransmissionIdByPeer.TryGetValue(
+                    peerIndex,
+                    out int acknowledgedMapTransmissionId);
+                bridge._acknowledgedInitialVillageBattleMaterializationTransmissionIdByPeer.TryGetValue(
+                    peerIndex,
+                    out int acknowledgedReadyTransmissionId);
+                bridge._acknowledgedVillageBattleDeploymentBoundaryRevisionByPeer.TryGetValue(
+                    peerIndex,
+                    out int acknowledgedBoundaryRevision);
+                bool peerReady =
+                    expectedTransmissionId > 0 &&
+                    acknowledgedMapTransmissionId == expectedTransmissionId &&
+                    acknowledgedReadyTransmissionId == expectedTransmissionId &&
+                    boundaryContractAvailable &&
+                    expectedBoundaryRevision > 0 &&
+                    !string.IsNullOrWhiteSpace(expectedBoundaryHash) &&
+                    acknowledgedBoundaryRevision == expectedBoundaryRevision;
+                if (peerReady)
+                {
+                    readyPeerCount++;
+                    continue;
+                }
+
+                if (pendingPeerSummaries.Count < 6)
+                {
+                    pendingPeerSummaries.Add(
+                        peerIndex +
+                        ":expected=" + expectedTransmissionId +
+                        ",map=" + acknowledgedMapTransmissionId +
+                        ",ready=" + acknowledgedReadyTransmissionId +
+                        ",boundaryExpected=" + expectedBoundaryRevision +
+                        ",boundaryReady=" + acknowledgedBoundaryRevision);
+                }
+            }
+
+            int assignedPeerCount = assignedPeerIndices.Distinct().Count();
+            bool ready = readyPeerCount == assignedPeerCount;
+            readinessSummary =
+                "Ready=" + ready +
+                " AssignedPeers=" + assignedPeerCount +
+                " ReadyPeers=" + readyPeerCount +
+                " BoundaryContractAvailable=" + boundaryContractAvailable +
+                " BoundaryRevision=" + expectedBoundaryRevision +
+                " Pending=[" + string.Join(";", pendingPeerSummaries) + "]";
+            return ready;
+        }
+
         private bool TryAcknowledgePeerBattleSnapshot(NetworkCommunicator peer, string rawTransmissionId)
         {
             if (peer == null || string.IsNullOrWhiteSpace(rawTransmissionId) || !int.TryParse(rawTransmissionId, out int transmissionId))
@@ -16435,6 +17413,9 @@ namespace CoopSpectator.MissionBehaviors
             Mission.Current
                 ?.GetMissionBehavior<CoopMissionNetworkBridge>()
                 ?.ResetClientInitialFieldBattleMaterializationReadiness();
+            Mission.Current
+                ?.GetMissionBehavior<CoopMissionNetworkBridge>()
+                ?.ResetClientInitialVillageBattleMaterializationReadiness();
         }
 
         private static void MarkClientMaterializedAgentEntrySnapshotApplied(
@@ -16455,6 +17436,9 @@ namespace CoopSpectator.MissionBehaviors
             Mission.Current
                 ?.GetMissionBehavior<CoopMissionNetworkBridge>()
                 ?.ResetClientInitialFieldBattleMaterializationReadiness();
+            Mission.Current
+                ?.GetMissionBehavior<CoopMissionNetworkBridge>()
+                ?.ResetClientInitialVillageBattleMaterializationReadiness();
             _clientObservedMaterializedAgentEntryMission = null;
             _clientObservedMaterializedAgentEntryTransmissionId = 0;
             _clientAppliedMaterializedAgentEntryTransmissionId = 0;
@@ -16478,6 +17462,18 @@ namespace CoopSpectator.MissionBehaviors
             _clientConfirmedInitialFieldBattleMaterializationTransmissionId = 0;
             _clientConfirmedInitialFieldBattleMaterializationReadyAgentCount = 0;
             _lastClientInitialFieldBattleMaterializationReadinessSummary = string.Empty;
+        }
+
+        private void ResetClientInitialVillageBattleMaterializationReadiness()
+        {
+            _nextClientInitialVillageBattleMaterializationReadinessPollUtc = DateTime.MinValue;
+            _lastClientInitialVillageBattleMaterializationReadySentUtc = DateTime.MinValue;
+            _clientConfirmedInitialVillageBattleMaterializationTransmissionId = 0;
+            _clientConfirmedInitialVillageBattleMaterializationReadyAgentCount = 0;
+            _lastClientInitialVillageBattleMaterializationReadinessSummary = string.Empty;
+            _lastClientVillageBattleDeploymentBoundaryReadySentUtc = DateTime.MinValue;
+            _lastClientVillageBattleDeploymentBoundaryReadyRevision = 0;
+            _lastClientVillageBattleDeploymentBoundaryReadyHash = string.Empty;
         }
 
         private bool HasClientBattleProgressedBeyondInitialMaterializationReadiness()

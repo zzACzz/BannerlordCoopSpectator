@@ -13,6 +13,7 @@ namespace CoopSpectator.Infrastructure
         private const string EnvDebugDedicatedStdio = "COOP_DEBUG_DEDICATED_STDIO";
         private const string EnvOrderOfBattleDiagnostics = "COOPSPECTATOR_OOB_DIAGNOSTICS";
         private const string EnvFieldBattleBoundaryDiagnostics = "COOPSPECTATOR_FIELD_BOUNDARY_DIAGNOSTICS";
+        private const string EnvVillageBattleBoundaryDiagnostics = "COOPSPECTATOR_VILLAGE_BOUNDARY_DIAGNOSTICS";
         private const string EnvPossessionDiagnostics = "COOPSPECTATOR_POSSESSION_DIAGNOSTICS";
         private const string EnvMoraleDiagnostics = "COOPSPECTATOR_MORALE_DIAGNOSTICS";
         private const string EnvCombatModelDiagnostics = "COOPSPECTATOR_COMBAT_MODEL_DIAGNOSTICS";
@@ -38,6 +39,10 @@ namespace CoopSpectator.Infrastructure
         /// <summary>Enable focused, deduplicated exact field-battle deployment-boundary diagnostics.</summary>
         public static bool FieldBattleBoundaryDiagnostics =>
             GetEnvBool(EnvFieldBattleBoundaryDiagnostics);
+
+        /// <summary>Enable focused, deduplicated village-battle deployment-boundary diagnostics.</summary>
+        public static bool VillageBattleBoundaryDiagnostics =>
+            GetEnvBool(EnvVillageBattleBoundaryDiagnostics);
 
         /// <summary>Enable focused possession/corpse/controlled-agent diagnostics.</summary>
         public static bool PossessionDiagnostics =>

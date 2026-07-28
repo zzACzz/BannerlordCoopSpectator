@@ -1554,6 +1554,194 @@ namespace CoopSpectator.Network.Messages
     }
 
     [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromClient)]
+    public sealed class CoopInitialVillageBattleMaterializationReadyMessage : GameNetworkMessage
+    {
+        private static readonly CompressionInfo.Integer TransmissionCompressionInfo =
+            new CompressionInfo.Integer(0, 1048575, maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer CountCompressionInfo =
+            new CompressionInfo.Integer(0, 8192, maximumValueGiven: true);
+
+        public CoopInitialVillageBattleMaterializationReadyMessage(
+            int transmissionId,
+            int entryCount,
+            int readyAgentCount,
+            string payloadHash)
+        {
+            TransmissionId = transmissionId;
+            EntryCount = entryCount;
+            ReadyAgentCount = readyAgentCount;
+            PayloadHash = string.IsNullOrWhiteSpace(payloadHash) ? string.Empty : payloadHash.Trim();
+        }
+
+        public CoopInitialVillageBattleMaterializationReadyMessage()
+        {
+            TransmissionId = 0;
+            EntryCount = 0;
+            ReadyAgentCount = 0;
+            PayloadHash = string.Empty;
+        }
+
+        public int TransmissionId { get; private set; }
+        public int EntryCount { get; private set; }
+        public int ReadyAgentCount { get; private set; }
+        public string PayloadHash { get; private set; }
+
+        protected override bool OnRead()
+        {
+            bool valid = true;
+            TransmissionId = ReadIntFromPacket(TransmissionCompressionInfo, ref valid);
+            EntryCount = ReadIntFromPacket(CountCompressionInfo, ref valid);
+            ReadyAgentCount = ReadIntFromPacket(CountCompressionInfo, ref valid);
+            PayloadHash = ReadStringFromPacket(ref valid) ?? string.Empty;
+            return valid;
+        }
+
+        protected override void OnWrite()
+        {
+            WriteIntToPacket(TransmissionId, TransmissionCompressionInfo);
+            WriteIntToPacket(EntryCount, CountCompressionInfo);
+            WriteIntToPacket(ReadyAgentCount, CountCompressionInfo);
+            WriteStringToPacket(PayloadHash ?? string.Empty);
+        }
+
+        protected override MultiplayerMessageFilter OnGetLogFilter()
+        {
+            return MultiplayerMessageFilter.Mission;
+        }
+
+        protected override string OnGetLogFormat()
+        {
+            return "CoopInitialVillageBattleMaterializationReady TransmissionId=" + TransmissionId +
+                " EntryCount=" + EntryCount +
+                " ReadyAgentCount=" + ReadyAgentCount;
+        }
+    }
+
+    [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromServer)]
+    public sealed class CoopVillageBattleDeploymentBoundaryContractMessage : GameNetworkMessage
+    {
+        public const int MaxBoundaryPayloadBytes = 4095;
+
+        private static readonly CompressionInfo.Integer RevisionCompressionInfo =
+            new CompressionInfo.Integer(0, int.MaxValue, maximumValueGiven: true);
+
+        public CoopVillageBattleDeploymentBoundaryContractMessage(
+            int revision,
+            string payloadHash,
+            byte[] payloadBytes)
+        {
+            Revision = Math.Max(0, revision);
+            PayloadHash = string.IsNullOrWhiteSpace(payloadHash) ? string.Empty : payloadHash.Trim();
+            PayloadBytes = payloadBytes ?? Array.Empty<byte>();
+        }
+
+        public CoopVillageBattleDeploymentBoundaryContractMessage()
+        {
+            Revision = 0;
+            PayloadHash = string.Empty;
+            PayloadBytes = Array.Empty<byte>();
+        }
+
+        public int Revision { get; private set; }
+        public string PayloadHash { get; private set; }
+        public byte[] PayloadBytes { get; private set; }
+
+        protected override bool OnRead()
+        {
+            bool valid = true;
+            Revision = ReadIntFromPacket(RevisionCompressionInfo, ref valid);
+            PayloadHash = ReadStringFromPacket(ref valid) ?? string.Empty;
+            byte[] payloadBuffer = new byte[MaxBoundaryPayloadBytes];
+            int bytesRead = ReadByteArrayFromPacket(
+                payloadBuffer,
+                0,
+                payloadBuffer.Length,
+                ref valid);
+            if (bytesRead <= 0)
+            {
+                PayloadBytes = Array.Empty<byte>();
+            }
+            else if (bytesRead == payloadBuffer.Length)
+            {
+                PayloadBytes = payloadBuffer;
+            }
+            else
+            {
+                PayloadBytes = new byte[bytesRead];
+                Buffer.BlockCopy(payloadBuffer, 0, PayloadBytes, 0, bytesRead);
+            }
+
+            return valid;
+        }
+
+        protected override void OnWrite()
+        {
+            byte[] payload = PayloadBytes ?? Array.Empty<byte>();
+            int payloadLength = Math.Min(payload.Length, MaxBoundaryPayloadBytes);
+            WriteIntToPacket(Math.Max(0, Revision), RevisionCompressionInfo);
+            WriteStringToPacket(PayloadHash ?? string.Empty);
+            WriteByteArrayToPacket(payload, 0, payloadLength);
+        }
+
+        protected override MultiplayerMessageFilter OnGetLogFilter()
+        {
+            return MultiplayerMessageFilter.Mission;
+        }
+
+        protected override string OnGetLogFormat()
+        {
+            return "CoopVillageBattleDeploymentBoundaryContract Revision=" + Revision +
+                " Bytes=" + (PayloadBytes?.Length ?? 0);
+        }
+    }
+
+    [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromClient)]
+    public sealed class CoopVillageBattleDeploymentBoundaryReadyMessage : GameNetworkMessage
+    {
+        private static readonly CompressionInfo.Integer RevisionCompressionInfo =
+            new CompressionInfo.Integer(0, int.MaxValue, maximumValueGiven: true);
+
+        public CoopVillageBattleDeploymentBoundaryReadyMessage(int revision, string payloadHash)
+        {
+            Revision = Math.Max(0, revision);
+            PayloadHash = string.IsNullOrWhiteSpace(payloadHash) ? string.Empty : payloadHash.Trim();
+        }
+
+        public CoopVillageBattleDeploymentBoundaryReadyMessage()
+        {
+            Revision = 0;
+            PayloadHash = string.Empty;
+        }
+
+        public int Revision { get; private set; }
+        public string PayloadHash { get; private set; }
+
+        protected override bool OnRead()
+        {
+            bool valid = true;
+            Revision = ReadIntFromPacket(RevisionCompressionInfo, ref valid);
+            PayloadHash = ReadStringFromPacket(ref valid) ?? string.Empty;
+            return valid;
+        }
+
+        protected override void OnWrite()
+        {
+            WriteIntToPacket(Math.Max(0, Revision), RevisionCompressionInfo);
+            WriteStringToPacket(PayloadHash ?? string.Empty);
+        }
+
+        protected override MultiplayerMessageFilter OnGetLogFilter()
+        {
+            return MultiplayerMessageFilter.Mission;
+        }
+
+        protected override string OnGetLogFormat()
+        {
+            return "CoopVillageBattleDeploymentBoundaryReady Revision=" + Revision;
+        }
+    }
+
+    [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromClient)]
     public sealed class CoopBattleSnapshotAbortMessage : GameNetworkMessage
     {
         private static readonly CompressionInfo.Integer TransmissionCompressionInfo = new CompressionInfo.Integer(0, 1048575, maximumValueGiven: true);
