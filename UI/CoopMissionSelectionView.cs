@@ -4701,9 +4701,12 @@ namespace CoopSpectator.UI
             object orderTroopPlacer = ResolveNativeCommanderOrderTroopPlacer();
             if (orderTroopPlacer != null)
             {
+                bool mayRemainUnrestrictedWithoutReadyBoundaries =
+                    IsCurrentExactSallyOutCommanderDeploymentScenario(mission) ||
+                    IsCurrentExactFieldBattleCommanderDeploymentScenario(mission);
                 bool restrictToBoundaries =
                     boundariesReady ||
-                    !IsCurrentExactSallyOutCommanderDeploymentScenario(mission);
+                    !mayRemainUnrestrictedWithoutReadyBoundaries;
                 TryInvokeInstanceMethod(
                     orderTroopPlacer,
                     "RestrictOrdersToDeploymentBoundaries",
@@ -5786,6 +5789,23 @@ namespace CoopSpectator.UI
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
             return ExactCampaignCommanderDeploymentRuntime.IsExactSallyOutScenario(
+                mission,
+                scenarioContext);
+        }
+
+        private static bool IsCurrentExactFieldBattleCommanderDeploymentScenario(Mission mission)
+        {
+            if (mission == null ||
+                !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
+            {
+                return false;
+            }
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            return ExactCampaignCommanderDeploymentRuntime.IsExactFieldBattleScenario(
                 mission,
                 scenarioContext);
         }

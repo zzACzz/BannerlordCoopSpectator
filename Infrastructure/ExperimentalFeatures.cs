@@ -97,6 +97,13 @@ namespace CoopSpectator.Infrastructure
         public const bool EnableMaterializedSiegeReinforcementRuntime = false;
 
         /// <summary>
+        /// Exact ordinary field-battle initial materialization: pace native client
+        /// CreateAgent replay and require a field-specific readiness acknowledgement
+        /// before battle start. Kept separate from the validated SallyOut runtime.
+        /// </summary>
+        public const bool EnableExactFieldBattleInitialMaterializationRuntime = true;
+
+        /// <summary>
         /// Exact SiegeMissionWithDeployment scene initializer profile: mirror the
         /// native campaign siege initializer fields that affect scene material
         /// and campaign-mode object setup, while keeping map-patch repair out of

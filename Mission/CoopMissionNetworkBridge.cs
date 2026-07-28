@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -513,6 +514,10 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly BodyFlags BoundaryHeightBodyFlags = (BodyFlags)540127625;
         private const string BoundaryWallEntityName = "coop_siege_deployment_boundary_wall";
         private const string BoundaryFallbackMarkerMeshName = "order_flag_small";
+        private const string FieldBattleFrontBoundaryKeyPrefix = "field_battle_front_";
+        private const float FieldBattleFrontMarkerInterval = 4f;
+        private const float FieldBattleFrontMarkerScale = 0.9f;
+        private const float FieldBattleFrontProjectionTolerance = 1f;
 
         private readonly string _prefabName;
         private readonly float _markerInterval;
@@ -714,6 +719,89 @@ namespace CoopSpectator.MissionBehaviors
             return ensuredAny;
         }
 
+        public bool TryEnsureProminentFieldBattleFrontBoundaryMarkersForTeam(
+            DefaultMissionDeploymentPlan deploymentPlan,
+            Team team,
+            string source)
+        {
+            if (deploymentPlan == null || team == null || team.Side == BattleSideEnum.None)
+                return false;
+
+            AfterStart();
+
+            Dictionary<string, List<GameEntity>> sideMarkers = EnsureSideMarkerMap(team.Side);
+            if (sideMarkers == null)
+                return false;
+
+            bool ensuredAny = false;
+            int boundaryIndex = 0;
+            int createdMarkerCount = 0;
+            try
+            {
+                Banner banner = ResolveBannerForSide(team.Side);
+                MatrixFrame deploymentFrame = deploymentPlan.GetDeploymentFrame(team);
+                foreach (var boundary in deploymentPlan.GetDeploymentBoundaries(team))
+                {
+                    string boundaryId = string.IsNullOrWhiteSpace(boundary.Item1)
+                        ? boundaryIndex.ToString()
+                        : boundary.Item1;
+                    boundaryIndex++;
+
+                    List<Vec2> points = boundary.Item2?
+                        .Where(point => point.IsValid)
+                        .ToList();
+                    if (!TryResolveFieldBattleFrontBoundaryLine(
+                            points,
+                            in deploymentFrame,
+                            out Vec2 startPoint,
+                            out Vec2 endPoint))
+                    {
+                        continue;
+                    }
+
+                    string markerKey = FieldBattleFrontBoundaryKeyPrefix + boundaryId;
+                    ensuredAny |= TryEnsureProminentBoundaryMarkerLine(
+                        sideMarkers,
+                        team.Side,
+                        markerKey,
+                        startPoint,
+                        endPoint,
+                        banner,
+                        ref createdMarkerCount);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (CoopDebugConfig.OrderOfBattleDiagnostics)
+                {
+                    ModLogger.Info(
+                        "CoopSiegeDeploymentBoundaryMarkerView: prominent field-battle front boundary ensure failed. " +
+                        "Side=" + team.Side +
+                        " Source=" + (source ?? "unknown") +
+                        " Error=" + ex.Message);
+                }
+
+                return ensuredAny;
+            }
+
+            if (CoopDebugConfig.OrderOfBattleDiagnostics)
+            {
+                string diagnosticsKey =
+                    "field-front|" + team.Side + "|" + boundaryIndex + "|" + createdMarkerCount;
+                if (_loggedDiagnosticsKeys.Add(diagnosticsKey))
+                {
+                    ModLogger.Info(
+                        "CoopSiegeDeploymentBoundaryMarkerView: ensured prominent field-battle front boundary. " +
+                        "Side=" + team.Side +
+                        " BoundaryCount=" + boundaryIndex +
+                        " CreatedMarkerCount=" + createdMarkerCount +
+                        " Source=" + (source ?? "unknown"));
+                }
+            }
+
+            return ensuredAny;
+        }
+
         private bool TryEnsureBoundaryMarkersForPoints(
             Dictionary<string, List<GameEntity>> sideMarkers,
             BattleSideEnum side,
@@ -771,6 +859,140 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return false;
+        }
+
+        private bool TryEnsureProminentBoundaryMarkerLine(
+            Dictionary<string, List<GameEntity>> sideMarkers,
+            BattleSideEnum side,
+            string key,
+            Vec2 startPoint,
+            Vec2 endPoint,
+            Banner banner,
+            ref int createdMarkerCount)
+        {
+            if (sideMarkers == null ||
+                string.IsNullOrWhiteSpace(key) ||
+                !startPoint.IsValid ||
+                !endPoint.IsValid ||
+                (endPoint - startPoint).Length <= 0.5f)
+            {
+                return false;
+            }
+
+            List<Vec2> linePoints = new List<Vec2> { startPoint, endPoint };
+            Dictionary<string, string> sideGeometry = EnsureSideGeometryMap(side);
+            string geometrySignature = BuildBoundaryGeometrySignature(linePoints) + "|prominent-front";
+            if (sideMarkers.TryGetValue(key, out List<GameEntity> existingMarkers))
+            {
+                if (sideGeometry != null &&
+                    sideGeometry.TryGetValue(key, out string existingSignature) &&
+                    string.Equals(existingSignature, geometrySignature, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+
+                RemoveBoundaryMarkerEntities(existingMarkers);
+                sideMarkers.Remove(key);
+                sideGeometry?.Remove(key);
+            }
+
+            List<GameEntity> markers = new List<GameEntity>();
+            MarkLine(
+                startPoint,
+                endPoint,
+                markers,
+                banner,
+                FieldBattleFrontMarkerInterval,
+                FieldBattleFrontMarkerScale);
+
+            sideMarkers[key] = markers;
+            if (sideGeometry != null)
+                sideGeometry[key] = geometrySignature;
+            createdMarkerCount += markers.Count;
+            if (markers.Count <= 0)
+                return false;
+
+            _boundaryMarkersRemoved = false;
+            return true;
+        }
+
+        private static bool TryResolveFieldBattleFrontBoundaryLine(
+            IList<Vec2> points,
+            in MatrixFrame deploymentFrame,
+            out Vec2 startPoint,
+            out Vec2 endPoint)
+        {
+            startPoint = Vec2.Invalid;
+            endPoint = Vec2.Invalid;
+            if (points == null || points.Count < 2)
+                return false;
+
+            Vec2 origin = deploymentFrame.origin.AsVec2;
+            Vec2 forward = deploymentFrame.rotation.f.AsVec2;
+            Vec2 lateral = deploymentFrame.rotation.s.AsVec2;
+            if (!origin.IsValid || !forward.IsValid || !lateral.IsValid ||
+                forward.Length <= 0.001f || lateral.Length <= 0.001f)
+            {
+                return false;
+            }
+
+            forward.Normalize();
+            lateral.Normalize();
+            float maximumForwardProjection = float.MinValue;
+            for (int i = 0; i < points.Count; i++)
+            {
+                Vec2 offset = points[i] - origin;
+                float projection = offset.x * forward.x + offset.y * forward.y;
+                if (projection > maximumForwardProjection)
+                    maximumForwardProjection = projection;
+            }
+
+            List<Vec2> frontCandidates = new List<Vec2>();
+            for (int i = 0; i < points.Count; i++)
+            {
+                Vec2 offset = points[i] - origin;
+                float projection = offset.x * forward.x + offset.y * forward.y;
+                if (maximumForwardProjection - projection <= FieldBattleFrontProjectionTolerance)
+                    frontCandidates.Add(points[i]);
+            }
+
+            if (frontCandidates.Count < 2)
+            {
+                frontCandidates = points
+                    .OrderByDescending(point =>
+                    {
+                        Vec2 offset = point - origin;
+                        return offset.x * forward.x + offset.y * forward.y;
+                    })
+                    .Take(2)
+                    .ToList();
+            }
+
+            if (frontCandidates.Count < 2)
+                return false;
+
+            float minimumLateralProjection = float.MaxValue;
+            float maximumLateralProjection = float.MinValue;
+            for (int i = 0; i < frontCandidates.Count; i++)
+            {
+                Vec2 offset = frontCandidates[i] - origin;
+                float projection = offset.x * lateral.x + offset.y * lateral.y;
+                if (projection < minimumLateralProjection)
+                {
+                    minimumLateralProjection = projection;
+                    startPoint = frontCandidates[i];
+                }
+
+                if (projection > maximumLateralProjection)
+                {
+                    maximumLateralProjection = projection;
+                    endPoint = frontCandidates[i];
+                }
+            }
+
+            return startPoint.IsValid &&
+                   endPoint.IsValid &&
+                   (endPoint - startPoint).Length > 0.5f;
         }
 
         private static List<Vec2> CreateSceneDeploymentBoundaryPoints(ICollection<Vec2> sourcePoints)
@@ -870,7 +1092,13 @@ namespace CoopSpectator.MissionBehaviors
             return null;
         }
 
-        private int MarkLine(Vec2 startPoint, Vec2 endPoint, List<GameEntity> boundary, Banner banner)
+        private int MarkLine(
+            Vec2 startPoint,
+            Vec2 endPoint,
+            List<GameEntity> boundary,
+            Banner banner,
+            float markerInterval = 0f,
+            float markerScale = 0.45f)
         {
             Scene scene = Mission?.Scene;
             if (scene == null || boundary == null)
@@ -883,19 +1111,22 @@ namespace CoopSpectator.MissionBehaviors
             if (length <= 0.001f)
                 return 0;
 
+            float effectiveMarkerInterval = markerInterval > 0.0001f
+                ? markerInterval
+                : _markerInterval;
             Vec3 step = delta;
             step.Normalize();
-            step *= _markerInterval;
+            step *= effectiveMarkerInterval;
 
             int fallbackMarkerCount = 0;
-            for (float distance = 0f; distance < length; distance += _markerInterval)
+            for (float distance = 0f; distance < length; distance += effectiveMarkerInterval)
             {
                 MatrixFrame frame = MatrixFrame.Identity;
                 frame.rotation.RotateAboutUp(delta.RotationZ + (float)Math.PI / 2f);
                 frame.origin = start;
                 frame.origin.z = ResolveMarkerHeight(scene, frame.origin.AsVec2);
 
-                Vec3 scale = Vec3.One * 0.45f;
+                Vec3 scale = Vec3.One * Math.Max(markerScale, 0.05f);
                 frame.Scale(in scale);
 
                 GameEntity marker = MakeEntity(scene, banner);
@@ -1193,6 +1424,12 @@ namespace CoopSpectator.MissionBehaviors
         private const string BoundaryMarkerPrefabName = "swallowtail_banner";
         private const float BoundaryMarkerInterval = 2f;
         private const float SallyOutBoundaryMarkerInterval = 10f;
+        private const float FieldBattleBoundaryAlignmentMinimumShift = 20f;
+        private const float FieldBattleBoundaryAlignmentSampleTolerance = 30f;
+        private const float FieldBattleBoundaryCoreMinimumSeparation = 80f;
+        private const float FieldBattleBoundaryOutlierMinimumOwnDistance = 60f;
+        private const float FieldBattleBoundaryOutlierEnemyClosenessMargin = 15f;
+        private const float FieldBattleBoundaryMinimumRetainedFraction = 0.75f;
 
         private static readonly FieldInfo DefaultMissionDeploymentPlanTeamDeploymentPlansField =
             typeof(DefaultMissionDeploymentPlan).GetField("_teamDeploymentPlans", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -1200,12 +1437,44 @@ namespace CoopSpectator.MissionBehaviors
             typeof(DefaultTeamDeploymentPlan).GetField("_deploymentBoundaries", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo DefaultTeamDeploymentPlanDeploymentFrameField =
             typeof(DefaultTeamDeploymentPlan).GetField("_deploymentFrame", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo DefaultTeamDeploymentPlanInitialPlanField =
+            typeof(DefaultTeamDeploymentPlan).GetField("_initialPlan", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo DefaultDeploymentPlanMeanPositionField =
+            typeof(DefaultDeploymentPlan).GetField("_meanPosition", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo DefaultFormationDeploymentPlanSpawnFrameField =
+            typeof(DefaultFormationDeploymentPlan).GetField("_spawnFrame", BindingFlags.Instance | BindingFlags.NonPublic);
         private static Mission _cachedNativeBoundaryMarkerMission;
         private static object _cachedNativeBoundaryMarker;
+        private static Mission _nativeBoundaryGeometryMission;
+        private static readonly Dictionary<BattleSideEnum, Dictionary<string, string>> NativeBoundaryGeometrySignatures =
+            new Dictionary<BattleSideEnum, Dictionary<string, string>>();
+        private static readonly HashSet<BattleSideEnum> NativeBoundaryInitializedSides =
+            new HashSet<BattleSideEnum>();
+        private static Mission _fieldBattleBoundaryAlignmentMission;
+        private static readonly Dictionary<BattleSideEnum, string> FieldBattleAlignedBoundaryGeometrySignatures =
+            new Dictionary<BattleSideEnum, string>();
+        private static Mission _fieldBattleBoundaryDiagnosticsMission;
+        private static readonly HashSet<string> FieldBattleBoundaryDiagnosticsKeys =
+            new HashSet<string>(StringComparer.Ordinal);
 #if !COOPSPECTATOR_DEDICATED
         private static Mission _cachedCoopBoundaryMarkerMission;
         private static CoopSiegeDeploymentBoundaryMarkerView _cachedCoopBoundaryMarker;
 #endif
+
+        private sealed class FieldBattleFormationAlignmentSample
+        {
+            public DefaultFormationDeploymentPlan Plan { get; set; }
+            public Vec2 ActualPosition { get; set; }
+            public Vec2 PlannedPosition { get; set; }
+            public Vec2 Delta { get; set; }
+        }
+
+        private sealed class FieldBattlePlacementSample
+        {
+            public Agent Agent { get; set; }
+            public Vec2 Position { get; set; }
+            public int FormationIndex { get; set; }
+        }
 
         public static bool IsCoopSiegeDeploymentMission(Mission mission)
         {
@@ -1285,6 +1554,20 @@ namespace CoopSpectator.MissionBehaviors
                 out _);
         }
 
+        private static bool IsExactFieldBattleDeploymentScenario(Mission mission)
+        {
+            if (mission == null)
+                return false;
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            return ExactCampaignCommanderDeploymentRuntime.IsExactFieldBattleScenario(
+                mission,
+                scenarioContext);
+        }
+
         public static bool TryEnsureDeploymentPlanBoundaries(Mission mission, Team team, string source)
         {
             if (!IsCoopCommanderDeploymentPlacementMission(mission) ||
@@ -1315,6 +1598,10 @@ namespace CoopSpectator.MissionBehaviors
                         scenarioContext,
                         mission.SceneName,
                         out _);
+                bool isExactFieldBattle =
+                    ExactCampaignCommanderDeploymentRuntime.IsExactFieldBattleScenario(
+                        mission,
+                        scenarioContext);
 
                 if (!TryHasDeploymentBoundaries(deploymentPlan, team))
                 {
@@ -1356,6 +1643,18 @@ namespace CoopSpectator.MissionBehaviors
                         deploymentPlan,
                         team,
                         source);
+                }
+
+                if (isExactFieldBattle)
+                {
+                    bool exactFieldBattleBoundaryReady =
+                        TryEnsureExactFieldBattleDeploymentBoundaryContract(
+                            mission,
+                            deploymentPlan,
+                            team,
+                            source);
+                    return exactFieldBattleBoundaryReady ||
+                           TryHasDeploymentBoundaries(deploymentPlan, team);
                 }
 
                 return TryHasDeploymentBoundaries(deploymentPlan, team);
@@ -1445,15 +1744,32 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             bool hasTeamDeploymentPlanBoundaries = TryEnsureDeploymentPlanBoundaries(mission, team, source);
-            bool preferNativeBoundaryMarker = IsExactSallyOutDeploymentScenario(mission);
-            if (preferNativeBoundaryMarker &&
+            bool isExactSallyOut = IsExactSallyOutDeploymentScenario(mission);
+            bool isExactFieldBattle = IsExactFieldBattleDeploymentScenario(mission);
+            bool preferNativeBoundaryMarker = isExactSallyOut || isExactFieldBattle;
+            float preferredNativeMarkerInterval = isExactSallyOut
+                ? SallyOutBoundaryMarkerInterval
+                : BoundaryMarkerInterval;
+            bool ensuredNativeBoundaryMarkers = preferNativeBoundaryMarker &&
                 TryEnsureNativeVisibleDeploymentBoundaryMarkers(
                     mission,
                     missionScreen,
                     team,
                     source,
-                    SallyOutBoundaryMarkerInterval))
+                    preferredNativeMarkerInterval,
+                    refreshOnGeometryChange: isExactFieldBattle);
+            if (ensuredNativeBoundaryMarkers)
             {
+#if !COOPSPECTATOR_DEDICATED
+                if (isExactFieldBattle)
+                {
+                    TryEnsureProminentFieldBattleFrontBoundaryMarkers(
+                        mission,
+                        missionScreen,
+                        team,
+                        source);
+                }
+#endif
                 return true;
             }
 
@@ -1464,9 +1780,7 @@ namespace CoopSpectator.MissionBehaviors
                 coopMarker = TryCreateAndAttachCoopBoundaryMarker(
                     mission,
                     missionScreen,
-                    preferNativeBoundaryMarker
-                        ? SallyOutBoundaryMarkerInterval
-                        : BoundaryMarkerInterval);
+                    preferredNativeMarkerInterval);
             }
             if (coopMarker != null)
             {
@@ -1526,7 +1840,8 @@ namespace CoopSpectator.MissionBehaviors
                 missionScreen,
                 team,
                 source,
-                BoundaryMarkerInterval);
+                BoundaryMarkerInterval,
+                refreshOnGeometryChange: false);
         }
 
         private static bool TryEnsureNativeVisibleDeploymentBoundaryMarkers(
@@ -1534,7 +1849,8 @@ namespace CoopSpectator.MissionBehaviors
             object missionScreen,
             Team team,
             string source,
-            float markerInterval)
+            float markerInterval,
+            bool refreshOnGeometryChange)
         {
             if (mission == null || team == null || team.Side == BattleSideEnum.None)
                 return false;
@@ -1546,22 +1862,34 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
 
             TryEnsureBoundaryMarkerInitialized(marker);
-            bool ensuredAny = TryAddDeploymentBoundaryMarkersDirectly(marker, mission, team);
-            if (!ensuredAny)
-                ensuredAny = TryInvokeInstanceMethod(marker, "OnDeploymentPlanMade", team, true);
+            bool ensuredAny = TryAddDeploymentBoundaryMarkersDirectly(
+                marker,
+                mission,
+                team,
+                refreshOnGeometryChange);
+            if (!ensuredAny && !refreshOnGeometryChange)
+            {
+                TryInvokeInstanceMethod(marker, "OnDeploymentPlanMade", team, true);
+                ensuredAny = HasAnyNativeBoundaryMarkerEntities(marker, team.Side);
+            }
 
             Team enemyTeam = mission.PlayerEnemyTeam;
             if (enemyTeam != null && enemyTeam != team)
             {
                 TryEnsureDeploymentPlanBoundaries(mission, enemyTeam, (source ?? "unknown") + " enemy");
-                bool ensuredEnemy = TryAddDeploymentBoundaryMarkersDirectly(marker, mission, enemyTeam);
-                if (!ensuredEnemy)
+                bool ensuredEnemy = TryAddDeploymentBoundaryMarkersDirectly(
+                    marker,
+                    mission,
+                    enemyTeam,
+                    refreshOnGeometryChange);
+                if (!ensuredEnemy && !refreshOnGeometryChange)
                 {
-                    ensuredEnemy = TryInvokeInstanceMethod(
+                    TryInvokeInstanceMethod(
                         marker,
                         "OnDeploymentPlanMade",
                         enemyTeam,
                         true);
+                    ensuredEnemy = HasAnyNativeBoundaryMarkerEntities(marker, enemyTeam.Side);
                 }
 
                 ensuredAny |= ensuredEnemy;
@@ -1591,6 +1919,13 @@ namespace CoopSpectator.MissionBehaviors
 
                     _cachedNativeBoundaryMarkerMission = null;
                     _cachedNativeBoundaryMarker = null;
+                }
+
+                if (ReferenceEquals(_nativeBoundaryGeometryMission, mission))
+                {
+                    _nativeBoundaryGeometryMission = null;
+                    NativeBoundaryGeometrySignatures.Clear();
+                    NativeBoundaryInitializedSides.Clear();
                 }
 
 #if !COOPSPECTATOR_DEDICATED
@@ -1809,6 +2144,1049 @@ namespace CoopSpectator.MissionBehaviors
             return IsDeploymentFrameInsideBoundaries(
                 deploymentFrame,
                 deploymentBoundaries);
+        }
+
+        private static bool TryEnsureExactFieldBattleDeploymentBoundaryContract(
+            Mission mission,
+            DefaultMissionDeploymentPlan deploymentPlan,
+            Team team,
+            string source)
+        {
+            if (mission?.Scene == null ||
+                deploymentPlan == null ||
+                team == null ||
+                team.Side == BattleSideEnum.None ||
+                DefaultTeamDeploymentPlanDeploymentBoundariesField == null ||
+                DefaultTeamDeploymentPlanDeploymentFrameField == null ||
+                DefaultTeamDeploymentPlanInitialPlanField == null ||
+                DefaultDeploymentPlanMeanPositionField == null ||
+                DefaultFormationDeploymentPlanSpawnFrameField == null)
+            {
+                LogExactFieldBattleBoundaryDiagnosticsOnce(
+                    mission,
+                    team?.Side ?? BattleSideEnum.None,
+                    "precondition-failed",
+                    () => "Scene=" + (mission?.SceneName ?? "null") +
+                    " Plan=" + (deploymentPlan != null) +
+                    " Team=" + (team != null) +
+                    " Side=" + (team?.Side.ToString() ?? "null") +
+                    " BoundariesField=" + (DefaultTeamDeploymentPlanDeploymentBoundariesField != null) +
+                    " FrameField=" + (DefaultTeamDeploymentPlanDeploymentFrameField != null) +
+                    " InitialPlanField=" + (DefaultTeamDeploymentPlanInitialPlanField != null) +
+                    " MeanField=" + (DefaultDeploymentPlanMeanPositionField != null) +
+                    " SpawnFrameField=" + (DefaultFormationDeploymentPlanSpawnFrameField != null) +
+                    " Source=" + (source ?? "unknown"));
+                return false;
+            }
+
+            DefaultTeamDeploymentPlan teamPlan = TryGetTeamDeploymentPlan(deploymentPlan, team);
+            if (teamPlan == null ||
+                !(DefaultTeamDeploymentPlanInitialPlanField.GetValue(teamPlan) is DefaultDeploymentPlan initialPlan) ||
+                !(DefaultTeamDeploymentPlanDeploymentBoundariesField.GetValue(teamPlan) is
+                    MBList<(string id, MBList<Vec2> points)> deploymentBoundaries))
+            {
+                LogExactFieldBattleBoundaryDiagnosticsOnce(
+                    mission,
+                    team.Side,
+                    "team-plan-state-missing",
+                    () => "TeamPlan=" + (teamPlan != null) +
+                    " InitialPlan=" +
+                    (teamPlan != null &&
+                     DefaultTeamDeploymentPlanInitialPlanField.GetValue(teamPlan) is DefaultDeploymentPlan) +
+                    " Boundaries=" +
+                    (teamPlan != null &&
+                     DefaultTeamDeploymentPlanDeploymentBoundariesField.GetValue(teamPlan) is
+                         MBList<(string id, MBList<Vec2> points)>) +
+                    " Source=" + (source ?? "unknown"));
+                return false;
+            }
+
+            EnsureExactFieldBattleBoundaryAlignmentState(mission);
+            string currentGeometrySignature =
+                BuildExactFieldBattleBoundaryGeometrySignature(deploymentBoundaries);
+            if (FieldBattleAlignedBoundaryGeometrySignatures.TryGetValue(
+                    team.Side,
+                    out string alignedGeometrySignature) &&
+                string.Equals(
+                    currentGeometrySignature,
+                    alignedGeometrySignature,
+                    StringComparison.Ordinal) &&
+                HasUsableExactSallyOutDeploymentBoundaryPoints(deploymentBoundaries))
+            {
+                if (CoopDebugConfig.FieldBattleBoundaryDiagnostics)
+                {
+                    List<Vec2> cachedPlacementSamples =
+                        CollectExactSallyOutPlacementSamples(mission, team);
+                    LogExactFieldBattleBoundaryDiagnosticsOnce(
+                        mission,
+                        team.Side,
+                        "cached-boundary-fast-path",
+                        () => "Live={" + DescribeExactFieldBattlePositions(cachedPlacementSamples) + "}" +
+                        " Boundary={" + DescribeExactFieldBattleBoundaries(deploymentBoundaries) + "}" +
+                        " LiveInside=" + AreExactSallyOutPlacementSamplesInsideBoundaries(
+                            deploymentPlan,
+                            team,
+                            cachedPlacementSamples) +
+                        " Frame={" + DescribeExactFieldBattleDeploymentFrame(teamPlan) + "}" +
+                        " Source=" + (source ?? "unknown"));
+                }
+
+                return true;
+            }
+
+            Team enemyTeam = mission.Teams?
+                .FirstOrDefault(candidate =>
+                    candidate != null &&
+                    candidate.Side != BattleSideEnum.None &&
+                    candidate.Side != team.Side);
+            List<FieldBattlePlacementSample> rawTeamPlacementSamples =
+                CollectExactFieldBattlePlacementSamples(mission, team);
+            List<FieldBattlePlacementSample> rawEnemyPlacementSamples =
+                CollectExactFieldBattlePlacementSamples(mission, enemyTeam);
+            List<FieldBattlePlacementSample> teamCorePlacementSamples =
+                SelectExactFieldBattleDominantPlacementSamples(
+                    rawTeamPlacementSamples,
+                    rawEnemyPlacementSamples,
+                    out List<FieldBattlePlacementSample> ignoredTeamPlacementSamples);
+            List<FieldBattlePlacementSample> enemyCorePlacementSamples =
+                SelectExactFieldBattleDominantPlacementSamples(
+                    rawEnemyPlacementSamples,
+                    rawTeamPlacementSamples,
+                    out List<FieldBattlePlacementSample> ignoredEnemyPlacementSamples);
+            List<Vec2> teamPlacementSamples = teamCorePlacementSamples
+                .Select(sample => sample.Position)
+                .ToList();
+            List<Vec2> enemyPlacementSamples = enemyCorePlacementSamples
+                .Select(sample => sample.Position)
+                .ToList();
+
+            List<FieldBattleFormationAlignmentSample> rawAlignmentSamples =
+                CollectExactFieldBattleFormationAlignmentSamples(
+                    mission,
+                    deploymentPlan,
+                    team);
+            List<FieldBattleFormationAlignmentSample> alignmentSamples =
+                FilterExactFieldBattleFormationAlignmentSamples(
+                    rawAlignmentSamples,
+                    rawTeamPlacementSamples,
+                    rawEnemyPlacementSamples,
+                    out int ignoredAlignmentSampleCount);
+            bool hasReliableFormationAlignment =
+                TryResolveExactFieldBattleCommonAlignment(
+                    alignmentSamples,
+                    out Vec2 commonAlignment,
+                    out int consistentSampleCount);
+
+            if (ignoredTeamPlacementSamples.Count > 0 ||
+                ignoredEnemyPlacementSamples.Count > 0 ||
+                ignoredAlignmentSampleCount > 0)
+            {
+                LogExactFieldBattleBoundaryDiagnosticsOnce(
+                    mission,
+                    team.Side,
+                    "dominant-cluster-filtered",
+                    () => "OwnRaw={" + DescribeExactFieldBattlePlacementSamples(rawTeamPlacementSamples) + "}" +
+                    " OwnCore={" + DescribeExactFieldBattlePositions(teamPlacementSamples) + "}" +
+                    " OwnIgnored={" + DescribeExactFieldBattlePlacementSamples(ignoredTeamPlacementSamples) + "}" +
+                    " EnemyRaw={" + DescribeExactFieldBattlePlacementSamples(rawEnemyPlacementSamples) + "}" +
+                    " EnemyCore={" + DescribeExactFieldBattlePositions(enemyPlacementSamples) + "}" +
+                    " EnemyIgnored={" + DescribeExactFieldBattlePlacementSamples(ignoredEnemyPlacementSamples) + "}" +
+                    " AlignmentRaw=" + rawAlignmentSamples.Count +
+                    " AlignmentCore=" + alignmentSamples.Count +
+                    " AlignmentIgnored=" + ignoredAlignmentSampleCount +
+                    " Source=" + (source ?? "unknown"));
+            }
+
+            if (teamPlacementSamples.Count <= 0)
+            {
+                LogExactFieldBattleBoundaryDiagnosticsOnce(
+                    mission,
+                    team.Side,
+                    "placement-samples-missing",
+                    () => "AlignmentSamples=" + alignmentSamples.Count +
+                    " ReliableAlignment=" + hasReliableFormationAlignment +
+                    " ExistingBoundary={" + DescribeExactFieldBattleBoundaries(deploymentBoundaries) + "}" +
+                    " Source=" + (source ?? "unknown"));
+                return false;
+            }
+
+            if (!TryResolveExactFieldBattleForwardDirection(
+                    team,
+                    teamPlacementSamples,
+                    enemyPlacementSamples,
+                    out Vec2 forwardDirection))
+            {
+                LogExactFieldBattleBoundaryDiagnosticsOnce(
+                    mission,
+                    team.Side,
+                    "forward-direction-missing",
+                    () => "Live={" + DescribeExactFieldBattlePositions(teamPlacementSamples) + "}" +
+                    " ExistingBoundary={" + DescribeExactFieldBattleBoundaries(deploymentBoundaries) + "}" +
+                    " Source=" + (source ?? "unknown"));
+                return false;
+            }
+
+            if (!TryBuildExactFieldBattleDeploymentBoundaries(
+                    mission,
+                    team,
+                    alignmentSamples,
+                    teamPlacementSamples,
+                    forwardDirection,
+                    out List<(string id, MBList<Vec2> points)> repairedBoundaries,
+                    out MatrixFrame repairedDeploymentFrame))
+            {
+                LogExactFieldBattleBoundaryDiagnosticsOnce(
+                    mission,
+                    team.Side,
+                    "candidate-build-failed",
+                    () => "Live={" + DescribeExactFieldBattlePositions(teamPlacementSamples) + "}" +
+                    " MissionBoundary={" + DescribeExactFieldBattleMissionBoundaries(mission) + "}" +
+                    " ExistingBoundary={" + DescribeExactFieldBattleBoundaries(deploymentBoundaries) + "}" +
+                    " AlignmentSamples=" + alignmentSamples.Count +
+                    " ReliableAlignment=" + hasReliableFormationAlignment +
+                    " CommonAlignment=" + commonAlignment +
+                    " Forward=" + forwardDirection +
+                    " Source=" + (source ?? "unknown"));
+                return false;
+            }
+
+            LogExactFieldBattleBoundaryDiagnosticsOnce(
+                mission,
+                team.Side,
+                "candidate-built",
+                () => "Live={" + DescribeExactFieldBattlePositions(teamPlacementSamples) + "}" +
+                " ExistingBoundary={" + DescribeExactFieldBattleBoundaries(deploymentBoundaries) + "}" +
+                " CandidateBoundary={" + DescribeExactFieldBattleBoundaries(repairedBoundaries) + "}" +
+                " CandidateFrameOrigin=" + repairedDeploymentFrame.origin.AsVec2 +
+                " CandidateFrameForward=" + repairedDeploymentFrame.rotation.f.AsVec2 +
+                " AlignmentSamples=" + alignmentSamples.Count +
+                " ReliableAlignment=" + hasReliableFormationAlignment +
+                " CommonAlignment=" + commonAlignment +
+                " Forward=" + forwardDirection +
+                " Source=" + (source ?? "unknown"));
+
+            List<(string id, MBList<Vec2> points)> originalBoundaries =
+                CloneExactSallyOutDeploymentBoundaries(deploymentBoundaries);
+            MatrixFrame originalDeploymentFrame = MatrixFrame.Zero;
+            bool hasOriginalDeploymentFrame = false;
+            object originalDeploymentFrameValue =
+                DefaultTeamDeploymentPlanDeploymentFrameField.GetValue(teamPlan);
+            if (originalDeploymentFrameValue is MatrixFrame currentDeploymentFrame)
+            {
+                originalDeploymentFrame = currentDeploymentFrame;
+                hasOriginalDeploymentFrame = true;
+            }
+
+            Vec3 originalMeanPosition = Vec3.Zero;
+            bool hasOriginalMeanPosition = false;
+            object originalMeanPositionValue =
+                DefaultDeploymentPlanMeanPositionField.GetValue(initialPlan);
+            if (originalMeanPositionValue is Vec3 currentMeanPosition)
+            {
+                originalMeanPosition = currentMeanPosition;
+                hasOriginalMeanPosition = true;
+            }
+
+            var originalFormationFrames =
+                new List<(DefaultFormationDeploymentPlan Plan, WorldFrame Frame)>();
+            bool repairApplied = false;
+            try
+            {
+                repairApplied = true;
+                Vec2 appliedTranslation =
+                    hasReliableFormationAlignment &&
+                    commonAlignment.Length >= FieldBattleBoundaryAlignmentMinimumShift
+                        ? commonAlignment
+                        : Vec2.Zero;
+                Mat3 correctedRotation = Mat3.Identity;
+                correctedRotation.RotateAboutUp(forwardDirection.RotationInRadians);
+                if (hasReliableFormationAlignment)
+                {
+                    for (int formationIndex = 0; formationIndex < 11; formationIndex++)
+                    {
+                        IFormationDeploymentPlan formationPlan =
+                            deploymentPlan.GetFormationPlan(
+                                team,
+                                (FormationClass)formationIndex,
+                                isReinforcement: false);
+                        if (!(formationPlan is DefaultFormationDeploymentPlan defaultFormationPlan) ||
+                            !(DefaultFormationDeploymentPlanSpawnFrameField.GetValue(defaultFormationPlan) is
+                                WorldFrame originalFormationFrame) ||
+                            !originalFormationFrame.IsValid)
+                        {
+                            continue;
+                        }
+
+                        originalFormationFrames.Add((defaultFormationPlan, originalFormationFrame));
+                        WorldFrame correctedFormationFrame = originalFormationFrame;
+                        WorldPosition correctedOrigin = correctedFormationFrame.Origin;
+                        correctedOrigin.SetVec2(correctedOrigin.AsVec2 + appliedTranslation);
+                        correctedFormationFrame.Origin = correctedOrigin;
+                        correctedFormationFrame.Rotation = correctedRotation;
+                        defaultFormationPlan.SetFrame(in correctedFormationFrame);
+                    }
+
+                    if (hasOriginalMeanPosition)
+                    {
+                        Vec3 correctedMeanPosition = originalMeanPosition;
+                        correctedMeanPosition.x += appliedTranslation.x;
+                        correctedMeanPosition.y += appliedTranslation.y;
+                        DefaultDeploymentPlanMeanPositionField.SetValue(
+                            initialPlan,
+                            correctedMeanPosition);
+                    }
+                }
+
+                deploymentBoundaries.Clear();
+                foreach (var repairedBoundary in repairedBoundaries)
+                    deploymentBoundaries.Add(repairedBoundary);
+                DefaultTeamDeploymentPlanDeploymentFrameField.SetValue(
+                    teamPlan,
+                    repairedDeploymentFrame);
+
+                bool hasUsableBoundary =
+                    HasUsableExactSallyOutDeploymentBoundaryPoints(deploymentBoundaries);
+                bool ownSamplesInside =
+                    AreExactSallyOutPlacementSamplesInsideBoundaries(
+                        deploymentPlan,
+                        team,
+                        teamPlacementSamples);
+                bool enemySamplesOutside =
+                    AreExactSallyOutEnemyPlacementSamplesOutsideBoundaries(
+                        deploymentPlan,
+                        team,
+                        enemyPlacementSamples);
+                bool frameFacingEnemy =
+                    IsExactFieldBattleDeploymentFrameFacingEnemy(
+                        repairedDeploymentFrame,
+                        forwardDirection);
+                bool repaired =
+                    hasUsableBoundary &&
+                    ownSamplesInside &&
+                    enemySamplesOutside &&
+                    frameFacingEnemy;
+                if (!repaired)
+                {
+                    LogExactFieldBattleBoundaryDiagnosticsOnce(
+                        mission,
+                        team.Side,
+                        "candidate-validation-failed",
+                        () => "UsableBoundary=" + hasUsableBoundary +
+                        " OwnInside=" + ownSamplesInside +
+                        " EnemyOutside=" + enemySamplesOutside +
+                        " FrameFacingEnemy=" + frameFacingEnemy +
+                        " Own={" + DescribeExactFieldBattlePositions(teamPlacementSamples) + "}" +
+                        " Enemy={" + DescribeExactFieldBattlePositions(enemyPlacementSamples) + "}" +
+                        " CandidateBoundary={" + DescribeExactFieldBattleBoundaries(deploymentBoundaries) + "}" +
+                        " CandidateFrameOrigin=" + repairedDeploymentFrame.origin.AsVec2 +
+                        " CandidateFrameForward=" + repairedDeploymentFrame.rotation.f.AsVec2 +
+                        " ExpectedForward=" + forwardDirection +
+                        " Source=" + (source ?? "unknown"));
+                    RestoreExactFieldBattleDeploymentBoundaryState(
+                        teamPlan,
+                        initialPlan,
+                        deploymentBoundaries,
+                        originalBoundaries,
+                        hasOriginalDeploymentFrame,
+                        originalDeploymentFrame,
+                        hasOriginalMeanPosition,
+                        originalMeanPosition,
+                        originalFormationFrames);
+                    repairApplied = false;
+                    return false;
+                }
+
+                string repairedGeometrySignature =
+                    BuildExactFieldBattleBoundaryGeometrySignature(deploymentBoundaries);
+                FieldBattleAlignedBoundaryGeometrySignatures[team.Side] =
+                    repairedGeometrySignature;
+                LogExactFieldBattleBoundaryDiagnosticsOnce(
+                    mission,
+                    team.Side,
+                    "candidate-accepted",
+                    () => "Own={" + DescribeExactFieldBattlePositions(teamPlacementSamples) + "}" +
+                    " Enemy={" + DescribeExactFieldBattlePositions(enemyPlacementSamples) + "}" +
+                    " Boundary={" + DescribeExactFieldBattleBoundaries(deploymentBoundaries) + "}" +
+                    " FrameOrigin=" + repairedDeploymentFrame.origin.AsVec2 +
+                    " FrameForward=" + repairedDeploymentFrame.rotation.f.AsVec2 +
+                    " Forward=" + forwardDirection +
+                    " Source=" + (source ?? "unknown"));
+                if (CoopDebugConfig.OrderOfBattleDiagnostics)
+                {
+                    ModLogger.Info(
+                        "CoopSiegeDeploymentBoundaryRuntime: aligned exact field-battle deployment plan to live formation layout. " +
+                        "Side=" + team.Side +
+                        " Samples=" + alignmentSamples.Count +
+                        " ConsistentSamples=" + consistentSampleCount +
+                        " ReliableAlignment=" + hasReliableFormationAlignment +
+                        " CommonAlignment=" + commonAlignment +
+                        " AppliedTranslation=" + appliedTranslation +
+                        " Forward=" + forwardDirection +
+                        " BoundaryCount=" + repairedBoundaries.Count +
+                        " Source=" + (source ?? "unknown"));
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                if (repairApplied)
+                {
+                    RestoreExactFieldBattleDeploymentBoundaryState(
+                        teamPlan,
+                        initialPlan,
+                        deploymentBoundaries,
+                        originalBoundaries,
+                        hasOriginalDeploymentFrame,
+                        originalDeploymentFrame,
+                        hasOriginalMeanPosition,
+                        originalMeanPosition,
+                        originalFormationFrames);
+                }
+
+                if (CoopDebugConfig.OrderOfBattleDiagnostics)
+                {
+                    ModLogger.Info(
+                        "CoopSiegeDeploymentBoundaryRuntime: exact field-battle deployment alignment failed. " +
+                        "Side=" + team.Side +
+                        " Source=" + (source ?? "unknown") +
+                        " Error=" + ex.GetType().Name + ":" + ex.Message);
+                }
+
+                LogExactFieldBattleBoundaryDiagnosticsOnce(
+                    mission,
+                    team.Side,
+                    "alignment-exception",
+                    () => "Source=" + (source ?? "unknown") +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message);
+
+                return false;
+            }
+        }
+
+        private static void LogExactFieldBattleBoundaryDiagnosticsOnce(
+            Mission mission,
+            BattleSideEnum side,
+            string stage,
+            Func<string> detailsFactory)
+        {
+            if (!CoopDebugConfig.FieldBattleBoundaryDiagnostics)
+                return;
+
+            if (!ReferenceEquals(_fieldBattleBoundaryDiagnosticsMission, mission))
+            {
+                _fieldBattleBoundaryDiagnosticsMission = mission;
+                FieldBattleBoundaryDiagnosticsKeys.Clear();
+            }
+
+            string key = side + "|" + (stage ?? "unknown");
+            if (!FieldBattleBoundaryDiagnosticsKeys.Add(key))
+                return;
+
+            ModLogger.Info(
+                "CoopSiegeDeploymentBoundaryRuntime: exact field-battle boundary diagnostics. " +
+                "Stage=" + (stage ?? "unknown") +
+                " Side=" + side +
+                " " + (detailsFactory?.Invoke() ?? string.Empty));
+        }
+
+        private static string DescribeExactFieldBattlePositions(IEnumerable<Vec2> positions)
+        {
+            List<Vec2> points = positions?
+                .Where(point => point.IsValid)
+                .ToList() ?? new List<Vec2>();
+            if (points.Count <= 0)
+                return "Count=0";
+
+            Vec2 mean = Vec2.Zero;
+            float minimumX = float.MaxValue;
+            float maximumX = float.MinValue;
+            float minimumY = float.MaxValue;
+            float maximumY = float.MinValue;
+            for (int i = 0; i < points.Count; i++)
+            {
+                Vec2 point = points[i];
+                mean += point;
+                minimumX = Math.Min(minimumX, point.x);
+                maximumX = Math.Max(maximumX, point.x);
+                minimumY = Math.Min(minimumY, point.y);
+                maximumY = Math.Max(maximumY, point.y);
+            }
+
+            mean *= 1f / points.Count;
+            return "Count=" + points.Count +
+                   " Mean=" + mean +
+                   " Min=(" + minimumX.ToString("F2") + "," + minimumY.ToString("F2") + ")" +
+                   " Max=(" + maximumX.ToString("F2") + "," + maximumY.ToString("F2") + ")";
+        }
+
+        private static string DescribeExactFieldBattleBoundaries(
+            IEnumerable<(string id, MBList<Vec2> points)> boundaries)
+        {
+            if (boundaries == null)
+                return "BoundaryCount=0 PointCount=0";
+
+            List<(string id, MBList<Vec2> points)> boundaryList = boundaries.ToList();
+            List<Vec2> points = boundaryList
+                .Where(boundary => boundary.points != null)
+                .SelectMany(boundary => boundary.points)
+                .Where(point => point.IsValid)
+                .ToList();
+            return "BoundaryCount=" + boundaryList.Count +
+                   " " + DescribeExactFieldBattlePositions(points);
+        }
+
+        private static string DescribeExactFieldBattleMissionBoundaries(Mission mission)
+        {
+            if (mission?.Boundaries == null)
+                return "BoundaryCount=0 PointCount=0";
+
+            List<KeyValuePair<string, ICollection<Vec2>>> boundaries =
+                mission.Boundaries.ToList();
+            List<Vec2> points = boundaries
+                .Where(boundary => boundary.Value != null)
+                .SelectMany(boundary => boundary.Value)
+                .Where(point => point.IsValid)
+                .ToList();
+            return "BoundaryCount=" + boundaries.Count +
+                   " " + DescribeExactFieldBattlePositions(points);
+        }
+
+        private static string DescribeExactFieldBattleDeploymentFrame(
+            DefaultTeamDeploymentPlan teamPlan)
+        {
+            if (teamPlan == null ||
+                !(DefaultTeamDeploymentPlanDeploymentFrameField?.GetValue(teamPlan) is MatrixFrame frame))
+            {
+                return "Unavailable";
+            }
+
+            return "Origin=" + frame.origin.AsVec2 +
+                   " Forward=" + frame.rotation.f.AsVec2;
+        }
+
+        private static List<FieldBattlePlacementSample> CollectExactFieldBattlePlacementSamples(
+            Mission mission,
+            Team team)
+        {
+            var samples = new List<FieldBattlePlacementSample>();
+            if (mission?.AllAgents != null)
+            {
+                foreach (Agent agent in mission.AllAgents)
+                {
+                    if (agent == null ||
+                        agent.IsMount ||
+                        !agent.IsHuman ||
+                        !agent.IsActive() ||
+                        !ReferenceEquals(agent.Team, team))
+                    {
+                        continue;
+                    }
+
+                    Vec2 position = agent.Position.AsVec2;
+                    if (!position.IsValid)
+                        continue;
+
+                    samples.Add(new FieldBattlePlacementSample
+                    {
+                        Agent = agent,
+                        Position = position,
+                        FormationIndex = agent.Formation?.Index ?? -1
+                    });
+                }
+            }
+
+            if (samples.Count > 0 || team?.FormationsIncludingEmpty == null)
+                return samples;
+
+            foreach (Formation formation in team.FormationsIncludingEmpty)
+            {
+                if (formation == null ||
+                    formation.CountOfUnits <= 0 ||
+                    !formation.OrderPositionIsValid ||
+                    !formation.OrderPosition.IsValid)
+                {
+                    continue;
+                }
+
+                samples.Add(new FieldBattlePlacementSample
+                {
+                    Position = formation.OrderPosition,
+                    FormationIndex = formation.Index
+                });
+            }
+
+            return samples;
+        }
+
+        private static List<FieldBattlePlacementSample> SelectExactFieldBattleDominantPlacementSamples(
+            IList<FieldBattlePlacementSample> ownSamples,
+            IList<FieldBattlePlacementSample> enemySamples,
+            out List<FieldBattlePlacementSample> ignoredSamples)
+        {
+            ignoredSamples = new List<FieldBattlePlacementSample>();
+            var retainedSamples = ownSamples?
+                .Where(sample => sample != null && sample.Position.IsValid)
+                .ToList() ?? new List<FieldBattlePlacementSample>();
+            if (retainedSamples.Count <= 0 ||
+                !TryResolveExactFieldBattleMedianPosition(retainedSamples, out Vec2 ownCore) ||
+                !TryResolveExactFieldBattleMedianPosition(enemySamples, out Vec2 enemyCore) ||
+                (enemyCore - ownCore).Length < FieldBattleBoundaryCoreMinimumSeparation)
+            {
+                return retainedSamples;
+            }
+
+            var dominantSamples = new List<FieldBattlePlacementSample>(retainedSamples.Count);
+            foreach (FieldBattlePlacementSample sample in retainedSamples)
+            {
+                if (IsExactFieldBattleCrossSideOutlier(sample.Position, ownCore, enemyCore))
+                    ignoredSamples.Add(sample);
+                else
+                    dominantSamples.Add(sample);
+            }
+
+            int minimumRetainedCount = Math.Max(
+                1,
+                (int)Math.Ceiling(retainedSamples.Count * FieldBattleBoundaryMinimumRetainedFraction));
+            if (dominantSamples.Count < minimumRetainedCount)
+            {
+                ignoredSamples.Clear();
+                return retainedSamples;
+            }
+
+            return dominantSamples;
+        }
+
+        private static List<FieldBattleFormationAlignmentSample>
+            FilterExactFieldBattleFormationAlignmentSamples(
+                IList<FieldBattleFormationAlignmentSample> alignmentSamples,
+                IList<FieldBattlePlacementSample> ownSamples,
+                IList<FieldBattlePlacementSample> enemySamples,
+                out int ignoredSampleCount)
+        {
+            ignoredSampleCount = 0;
+            var availableSamples = alignmentSamples?
+                .Where(sample => sample != null && sample.ActualPosition.IsValid)
+                .ToList() ?? new List<FieldBattleFormationAlignmentSample>();
+            if (availableSamples.Count <= 0 ||
+                !TryResolveExactFieldBattleMedianPosition(ownSamples, out Vec2 ownCore) ||
+                !TryResolveExactFieldBattleMedianPosition(enemySamples, out Vec2 enemyCore) ||
+                (enemyCore - ownCore).Length < FieldBattleBoundaryCoreMinimumSeparation)
+            {
+                return availableSamples;
+            }
+
+            List<FieldBattleFormationAlignmentSample> retainedSamples = availableSamples
+                .Where(sample =>
+                    !IsExactFieldBattleCrossSideOutlier(
+                        sample.ActualPosition,
+                        ownCore,
+                        enemyCore))
+                .ToList();
+            ignoredSampleCount = availableSamples.Count - retainedSamples.Count;
+            return retainedSamples;
+        }
+
+        private static bool TryResolveExactFieldBattleMedianPosition(
+            IEnumerable<FieldBattlePlacementSample> samples,
+            out Vec2 medianPosition)
+        {
+            medianPosition = Vec2.Zero;
+            List<FieldBattlePlacementSample> validSamples = samples?
+                .Where(sample => sample != null && sample.Position.IsValid)
+                .ToList();
+            if (validSamples == null || validSamples.Count <= 0)
+                return false;
+
+            List<float> xCoordinates = validSamples
+                .Select(sample => sample.Position.x)
+                .OrderBy(value => value)
+                .ToList();
+            List<float> yCoordinates = validSamples
+                .Select(sample => sample.Position.y)
+                .OrderBy(value => value)
+                .ToList();
+            medianPosition = new Vec2(
+                ResolveExactFieldBattleMedian(xCoordinates),
+                ResolveExactFieldBattleMedian(yCoordinates));
+            return medianPosition.IsValid;
+        }
+
+        private static bool IsExactFieldBattleCrossSideOutlier(
+            Vec2 position,
+            Vec2 ownCore,
+            Vec2 enemyCore)
+        {
+            if (!position.IsValid || !ownCore.IsValid || !enemyCore.IsValid)
+                return false;
+
+            float ownDistance = (position - ownCore).Length;
+            float enemyDistance = (position - enemyCore).Length;
+            return ownDistance >= FieldBattleBoundaryOutlierMinimumOwnDistance &&
+                   enemyDistance + FieldBattleBoundaryOutlierEnemyClosenessMargin < ownDistance;
+        }
+
+        private static string DescribeExactFieldBattlePlacementSamples(
+            IList<FieldBattlePlacementSample> samples)
+        {
+            if (samples == null || samples.Count <= 0)
+                return "Count=0";
+
+            string summary = DescribeExactFieldBattlePositions(
+                samples
+                    .Where(sample => sample != null)
+                    .Select(sample => sample.Position)
+                    .ToList());
+            if (samples.Count > 8)
+                return summary;
+
+            var details = new List<string>();
+            foreach (FieldBattlePlacementSample sample in samples)
+            {
+                if (sample == null)
+                    continue;
+
+                Agent agent = sample.Agent;
+                details.Add(
+                    "AgentIndex=" + (agent?.Index.ToString() ?? "none") +
+                    ",Name=" + (agent?.Name?.ToString() ?? "formation-order") +
+                    ",Character=" + (agent?.Character?.StringId ?? "none") +
+                    ",Hero=" + (agent?.Character?.IsHero == true) +
+                    ",Peer=" + (agent?.MissionPeer != null) +
+                    ",Formation=" + sample.FormationIndex +
+                    ",Position=" + sample.Position);
+            }
+
+            return summary + " Details=[" + string.Join("; ", details) + "]";
+        }
+
+        private static List<FieldBattleFormationAlignmentSample>
+            CollectExactFieldBattleFormationAlignmentSamples(
+                Mission mission,
+                DefaultMissionDeploymentPlan deploymentPlan,
+                Team team)
+        {
+            var samples = new List<FieldBattleFormationAlignmentSample>();
+            if (mission?.AllAgents == null || deploymentPlan == null || team == null)
+                return samples;
+
+            foreach (Formation formation in team.FormationsIncludingEmpty)
+            {
+                if (formation == null || formation.CountOfUnits <= 0)
+                    continue;
+
+                IFormationDeploymentPlan formationPlan =
+                    deploymentPlan.GetFormationPlan(
+                        team,
+                        formation.FormationIndex,
+                        isReinforcement: false);
+                if (!(formationPlan is DefaultFormationDeploymentPlan defaultFormationPlan) ||
+                    !defaultFormationPlan.HasFrame())
+                {
+                    continue;
+                }
+
+                Vec2 actualPosition = Vec2.Zero;
+                int activeUnitCount = 0;
+                formation.ApplyActionOnEachUnit(agent =>
+                {
+                    if (agent == null ||
+                        agent.IsMount ||
+                        !agent.IsHuman ||
+                        !agent.IsActive() ||
+                        !ReferenceEquals(agent.Team, team))
+                    {
+                        return;
+                    }
+
+                    Vec2 position = agent.Position.AsVec2;
+                    if (!position.IsValid)
+                        return;
+
+                    actualPosition += position;
+                    activeUnitCount++;
+                });
+                if (activeUnitCount <= 0)
+                    continue;
+
+                actualPosition *= 1f / activeUnitCount;
+                Vec2 plannedPosition = defaultFormationPlan.GetFrame().origin.AsVec2;
+                if (!actualPosition.IsValid || !plannedPosition.IsValid)
+                    continue;
+
+                samples.Add(new FieldBattleFormationAlignmentSample
+                {
+                    Plan = defaultFormationPlan,
+                    ActualPosition = actualPosition,
+                    PlannedPosition = plannedPosition,
+                    Delta = actualPosition - plannedPosition
+                });
+            }
+
+            return samples;
+        }
+
+        private static bool TryResolveExactFieldBattleCommonAlignment(
+            IList<FieldBattleFormationAlignmentSample> samples,
+            out Vec2 commonAlignment,
+            out int consistentSampleCount)
+        {
+            commonAlignment = Vec2.Zero;
+            consistentSampleCount = 0;
+            if (samples == null || samples.Count <= 0)
+                return false;
+
+            List<float> xOffsets = samples
+                .Select(sample => sample.Delta.x)
+                .OrderBy(value => value)
+                .ToList();
+            List<float> yOffsets = samples
+                .Select(sample => sample.Delta.y)
+                .OrderBy(value => value)
+                .ToList();
+            commonAlignment = new Vec2(
+                ResolveExactFieldBattleMedian(xOffsets),
+                ResolveExactFieldBattleMedian(yOffsets));
+            if (!commonAlignment.IsValid)
+                return false;
+
+            for (int i = 0; i < samples.Count; i++)
+            {
+                if ((samples[i].Delta - commonAlignment).Length <=
+                    FieldBattleBoundaryAlignmentSampleTolerance)
+                {
+                    consistentSampleCount++;
+                }
+            }
+
+            int requiredConsistentSamples =
+                Math.Max(1, (int)Math.Ceiling(samples.Count * 0.6d));
+            return consistentSampleCount >= requiredConsistentSamples;
+        }
+
+        private static float ResolveExactFieldBattleMedian(IList<float> values)
+        {
+            if (values == null || values.Count <= 0)
+                return 0f;
+
+            int middleIndex = values.Count / 2;
+            if ((values.Count & 1) != 0)
+                return values[middleIndex];
+
+            return (values[middleIndex - 1] + values[middleIndex]) * 0.5f;
+        }
+
+        private static bool TryBuildExactFieldBattleDeploymentBoundaries(
+            Mission mission,
+            Team team,
+            IList<FieldBattleFormationAlignmentSample> alignmentSamples,
+            IList<Vec2> placementSamples,
+            Vec2 forwardDirection,
+            out List<(string id, MBList<Vec2> points)> repairedBoundaries,
+            out MatrixFrame deploymentFrame)
+        {
+            repairedBoundaries = new List<(string id, MBList<Vec2> points)>();
+            deploymentFrame = MatrixFrame.Zero;
+            if (mission?.Scene == null ||
+                team == null ||
+                placementSamples == null ||
+                placementSamples.Count <= 0 ||
+                !forwardDirection.IsValid ||
+                forwardDirection.LengthSquared <= 0.0001f)
+            {
+                return false;
+            }
+
+            forwardDirection = forwardDirection.Normalized();
+            Vec2 lateralDirection = new Vec2(-forwardDirection.y, forwardDirection.x);
+            float frontProjection = float.MinValue;
+            float minimumLateralProjection = float.MaxValue;
+            float maximumLateralProjection = float.MinValue;
+            for (int i = 0; i < (alignmentSamples?.Count ?? 0); i++)
+            {
+                FieldBattleFormationAlignmentSample sample = alignmentSamples[i];
+                float halfDepth = sample.Plan.HasDimensions
+                    ? sample.Plan.PlannedDepth * 0.5f
+                    : 0f;
+                float halfWidth = sample.Plan.HasDimensions
+                    ? sample.Plan.PlannedWidth * 0.5f
+                    : 0f;
+                frontProjection = Math.Max(
+                    frontProjection,
+                    DotExactSallyOutBoundary(sample.ActualPosition, forwardDirection) + halfDepth);
+                float lateralProjection =
+                    DotExactSallyOutBoundary(sample.ActualPosition, lateralDirection);
+                minimumLateralProjection = Math.Min(
+                    minimumLateralProjection,
+                    lateralProjection - halfWidth);
+                maximumLateralProjection = Math.Max(
+                    maximumLateralProjection,
+                    lateralProjection + halfWidth);
+            }
+
+            for (int i = 0; i < placementSamples.Count; i++)
+            {
+                Vec2 placementSample = placementSamples[i];
+                if (!placementSample.IsValid)
+                    continue;
+
+                frontProjection = Math.Max(
+                    frontProjection,
+                    DotExactSallyOutBoundary(placementSample, forwardDirection));
+                float lateralProjection =
+                    DotExactSallyOutBoundary(placementSample, lateralDirection);
+                minimumLateralProjection = Math.Min(
+                    minimumLateralProjection,
+                    lateralProjection);
+                maximumLateralProjection = Math.Max(
+                    maximumLateralProjection,
+                    lateralProjection);
+            }
+
+            frontProjection += 10f;
+            float lateralCenter =
+                (minimumLateralProjection + maximumLateralProjection) * 0.5f;
+            float lateralHalfWidth = Math.Max(
+                50f,
+                (maximumLateralProjection - minimumLateralProjection) * 0.5f + 10f);
+            foreach (KeyValuePair<string, ICollection<Vec2>> missionBoundary in mission.Boundaries)
+            {
+                List<Vec2> polygon =
+                    CreateExactSallyOutConvexBoundary(missionBoundary.Value);
+                polygon = ClipExactSallyOutBoundaryToHalfPlane(
+                    polygon,
+                    forwardDirection,
+                    frontProjection);
+                polygon = ClipExactSallyOutBoundaryToHalfPlane(
+                    polygon,
+                    lateralDirection,
+                    lateralCenter + lateralHalfWidth);
+                polygon = ClipExactSallyOutBoundaryToHalfPlane(
+                    polygon,
+                    -lateralDirection,
+                    -(lateralCenter - lateralHalfWidth));
+                if (polygon == null || polygon.Count <= 2)
+                    continue;
+
+                var repairedBoundary = new MBList<Vec2>(polygon);
+                MBSceneUtilities.RadialSortBoundary(ref repairedBoundary);
+                MBSceneUtilities.FindConvexHull(ref repairedBoundary);
+                if (repairedBoundary.Count <= 2 ||
+                    repairedBoundary.Any(point => !point.IsValid))
+                {
+                    continue;
+                }
+
+                string boundaryId = string.IsNullOrWhiteSpace(missionBoundary.Key)
+                    ? "coop_field_battle_" + team.Side + "_" + repairedBoundaries.Count
+                    : "coop_field_battle_" + team.Side + "_" + missionBoundary.Key;
+                repairedBoundaries.Add((boundaryId, repairedBoundary));
+            }
+
+            if (repairedBoundaries.Count <= 0)
+                return false;
+
+            Vec2 deploymentOrigin =
+                forwardDirection * frontProjection +
+                lateralDirection * lateralCenter;
+            float height = mission.Scene.GetTerrainHeight(deploymentOrigin);
+            mission.Scene.GetHeightAtPoint(deploymentOrigin, BodyFlags.None, ref height);
+            Mat3 deploymentRotation = Mat3.Identity;
+            deploymentRotation.RotateAboutUp(forwardDirection.RotationInRadians);
+            deploymentFrame = new MatrixFrame(
+                in deploymentRotation,
+                new Vec3(deploymentOrigin, height));
+            return deploymentFrame.origin.IsValid;
+        }
+
+        private static bool IsExactFieldBattleDeploymentFrameFacingEnemy(
+            MatrixFrame deploymentFrame,
+            Vec2 expectedForwardDirection)
+        {
+            Vec2 actualForwardDirection = deploymentFrame.rotation.f.AsVec2;
+            return actualForwardDirection.IsValid &&
+                   actualForwardDirection.LengthSquared > 0.0001f &&
+                   expectedForwardDirection.IsValid &&
+                   expectedForwardDirection.LengthSquared > 0.0001f &&
+                   DotExactSallyOutBoundary(
+                       actualForwardDirection.Normalized(),
+                       expectedForwardDirection.Normalized()) > 0.9f;
+        }
+
+        private static void RestoreExactFieldBattleDeploymentBoundaryState(
+            DefaultTeamDeploymentPlan teamPlan,
+            DefaultDeploymentPlan initialPlan,
+            MBList<(string id, MBList<Vec2> points)> deploymentBoundaries,
+            IEnumerable<(string id, MBList<Vec2> points)> originalBoundaries,
+            bool hasOriginalDeploymentFrame,
+            MatrixFrame originalDeploymentFrame,
+            bool hasOriginalMeanPosition,
+            Vec3 originalMeanPosition,
+            IEnumerable<(DefaultFormationDeploymentPlan Plan, WorldFrame Frame)> originalFormationFrames)
+        {
+            RestoreExactSallyOutDeploymentBoundaryState(
+                teamPlan,
+                deploymentBoundaries,
+                originalBoundaries,
+                hasOriginalDeploymentFrame,
+                originalDeploymentFrame);
+            if (hasOriginalMeanPosition && initialPlan != null)
+            {
+                DefaultDeploymentPlanMeanPositionField?.SetValue(
+                    initialPlan,
+                    originalMeanPosition);
+            }
+
+            if (originalFormationFrames == null)
+                return;
+
+            foreach (var originalFormationFrame in originalFormationFrames)
+            {
+                if (originalFormationFrame.Plan == null)
+                    continue;
+
+                WorldFrame frame = originalFormationFrame.Frame;
+                originalFormationFrame.Plan.SetFrame(in frame);
+            }
+        }
+
+        private static void EnsureExactFieldBattleBoundaryAlignmentState(Mission mission)
+        {
+            if (ReferenceEquals(_fieldBattleBoundaryAlignmentMission, mission))
+                return;
+
+            _fieldBattleBoundaryAlignmentMission = mission;
+            FieldBattleAlignedBoundaryGeometrySignatures.Clear();
+        }
+
+        private static string BuildExactFieldBattleBoundaryGeometrySignature(
+            IEnumerable<(string id, MBList<Vec2> points)> boundaries)
+        {
+            if (boundaries == null)
+                return "null";
+
+            unchecked
+            {
+                int hash = 17;
+                int boundaryCount = 0;
+                int pointCount = 0;
+                foreach (var boundary in boundaries)
+                {
+                    hash = hash * 31 + (boundary.id ?? string.Empty).GetHashCode();
+                    boundaryCount++;
+                    if (boundary.points == null)
+                        continue;
+
+                    foreach (Vec2 point in boundary.points)
+                    {
+                        hash = hash * 31 + (int)Math.Round(point.x * 10f);
+                        hash = hash * 31 + (int)Math.Round(point.y * 10f);
+                        pointCount++;
+                    }
+                }
+
+                return boundaryCount + "|" + pointCount + "|" + hash;
+            }
         }
 
         private static bool TryEnsureExactSallyOutDeploymentBoundaryContract(
@@ -2187,6 +3565,60 @@ namespace CoopSpectator.MissionBehaviors
             return true;
         }
 
+        private static bool TryResolveExactFieldBattleForwardDirection(
+            Team team,
+            IList<Vec2> teamSamples,
+            IList<Vec2> enemySamples,
+            out Vec2 forwardDirection)
+        {
+            forwardDirection = Vec2.Zero;
+            if (team == null || teamSamples == null || teamSamples.Count <= 0)
+                return false;
+
+            if (team.FormationsIncludingEmpty != null)
+            {
+                foreach (Formation formation in team.FormationsIncludingEmpty)
+                {
+                    if (formation == null || formation.CountOfUnits <= 0)
+                        continue;
+
+                    Vec2 direction = formation.Direction;
+                    if (direction.IsValid && direction.LengthSquared > 0.0001f)
+                        forwardDirection += direction.Normalized();
+                }
+            }
+
+            Vec2 teamMean = Vec2.Zero;
+            for (int i = 0; i < teamSamples.Count; i++)
+                teamMean += teamSamples[i];
+            teamMean *= 1f / teamSamples.Count;
+
+            Vec2 towardEnemy = Vec2.Zero;
+            if (enemySamples != null && enemySamples.Count > 0)
+            {
+                Vec2 enemyMean = Vec2.Zero;
+                for (int i = 0; i < enemySamples.Count; i++)
+                    enemyMean += enemySamples[i];
+                enemyMean *= 1f / enemySamples.Count;
+                towardEnemy = enemyMean - teamMean;
+            }
+
+            if (!forwardDirection.IsValid || forwardDirection.LengthSquared <= 0.0001f)
+                forwardDirection = towardEnemy;
+            if (!forwardDirection.IsValid || forwardDirection.LengthSquared <= 0.0001f)
+                return false;
+
+            forwardDirection = forwardDirection.Normalized();
+            if (towardEnemy.IsValid &&
+                towardEnemy.LengthSquared > 0.0001f &&
+                DotExactSallyOutBoundary(forwardDirection, towardEnemy) < 0f)
+            {
+                forwardDirection = -forwardDirection;
+            }
+
+            return true;
+        }
+
         private static bool TryResolveExactSallyOutForwardDirection(
             Mission mission,
             Team team,
@@ -2467,6 +3899,51 @@ namespace CoopSpectator.MissionBehaviors
         }
 
 #if !COOPSPECTATOR_DEDICATED
+        private static bool TryEnsureProminentFieldBattleFrontBoundaryMarkers(
+            Mission mission,
+            object missionScreen,
+            Team team,
+            string source)
+        {
+            try
+            {
+                if (mission == null || team == null || team.Side == BattleSideEnum.None ||
+                    !mission.GetDeploymentPlan<DefaultMissionDeploymentPlan>(out DefaultMissionDeploymentPlan deploymentPlan) ||
+                    deploymentPlan == null)
+                {
+                    return false;
+                }
+
+                CoopSiegeDeploymentBoundaryMarkerView marker = ResolveExistingCoopBoundaryMarker(mission);
+                if (marker == null)
+                {
+                    marker = TryCreateAndAttachCoopBoundaryMarker(
+                        mission,
+                        missionScreen,
+                        BoundaryMarkerInterval);
+                }
+
+                return marker != null &&
+                       marker.TryEnsureProminentFieldBattleFrontBoundaryMarkersForTeam(
+                           deploymentPlan,
+                           team,
+                           source ?? "unknown");
+            }
+            catch (Exception ex)
+            {
+                if (CoopDebugConfig.OrderOfBattleDiagnostics)
+                {
+                    ModLogger.Info(
+                        "CoopSiegeDeploymentBoundaryRuntime: prominent field-battle front boundary ensure failed. " +
+                        "Side=" + (team?.Side.ToString() ?? "none") +
+                        " Source=" + (source ?? "unknown") +
+                        " Error=" + ex.Message);
+                }
+
+                return false;
+            }
+        }
+
         private static CoopSiegeDeploymentBoundaryMarkerView TryCreateAndAttachCoopBoundaryMarker(
             Mission mission,
             object missionScreen,
@@ -2659,7 +4136,8 @@ namespace CoopSpectator.MissionBehaviors
         private static bool TryAddDeploymentBoundaryMarkersDirectly(
             object marker,
             Mission mission,
-            Team team)
+            Team team,
+            bool refreshOnGeometryChange)
         {
             if (marker == null ||
                 !TryEnsureDeploymentPlanBoundaries(mission, team, "visible-marker-direct") ||
@@ -2672,16 +4150,73 @@ namespace CoopSpectator.MissionBehaviors
             bool addedAny = false;
             try
             {
+                Dictionary<string, string> geometrySignatures = null;
+                bool isFirstRefreshForSide = false;
+                if (refreshOnGeometryChange)
+                {
+                    EnsureNativeBoundaryGeometryStateForMission(mission);
+                    if (!NativeBoundaryGeometrySignatures.TryGetValue(
+                            team.Side,
+                            out geometrySignatures))
+                    {
+                        geometrySignatures = new Dictionary<string, string>(StringComparer.Ordinal);
+                        NativeBoundaryGeometrySignatures[team.Side] = geometrySignatures;
+                    }
+
+                    isFirstRefreshForSide = !NativeBoundaryInitializedSides.Contains(team.Side);
+                    if (isFirstRefreshForSide)
+                        TryRemoveAllNativeBoundaryMarkersForSide(marker, team.Side);
+                }
+
+                var activeBoundaryKeys = new HashSet<string>(StringComparer.Ordinal);
+                int boundaryIndex = 0;
                 foreach (var boundary in deploymentPlan.GetDeploymentBoundaries(team))
                 {
+                    string boundaryKey = string.IsNullOrWhiteSpace(boundary.Item1)
+                        ? "boundary_" + boundaryIndex.ToString()
+                        : boundary.Item1;
+                    boundaryIndex++;
+                    activeBoundaryKeys.Add(boundaryKey);
+
+                    string geometrySignature = BuildNativeBoundaryGeometrySignature(boundary.Item2);
+                    if (refreshOnGeometryChange &&
+                        !isFirstRefreshForSide &&
+                        (!geometrySignatures.TryGetValue(boundaryKey, out string previousSignature) ||
+                         !string.Equals(previousSignature, geometrySignature, StringComparison.Ordinal)))
+                    {
+                        TryRemoveNativeBoundaryMarker(marker, team.Side, boundaryKey);
+                    }
+
                     var markerBoundary = new KeyValuePair<string, ICollection<Vec2>>(
-                        boundary.Item1,
+                        boundaryKey,
                         boundary.Item2);
-                    addedAny |= TryInvokeInstanceMethod(
+                    TryInvokeInstanceMethod(
                         marker,
                         "AddBoundaryMarkerForSide",
                         team.Side,
                         markerBoundary);
+
+                    bool hasMarkerEntities = HasNativeBoundaryMarkerEntities(
+                        marker,
+                        team.Side,
+                        boundaryKey);
+                    addedAny |= hasMarkerEntities;
+                    if (refreshOnGeometryChange && hasMarkerEntities)
+                        geometrySignatures[boundaryKey] = geometrySignature;
+                }
+
+                if (refreshOnGeometryChange)
+                {
+                    foreach (string staleBoundaryKey in geometrySignatures.Keys
+                                 .Where(key => !activeBoundaryKeys.Contains(key))
+                                 .ToList())
+                    {
+                        TryRemoveNativeBoundaryMarker(marker, team.Side, staleBoundaryKey);
+                        geometrySignatures.Remove(staleBoundaryKey);
+                    }
+
+                    if (addedAny)
+                        NativeBoundaryInitializedSides.Add(team.Side);
                 }
             }
             catch
@@ -2690,6 +4225,142 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return addedAny;
+        }
+
+        private static void EnsureNativeBoundaryGeometryStateForMission(Mission mission)
+        {
+            if (ReferenceEquals(_nativeBoundaryGeometryMission, mission))
+                return;
+
+            _nativeBoundaryGeometryMission = mission;
+            NativeBoundaryGeometrySignatures.Clear();
+            NativeBoundaryInitializedSides.Clear();
+        }
+
+        private static string BuildNativeBoundaryGeometrySignature(IEnumerable<Vec2> points)
+        {
+            if (points == null)
+                return "null";
+
+            unchecked
+            {
+                int hash = 17;
+                int count = 0;
+                foreach (Vec2 point in points)
+                {
+                    hash = hash * 31 + (int)Math.Round(point.x * 10f);
+                    hash = hash * 31 + (int)Math.Round(point.y * 10f);
+                    count++;
+                }
+
+                return count + "|" + hash;
+            }
+        }
+
+        private static IDictionary ResolveNativeBoundaryMarkerMap(
+            object marker,
+            BattleSideEnum side)
+        {
+            if (marker == null || side == BattleSideEnum.None)
+                return null;
+
+            try
+            {
+                FieldInfo markerField = marker
+                    .GetType()
+                    .GetField(
+                        "_boundaryMarkersPerSide",
+                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (!(markerField?.GetValue(marker) is Array markerArray))
+                    return null;
+
+                int sideIndex = (int)side;
+                if (sideIndex < 0 || sideIndex >= markerArray.Length)
+                    return null;
+
+                return markerArray.GetValue(sideIndex) as IDictionary;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static bool HasNativeBoundaryMarkerEntities(
+            object marker,
+            BattleSideEnum side,
+            string boundaryKey)
+        {
+            IDictionary markerMap = ResolveNativeBoundaryMarkerMap(marker, side);
+            if (markerMap == null ||
+                boundaryKey == null ||
+                !markerMap.Contains(boundaryKey))
+            {
+                return false;
+            }
+
+            return markerMap[boundaryKey] is System.Collections.ICollection entities &&
+                   entities.Count > 0;
+        }
+
+        private static bool HasAnyNativeBoundaryMarkerEntities(
+            object marker,
+            BattleSideEnum side)
+        {
+            IDictionary markerMap = ResolveNativeBoundaryMarkerMap(marker, side);
+            if (markerMap == null)
+                return false;
+
+            foreach (object value in markerMap.Values)
+            {
+                if (value is System.Collections.ICollection entities && entities.Count > 0)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryRemoveNativeBoundaryMarker(
+            object marker,
+            BattleSideEnum side,
+            string boundaryKey)
+        {
+            if (marker == null ||
+                side == BattleSideEnum.None ||
+                boundaryKey == null)
+            {
+                return false;
+            }
+
+            IDictionary markerMap = ResolveNativeBoundaryMarkerMap(marker, side);
+            if (markerMap == null || !markerMap.Contains(boundaryKey))
+                return true;
+
+            if (!TryInvokeInstanceMethod(marker, "RemoveBoundaryMarker", boundaryKey, side))
+                return false;
+
+            return !markerMap.Contains(boundaryKey);
+        }
+
+        private static bool TryRemoveAllNativeBoundaryMarkersForSide(
+            object marker,
+            BattleSideEnum side)
+        {
+            IDictionary markerMap = ResolveNativeBoundaryMarkerMap(marker, side);
+            if (markerMap == null)
+                return false;
+
+            bool removedAll = true;
+            foreach (string boundaryKey in markerMap.Keys
+                         .Cast<object>()
+                         .Select(key => key as string)
+                         .Where(key => key != null)
+                         .ToList())
+            {
+                removedAll &= TryRemoveNativeBoundaryMarker(marker, side, boundaryKey);
+            }
+
+            return removedAll;
         }
 
         private static bool TryInvokeInstanceMethod(object target, string methodName, params object[] arguments)
@@ -2762,6 +4433,13 @@ namespace CoopSpectator.MissionBehaviors
             return SallyOutScenarioContract.IsValidatedScenario(
                 scenarioContext,
                 mission.SceneName ?? string.Empty,
+                out _);
+        }
+
+        private static bool IsValidatedInitialFieldBattleMaterializationScenario(Mission mission)
+        {
+            return ExactFieldBattleInitialMaterializationRuntime.IsValidatedScenario(
+                mission,
                 out _);
         }
 
@@ -2886,6 +4564,8 @@ namespace CoopSpectator.MissionBehaviors
             new Dictionary<int, string>();
         private readonly Dictionary<int, int> _acknowledgedInitialAgentMaterializationTransmissionIdByPeer =
             new Dictionary<int, int>();
+        private readonly Dictionary<int, int> _acknowledgedInitialFieldBattleMaterializationTransmissionIdByPeer =
+            new Dictionary<int, int>();
         private readonly Dictionary<int, PendingPayloadTransmission> _completedMaterializedAgentEntryTransmissionByPeer =
             new Dictionary<int, PendingPayloadTransmission>();
         private readonly Dictionary<int, DateTime> _completedMaterializedAgentEntryTransmissionUtcByPeer =
@@ -2931,12 +4611,17 @@ namespace CoopSpectator.MissionBehaviors
         private DateTime _lastClientBattleReconnectFinalizeReadyAckUtc = DateTime.MinValue;
         private DateTime _nextClientInitialAgentMaterializationReadinessPollUtc = DateTime.MinValue;
         private DateTime _lastClientInitialAgentMaterializationReadySentUtc = DateTime.MinValue;
+        private DateTime _nextClientInitialFieldBattleMaterializationReadinessPollUtc = DateTime.MinValue;
+        private DateTime _lastClientInitialFieldBattleMaterializationReadySentUtc = DateTime.MinValue;
         private DateTime _nextBootstrapDependentPeerPayloadSyncUtc = DateTime.MinValue;
         private int _lastClientBattleReconnectFinalizeReadyAckTransmissionId;
         private int _clientConfirmedInitialAgentMaterializationTransmissionId;
         private int _clientConfirmedInitialAgentMaterializationReadyAgentCount;
+        private int _clientConfirmedInitialFieldBattleMaterializationTransmissionId;
+        private int _clientConfirmedInitialFieldBattleMaterializationReadyAgentCount;
         private string _lastClientBattleReconnectFinalizeReadinessSummary = string.Empty;
         private string _lastClientInitialAgentMaterializationReadinessSummary = string.Empty;
+        private string _lastClientInitialFieldBattleMaterializationReadinessSummary = string.Empty;
         private string _clientAppliedBattleDataReadinessStage = string.Empty;
         private bool _delayedClientAgentControlDiagnosticsPending;
         private int _delayedClientAgentControlDiagnosticsTicksRemaining;
@@ -3766,6 +5451,8 @@ namespace CoopSpectator.MissionBehaviors
                     HandleClientMaterializedAgentEntrySnapshotCompleteAck);
                 registerer.RegisterBaseHandler<CoopInitialAgentMaterializationReadyMessage>(
                     HandleClientInitialAgentMaterializationReady);
+                registerer.RegisterBaseHandler<CoopInitialFieldBattleMaterializationReadyMessage>(
+                    HandleClientInitialFieldBattleMaterializationReady);
                 registerer.RegisterBaseHandler<CoopMaterializedReinforcementBatchPreparedMessage>(
                     HandleClientMaterializedReinforcementBatchPrepared);
                 registerer.RegisterBaseHandler<CoopMaterializedReinforcementBatchReadyMessage>(
@@ -3847,6 +5534,7 @@ namespace CoopSpectator.MissionBehaviors
                     Mission,
                     "CoopMissionNetworkBridge.TryRunClientBattleSnapshotRecoveryTick");
                 TrySendClientInitialAgentMaterializationReadyIfNeeded();
+                TrySendClientInitialFieldBattleMaterializationReadyIfNeeded();
                 TrySendClientMaterializedReinforcementBatchPreparedAcks();
                 TrySendClientMaterializedReinforcementBatchReadyAcks();
                 TrySendClientBattleReconnectFinalizeReadyAckIfNeeded();
@@ -4066,6 +5754,104 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
+        private void TrySendClientInitialFieldBattleMaterializationReadyIfNeeded()
+        {
+            if (!GameNetwork.IsClient ||
+                !GameNetwork.IsSessionActive ||
+                Mission == null ||
+                !IsValidatedInitialFieldBattleMaterializationScenario(Mission) ||
+                CoopBattlePhaseRuntimeState.GetPhase() >= CoopBattlePhase.BattleActive ||
+                HasClientBattleProgressedBeyondInitialMaterializationReadiness())
+            {
+                return;
+            }
+
+            if (!TryGetClientCurrentMaterializedAgentEntrySnapshotIdentity(
+                    out int transmissionId,
+                    out int entryCount,
+                    out string payloadHash,
+                    out string mapReadinessSummary))
+            {
+                _lastClientInitialFieldBattleMaterializationReadinessSummary =
+                    "materialized-map-not-ready " + (mapReadinessSummary ?? "unknown");
+                return;
+            }
+
+            DateTime nowUtc = DateTime.UtcNow;
+            if (_clientConfirmedInitialFieldBattleMaterializationTransmissionId != transmissionId)
+            {
+                if (nowUtc < _nextClientInitialFieldBattleMaterializationReadinessPollUtc)
+                    return;
+
+                _nextClientInitialFieldBattleMaterializationReadinessPollUtc =
+                    nowUtc + InitialAgentMaterializationReadinessPollInterval;
+                if (!CoopMissionSpawnLogic.IsClientInitialFieldBattleMaterializationReady(
+                        out int readyAgentCount,
+                        out string readinessSummary))
+                {
+                    _lastClientInitialFieldBattleMaterializationReadinessSummary =
+                        readinessSummary ?? "unknown";
+                    return;
+                }
+
+                if (readyAgentCount != entryCount)
+                {
+                    _lastClientInitialFieldBattleMaterializationReadinessSummary =
+                        "ready-agent-count-mismatch" +
+                        " ReadyAgentCount=" + readyAgentCount +
+                        " EntryCount=" + entryCount;
+                    return;
+                }
+
+                _clientConfirmedInitialFieldBattleMaterializationTransmissionId = transmissionId;
+                _clientConfirmedInitialFieldBattleMaterializationReadyAgentCount = readyAgentCount;
+                _lastClientInitialFieldBattleMaterializationReadySentUtc = DateTime.MinValue;
+                _lastClientInitialFieldBattleMaterializationReadinessSummary =
+                    readinessSummary ?? "ready";
+            }
+
+            if (_lastClientInitialFieldBattleMaterializationReadySentUtc != DateTime.MinValue &&
+                nowUtc - _lastClientInitialFieldBattleMaterializationReadySentUtc <
+                    InitialAgentMaterializationReadyRetryDelay)
+            {
+                return;
+            }
+
+            bool firstSend =
+                _lastClientInitialFieldBattleMaterializationReadySentUtc == DateTime.MinValue;
+            try
+            {
+                GameNetwork.BeginModuleEventAsClient();
+                GameNetwork.WriteMessage(
+                    new CoopInitialFieldBattleMaterializationReadyMessage(
+                        transmissionId,
+                        entryCount,
+                        _clientConfirmedInitialFieldBattleMaterializationReadyAgentCount,
+                        payloadHash));
+                GameNetwork.EndModuleEventAsClient();
+                _lastClientInitialFieldBattleMaterializationReadySentUtc = nowUtc;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: client field-battle initial materialization readiness send failed. " +
+                    "Error=" + ex.Message);
+                return;
+            }
+
+            if (firstSend || ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: sent client field-battle initial materialization readiness. " +
+                    "TransmissionId=" + transmissionId +
+                    " EntryCount=" + entryCount +
+                    " ReadyAgentCount=" +
+                    _clientConfirmedInitialFieldBattleMaterializationReadyAgentCount +
+                    " ReadinessSummary={" +
+                    (_lastClientInitialFieldBattleMaterializationReadinessSummary ?? "unknown") + "}");
+            }
+        }
+
         private void TryPersistHostedLocalPeerMarker()
         {
             if (_persistedHostedLocalPeerMarker || !GameNetwork.IsClient || !GameNetwork.IsSessionActive)
@@ -4166,6 +5952,7 @@ namespace CoopSpectator.MissionBehaviors
             _expectedMaterializedAgentEntryCountByPeer.Clear();
             _expectedMaterializedAgentEntryPayloadHashByPeer.Clear();
             _acknowledgedInitialAgentMaterializationTransmissionIdByPeer.Clear();
+            _acknowledgedInitialFieldBattleMaterializationTransmissionIdByPeer.Clear();
             _completedMaterializedAgentEntryTransmissionByPeer.Clear();
             _completedMaterializedAgentEntryTransmissionUtcByPeer.Clear();
             _serverMaterializedReinforcementBatchesById.Clear();
@@ -4197,6 +5984,11 @@ namespace CoopSpectator.MissionBehaviors
             _clientConfirmedInitialAgentMaterializationTransmissionId = 0;
             _clientConfirmedInitialAgentMaterializationReadyAgentCount = 0;
             _lastClientInitialAgentMaterializationReadinessSummary = string.Empty;
+            _nextClientInitialFieldBattleMaterializationReadinessPollUtc = DateTime.MinValue;
+            _lastClientInitialFieldBattleMaterializationReadySentUtc = DateTime.MinValue;
+            _clientConfirmedInitialFieldBattleMaterializationTransmissionId = 0;
+            _clientConfirmedInitialFieldBattleMaterializationReadyAgentCount = 0;
+            _lastClientInitialFieldBattleMaterializationReadinessSummary = string.Empty;
             _clientAppliedBattleDataReadinessStage = string.Empty;
             _cachedMaterializedAgentEntryContentRevision = -1;
             _cachedMaterializedAgentEntrySnapshot = null;
@@ -5029,11 +6821,17 @@ namespace CoopSpectator.MissionBehaviors
                         mission,
                         message.AssignmentSide,
                         out string sallyOutPlacementDiagnostics);
-                if (!acceptsSallyOutPlacementState)
+                bool acceptsFieldBattlePlacementState =
+                    ExactFieldBattleCommanderDeploymentRuntime.ShouldAcceptClientFormationLayoutState(
+                        mission,
+                        message.AssignmentSide,
+                        out string fieldBattlePlacementDiagnostics);
+                if (!acceptsSallyOutPlacementState && !acceptsFieldBattlePlacementState)
                 {
                     diagnostics =
                         "phase-not-deployment Phase=" + phase +
-                        " SallyOut={" + (sallyOutPlacementDiagnostics ?? "inactive") + "}";
+                        " SallyOut={" + (sallyOutPlacementDiagnostics ?? "inactive") + "}" +
+                        " FieldBattle={" + (fieldBattlePlacementDiagnostics ?? "inactive") + "}";
                     return false;
                 }
             }
@@ -11185,6 +12983,72 @@ namespace CoopSpectator.MissionBehaviors
             return true;
         }
 
+        private bool HandleClientInitialFieldBattleMaterializationReady(
+            NetworkCommunicator peer,
+            GameNetworkMessage baseMessage)
+        {
+            if (!(baseMessage is CoopInitialFieldBattleMaterializationReadyMessage message))
+                return false;
+
+            if (peer == null || Mission == null)
+                return true;
+
+            if (IsValidatedInitialFieldBattleMaterializationScenario(Mission) &&
+                CoopBattlePhaseRuntimeState.GetPhase() >= CoopBattlePhase.BattleActive)
+            {
+                return true;
+            }
+
+            _expectedMaterializedAgentEntryTransmissionIdByPeer.TryGetValue(
+                peer.Index,
+                out int expectedTransmissionId);
+            _acknowledgedMaterializedAgentEntryTransmissionIdByPeer.TryGetValue(
+                peer.Index,
+                out int acknowledgedMapTransmissionId);
+            _expectedMaterializedAgentEntryCountByPeer.TryGetValue(
+                peer.Index,
+                out int expectedEntryCount);
+            _expectedMaterializedAgentEntryPayloadHashByPeer.TryGetValue(
+                peer.Index,
+                out string expectedPayloadHash);
+
+            bool accepted =
+                IsValidatedInitialFieldBattleMaterializationScenario(Mission) &&
+                CoopBattlePhaseRuntimeState.GetPhase() < CoopBattlePhase.BattleActive &&
+                expectedTransmissionId > 0 &&
+                message.TransmissionId == expectedTransmissionId &&
+                acknowledgedMapTransmissionId == expectedTransmissionId &&
+                message.EntryCount == expectedEntryCount &&
+                message.ReadyAgentCount == expectedEntryCount &&
+                !string.IsNullOrWhiteSpace(expectedPayloadHash) &&
+                string.Equals(message.PayloadHash, expectedPayloadHash, StringComparison.Ordinal);
+            if (accepted)
+            {
+                _acknowledgedInitialFieldBattleMaterializationTransmissionIdByPeer[peer.Index] =
+                    message.TransmissionId;
+            }
+
+            if (!accepted || ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: processed client field-battle initial materialization readiness. " +
+                    "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                    " TransmissionId=" + message.TransmissionId +
+                    " ExpectedTransmissionId=" + expectedTransmissionId +
+                    " AcknowledgedMapTransmissionId=" + acknowledgedMapTransmissionId +
+                    " EntryCount=" + message.EntryCount +
+                    " ExpectedEntryCount=" + expectedEntryCount +
+                    " ReadyAgentCount=" + message.ReadyAgentCount +
+                    " HashMatched=" + string.Equals(
+                        message.PayloadHash,
+                        expectedPayloadHash,
+                        StringComparison.Ordinal) +
+                    " Accepted=" + accepted);
+            }
+
+            return true;
+        }
+
         private bool HandleClientMaterializedReinforcementBatchPrepared(
             NetworkCommunicator peer,
             GameNetworkMessage baseMessage)
@@ -14262,6 +16126,7 @@ namespace CoopSpectator.MissionBehaviors
             _expectedMaterializedAgentEntryPayloadHashByPeer[peerIndex] = payloadHash;
             _acknowledgedMaterializedAgentEntryTransmissionIdByPeer.Remove(peerIndex);
             _acknowledgedInitialAgentMaterializationTransmissionIdByPeer.Remove(peerIndex);
+            _acknowledgedInitialFieldBattleMaterializationTransmissionIdByPeer.Remove(peerIndex);
             _completedMaterializedAgentEntryTransmissionByPeer.Remove(peerIndex);
             _completedMaterializedAgentEntryTransmissionUtcByPeer.Remove(peerIndex);
         }
@@ -14276,6 +16141,7 @@ namespace CoopSpectator.MissionBehaviors
             _expectedMaterializedAgentEntryCountByPeer.Remove(peerIndex);
             _expectedMaterializedAgentEntryPayloadHashByPeer.Remove(peerIndex);
             _acknowledgedInitialAgentMaterializationTransmissionIdByPeer.Remove(peerIndex);
+            _acknowledgedInitialFieldBattleMaterializationTransmissionIdByPeer.Remove(peerIndex);
             _completedMaterializedAgentEntryTransmissionByPeer.Remove(peerIndex);
             _completedMaterializedAgentEntryTransmissionUtcByPeer.Remove(peerIndex);
         }
@@ -14392,6 +16258,80 @@ namespace CoopSpectator.MissionBehaviors
             return ready;
         }
 
+        internal static bool AreAssignedPeersInitialFieldBattleMaterializationReady(
+            Mission mission,
+            IReadOnlyCollection<int> assignedPeerIndices,
+            out string readinessSummary)
+        {
+            readinessSummary = string.Empty;
+            if (!GameNetwork.IsServer || mission == null)
+            {
+                readinessSummary = "invalid-server-mission-context";
+                return false;
+            }
+
+            if (!IsValidatedInitialFieldBattleMaterializationScenario(mission))
+            {
+                readinessSummary = "not-field-battle";
+                return true;
+            }
+
+            if (assignedPeerIndices == null || assignedPeerIndices.Count <= 0)
+            {
+                readinessSummary = "assigned-peers-empty";
+                return false;
+            }
+
+            CoopMissionNetworkBridge bridge = mission.GetMissionBehavior<CoopMissionNetworkBridge>();
+            if (bridge == null)
+            {
+                readinessSummary = "bridge-null";
+                return false;
+            }
+
+            int readyPeerCount = 0;
+            var pendingPeerSummaries = new List<string>();
+            foreach (int peerIndex in assignedPeerIndices.Distinct())
+            {
+                bridge._expectedMaterializedAgentEntryTransmissionIdByPeer.TryGetValue(
+                    peerIndex,
+                    out int expectedTransmissionId);
+                bridge._acknowledgedMaterializedAgentEntryTransmissionIdByPeer.TryGetValue(
+                    peerIndex,
+                    out int acknowledgedMapTransmissionId);
+                bridge._acknowledgedInitialFieldBattleMaterializationTransmissionIdByPeer.TryGetValue(
+                    peerIndex,
+                    out int acknowledgedReadyTransmissionId);
+                bool peerReady =
+                    expectedTransmissionId > 0 &&
+                    acknowledgedMapTransmissionId == expectedTransmissionId &&
+                    acknowledgedReadyTransmissionId == expectedTransmissionId;
+                if (peerReady)
+                {
+                    readyPeerCount++;
+                    continue;
+                }
+
+                if (pendingPeerSummaries.Count < 6)
+                {
+                    pendingPeerSummaries.Add(
+                        peerIndex +
+                        ":expected=" + expectedTransmissionId +
+                        ",map=" + acknowledgedMapTransmissionId +
+                        ",ready=" + acknowledgedReadyTransmissionId);
+                }
+            }
+
+            int assignedPeerCount = assignedPeerIndices.Distinct().Count();
+            bool ready = readyPeerCount == assignedPeerCount;
+            readinessSummary =
+                "Ready=" + ready +
+                " AssignedPeers=" + assignedPeerCount +
+                " ReadyPeers=" + readyPeerCount +
+                " Pending=[" + string.Join(";", pendingPeerSummaries) + "]";
+            return ready;
+        }
+
         private bool TryAcknowledgePeerBattleSnapshot(NetworkCommunicator peer, string rawTransmissionId)
         {
             if (peer == null || string.IsNullOrWhiteSpace(rawTransmissionId) || !int.TryParse(rawTransmissionId, out int transmissionId))
@@ -14492,6 +16432,9 @@ namespace CoopSpectator.MissionBehaviors
             Mission.Current
                 ?.GetMissionBehavior<CoopMissionNetworkBridge>()
                 ?.ResetClientInitialAgentMaterializationReadiness();
+            Mission.Current
+                ?.GetMissionBehavior<CoopMissionNetworkBridge>()
+                ?.ResetClientInitialFieldBattleMaterializationReadiness();
         }
 
         private static void MarkClientMaterializedAgentEntrySnapshotApplied(
@@ -14509,6 +16452,9 @@ namespace CoopSpectator.MissionBehaviors
             Mission.Current
                 ?.GetMissionBehavior<CoopMissionNetworkBridge>()
                 ?.ResetClientInitialAgentMaterializationReadiness();
+            Mission.Current
+                ?.GetMissionBehavior<CoopMissionNetworkBridge>()
+                ?.ResetClientInitialFieldBattleMaterializationReadiness();
             _clientObservedMaterializedAgentEntryMission = null;
             _clientObservedMaterializedAgentEntryTransmissionId = 0;
             _clientAppliedMaterializedAgentEntryTransmissionId = 0;
@@ -14523,6 +16469,15 @@ namespace CoopSpectator.MissionBehaviors
             _clientConfirmedInitialAgentMaterializationTransmissionId = 0;
             _clientConfirmedInitialAgentMaterializationReadyAgentCount = 0;
             _lastClientInitialAgentMaterializationReadinessSummary = string.Empty;
+        }
+
+        private void ResetClientInitialFieldBattleMaterializationReadiness()
+        {
+            _nextClientInitialFieldBattleMaterializationReadinessPollUtc = DateTime.MinValue;
+            _lastClientInitialFieldBattleMaterializationReadySentUtc = DateTime.MinValue;
+            _clientConfirmedInitialFieldBattleMaterializationTransmissionId = 0;
+            _clientConfirmedInitialFieldBattleMaterializationReadyAgentCount = 0;
+            _lastClientInitialFieldBattleMaterializationReadinessSummary = string.Empty;
         }
 
         private bool HasClientBattleProgressedBeyondInitialMaterializationReadiness()

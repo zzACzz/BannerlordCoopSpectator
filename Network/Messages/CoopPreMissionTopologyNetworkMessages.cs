@@ -8,7 +8,7 @@ namespace CoopSpectator.Network.Messages
     [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromServer)]
     public sealed class CoopPreMissionTopologyContractMessage : GameNetworkMessage
     {
-        public const int CurrentSchemaVersion = 1;
+        public const int CurrentSchemaVersion = 2;
         public const int MaxWallRatioCount = 16;
         public const int MaxSiegeEngineCountPerSide = 32;
 
@@ -28,12 +28,25 @@ namespace CoopSpectator.Network.Messages
             new CompressionInfo.Integer(-1, 1023, maximumValueGiven: true);
         private static readonly CompressionInfo.Integer SiegeEngineHealthCompressionInfo =
             new CompressionInfo.Integer(0, 100000000, maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer MapPatchSceneIndexCompressionInfo =
+            new CompressionInfo.Integer(-1, 32767, maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer MapPatchNormalizedCompressionInfo =
+            new CompressionInfo.Integer(0, 10000, maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer MapPatchDirectionCompressionInfo =
+            new CompressionInfo.Integer(-10000, 10000, maximumValueGiven: true);
 
         public CoopPreMissionTopologyContractMessage(
             int battleIndex,
             string battleId,
             string runtimeScene,
             string playerSide,
+            int mapPatchSceneIndex,
+            float mapPatchNormalizedX,
+            float mapPatchNormalizedY,
+            bool hasPatchEncounterDirection,
+            float patchEncounterDirX,
+            float patchEncounterDirY,
+            string patchEncounterDirectionSource,
             BattleScenarioContextMessage scenarioContext,
             string contractHash)
         {
@@ -42,6 +55,13 @@ namespace CoopSpectator.Network.Messages
             BattleId = Normalize(battleId);
             RuntimeScene = Normalize(runtimeScene);
             PlayerSide = Normalize(playerSide);
+            MapPatchSceneIndex = Clamp(mapPatchSceneIndex, -1, 32767);
+            MapPatchNormalizedX = QuantizeNormalizedCoordinate(mapPatchNormalizedX) / 10000f;
+            MapPatchNormalizedY = QuantizeNormalizedCoordinate(mapPatchNormalizedY) / 10000f;
+            HasPatchEncounterDirection = hasPatchEncounterDirection;
+            PatchEncounterDirX = QuantizeDirectionComponent(patchEncounterDirX) / 10000f;
+            PatchEncounterDirY = QuantizeDirectionComponent(patchEncounterDirY) / 10000f;
+            PatchEncounterDirectionSource = Normalize(patchEncounterDirectionSource);
             ScenarioContext = scenarioContext?.Clone();
             ContractHash = Normalize(contractHash);
         }
@@ -53,6 +73,13 @@ namespace CoopSpectator.Network.Messages
             BattleId = string.Empty;
             RuntimeScene = string.Empty;
             PlayerSide = string.Empty;
+            MapPatchSceneIndex = -1;
+            MapPatchNormalizedX = 0f;
+            MapPatchNormalizedY = 0f;
+            HasPatchEncounterDirection = false;
+            PatchEncounterDirX = 0f;
+            PatchEncounterDirY = 0f;
+            PatchEncounterDirectionSource = string.Empty;
             ScenarioContext = null;
             ContractHash = string.Empty;
         }
@@ -62,6 +89,13 @@ namespace CoopSpectator.Network.Messages
         public string BattleId { get; private set; }
         public string RuntimeScene { get; private set; }
         public string PlayerSide { get; private set; }
+        public int MapPatchSceneIndex { get; private set; }
+        public float MapPatchNormalizedX { get; private set; }
+        public float MapPatchNormalizedY { get; private set; }
+        public bool HasPatchEncounterDirection { get; private set; }
+        public float PatchEncounterDirX { get; private set; }
+        public float PatchEncounterDirY { get; private set; }
+        public string PatchEncounterDirectionSource { get; private set; }
         public BattleScenarioContextMessage ScenarioContext { get; private set; }
         public string ContractHash { get; private set; }
 
@@ -73,6 +107,17 @@ namespace CoopSpectator.Network.Messages
             BattleId = ReadStringFromPacket(ref bufferReadValid) ?? string.Empty;
             RuntimeScene = ReadStringFromPacket(ref bufferReadValid) ?? string.Empty;
             PlayerSide = ReadStringFromPacket(ref bufferReadValid) ?? string.Empty;
+            MapPatchSceneIndex = ReadIntFromPacket(MapPatchSceneIndexCompressionInfo, ref bufferReadValid);
+            MapPatchNormalizedX =
+                ReadIntFromPacket(MapPatchNormalizedCompressionInfo, ref bufferReadValid) / 10000f;
+            MapPatchNormalizedY =
+                ReadIntFromPacket(MapPatchNormalizedCompressionInfo, ref bufferReadValid) / 10000f;
+            HasPatchEncounterDirection = ReadBoolFromPacket(ref bufferReadValid);
+            PatchEncounterDirX =
+                ReadIntFromPacket(MapPatchDirectionCompressionInfo, ref bufferReadValid) / 10000f;
+            PatchEncounterDirY =
+                ReadIntFromPacket(MapPatchDirectionCompressionInfo, ref bufferReadValid) / 10000f;
+            PatchEncounterDirectionSource = ReadStringFromPacket(ref bufferReadValid) ?? string.Empty;
 
             var scenarioContext = new BattleScenarioContextMessage
             {
@@ -143,6 +188,23 @@ namespace CoopSpectator.Network.Messages
             WriteStringToPacket(BattleId ?? string.Empty);
             WriteStringToPacket(RuntimeScene ?? string.Empty);
             WriteStringToPacket(PlayerSide ?? string.Empty);
+            WriteIntToPacket(
+                Clamp(MapPatchSceneIndex, -1, 32767),
+                MapPatchSceneIndexCompressionInfo);
+            WriteIntToPacket(
+                QuantizeNormalizedCoordinate(MapPatchNormalizedX),
+                MapPatchNormalizedCompressionInfo);
+            WriteIntToPacket(
+                QuantizeNormalizedCoordinate(MapPatchNormalizedY),
+                MapPatchNormalizedCompressionInfo);
+            WriteBoolToPacket(HasPatchEncounterDirection);
+            WriteIntToPacket(
+                QuantizeDirectionComponent(PatchEncounterDirX),
+                MapPatchDirectionCompressionInfo);
+            WriteIntToPacket(
+                QuantizeDirectionComponent(PatchEncounterDirY),
+                MapPatchDirectionCompressionInfo);
+            WriteStringToPacket(PatchEncounterDirectionSource ?? string.Empty);
 
             BattleScenarioContextMessage scenarioContext = ScenarioContext;
             WriteStringToPacket(scenarioContext?.CampaignBattleType ?? string.Empty);
@@ -213,6 +275,9 @@ namespace CoopSpectator.Network.Messages
                 " Schema=" + SchemaVersion +
                 " BattleIndex=" + BattleIndex +
                 " Scene=" + (RuntimeScene ?? string.Empty) +
+                " MapPatchSceneIndex=" + MapPatchSceneIndex +
+                " MapPatchNormalized=(" + MapPatchNormalizedX.ToString("0.####") + "," + MapPatchNormalizedY.ToString("0.####") + ")" +
+                " HasPatchEncounterDirection=" + HasPatchEncounterDirection +
                 " Siege=" + (ScenarioContext?.IsSiegeBattle == true) +
                 " Shell=" + (ScenarioContext?.SiegeContext?.MissionShell ?? string.Empty) +
                 " SceneLevels=" + (ScenarioContext?.SiegeContext?.MissionInitializerSceneLevels ?? string.Empty);
@@ -292,6 +357,20 @@ namespace CoopSpectator.Network.Messages
             if (value < min)
                 return min;
             return value > max ? max : value;
+        }
+
+        private static int QuantizeNormalizedCoordinate(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value))
+                return 0;
+            return Clamp((int)Math.Round(value * 10000f), 0, 10000);
+        }
+
+        private static int QuantizeDirectionComponent(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value))
+                return 0;
+            return Clamp((int)Math.Round(value * 10000f), -10000, 10000);
         }
 
         private static string Normalize(string value)

@@ -95,6 +95,42 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
+        public static bool ShouldAcceptClientFormationLayoutState(
+            Mission mission,
+            BattleSideEnum side,
+            out string diagnostics)
+        {
+            diagnostics = "client-manual-placement-inactive";
+            if (side == BattleSideEnum.None ||
+                !TryValidateClientManualPlacement(mission, out diagnostics))
+            {
+                return false;
+            }
+
+            lock (Sync)
+            {
+                if (!ReferenceEquals(_activeMission, mission) ||
+                    !ReferenceEquals(_manualPlacementMission, mission) ||
+                    !_manualPlacementActive ||
+                    _deploymentLifecycleFinished)
+                {
+                    diagnostics =
+                        "client-manual-placement-inactive" +
+                        " ActiveMission=" + ReferenceEquals(_activeMission, mission) +
+                        " PlacementMission=" + ReferenceEquals(_manualPlacementMission, mission) +
+                        " PlacementActive=" + _manualPlacementActive +
+                        " LifecycleFinished=" + _deploymentLifecycleFinished;
+                    return false;
+                }
+
+                diagnostics =
+                    "client-manual-placement-active" +
+                    " Side=" + side +
+                    " CompletedSides=[" + string.Join(",", CompletedDeploymentSides) + "]";
+                return true;
+            }
+        }
+
         private static bool TryBeginValidatedManualPlacement(
             Mission mission,
             BattleSideEnum side,

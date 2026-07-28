@@ -14,6 +14,13 @@ namespace CoopSpectator.Infrastructure
         public string BattleId { get; set; }
         public string RuntimeScene { get; set; }
         public string PlayerSide { get; set; }
+        public int MapPatchSceneIndex { get; set; } = -1;
+        public float MapPatchNormalizedX { get; set; }
+        public float MapPatchNormalizedY { get; set; }
+        public bool HasPatchEncounterDirection { get; set; }
+        public float PatchEncounterDirX { get; set; }
+        public float PatchEncounterDirY { get; set; }
+        public string PatchEncounterDirectionSource { get; set; }
         public BattleScenarioContextMessage ScenarioContext { get; set; }
         public string ContractHash { get; set; }
         public DateTime ReceivedUtc { get; set; }
@@ -27,6 +34,13 @@ namespace CoopSpectator.Infrastructure
                 BattleId = BattleId,
                 RuntimeScene = RuntimeScene,
                 PlayerSide = PlayerSide,
+                MapPatchSceneIndex = MapPatchSceneIndex,
+                MapPatchNormalizedX = MapPatchNormalizedX,
+                MapPatchNormalizedY = MapPatchNormalizedY,
+                HasPatchEncounterDirection = HasPatchEncounterDirection,
+                PatchEncounterDirX = PatchEncounterDirX,
+                PatchEncounterDirY = PatchEncounterDirY,
+                PatchEncounterDirectionSource = PatchEncounterDirectionSource,
                 ScenarioContext = ScenarioContext?.Clone(),
                 ContractHash = ContractHash,
                 ReceivedUtc = ReceivedUtc
@@ -80,12 +94,22 @@ namespace CoopSpectator.Infrastructure
                 snapshot.BattleId,
                 runtimeScene,
                 playerSide,
+                snapshot.MapPatchSceneIndex,
+                snapshot.MapPatchNormalizedX,
+                snapshot.MapPatchNormalizedY,
+                snapshot.HasPatchEncounterDirection,
+                snapshot.PatchEncounterDirX,
+                snapshot.PatchEncounterDirY,
+                snapshot.PatchEncounterDirectionSource,
                 scenarioContext);
 
             diagnostics =
                 "Scene=" + runtimeScene +
                 " BattleIndex=" + battleIndex +
                 " BattleId=" + Normalize(snapshot.BattleId) +
+                " MapPatchSceneIndex=" + snapshot.MapPatchSceneIndex +
+                " MapPatchNormalized=(" + QuantizeNormalizedCoordinate(snapshot.MapPatchNormalizedX) + "," + QuantizeNormalizedCoordinate(snapshot.MapPatchNormalizedY) + ")" +
+                " HasPatchEncounterDirection=" + snapshot.HasPatchEncounterDirection +
                 " ScenarioKind=" + Normalize(scenarioContext.ScenarioKind) +
                 " IsSiegeBattle=" + scenarioContext.IsSiegeBattle +
                 " Shell=" + Normalize(scenarioContext.SiegeContext?.MissionShell) +
@@ -96,6 +120,13 @@ namespace CoopSpectator.Infrastructure
                 snapshot.BattleId,
                 runtimeScene,
                 playerSide,
+                snapshot.MapPatchSceneIndex,
+                snapshot.MapPatchNormalizedX,
+                snapshot.MapPatchNormalizedY,
+                snapshot.HasPatchEncounterDirection,
+                snapshot.PatchEncounterDirX,
+                snapshot.PatchEncounterDirY,
+                snapshot.PatchEncounterDirectionSource,
                 scenarioContext,
                 contractHash);
         }
@@ -131,6 +162,13 @@ namespace CoopSpectator.Infrastructure
                 message.BattleId,
                 message.RuntimeScene,
                 message.PlayerSide,
+                message.MapPatchSceneIndex,
+                message.MapPatchNormalizedX,
+                message.MapPatchNormalizedY,
+                message.HasPatchEncounterDirection,
+                message.PatchEncounterDirX,
+                message.PatchEncounterDirY,
+                message.PatchEncounterDirectionSource,
                 message.ScenarioContext);
             if (!string.Equals(
                     expectedHash,
@@ -150,6 +188,13 @@ namespace CoopSpectator.Infrastructure
                 BattleId = Normalize(message.BattleId),
                 RuntimeScene = Normalize(message.RuntimeScene),
                 PlayerSide = Normalize(message.PlayerSide),
+                MapPatchSceneIndex = message.MapPatchSceneIndex,
+                MapPatchNormalizedX = message.MapPatchNormalizedX,
+                MapPatchNormalizedY = message.MapPatchNormalizedY,
+                HasPatchEncounterDirection = message.HasPatchEncounterDirection,
+                PatchEncounterDirX = message.PatchEncounterDirX,
+                PatchEncounterDirY = message.PatchEncounterDirY,
+                PatchEncounterDirectionSource = Normalize(message.PatchEncounterDirectionSource),
                 ScenarioContext = message.ScenarioContext.Clone(),
                 ContractHash = expectedHash,
                 ReceivedUtc = DateTime.UtcNow
@@ -164,6 +209,8 @@ namespace CoopSpectator.Infrastructure
                 "Accepted=True Scene=" + accepted.RuntimeScene +
                 " BattleIndex=" + accepted.BattleIndex +
                 " BattleId=" + accepted.BattleId +
+                " MapPatchSceneIndex=" + accepted.MapPatchSceneIndex +
+                " HasPatchEncounterDirection=" + accepted.HasPatchEncounterDirection +
                 " ScenarioKind=" + Normalize(accepted.ScenarioContext?.ScenarioKind) +
                 " IsSiegeBattle=" + (accepted.ScenarioContext?.IsSiegeBattle == true) +
                 " Shell=" + Normalize(accepted.ScenarioContext?.SiegeContext?.MissionShell) +
@@ -328,6 +375,13 @@ namespace CoopSpectator.Infrastructure
                 snapshot.BattleId,
                 runtimeScene,
                 playerSide,
+                snapshot.MapPatchSceneIndex,
+                snapshot.MapPatchNormalizedX,
+                snapshot.MapPatchNormalizedY,
+                snapshot.HasPatchEncounterDirection,
+                snapshot.PatchEncounterDirX,
+                snapshot.PatchEncounterDirY,
+                snapshot.PatchEncounterDirectionSource,
                 snapshot.ScenarioContext);
             bool matches = string.Equals(
                 fullSnapshotHash,
@@ -372,6 +426,13 @@ namespace CoopSpectator.Infrastructure
             string battleId,
             string runtimeScene,
             string playerSide,
+            int mapPatchSceneIndex,
+            float mapPatchNormalizedX,
+            float mapPatchNormalizedY,
+            bool hasPatchEncounterDirection,
+            float patchEncounterDirX,
+            float patchEncounterDirY,
+            string patchEncounterDirectionSource,
             BattleScenarioContextMessage scenarioContext)
         {
             var builder = new StringBuilder(2048);
@@ -380,6 +441,13 @@ namespace CoopSpectator.Infrastructure
             Append(builder, battleId);
             Append(builder, runtimeScene);
             Append(builder, playerSide);
+            Append(builder, Clamp(mapPatchSceneIndex, -1, 32767));
+            Append(builder, QuantizeNormalizedCoordinate(mapPatchNormalizedX));
+            Append(builder, QuantizeNormalizedCoordinate(mapPatchNormalizedY));
+            Append(builder, hasPatchEncounterDirection);
+            Append(builder, QuantizeDirectionComponent(patchEncounterDirX));
+            Append(builder, QuantizeDirectionComponent(patchEncounterDirY));
+            Append(builder, patchEncounterDirectionSource);
             Append(builder, scenarioContext?.CampaignBattleType);
             Append(builder, scenarioContext?.ScenarioKind);
             Append(builder, scenarioContext?.IsSiegeBattle == true);
@@ -479,6 +547,20 @@ namespace CoopSpectator.Infrastructure
                 (int)Math.Round(Math.Max(0f, value) * 100f),
                 0,
                 100000000);
+        }
+
+        private static int QuantizeNormalizedCoordinate(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value))
+                return 0;
+            return Clamp((int)Math.Round(value * 10000f), 0, 10000);
+        }
+
+        private static int QuantizeDirectionComponent(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value))
+                return 0;
+            return Clamp((int)Math.Round(value * 10000f), -10000, 10000);
         }
 
         private static void Append(StringBuilder builder, object value)

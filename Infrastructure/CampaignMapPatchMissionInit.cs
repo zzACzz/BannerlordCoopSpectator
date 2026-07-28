@@ -859,7 +859,7 @@ namespace CoopSpectator.Infrastructure
                         out CoopPreMissionTopologyContract preMissionContract,
                         out _))
                 {
-                    return new BattleSnapshotMessage
+                    var earlySnapshot = new BattleSnapshotMessage
                     {
                         BattleId = preMissionContract.BattleId,
                         MapScene = preMissionContract.RuntimeScene,
@@ -868,6 +868,19 @@ namespace CoopSpectator.Infrastructure
                         PlayerTroopsReceivedDamageMultiplier = 1f,
                         ScenarioContext = preMissionScenarioContext
                     };
+
+                    if (ExactLandBattleScenarioContract.IsFieldBattleScenario(preMissionScenarioContext))
+                    {
+                        earlySnapshot.MapPatchSceneIndex = preMissionContract.MapPatchSceneIndex;
+                        earlySnapshot.MapPatchNormalizedX = preMissionContract.MapPatchNormalizedX;
+                        earlySnapshot.MapPatchNormalizedY = preMissionContract.MapPatchNormalizedY;
+                        earlySnapshot.HasPatchEncounterDirection = preMissionContract.HasPatchEncounterDirection;
+                        earlySnapshot.PatchEncounterDirX = preMissionContract.PatchEncounterDirX;
+                        earlySnapshot.PatchEncounterDirY = preMissionContract.PatchEncounterDirY;
+                        earlySnapshot.PatchEncounterDirectionSource = preMissionContract.PatchEncounterDirectionSource;
+                    }
+
+                    return earlySnapshot;
                 }
             }
             catch

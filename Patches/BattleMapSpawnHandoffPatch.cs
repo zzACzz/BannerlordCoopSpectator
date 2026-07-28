@@ -279,6 +279,7 @@ namespace CoopSpectator.Patches
             public int ExactSiegeAdapterMissAttempts;
             public bool ExactSiegeNativeFallbackLogged;
             public bool UseSallyOutNativeStartupPacing;
+            public bool UseFieldBattleNativeStartupPacing;
             public string DeferralReason;
         }
 
@@ -892,6 +893,8 @@ namespace CoopSpectator.Patches
                 _sallyOutClientAdaptiveReplayGroupLimit = MinSallyOutClientCreateAgentReplayGroupsPerTick;
                 _sallyOutClientAdaptiveStableTickCount = 0;
             }
+            ExactFieldBattleInitialMaterializationRuntime.Reset(
+                source ?? "BattleMapSpawnHandoffPatch.ResetRuntimeState");
             _delayedLocalControlledWeaponStateReplayDepth = 0;
             _unsafeImmediateClientAgentBaselineMaterializationDepth = 0;
             _forcedNativeClientCreateAgentReplayDepth = 0;
@@ -2669,6 +2672,15 @@ namespace CoopSpectator.Patches
                 bool mountedHeroPayloadCandidate = IsMountedHeroTemplatePayload(createAgent);
                 bool useInitialSallyOutCreateAgentPacing =
                     ShouldUseInitialSallyOutCreateAgentPacing(mission, out string sallyOutPacingReason);
+                bool fieldBattleMaterializedMapApplied =
+                    CoopMissionNetworkBridge.HasClientCurrentMaterializedAgentEntrySnapshotApplied(
+                        out string fieldBattleMaterializedMapReadinessSummary);
+                bool useInitialFieldBattleCreateAgentPacing =
+                    ExactFieldBattleInitialMaterializationRuntime.ShouldPaceInitialClientCreateAgent(
+                        mission,
+                        fieldBattleMaterializedMapApplied,
+                        fieldBattleMaterializedMapReadinessSummary,
+                        out string fieldBattlePacingReason);
                 ExactCreateAgentCorridorDiagnostics.ObserveClientCreateAgentPrefix(
                     createAgent,
                     snapshotReadyForExactHeroHandoff,
@@ -2699,6 +2711,28 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                if (useInitialFieldBattleCreateAgentPacing &&
+                    !createAgent.IsPlayerAgent &&
+                    createAgent.Peer == null)
+                {
+                    RegisterDeferredClientCreateAgentPayload(
+                        createAgent,
+                        fieldBattlePacingReason,
+                        useFieldBattleNativeStartupPacing: true);
+                    if (ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+                    {
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: deferred initial field-battle CreateAgent for paced client replay. " +
+                            "AgentIndex=" + createAgent.AgentIndex +
+                            " MountAgentIndex=" + createAgent.MountAgentIndex +
+                            " TeamIndex=" + createAgent.TeamIndex +
+                            " HeroLike=" + IsHeroLikeCreateAgentPayload(createAgent) +
+                            " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
+                            " Reason=" + (fieldBattlePacingReason ?? "unknown"));
+                    }
+                    return false;
+                }
+
                 if (useInitialSallyOutCreateAgentPacing &&
                     mountedHeroPayloadCandidate &&
                     !TryMaterializeDeferredSallyOutMountBeforeHero(
@@ -2714,6 +2748,29 @@ namespace CoopSpectator.Patches
                     {
                         ModLogger.Info(
                             "BattleMapSpawnHandoffPatch: deferred SallyOut mounted hero until its paced native mount is materialized. " +
+                            "AgentIndex=" + createAgent.AgentIndex +
+                            " MountAgentIndex=" + createAgent.MountAgentIndex +
+                            " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
+                            " Reason=" + mountDeferralReason);
+                    }
+                    return false;
+                }
+
+                if (useInitialFieldBattleCreateAgentPacing &&
+                    mountedHeroPayloadCandidate &&
+                    !TryMaterializeDeferredFieldBattleMountBeforeHero(
+                        mission,
+                        createAgent.MountAgentIndex,
+                        "battle-map handoff field-battle mounted hero prerequisite"))
+                {
+                    string mountDeferralReason =
+                        "field-battle-deferred-mount-not-materialized MountAgentIndex=" +
+                        createAgent.MountAgentIndex;
+                    RegisterDeferredMountedHeroCreateAgentPayload(createAgent, mountDeferralReason);
+                    if (ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+                    {
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: deferred field-battle mounted hero until its paced native mount is materialized. " +
                             "AgentIndex=" + createAgent.AgentIndex +
                             " MountAgentIndex=" + createAgent.MountAgentIndex +
                             " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
@@ -3365,6 +3422,93 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static bool TryMaterializeDeferredFieldBattleMountBeforeHero(
+            Mission mission,
+            int mountAgentIndex,
+            string source)
+        {
+            if (mission == null || mountAgentIndex < 0)
+                return true;
+
+            Agent existingMount = Mission.MissionNetworkHelper.GetAgentFromIndex(
+                mountAgentIndex,
+                canBeNull: true);
+            if (existingMount != null && existingMount.IsActive())
+            {
+                RemoveDeferredClientCreateAgentPayload(mountAgentIndex);
+                return true;
+            }
+
+            DeferredClientCreateAgentPayload deferredMountPayload;
+            lock (DeferredClientAgentBootstrapBundleLock)
+            {
+                deferredMountPayload =
+                    DeferredClientAgentBootstrapBundles.TryGetValue(
+                        mountAgentIndex,
+                        out DeferredClientAgentBootstrapBundle bundle) &&
+                    bundle?.CreateAgent?.UseFieldBattleNativeStartupPacing == true
+                        ? bundle.CreateAgent
+                        : null;
+            }
+
+            if (deferredMountPayload?.Message == null)
+                return true;
+
+            MissionNetworkComponent missionNetworkComponent = mission.GetMissionBehavior<MissionNetworkComponent>();
+            if (missionNetworkComponent == null ||
+                _missionNetworkComponentHandleServerEventCreateAgentMethod == null)
+            {
+                return false;
+            }
+
+            deferredMountPayload.LastAttemptUtc = DateTime.UtcNow;
+            deferredMountPayload.Attempts++;
+            try
+            {
+                _forcedNativeClientCreateAgentReplayDepth++;
+                try
+                {
+                    _missionNetworkComponentHandleServerEventCreateAgentMethod.Invoke(
+                        missionNetworkComponent,
+                        new object[] { deferredMountPayload.Message });
+                }
+                finally
+                {
+                    _forcedNativeClientCreateAgentReplayDepth--;
+                }
+
+                Agent replayedMount = Mission.MissionNetworkHelper.GetAgentFromIndex(
+                    mountAgentIndex,
+                    canBeNull: true);
+                if (replayedMount == null || !replayedMount.IsActive())
+                    return false;
+
+                RemoveDeferredClientCreateAgentPayload(mountAgentIndex);
+                if (ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+                {
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: materialized deferred field-battle mount before exact hero adapter. " +
+                        "MountAgentIndex=" + mountAgentIndex +
+                        " Attempts=" + deferredMountPayload.Attempts +
+                        " Source=" + (source ?? "unknown"));
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                if (ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+                {
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred field-battle mount prerequisite replay failed. " +
+                        "MountAgentIndex=" + mountAgentIndex +
+                        " Attempts=" + deferredMountPayload.Attempts +
+                        " Source=" + (source ?? "unknown") +
+                        " Message=" + ex.GetBaseException().Message);
+                }
+                return false;
+            }
+        }
+
         private static void EnsureDeferredClientBootstrapMissionScope(Mission mission)
         {
             if (!GameNetwork.IsClient || mission == null)
@@ -3824,6 +3968,12 @@ namespace CoopSpectator.Patches
 
             DateTime replayTickUtc = DateTime.UtcNow;
             bool useAdaptiveSallyOutReplay = ShouldUseAdaptiveInitialSallyOutClientReplay(mission);
+            bool useAdaptiveFieldBattleReplay =
+                !useAdaptiveSallyOutReplay &&
+                CoopBattlePhaseRuntimeState.GetPhase() < CoopBattlePhase.BattleActive &&
+                ExactFieldBattleInitialMaterializationRuntime.IsValidatedScenario(
+                    mission,
+                    out _);
             int pacedGroupLimit = MaxSallyOutClientCreateAgentReplayGroupsPerTick;
             TimeSpan replayTickGap = TimeSpan.Zero;
             if (useAdaptiveSallyOutReplay)
@@ -3834,8 +3984,19 @@ namespace CoopSpectator.Patches
                 if (replayTickUtc < _nextSallyOutClientCreateAgentReplayUtc)
                     return;
             }
+            else if (useAdaptiveFieldBattleReplay)
+            {
+                if (!ExactFieldBattleInitialMaterializationRuntime.TryPrepareAdaptiveReplay(
+                        mission,
+                        replayTickUtc,
+                        out pacedGroupLimit,
+                        out replayTickGap))
+                {
+                    return;
+                }
+            }
 
-            int maxBundleCount = useAdaptiveSallyOutReplay
+            int maxBundleCount = useAdaptiveSallyOutReplay || useAdaptiveFieldBattleReplay
                 ? pacedGroupLimit
                 : int.MaxValue;
             var replayStopwatch = System.Diagnostics.Stopwatch.StartNew();
@@ -3940,6 +4101,16 @@ namespace CoopSpectator.Patches
                         agentBootstrapSnapshot.Bundles.Count,
                         source);
                 }
+                else if (useAdaptiveFieldBattleReplay)
+                {
+                    ExactFieldBattleInitialMaterializationRuntime.ObserveAdaptiveReplay(
+                        mission,
+                        replayStopwatch.Elapsed,
+                        replayTickGap,
+                        admittedPacedGroupCount,
+                        agentBootstrapSnapshot.Bundles.Count,
+                        source);
+                }
             }
         }
 
@@ -4038,7 +4209,8 @@ namespace CoopSpectator.Patches
         private static void RegisterDeferredClientCreateAgentPayload(
             CreateAgent createAgent,
             string snapshotReadinessSummary,
-            bool useSallyOutNativeStartupPacing = false)
+            bool useSallyOutNativeStartupPacing = false,
+            bool useFieldBattleNativeStartupPacing = false)
         {
             if (createAgent == null)
                 return;
@@ -4059,6 +4231,7 @@ namespace CoopSpectator.Patches
                     LastAttemptUtc = DateTime.MinValue,
                     Attempts = 0,
                     UseSallyOutNativeStartupPacing = useSallyOutNativeStartupPacing,
+                    UseFieldBattleNativeStartupPacing = useFieldBattleNativeStartupPacing,
                     DeferralReason = snapshotReadinessSummary
                 };
                 ScheduleDeferredClientAgentBootstrapBundleNoLock(bundle);
@@ -7462,13 +7635,15 @@ namespace CoopSpectator.Patches
                 return 0;
 
             int boundedPacedGroupCount = Math.Max(
-                MinSallyOutClientCreateAgentReplayGroupsPerTick,
-                Math.Min(MaxSallyOutClientCreateAgentReplayGroupsPerTick, maxPacedGroupCount));
+                1,
+                maxPacedGroupCount);
 
             DateTime nowUtc = DateTime.UtcNow;
+            bool useFieldBattleNativeStartupPacing = deferredPayloads.Any(candidate =>
+                candidate?.UseFieldBattleNativeStartupPacing == true);
             Dictionary<int, int> pacedMountToRiderAgentIndex = deferredPayloads
                 .Where(candidate =>
-                    candidate?.UseSallyOutNativeStartupPacing == true &&
+                    UsesInitialNativeStartupPacing(candidate) &&
                     candidate.Message != null &&
                     candidate.Message.MountAgentIndex >= 0)
                 .GroupBy(candidate => candidate.Message.MountAgentIndex)
@@ -7476,13 +7651,13 @@ namespace CoopSpectator.Patches
                     group => group.Key,
                     group => group.OrderBy(candidate => candidate.Sequence).First().Message.AgentIndex);
             Dictionary<int, long> pacedGroupFirstSequence = deferredPayloads
-                .Where(candidate => candidate?.UseSallyOutNativeStartupPacing == true && candidate.Message != null)
+                .Where(candidate => UsesInitialNativeStartupPacing(candidate) && candidate.Message != null)
                 .GroupBy(candidate => ResolveSallyOutCreateAgentReplayGroupKey(candidate, pacedMountToRiderAgentIndex))
                 .ToDictionary(group => group.Key, group => group.Min(candidate => candidate.Sequence));
             deferredPayloads = deferredPayloads
                 .OrderBy(candidate =>
                 {
-                    if (candidate?.UseSallyOutNativeStartupPacing != true || candidate.Message == null)
+                    if (!UsesInitialNativeStartupPacing(candidate) || candidate.Message == null)
                         return candidate?.Sequence ?? long.MaxValue;
 
                     int groupKey = ResolveSallyOutCreateAgentReplayGroupKey(
@@ -7493,7 +7668,7 @@ namespace CoopSpectator.Patches
                         : candidate.Sequence;
                 })
                 .ThenBy(candidate =>
-                    candidate?.UseSallyOutNativeStartupPacing == true &&
+                    UsesInitialNativeStartupPacing(candidate) &&
                     candidate.Message?.MountAgentIndex >= 0
                         ? 1
                         : 0)
@@ -7501,17 +7676,22 @@ namespace CoopSpectator.Patches
                 .ToList();
 
             Dictionary<int, bool> pacedGroupRetryReady = deferredPayloads
-                .Where(candidate => candidate?.UseSallyOutNativeStartupPacing == true && candidate.Message != null)
+                .Where(candidate => UsesInitialNativeStartupPacing(candidate) && candidate.Message != null)
                 .GroupBy(candidate => ResolveSallyOutCreateAgentReplayGroupKey(candidate, pacedMountToRiderAgentIndex))
                 .ToDictionary(
                     group => group.Key,
                     group => group.All(candidate =>
                         candidate.LastAttemptUtc == DateTime.MinValue ||
                         nowUtc - candidate.LastAttemptUtc >= TimeSpan.FromMilliseconds(100)));
-            bool canStartPacedSallyOutGroup = nowUtc >= _nextSallyOutClientCreateAgentReplayUtc;
-            HashSet<int> admittedPacedSallyOutGroups = new HashSet<int>();
-            int admittedPacedSallyOutGroupCount = 0;
-            DateTime pacedSallyOutReplayStartUtc = DateTime.MinValue;
+            bool canStartPacedGroup =
+                useFieldBattleNativeStartupPacing ||
+                nowUtc >= _nextSallyOutClientCreateAgentReplayUtc;
+            TimeSpan pacedReplayTimeBudget = useFieldBattleNativeStartupPacing
+                ? ExactFieldBattleInitialMaterializationRuntime.ReplayTimeBudget
+                : SallyOutClientCreateAgentReplayTimeBudget;
+            HashSet<int> admittedPacedInitialGroups = new HashSet<int>();
+            int admittedPacedInitialGroupCount = 0;
+            DateTime pacedInitialReplayStartUtc = DateTime.MinValue;
             foreach (DeferredClientCreateAgentPayload deferredPayload in deferredPayloads)
             {
                 CreateAgent createAgent = deferredPayload?.Message;
@@ -7520,33 +7700,42 @@ namespace CoopSpectator.Patches
                 if (!IsCurrentDeferredClientAgentBootstrapPayload(createAgent.AgentIndex, deferredPayload))
                     continue;
 
-                if (deferredPayload.UseSallyOutNativeStartupPacing)
+                if (UsesInitialNativeStartupPacing(deferredPayload))
                 {
                     int groupKey = ResolveSallyOutCreateAgentReplayGroupKey(
                         deferredPayload,
                         pacedMountToRiderAgentIndex);
-                    if (!admittedPacedSallyOutGroups.Contains(groupKey))
+                    if (!admittedPacedInitialGroups.Contains(groupKey))
                     {
                         bool groupRetryReady =
                             pacedGroupRetryReady.TryGetValue(groupKey, out bool retryReady) && retryReady;
                         bool timeBudgetAvailable =
-                            admittedPacedSallyOutGroupCount == 0 ||
-                            DateTime.UtcNow - pacedSallyOutReplayStartUtc < SallyOutClientCreateAgentReplayTimeBudget;
-                        if (!canStartPacedSallyOutGroup ||
+                            admittedPacedInitialGroupCount == 0 ||
+                            DateTime.UtcNow - pacedInitialReplayStartUtc < pacedReplayTimeBudget;
+                        if (!canStartPacedGroup ||
                             !groupRetryReady ||
-                            admittedPacedSallyOutGroupCount >= boundedPacedGroupCount ||
+                            admittedPacedInitialGroupCount >= boundedPacedGroupCount ||
                             !timeBudgetAvailable)
                         {
                             continue;
                         }
 
-                        admittedPacedSallyOutGroups.Add(groupKey);
-                        admittedPacedSallyOutGroupCount++;
-                        if (pacedSallyOutReplayStartUtc == DateTime.MinValue)
+                        admittedPacedInitialGroups.Add(groupKey);
+                        admittedPacedInitialGroupCount++;
+                        if (pacedInitialReplayStartUtc == DateTime.MinValue)
                         {
-                            pacedSallyOutReplayStartUtc = DateTime.UtcNow;
-                            _nextSallyOutClientCreateAgentReplayUtc =
-                                pacedSallyOutReplayStartUtc + SallyOutClientCreateAgentReplayInterval;
+                            pacedInitialReplayStartUtc = DateTime.UtcNow;
+                            if (useFieldBattleNativeStartupPacing)
+                            {
+                                ExactFieldBattleInitialMaterializationRuntime.MarkReplayGroupStarted(
+                                    mission,
+                                    pacedInitialReplayStartUtc);
+                            }
+                            else
+                            {
+                                _nextSallyOutClientCreateAgentReplayUtc =
+                                    pacedInitialReplayStartUtc + SallyOutClientCreateAgentReplayInterval;
+                            }
                         }
                     }
                 }
@@ -7570,10 +7759,10 @@ namespace CoopSpectator.Patches
 
                 deferredPayload.LastAttemptUtc = nowUtc;
                 deferredPayload.Attempts++;
-                bool pacedSallyOutHero =
-                    deferredPayload.UseSallyOutNativeStartupPacing &&
+                bool pacedInitialHero =
+                    UsesInitialNativeStartupPacing(deferredPayload) &&
                     IsHeroLikeCreateAgentPayload(createAgent);
-                if (pacedSallyOutHero)
+                if (pacedInitialHero)
                 {
                     bool strictExactHeroCandidate = false;
                     bool handledPacedHero = TryHandleStrictExactHeroCreateAgentViaContract(
@@ -7598,14 +7787,14 @@ namespace CoopSpectator.Patches
                             BindDeferredClientSetWeaponAmmoDataPayloadsToMaterializedAgent(
                                 createAgent.AgentIndex,
                                 pacedHeroAgent,
-                                "paced SallyOut exact hero CreateAgent adapter");
+                                "paced initial exact hero CreateAgent adapter");
                         }
 
                         RemoveDeferredClientCreateAgentPayload(createAgent.AgentIndex);
                         if (ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
                         {
                             ModLogger.Info(
-                                "BattleMapSpawnHandoffPatch: materialized paced SallyOut hero through exact CreateAgent adapter. " +
+                                "BattleMapSpawnHandoffPatch: materialized paced initial hero through exact CreateAgent adapter. " +
                                 "AgentIndex=" + createAgent.AgentIndex +
                                 " MountAgentIndex=" + createAgent.MountAgentIndex +
                                 " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
@@ -7645,7 +7834,7 @@ namespace CoopSpectator.Patches
                     continue;
                 }
 
-                bool forceNativeReplay = deferredPayload.UseSallyOutNativeStartupPacing;
+                bool forceNativeReplay = UsesInitialNativeStartupPacing(deferredPayload);
                 bool exactSiegeNativeFallback = false;
                 if (ShouldDeferExactSiegeTroopCreateAgentUntilAuthoritativeMapping(
                         mission,
@@ -7808,7 +7997,7 @@ namespace CoopSpectator.Patches
                 }
             }
 
-            return admittedPacedSallyOutGroupCount;
+            return admittedPacedInitialGroupCount;
         }
 
         private static int ResolveSallyOutCreateAgentReplayGroupKey(
@@ -7826,6 +8015,13 @@ namespace CoopSpectator.Patches
                    mountToRiderAgentIndex.TryGetValue(createAgent.AgentIndex, out int riderAgentIndex)
                 ? riderAgentIndex
                 : createAgent.AgentIndex;
+        }
+
+        private static bool UsesInitialNativeStartupPacing(
+            DeferredClientCreateAgentPayload deferredPayload)
+        {
+            return deferredPayload?.UseSallyOutNativeStartupPacing == true ||
+                   deferredPayload?.UseFieldBattleNativeStartupPacing == true;
         }
 
         private static void TryReplayDeferredClientAgentSetFormation(

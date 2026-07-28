@@ -447,7 +447,11 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         { // Починаємо блок методу
             if (GameNetwork.IsClient) // MP-клієнт не повинен керувати dedicated helper під час join/load місії.
             {
+                bool isHostedCampaignBattleClient = IsHostedLocalCampaignBattleClient();
                 bool isInMissionForClient = Mission.Current != null;
+                if (isHostedCampaignBattleClient && isInMissionForClient)
+                    TryHandleBattleResultMissionExit();
+
                 _wasInMissionLastTick = isInMissionForClient;
                 if (!isInMissionForClient)
                 {
@@ -3272,7 +3276,9 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         private void TryHandleBattleResultMissionExit()
         {
             Mission mission = Mission.Current;
-            if (mission == null || GameNetwork.IsClient || TaleWorlds.CampaignSystem.Campaign.Current == null)
+            if (mission == null ||
+                GameNetwork.IsClient && !IsHostedLocalCampaignBattleClient() ||
+                TaleWorlds.CampaignSystem.Campaign.Current == null)
                 return;
 
             if (DateTime.UtcNow < _nextMissionBattleResultPollUtc)
@@ -3290,6 +3296,16 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             if (result.UpdatedUtc <= _missionEnteredUtc)
                 return;
+
+            if (!string.IsNullOrWhiteSpace(_activeBattleInstanceId) &&
+                !string.IsNullOrWhiteSpace(result.BattleInstanceId) &&
+                !string.Equals(
+                    _activeBattleInstanceId,
+                    result.BattleInstanceId,
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
 
             if (string.Equals(_lastMissionExitRequestedBattleResultKey, resultKey, StringComparison.Ordinal))
                 return;
@@ -4146,6 +4162,38 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
 
             return false;
+        }
+
+        private static bool IsHostedLocalCampaignBattleClient()
+        {
+            if (!GameNetwork.IsClient ||
+                TaleWorlds.CampaignSystem.Campaign.Current == null ||
+                Mission.Current == null)
+            {
+                return false;
+            }
+
+            MapEvent battle =
+                PlayerEncounter.Battle ??
+                PlayerEncounter.EncounteredBattle ??
+                MobileParty.MainParty?.MapEvent;
+            if (battle == null)
+                return false;
+
+            if (!HostSelfJoinRedirectState.TryResolvePersistedHostedPeerUserName(out string hostedLocalUserName) ||
+                string.IsNullOrWhiteSpace(hostedLocalUserName))
+            {
+                return false;
+            }
+
+            NetworkCommunicator myPeer = GameNetwork.MyPeer;
+            return myPeer != null &&
+                   !myPeer.IsServerPeer &&
+                   myPeer.IsConnectionActive &&
+                   string.Equals(
+                       myPeer.UserName,
+                       hostedLocalUserName,
+                       StringComparison.OrdinalIgnoreCase);
         }
 
         private static string BuildBattleResultKey(CoopBattleResultBridgeFile.BattleResultSnapshot result)
