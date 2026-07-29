@@ -954,6 +954,11 @@ namespace CoopSpectator.Patches
                 team,
                 formations,
                 (source ?? "order") + ":" + orderType);
+            CoopSiegeAssaultFormationOrderRuntime.CancelPlayerDirectedOrders(
+                mission,
+                team,
+                formations,
+                (source ?? "order") + ":" + orderType);
         }
 
         private static void UpdateCommanderFormationAiControlForOrder(

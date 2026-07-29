@@ -259,6 +259,51 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
+        public static bool TryIssueSiegeAssaultFormationOrder(
+            BattleSideEnum side,
+            int formationMask,
+            CoopSiegeAssaultFormationOrderKind orderKind,
+            string source)
+        {
+            if (!GameNetwork.IsClient ||
+                !GameNetwork.IsSessionActive ||
+                side == BattleSideEnum.None ||
+                formationMask <= 0 ||
+                !Enum.IsDefined(typeof(CoopSiegeAssaultFormationOrderKind), orderKind))
+            {
+                return false;
+            }
+
+            try
+            {
+                GameNetwork.BeginModuleEventAsClient();
+                GameNetwork.WriteMessage(
+                    new CoopSiegeAssaultFormationOrderMessage(
+                        side,
+                        formationMask,
+                        orderKind));
+                GameNetwork.EndModuleEventAsClient();
+                ModLogger.Info(
+                    "CoopBattleNetworkRequestTransport: sent siege assault formation order. " +
+                    "Side=" + side +
+                    " FormationMask=" + formationMask +
+                    " Order=" + orderKind +
+                    " Source=" + (source ?? "unknown"));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopBattleNetworkRequestTransport: siege assault formation order send failed. " +
+                    "Side=" + side +
+                    " FormationMask=" + formationMask +
+                    " Order=" + orderKind +
+                    " Source=" + (source ?? "unknown") +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message);
+                return false;
+            }
+        }
+
         private static Vec3 ResolveCommanderDeploymentPointPosition(DeploymentPoint deploymentPoint)
         {
             if (deploymentPoint == null)
@@ -5893,6 +5938,7 @@ namespace CoopSpectator.MissionBehaviors
                 registerer.RegisterBaseHandler<CoopCommanderDeploymentFormationAssignmentsMessage>(HandleClientCommanderDeploymentFormationAssignments);
                 registerer.RegisterBaseHandler<CoopCommanderDeploymentSiegeMachineSelectionMessage>(HandleClientCommanderDeploymentSiegeMachineSelection);
                 registerer.RegisterBaseHandler<CoopSiegeAmbushDestroySiegeWeaponsOrderMessage>(HandleClientDestroySiegeWeaponsOrder);
+                registerer.RegisterBaseHandler<CoopSiegeAssaultFormationOrderMessage>(HandleClientSiegeAssaultFormationOrder);
                 registerer.RegisterBaseHandler<CoopBattleSnapshotChunkRequestMessage>(HandleClientBattleSnapshotChunkRequest);
                 registerer.RegisterBaseHandler<CoopBattleSnapshotRangeAckMessage>(HandleClientBattleSnapshotRangeAck);
                 registerer.RegisterBaseHandler<CoopBattleSnapshotCompleteAckMessage>(HandleClientBattleSnapshotCompleteAck);
@@ -6763,6 +6809,9 @@ namespace CoopSpectator.MissionBehaviors
 
         public override void OnRemoveBehavior()
         {
+            CoopSiegeAssaultFormationOrderRuntime.Reset(
+                Mission,
+                "CoopMissionNetworkBridge.OnRemoveBehavior");
             _lastSentStatusPayloadByPeer.Clear();
             _lastSentMaterializedAgentEntryPayloadByPeer.Clear();
             _lastSentBattleSnapshotPayloadByPeer.Clear();
@@ -7003,6 +7052,139 @@ namespace CoopSpectator.MissionBehaviors
                     "Peer=" + (peer?.UserName ?? "null") +
                     " Side=" + message.RequestedSide +
                     " FormationMask=" + message.FormationMask +
+                    " Applied=" + applied +
+                    " Diagnostics={" + diagnostics + "}");
+            }
+        }
+
+        private bool HandleClientSiegeAssaultFormationOrder(
+            NetworkCommunicator peer,
+            GameNetworkMessage baseMessage)
+        {
+            if (!(baseMessage is CoopSiegeAssaultFormationOrderMessage message))
+                return false;
+
+            bool applied = false;
+            string diagnostics = "unhandled";
+            try
+            {
+                BattleScenarioContextMessage scenarioContext =
+                    BattleSnapshotRuntimeState.GetScenarioContext() ??
+                    BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                    BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+                bool isSiegeAssault =
+                    ExactCampaignSiegeAssaultWithDeploymentRuntime
+                        .IsSiegeAssaultScenario(scenarioContext) ||
+                    ExactCampaignSiegeAssaultNoDeploymentRuntime
+                        .IsSiegeAssaultScenario(scenarioContext);
+                if (!GameNetwork.IsServer ||
+                    Mission == null ||
+                    CoopBattlePhaseRuntimeState.GetPhase() != CoopBattlePhase.BattleActive ||
+                    !isSiegeAssault ||
+                    !Enum.IsDefined(
+                        typeof(CoopSiegeAssaultFormationOrderKind),
+                        message.OrderKind))
+                {
+                    diagnostics = "invalid-scenario-phase-or-order";
+                    return true;
+                }
+
+                if (!TryResolveExactBattleOrderAuthority(
+                        peer,
+                        out Team team,
+                        out _,
+                        out _,
+                        out List<int> authorizedFormationIndices,
+                        out string authorityRole))
+                {
+                    diagnostics = "order-authority-missing";
+                    return true;
+                }
+
+                if (team == null ||
+                    message.RequestedSide != team.Side ||
+                    authorizedFormationIndices.Count <= 0 ||
+                    (team.Side != BattleSideEnum.Attacker &&
+                     team.Side != BattleSideEnum.Defender))
+                {
+                    diagnostics =
+                        "invalid-side-or-authority TeamSide=" +
+                        (team?.Side.ToString() ?? "null") +
+                        " RequestedSide=" +
+                        message.RequestedSide +
+                        " Role=" +
+                        authorityRole +
+                        " Authorized=" +
+                        authorizedFormationIndices.Count;
+                    return true;
+                }
+
+                bool orderMatchesSide =
+                    team.Side == BattleSideEnum.Attacker
+                        ? message.OrderKind !=
+                          CoopSiegeAssaultFormationOrderKind.OccupyArcherPositions
+                        : message.OrderKind ==
+                          CoopSiegeAssaultFormationOrderKind.OccupyArcherPositions;
+                if (!orderMatchesSide)
+                {
+                    diagnostics = "order-not-valid-for-side";
+                    return true;
+                }
+
+                var requestedFormations = new List<Formation>();
+                for (int formationIndex = 0;
+                     formationIndex < (int)FormationClass.NumberOfRegularFormations;
+                     formationIndex++)
+                {
+                    int formationBit = 1 << formationIndex;
+                    if ((message.FormationMask & formationBit) == 0 ||
+                        !authorizedFormationIndices.Contains(formationIndex))
+                    {
+                        continue;
+                    }
+
+                    Formation formation = team.FormationsIncludingEmpty.FirstOrDefault(
+                        candidate =>
+                            candidate != null &&
+                            candidate.Index == formationIndex &&
+                            ReferenceEquals(candidate.Team, team));
+                    if (formation != null && formation.CountOfUnits > 0)
+                        requestedFormations.Add(formation);
+                }
+
+                if (requestedFormations.Count <= 0)
+                {
+                    diagnostics =
+                        "no-authorized-active-formations FormationMask=" +
+                        message.FormationMask;
+                    return true;
+                }
+
+                applied = CoopSiegeAssaultFormationOrderRuntime.TryApply(
+                    Mission,
+                    team,
+                    requestedFormations,
+                    message.OrderKind,
+                    out diagnostics);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                diagnostics =
+                    "exception " +
+                    ex.GetType().Name +
+                    ":" +
+                    ex.Message;
+                return true;
+            }
+            finally
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: handled siege assault formation order. " +
+                    "Peer=" + (peer?.UserName ?? "null") +
+                    " Side=" + message.RequestedSide +
+                    " FormationMask=" + message.FormationMask +
+                    " Order=" + message.OrderKind +
                     " Applied=" + applied +
                     " Diagnostics={" + diagnostics + "}");
             }

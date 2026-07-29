@@ -58,6 +58,7 @@
     <Compile Include="..\Mission\CoopExactCampaignReliefMissionController.cs" Link="Mission\CoopExactCampaignReliefMissionController.cs" />
     <Compile Include="..\Mission\CoopExactCampaignSiegeAmbushMissionController.cs" Link="Mission\CoopExactCampaignSiegeAmbushMissionController.cs" />
     <Compile Include="..\Mission\CoopMissionNetworkBridge.cs" Link="Mission\CoopMissionNetworkBridge.cs" />
+    <Compile Include="..\Mission\CoopSiegeAssaultFormationOrderRuntime.cs" Link="Mission\CoopSiegeAssaultFormationOrderRuntime.cs" />
     <Compile Include="..\MissionModels\CoopCampaignDerivedAgentStatCalculateModel.cs" Link="MissionModels\CoopCampaignDerivedAgentStatCalculateModel.cs" />
     <Compile Include="..\MissionModels\CoopCampaignDerivedStrikeMagnitudeCalculationModel.cs" Link="MissionModels\CoopCampaignDerivedStrikeMagnitudeCalculationModel.cs" />
     <Compile Include="..\MissionModels\CoopCampaignDerivedAgentApplyDamageModel.cs" Link="MissionModels\CoopCampaignDerivedAgentApplyDamageModel.cs" />
@@ -72,6 +73,7 @@
     <Compile Include="..\Network\Messages\CoopBattleSelectionNetworkMessages.cs" Link="Network\Messages\CoopBattleSelectionNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopBattleAgentControlNetworkMessages.cs" Link="Network\Messages\CoopBattleAgentControlNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopSiegeAmbushOrderNetworkMessages.cs" Link="Network\Messages\CoopSiegeAmbushOrderNetworkMessages.cs" />
+    <Compile Include="..\Network\Messages\CoopSiegeAssaultOrderNetworkMessages.cs" Link="Network\Messages\CoopSiegeAssaultOrderNetworkMessages.cs" />
     <Compile Include="..\Infrastructure\ModLogger.cs" Link="Infrastructure\ModLogger.cs" />
     <Compile Include="..\Infrastructure\BannerAwareAgentOrigin.cs" Link="Infrastructure\BannerAwareAgentOrigin.cs" />
     <Compile Include="..\Infrastructure\CoopDebugConfig.cs" Link="Infrastructure\CoopDebugConfig.cs" />

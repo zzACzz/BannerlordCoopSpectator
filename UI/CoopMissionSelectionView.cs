@@ -6843,6 +6843,128 @@ namespace CoopSpectator.UI
             return SiegeAmbushScenarioContract.IsSiegeAmbushScenario(scenarioContext);
         }
 
+        private static bool ShouldIncludeSiegeAssaultFormationOrderSet()
+        {
+            if (!IsCommanderBattleOrderActive() ||
+                CoopBattlePhaseRuntimeState.GetPhase() != CoopBattlePhase.BattleActive)
+            {
+                return false;
+            }
+
+            Mission mission = Mission.Current;
+            Team playerTeam = mission?.PlayerTeam;
+            if (playerTeam == null ||
+                (playerTeam.Side != BattleSideEnum.Attacker &&
+                 playerTeam.Side != BattleSideEnum.Defender))
+            {
+                return false;
+            }
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            return ExactCampaignSiegeAssaultWithDeploymentRuntime
+                       .IsSiegeAssaultScenario(scenarioContext) ||
+                   ExactCampaignSiegeAssaultNoDeploymentRuntime
+                       .IsSiegeAssaultScenario(scenarioContext);
+        }
+
+        private static void ExecuteSiegeAssaultFormationOrder(
+            OrderController orderController,
+            CoopSiegeAssaultFormationOrderKind orderKind)
+        {
+            Mission mission = Mission.Current;
+            Team team = mission?.PlayerTeam;
+            if (!ShouldIncludeSiegeAssaultFormationOrderSet() ||
+                orderController?.SelectedFormations == null ||
+                team == null)
+            {
+                InformationManager.DisplayMessage(
+                    new InformationMessage(
+                        "Coop Battle: siege order is unavailable."));
+                return;
+            }
+
+            bool orderMatchesSide =
+                team.Side == BattleSideEnum.Attacker
+                    ? orderKind !=
+                      CoopSiegeAssaultFormationOrderKind.OccupyArcherPositions
+                    : orderKind ==
+                      CoopSiegeAssaultFormationOrderKind.OccupyArcherPositions;
+            if (!orderMatchesSide)
+            {
+                InformationManager.DisplayMessage(
+                    new InformationMessage(
+                        "Coop Battle: siege order is invalid for this side."));
+                return;
+            }
+
+            int formationMask = BuildSelectedFormationMask(orderController, team);
+            if (formationMask <= 0)
+            {
+                InformationManager.DisplayMessage(
+                    new InformationMessage(
+                        "Coop Battle: select at least one active formation."));
+                return;
+            }
+
+            bool sent = CoopBattleNetworkRequestTransport
+                .TryIssueSiegeAssaultFormationOrder(
+                    team.Side,
+                    formationMask,
+                    orderKind,
+                    "F7 siege order set");
+            InformationManager.DisplayMessage(
+                new InformationMessage(
+                    sent
+                        ? GetSiegeAssaultOrderSentMessage(orderKind)
+                        : "Coop Battle: failed to send siege order."));
+        }
+
+        private static int BuildSelectedFormationMask(
+            OrderController orderController,
+            Team team)
+        {
+            if (orderController?.SelectedFormations == null || team == null)
+                return 0;
+
+            int formationMask = 0;
+            foreach (Formation formation in orderController.SelectedFormations)
+            {
+                if (formation == null ||
+                    !ReferenceEquals(formation.Team, team) ||
+                    formation.CountOfUnits <= 0 ||
+                    formation.Index < 0 ||
+                    formation.Index >= (int)FormationClass.NumberOfRegularFormations)
+                {
+                    continue;
+                }
+
+                formationMask |= 1 << formation.Index;
+            }
+
+            return formationMask;
+        }
+
+        private static string GetSiegeAssaultOrderSentMessage(
+            CoopSiegeAssaultFormationOrderKind orderKind)
+        {
+            switch (orderKind)
+            {
+                case CoopSiegeAssaultFormationOrderKind.AttackGate:
+                    return "Coop Battle: attack gate order sent.";
+                case CoopSiegeAssaultFormationOrderKind.AssaultWalls:
+                    return "Coop Battle: assault walls order sent.";
+                case CoopSiegeAssaultFormationOrderKind.UseSiegeMachines:
+                    return "Coop Battle: use siege machines order sent.";
+                case CoopSiegeAssaultFormationOrderKind.OccupyArcherPositions:
+                    return "Coop Battle: occupy wall positions order sent.";
+                default:
+                    return "Coop Battle: siege order sent.";
+            }
+        }
+
         private static void ExecuteSiegeAmbushDestroySiegeWeaponsOrder(
             OrderController orderController)
         {
@@ -6932,6 +7054,90 @@ namespace CoopSpectator.UI
             }
         }
 
+        private sealed class CoopSiegeAssaultFormationVisualOrder : VisualOrder
+        {
+            private readonly CoopSiegeAssaultFormationOrderKind _orderKind;
+            private readonly TextObject _name;
+
+            public CoopSiegeAssaultFormationVisualOrder(
+                string iconId,
+                CoopSiegeAssaultFormationOrderKind orderKind,
+                TextObject name)
+                : base(iconId)
+            {
+                _orderKind = orderKind;
+                _name = name;
+            }
+
+            public override TextObject GetName(OrderController orderController)
+            {
+                return _name;
+            }
+
+            public override bool IsTargeted()
+            {
+                return false;
+            }
+
+            public override void ExecuteOrder(
+                OrderController orderController,
+                VisualOrderExecutionParameters executionParameters)
+            {
+                ExecuteSiegeAssaultFormationOrder(orderController, _orderKind);
+            }
+
+            protected override bool? OnGetFormationHasOrder(Formation formation)
+            {
+                return false;
+            }
+        }
+
+        private static GenericVisualOrderSet CreateSiegeAssaultFormationOrderSet()
+        {
+            if (!ShouldIncludeSiegeAssaultFormationOrderSet())
+                return null;
+
+            Mission mission = Mission.Current;
+            Team team = mission?.PlayerTeam;
+            if (team == null)
+                return null;
+
+            var siegeSet = new GenericVisualOrderSet(
+                "order_movement_charge",
+                new TextObject("{=CoopSiegeOrders}Siege"),
+                useActiveOrderForIconId: false,
+                useActiveOrderForName: false);
+            if (team.Side == BattleSideEnum.Attacker)
+            {
+                siegeSet.AddOrder(
+                    new CoopSiegeAssaultFormationVisualOrder(
+                        "order_movement_charge",
+                        CoopSiegeAssaultFormationOrderKind.AttackGate,
+                        new TextObject("{=CoopAttackGate}Attack Gate")));
+                siegeSet.AddOrder(
+                    new CoopSiegeAssaultFormationVisualOrder(
+                        "order_movement_advance",
+                        CoopSiegeAssaultFormationOrderKind.AssaultWalls,
+                        new TextObject("{=CoopAssaultWalls}Assault Walls")));
+                siegeSet.AddOrder(
+                    new CoopSiegeAssaultFormationVisualOrder(
+                        "order_movement_follow",
+                        CoopSiegeAssaultFormationOrderKind.UseSiegeMachines,
+                        new TextObject("{=CoopUseSiegeMachines}Use Siege Machines")));
+            }
+            else if (team.Side == BattleSideEnum.Defender)
+            {
+                siegeSet.AddOrder(
+                    new CoopSiegeAssaultFormationVisualOrder(
+                        "order_toggle_fire",
+                        CoopSiegeAssaultFormationOrderKind.OccupyArcherPositions,
+                        new TextObject("{=CoopOccupyWallPositions}Occupy Wall Positions")));
+            }
+
+            siegeSet.AddOrder(new ReturnVisualOrder());
+            return siegeSet;
+        }
+
         private sealed class CoopCommanderDeploymentVisualOrderProvider : VisualOrderProvider
         {
             public override bool IsAvailable()
@@ -7008,6 +7214,9 @@ namespace CoopSpectator.UI
                 toggleSet.AddOrder(transferOrder);
                 toggleSet.AddOrder(new ReturnVisualOrder());
 
+                GenericVisualOrderSet siegeAssaultSet =
+                    CreateSiegeAssaultFormationOrderSet();
+
                 orders.Add(movementSet);
                 orders.Add(formSet);
                 orders.Add(toggleSet);
@@ -7016,9 +7225,15 @@ namespace CoopSpectator.UI
                     orders.Add(new SingleVisualOrderSet(fireOrder));
                     orders.Add(new SingleVisualOrderSet(mountedOrder));
                     orders.Add(new SingleVisualOrderSet(delegateOrder));
-                    orders.Add(new SingleVisualOrderSet(facingOrder));
+                    orders.Add(
+                        siegeAssaultSet ??
+                        (VisualOrderSet)new SingleVisualOrderSet(facingOrder));
                     orders.Add(new SingleVisualOrderSet(shieldWallOrder));
                     orders.Add(new SingleVisualOrderSet(lineOrder));
+                }
+                else if (siegeAssaultSet != null)
+                {
+                    orders.Add(siegeAssaultSet);
                 }
 
                 return orders;
