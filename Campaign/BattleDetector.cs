@@ -1221,7 +1221,14 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 int updatedWounded = partyState.MemberRoster.GetElementWoundedNumber(updatedIndex);
                 if (updatedWounded != desiredWounded)
                 {
-                    partyState.MemberRoster.SetElementWoundedNumber(updatedIndex, desiredWounded);
+                    // SetElementWoundedNumber mutates the row but leaves TroopRoster's cached
+                    // wounded totals stale. The delta path updates both representations.
+                    partyState.MemberRoster.AddToCountsAtIndex(
+                        updatedIndex,
+                        0,
+                        desiredWounded - updatedWounded,
+                        0,
+                        removeDepleted: false);
                     changed = true;
                 }
             }
@@ -3390,11 +3397,19 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 TryInjectFinalSiegeDefenderBattleResultPreviewIntoLiveEncounter(result, resultKey);
                 TryInjectFinalLandBattleDefeatedSideBattleResultPreviewIntoLiveEncounter(result, resultKey);
             }
+            bool finalSiegeDefenderPreviewApplied = string.Equals(
+                _cachedHostAftermathFinalSiegeDefenderPreviewResultKey,
+                resultKey,
+                StringComparison.Ordinal);
             if (!deferFinalAftermath &&
                 !useNativeFinalLordsHallAftermath &&
                 !useNativeFinalLandBattleAftermath &&
-                !useNativeSiegeAmbushAftermath)
+                !useNativeSiegeAmbushAftermath &&
+                !finalSiegeDefenderPreviewApplied)
             {
+                // A completed final-siege preview already exposes the wounded defenders to
+                // MapEvent.CaptureDefeatedPartyMembers. Pre-populating its loot roster here
+                // would make the native capture path add the same prisoners a second time.
                 TryInjectMainPartyPrisonerAftermathIntoLiveMapEvent(result);
             }
 
