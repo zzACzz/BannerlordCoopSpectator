@@ -282,6 +282,7 @@ namespace CoopSpectator.Patches
             public bool UseSallyOutNativeStartupPacing;
             public bool UseFieldBattleNativeStartupPacing;
             public bool UseVillageBattleNativeStartupPacing;
+            public bool UseSiegeAssaultNativeStartupPacing;
             public string DeferralReason;
         }
 
@@ -750,6 +751,8 @@ namespace CoopSpectator.Patches
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetUsableGameObjectIsDeactivated), () => PatchMissionNetworkComponentSetUsableGameObjectIsDeactivated(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetMachineTargetRotation), () => PatchMissionNetworkComponentSetMachineTargetRotation(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetSiegeMachineMovementDistance), () => PatchMissionNetworkComponentSetSiegeMachineMovementDistance(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetSiegeTowerGateState), () => PatchMissionNetworkComponentSetSiegeTowerGateState(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetSiegeTowerHasArrivedAtTarget), () => PatchMissionNetworkComponentSetSiegeTowerHasArrivedAtTarget(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSpawnWeaponWithNewEntity), () => PatchMissionNetworkComponentSpawnWeaponWithNewEntity(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentAttachWeaponToSpawnedWeapon), () => PatchMissionNetworkComponentAttachWeaponToSpawnedWeapon(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSpawnAttachedWeaponOnSpawnedWeapon), () => PatchMissionNetworkComponentSpawnAttachedWeaponOnSpawnedWeapon(harmony));
@@ -898,6 +901,8 @@ namespace CoopSpectator.Patches
             ExactFieldBattleInitialMaterializationRuntime.Reset(
                 source ?? "BattleMapSpawnHandoffPatch.ResetRuntimeState");
             ExactVillageBattleInitialMaterializationRuntime.Reset(
+                source ?? "BattleMapSpawnHandoffPatch.ResetRuntimeState");
+            ExactSiegeAssaultInitialMaterializationRuntime.Reset(
                 source ?? "BattleMapSpawnHandoffPatch.ResetRuntimeState");
             _delayedLocalControlledWeaponStateReplayDepth = 0;
             _unsafeImmediateClientAgentBaselineMaterializationDepth = 0;
@@ -1634,6 +1639,42 @@ namespace CoopSpectator.Patches
 
             harmony.Patch(target, prefix: new HarmonyMethod(prefix));
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventSetSiegeMachineMovementDistance.");
+        }
+
+        private static void PatchMissionNetworkComponentSetSiegeTowerGateState(Harmony harmony)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                "HandleServerEventSetSiegeTowerGateState",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventSetSiegeTowerGateState_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventSetSiegeTowerGateState not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventSetSiegeTowerGateState.");
+        }
+
+        private static void PatchMissionNetworkComponentSetSiegeTowerHasArrivedAtTarget(Harmony harmony)
+        {
+            MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                "HandleServerEventSetSiegeTowerHasArrivedAtTarget",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventSetSiegeTowerHasArrivedAtTarget_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: MissionNetworkComponent.HandleServerEventSetSiegeTowerHasArrivedAtTarget not found. Skip.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventSetSiegeTowerHasArrivedAtTarget.");
         }
 
         private static void PatchMissionNetworkComponentSpawnWeaponWithNewEntity(Harmony harmony)
@@ -2691,6 +2732,12 @@ namespace CoopSpectator.Patches
                         fieldBattleMaterializedMapApplied,
                         fieldBattleMaterializedMapReadinessSummary,
                         out string villageBattlePacingReason);
+                bool useInitialSiegeAssaultCreateAgentPacing =
+                    ExactSiegeAssaultInitialMaterializationRuntime.ShouldPaceInitialClientCreateAgent(
+                        mission,
+                        fieldBattleMaterializedMapApplied,
+                        fieldBattleMaterializedMapReadinessSummary,
+                        out string siegeAssaultPacingReason);
                 ExactCreateAgentCorridorDiagnostics.ObserveClientCreateAgentPrefix(
                     createAgent,
                     snapshotReadyForExactHeroHandoff,
@@ -2761,6 +2808,28 @@ namespace CoopSpectator.Patches
                             " HeroLike=" + IsHeroLikeCreateAgentPayload(createAgent) +
                             " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
                             " Reason=" + (villageBattlePacingReason ?? "unknown"));
+                    }
+                    return false;
+                }
+
+                if (useInitialSiegeAssaultCreateAgentPacing &&
+                    !createAgent.IsPlayerAgent &&
+                    createAgent.Peer == null)
+                {
+                    RegisterDeferredClientCreateAgentPayload(
+                        createAgent,
+                        siegeAssaultPacingReason,
+                        useSiegeAssaultNativeStartupPacing: true);
+                    if (ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+                    {
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: deferred initial external-siege foot CreateAgent for paced client replay. " +
+                            "AgentIndex=" + createAgent.AgentIndex +
+                            " MountAgentIndex=" + createAgent.MountAgentIndex +
+                            " TeamIndex=" + createAgent.TeamIndex +
+                            " HeroLike=" + IsHeroLikeCreateAgentPayload(createAgent) +
+                            " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
+                            " Reason=" + (siegeAssaultPacingReason ?? "unknown"));
                     }
                     return false;
                 }
@@ -4123,6 +4192,14 @@ namespace CoopSpectator.Patches
                 ExactVillageBattleInitialMaterializationRuntime.IsValidatedScenario(
                     mission,
                     out _);
+            bool useAdaptiveSiegeAssaultReplay =
+                !useAdaptiveSallyOutReplay &&
+                !useAdaptiveFieldBattleReplay &&
+                !useAdaptiveVillageBattleReplay &&
+                CoopBattlePhaseRuntimeState.GetPhase() < CoopBattlePhase.BattleActive &&
+                ExactSiegeAssaultInitialMaterializationRuntime.IsValidatedScenario(
+                    mission,
+                    out _);
             int pacedGroupLimit = MaxSallyOutClientCreateAgentReplayGroupsPerTick;
             TimeSpan replayTickGap = TimeSpan.Zero;
             if (useAdaptiveSallyOutReplay)
@@ -4155,11 +4232,23 @@ namespace CoopSpectator.Patches
                     return;
                 }
             }
+            else if (useAdaptiveSiegeAssaultReplay)
+            {
+                if (!ExactSiegeAssaultInitialMaterializationRuntime.TryPrepareAdaptiveReplay(
+                        mission,
+                        replayTickUtc,
+                        out pacedGroupLimit,
+                        out replayTickGap))
+                {
+                    return;
+                }
+            }
 
             int maxBundleCount =
                 useAdaptiveSallyOutReplay ||
                 useAdaptiveFieldBattleReplay ||
-                useAdaptiveVillageBattleReplay
+                useAdaptiveVillageBattleReplay ||
+                useAdaptiveSiegeAssaultReplay
                 ? pacedGroupLimit
                 : int.MaxValue;
             var replayStopwatch = System.Diagnostics.Stopwatch.StartNew();
@@ -4284,6 +4373,16 @@ namespace CoopSpectator.Patches
                         agentBootstrapSnapshot.Bundles.Count,
                         source);
                 }
+                else if (useAdaptiveSiegeAssaultReplay)
+                {
+                    ExactSiegeAssaultInitialMaterializationRuntime.ObserveAdaptiveReplay(
+                        mission,
+                        replayStopwatch.Elapsed,
+                        replayTickGap,
+                        admittedPacedGroupCount,
+                        agentBootstrapSnapshot.Bundles.Count,
+                        source);
+                }
             }
         }
 
@@ -4384,7 +4483,8 @@ namespace CoopSpectator.Patches
             string snapshotReadinessSummary,
             bool useSallyOutNativeStartupPacing = false,
             bool useFieldBattleNativeStartupPacing = false,
-            bool useVillageBattleNativeStartupPacing = false)
+            bool useVillageBattleNativeStartupPacing = false,
+            bool useSiegeAssaultNativeStartupPacing = false)
         {
             if (createAgent == null)
                 return;
@@ -4407,6 +4507,7 @@ namespace CoopSpectator.Patches
                     UseSallyOutNativeStartupPacing = useSallyOutNativeStartupPacing,
                     UseFieldBattleNativeStartupPacing = useFieldBattleNativeStartupPacing,
                     UseVillageBattleNativeStartupPacing = useVillageBattleNativeStartupPacing,
+                    UseSiegeAssaultNativeStartupPacing = useSiegeAssaultNativeStartupPacing,
                     DeferralReason = snapshotReadinessSummary
                 };
                 ScheduleDeferredClientAgentBootstrapBundleNoLock(bundle);
@@ -7818,9 +7919,11 @@ namespace CoopSpectator.Patches
                 candidate?.UseFieldBattleNativeStartupPacing == true);
             bool useVillageBattleNativeStartupPacing = deferredPayloads.Any(candidate =>
                 candidate?.UseVillageBattleNativeStartupPacing == true);
+            bool useSiegeAssaultNativeStartupPacing = deferredPayloads.Any(candidate =>
+                candidate?.UseSiegeAssaultNativeStartupPacing == true);
             Dictionary<int, int> pacedMountToRiderAgentIndex = deferredPayloads
                 .Where(candidate =>
-                    UsesInitialNativeStartupPacing(candidate) &&
+                    UsesMountedInitialNativeStartupPacing(candidate) &&
                     candidate.Message != null &&
                     candidate.Message.MountAgentIndex >= 0)
                 .GroupBy(candidate => candidate.Message.MountAgentIndex)
@@ -7845,7 +7948,7 @@ namespace CoopSpectator.Patches
                         : candidate.Sequence;
                 })
                 .ThenBy(candidate =>
-                    UsesInitialNativeStartupPacing(candidate) &&
+                    UsesMountedInitialNativeStartupPacing(candidate) &&
                     candidate.Message?.MountAgentIndex >= 0
                         ? 1
                         : 0)
@@ -7863,12 +7966,15 @@ namespace CoopSpectator.Patches
             bool canStartPacedGroup =
                 useFieldBattleNativeStartupPacing ||
                 useVillageBattleNativeStartupPacing ||
+                useSiegeAssaultNativeStartupPacing ||
                 nowUtc >= _nextSallyOutClientCreateAgentReplayUtc;
             TimeSpan pacedReplayTimeBudget = useFieldBattleNativeStartupPacing
                 ? ExactFieldBattleInitialMaterializationRuntime.ReplayTimeBudget
                 : useVillageBattleNativeStartupPacing
                     ? ExactVillageBattleInitialMaterializationRuntime.ReplayTimeBudget
-                    : SallyOutClientCreateAgentReplayTimeBudget;
+                    : useSiegeAssaultNativeStartupPacing
+                        ? ExactSiegeAssaultInitialMaterializationRuntime.ReplayTimeBudget
+                        : SallyOutClientCreateAgentReplayTimeBudget;
             HashSet<int> admittedPacedInitialGroups = new HashSet<int>();
             int admittedPacedInitialGroupCount = 0;
             DateTime pacedInitialReplayStartUtc = DateTime.MinValue;
@@ -7917,6 +8023,12 @@ namespace CoopSpectator.Patches
                                     mission,
                                     pacedInitialReplayStartUtc);
                             }
+                            else if (useSiegeAssaultNativeStartupPacing)
+                            {
+                                ExactSiegeAssaultInitialMaterializationRuntime.MarkReplayGroupStarted(
+                                    mission,
+                                    pacedInitialReplayStartUtc);
+                            }
                             else
                             {
                                 _nextSallyOutClientCreateAgentReplayUtc =
@@ -7955,7 +8067,8 @@ namespace CoopSpectator.Patches
                         mission,
                         createAgent,
                         out strictExactHeroCandidate);
-                    if (!handledPacedHero)
+                    if (!handledPacedHero &&
+                        deferredPayload.UseSiegeAssaultNativeStartupPacing != true)
                     {
                         handledPacedHero = TryHandleMountedHeroCreateAgentViaPayloadAdapter(
                             mission,
@@ -8208,7 +8321,15 @@ namespace CoopSpectator.Patches
         {
             return deferredPayload?.UseSallyOutNativeStartupPacing == true ||
                    deferredPayload?.UseFieldBattleNativeStartupPacing == true ||
-                   deferredPayload?.UseVillageBattleNativeStartupPacing == true;
+                   deferredPayload?.UseVillageBattleNativeStartupPacing == true ||
+                   deferredPayload?.UseSiegeAssaultNativeStartupPacing == true;
+        }
+
+        private static bool UsesMountedInitialNativeStartupPacing(
+            DeferredClientCreateAgentPayload deferredPayload)
+        {
+            return UsesInitialNativeStartupPacing(deferredPayload) &&
+                   deferredPayload?.UseSiegeAssaultNativeStartupPacing != true;
         }
 
         private static void TryReplayDeferredClientAgentSetFormation(
@@ -17489,6 +17610,42 @@ namespace CoopSpectator.Patches
             catch (Exception ex)
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: SetSiegeMachineMovementDistance siege id remap failed open: " + ex.Message);
+            }
+
+            return true;
+        }
+
+        private static bool MissionNetworkComponent_HandleServerEventSetSiegeTowerGateState_Prefix(GameNetworkMessage baseMessage)
+        {
+            try
+            {
+                TryRemapExactSiegeMissionObjectIdMessage(
+                    baseMessage,
+                    "SiegeTowerId",
+                    SiegeMissionObjectIdBridgeTarget.UsableMachine,
+                    "SetSiegeTowerGateState");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: SetSiegeTowerGateState siege id remap failed open: " + ex.Message);
+            }
+
+            return true;
+        }
+
+        private static bool MissionNetworkComponent_HandleServerEventSetSiegeTowerHasArrivedAtTarget_Prefix(GameNetworkMessage baseMessage)
+        {
+            try
+            {
+                TryRemapExactSiegeMissionObjectIdMessage(
+                    baseMessage,
+                    "SiegeTowerId",
+                    SiegeMissionObjectIdBridgeTarget.UsableMachine,
+                    "SetSiegeTowerHasArrivedAtTarget");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: SetSiegeTowerHasArrivedAtTarget siege id remap failed open: " + ex.Message);
             }
 
             return true;

@@ -155,6 +155,9 @@ namespace CoopSpectator.MissionBehaviors
             TryRestoreClientMainAgentFromMissionPeer(mission);
             CoopMissionSpawnLogic.TryRunClientExactCampaignVisualObserver(mission);
             CoopMissionSpawnLogic.TryRunClientGlobalCaptainAgentStatRefresh(mission);
+            CoopMissionSpawnLogic.TryRunAiWieldStateDiagnostics(
+                mission,
+                "CoopMissionClientLogic.OnMissionTick");
 
             if (_legacyOverlayAutoRequestCooldownRemaining > 0f)
                 _legacyOverlayAutoRequestCooldownRemaining = Math.Max(0f, _legacyOverlayAutoRequestCooldownRemaining - dt);
@@ -3780,6 +3783,24 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly HashSet<string> _loggedManualMaterializedSiegeRespawnRejectKeys = new HashSet<string>(StringComparer.Ordinal);
         private static readonly HashSet<string> _projectileLaunchDiagnosticKeys = new HashSet<string>(StringComparer.Ordinal);
         private const int ProjectileLaunchDiagnosticBudget = 64;
+        private const int AiWieldStateDiagnosticsScanBudget = 128;
+        private const float AiWieldStateDiagnosticsTargetDistance = 12f;
+        private static readonly TimeSpan AiWieldStateDiagnosticsScanInterval = TimeSpan.FromMilliseconds(500);
+        private static Mission _aiWieldStateDiagnosticsMission;
+        private static DateTime _nextAiWieldStateDiagnosticsScanUtc = DateTime.MinValue;
+        private static int _aiWieldStateDiagnosticsCursor;
+        private static List<Agent> _aiWieldStateDiagnosticsAgentSnapshot = new List<Agent>();
+
+        private sealed class AiWieldStateDiagnosticAgentState
+        {
+            public Agent Agent;
+            public bool WasSuspect;
+            public DateTime SuspectSinceUtc = DateTime.MinValue;
+        }
+
+        private static readonly Dictionary<int, AiWieldStateDiagnosticAgentState>
+            _aiWieldStateDiagnosticsByAgentIndex =
+                new Dictionary<int, AiWieldStateDiagnosticAgentState>();
         private static readonly EquipmentIndex[] LandBattleExactPreSpawnWeaponSlots =
         {
             EquipmentIndex.Weapon0,
@@ -5040,6 +5061,7 @@ namespace CoopSpectator.MissionBehaviors
             if (GameNetwork.IsServer)
                 return;
 
+            ResetAiWieldStateDiagnostics(null, source + " client-runtime-reset");
             ExactTransferContractRuntimeCache.Reset(source + " client-runtime-reset");
             _clientUseStringIdExactEquipmentPath = false;
             _materializedArmyEntryIdByAgentIndex.Clear();
@@ -5758,6 +5780,7 @@ namespace CoopSpectator.MissionBehaviors
             BattleAgentCapacityPolicy.Tick(Mission, "CoopMissionSpawnLogic.OnMissionTick");
             ExactSiegeMoraleDiagnostics.Tick(Mission, "CoopMissionSpawnLogic.OnMissionTick");
             TryRestoreExpiredMaterializedPossessionProtection(Mission, "CoopMissionSpawnLogic.OnMissionTick");
+            TryRunAiWieldStateDiagnostics(Mission, "CoopMissionSpawnLogic.OnMissionTick");
             _timeUntilNextPeerLog -= dt;
             if (_timeUntilNextPeerLog <= 0f)
             {
@@ -5782,6 +5805,286 @@ namespace CoopSpectator.MissionBehaviors
 
             RunCoopBattleSpawnOwnerTick(Mission, "CoopMissionSpawnLogic.OnMissionTick fallback");
             RunCoopBattlePhaseOwnerTick(Mission, "CoopMissionSpawnLogic.OnMissionTick fallback");
+        }
+
+        internal static void TryRunAiWieldStateDiagnostics(Mission mission, string source)
+        {
+            if (!ExperimentalFeatures.EnableAiWieldStateDiagnostics || mission == null)
+                return;
+
+            if (!SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(
+                    mission.SceneName ?? string.Empty))
+            {
+                return;
+            }
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            if (!ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(scenarioContext))
+                return;
+
+            CoopBattlePhase phase = CoopBattlePhaseRuntimeState.GetPhase();
+            if (phase < CoopBattlePhase.BattleActive || phase >= CoopBattlePhase.BattleEnded)
+                return;
+
+            if (!ReferenceEquals(_aiWieldStateDiagnosticsMission, mission))
+                ResetAiWieldStateDiagnostics(mission, source + " mission-change");
+
+            DateTime nowUtc = DateTime.UtcNow;
+            if (nowUtc < _nextAiWieldStateDiagnosticsScanUtc)
+                return;
+
+            _nextAiWieldStateDiagnosticsScanUtc = nowUtc.Add(AiWieldStateDiagnosticsScanInterval);
+            if (_aiWieldStateDiagnosticsAgentSnapshot.Count == 0 ||
+                _aiWieldStateDiagnosticsCursor >= _aiWieldStateDiagnosticsAgentSnapshot.Count)
+            {
+                try
+                {
+                    _aiWieldStateDiagnosticsAgentSnapshot = mission.AllAgents
+                        .Where(agent => agent != null && agent.IsHuman && agent.IsActive())
+                        .ToList();
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Info(
+                        "CoopMissionSpawnLogic: AI wield-state diagnostics snapshot failed. " +
+                        "RuntimeRole=" + GetAiWieldStateDiagnosticsRuntimeRole() +
+                        " Error=" + ex.GetType().Name + ":" + ex.Message +
+                        " Source=" + (source ?? "unknown"));
+                    _aiWieldStateDiagnosticsAgentSnapshot.Clear();
+                }
+
+                _aiWieldStateDiagnosticsCursor = 0;
+            }
+
+            int scanned = 0;
+            while (scanned < AiWieldStateDiagnosticsScanBudget &&
+                   _aiWieldStateDiagnosticsCursor < _aiWieldStateDiagnosticsAgentSnapshot.Count)
+            {
+                Agent agent = _aiWieldStateDiagnosticsAgentSnapshot[_aiWieldStateDiagnosticsCursor++];
+                scanned++;
+                TryObserveAiWieldStateDiagnosticAgent(agent, nowUtc, source);
+            }
+        }
+
+        private static void TryObserveAiWieldStateDiagnosticAgent(
+            Agent agent,
+            DateTime nowUtc,
+            string source)
+        {
+            if (agent == null)
+                return;
+
+            try
+            {
+                bool active = agent.IsActive();
+                bool aiControlled =
+                    active &&
+                    agent.Controller == AgentControllerType.AI &&
+                    agent.IsAIControlled &&
+                    agent.MissionPeer == null;
+                EquipmentIndex mainHandIndex = active
+                    ? agent.GetPrimaryWieldedItemIndex()
+                    : EquipmentIndex.None;
+                EquipmentIndex offHandIndex = active
+                    ? agent.GetOffhandWieldedItemIndex()
+                    : EquipmentIndex.None;
+                MissionEquipment missionEquipment = active ? agent.Equipment : null;
+                string meleeSlots = string.Empty;
+                bool hasUsableMeleeWeapon =
+                    active &&
+                    TryResolveAiWieldStateDiagnosticMeleeSlots(
+                        missionEquipment,
+                        out meleeSlots);
+
+                Agent targetAgent = active ? agent.GetTargetAgent() : null;
+                bool targetActive = targetAgent != null && targetAgent.IsActive();
+                bool targetEnemy =
+                    targetActive &&
+                    agent.Team != null &&
+                    targetAgent.Team != null &&
+                    agent.Team.Side != BattleSideEnum.None &&
+                    targetAgent.Team.Side != BattleSideEnum.None &&
+                    agent.Team.Side != targetAgent.Team.Side;
+                float targetDistance = float.MaxValue;
+                if (targetActive)
+                {
+                    targetDistance = (float)Math.Sqrt(
+                        agent.Position.AsVec2.DistanceSquared(targetAgent.Position.AsVec2));
+                }
+
+                bool suspect =
+                    aiControlled &&
+                    agent.CombatActionsEnabled &&
+                    mainHandIndex == EquipmentIndex.None &&
+                    hasUsableMeleeWeapon &&
+                    targetEnemy &&
+                    targetDistance <= AiWieldStateDiagnosticsTargetDistance;
+
+                if (!_aiWieldStateDiagnosticsByAgentIndex.TryGetValue(
+                        agent.Index,
+                        out AiWieldStateDiagnosticAgentState state) ||
+                    !ReferenceEquals(state.Agent, agent))
+                {
+                    state = new AiWieldStateDiagnosticAgentState
+                    {
+                        Agent = agent
+                    };
+                    _aiWieldStateDiagnosticsByAgentIndex[agent.Index] = state;
+                }
+
+                if (state.WasSuspect == suspect)
+                    return;
+
+                string transition;
+                double suspectDurationSeconds;
+                if (suspect)
+                {
+                    transition = "EnteredSuspectState";
+                    suspectDurationSeconds = 0d;
+                    state.SuspectSinceUtc = nowUtc;
+                }
+                else
+                {
+                    transition = "ExitedSuspectState";
+                    suspectDurationSeconds = state.SuspectSinceUtc == DateTime.MinValue
+                        ? 0d
+                        : Math.Max(0d, (nowUtc - state.SuspectSinceUtc).TotalSeconds);
+                    state.SuspectSinceUtc = DateTime.MinValue;
+                }
+
+                state.WasSuspect = suspect;
+                TryResolveAuthoritativeTrackedEntryId(agent, out string entryId);
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: AI wield-state diagnostics transition. " +
+                    "Transition=" + transition +
+                    " RuntimeRole=" + GetAiWieldStateDiagnosticsRuntimeRole() +
+                    " AgentIndex=" + agent.Index +
+                    " EntryId=" + (entryId ?? "null") +
+                    " TroopId=" + (agent.Character?.StringId ?? "null") +
+                    " Side=" + (agent.Team?.Side.ToString() ?? "null") +
+                    " Active=" + active +
+                    " Controller=" + agent.Controller +
+                    " IsAIControlled=" + agent.IsAIControlled +
+                    " CombatActionsEnabled=" + agent.CombatActionsEnabled +
+                    " MainHandIndex=" + mainHandIndex +
+                    " OffHandIndex=" + offHandIndex +
+                    " WieldedMainItem=" + (agent.WieldedWeapon.Item?.StringId ?? "none") +
+                    " WieldedOffhandItem=" + (agent.WieldedOffhandWeapon.Item?.StringId ?? "none") +
+                    " HasUsableMeleeWeapon=" + hasUsableMeleeWeapon +
+                    " MeleeSlots=[" + (meleeSlots ?? string.Empty) + "]" +
+                    " MissionEquipment={" +
+                        BuildWeaponPriorityMissionEquipmentUsageCatalog(missionEquipment) + "}" +
+                    " TargetAgentIndex=" + (targetAgent?.Index.ToString() ?? "null") +
+                    " TargetSide=" + (targetAgent?.Team?.Side.ToString() ?? "null") +
+                    " TargetActive=" + targetActive +
+                    " TargetEnemy=" + targetEnemy +
+                    " TargetDistance=" +
+                        (targetDistance == float.MaxValue
+                            ? "n/a"
+                            : targetDistance.ToString(
+                                "0.00",
+                                System.Globalization.CultureInfo.InvariantCulture)) +
+                    " Action0=" + agent.GetCurrentAction(0) +
+                    " ActionStage0=" + agent.GetCurrentActionStage(0) +
+                    " Action1=" + agent.GetCurrentAction(1) +
+                    " ActionStage1=" + agent.GetCurrentActionStage(1) +
+                    " MovementFlags=" + agent.MovementFlags +
+                    " SuspectDurationSeconds=" + suspectDurationSeconds.ToString(
+                        "0.00",
+                        System.Globalization.CultureInfo.InvariantCulture) +
+                    " Source=" + (source ?? "unknown"));
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: AI wield-state diagnostics agent observation failed. " +
+                    "RuntimeRole=" + GetAiWieldStateDiagnosticsRuntimeRole() +
+                    " AgentIndex=" + agent.Index +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message +
+                    " Source=" + (source ?? "unknown"));
+            }
+        }
+
+        private static bool TryResolveAiWieldStateDiagnosticMeleeSlots(
+            MissionEquipment missionEquipment,
+            out string meleeSlots)
+        {
+            var matchingSlots = new List<string>();
+            meleeSlots = string.Empty;
+            if (missionEquipment == null)
+                return false;
+
+            for (EquipmentIndex slot = EquipmentIndex.Weapon0;
+                 slot <= EquipmentIndex.Weapon3;
+                 slot++)
+            {
+                try
+                {
+                    MissionWeapon missionWeapon = missionEquipment[slot];
+                    if (missionWeapon.IsEmpty || missionWeapon.Item == null)
+                        continue;
+
+                    var matchingUsages = new List<int>();
+                    for (int usageIndex = 0; usageIndex < missionWeapon.WeaponsCount; usageIndex++)
+                    {
+                        WeaponComponentData usage =
+                            missionWeapon.GetWeaponComponentDataForUsage(usageIndex);
+                        if (IsWeaponPriorityMeleeUsage(usage))
+                            matchingUsages.Add(usageIndex);
+                    }
+
+                    if (matchingUsages.Count > 0)
+                    {
+                        matchingSlots.Add(
+                            GetEquipmentSlotLabel(slot) +
+                            "=" + missionWeapon.Item.StringId +
+                            "(usages=" + string.Join(",", matchingUsages) + ")");
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            meleeSlots = string.Join(";", matchingSlots);
+            return matchingSlots.Count > 0;
+        }
+
+        private static void ResetAiWieldStateDiagnostics(Mission mission, string source)
+        {
+            _aiWieldStateDiagnosticsMission = mission;
+            _nextAiWieldStateDiagnosticsScanUtc = DateTime.MinValue;
+            _aiWieldStateDiagnosticsCursor = 0;
+            _aiWieldStateDiagnosticsAgentSnapshot.Clear();
+            _aiWieldStateDiagnosticsByAgentIndex.Clear();
+
+            if (ExperimentalFeatures.EnableAiWieldStateDiagnostics && mission != null)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: AI wield-state diagnostics initialized. " +
+                    "RuntimeRole=" + GetAiWieldStateDiagnosticsRuntimeRole() +
+                    " Mission=" + (mission.SceneName ?? "null") +
+                    " ScanIntervalMs=" + AiWieldStateDiagnosticsScanInterval.TotalMilliseconds.ToString(
+                        "0",
+                        System.Globalization.CultureInfo.InvariantCulture) +
+                    " ScanBudget=" + AiWieldStateDiagnosticsScanBudget +
+                    " TargetDistance=" + AiWieldStateDiagnosticsTargetDistance.ToString(
+                        "0.0",
+                        System.Globalization.CultureInfo.InvariantCulture) +
+                    " ReadOnly=True" +
+                    " Source=" + (source ?? "unknown"));
+            }
+        }
+
+        private static string GetAiWieldStateDiagnosticsRuntimeRole()
+        {
+            if (GameNetwork.IsDedicatedServer)
+                return "dedicated-server";
+
+            return GameNetwork.IsServer ? "server" : "client";
         }
 
         public override void OnScoreHit(
@@ -6613,6 +6916,7 @@ namespace CoopSpectator.MissionBehaviors
         protected override void OnEndMission()
         {
             CoopBattlePhaseRuntimeState.SetPhase(CoopBattlePhase.BattleEnded, "CoopMissionSpawnLogic.OnEndMission", Mission, allowRegression: true);
+            ResetAiWieldStateDiagnostics(null, "CoopMissionSpawnLogic.OnEndMission");
             TryWriteBattleResultSnapshot(Mission, "server behavior end-mission");
             CoopBattleSelectionIntentState.Reset();
             CoopBattleSelectionRequestState.Reset();
@@ -7196,6 +7500,7 @@ namespace CoopSpectator.MissionBehaviors
 
             _lastServerRuntimeInitializedMission = mission;
             _lastServerRuntimeInitializationSource = source ?? "unknown";
+            ResetAiWieldStateDiagnostics(mission, source + " server-runtime-init");
             _lastDiagnosticSpawnMission = null;
             _lastDiagnosticOwnershipMission = null;
             _hasSpawnedDiagnosticAllowedAgent = false;
@@ -9429,6 +9734,141 @@ namespace CoopSpectator.MissionBehaviors
                 " ExpectedAgentCount=" + expectedAgentCount +
                 " ReadyAgentCount=" + readyAgentCount +
                 " PayloadHash=" + payloadHash;
+            return true;
+        }
+
+        internal static bool IsClientInitialSiegeAssaultMaterializationReady(
+            out int readyAgentCount,
+            out string readinessSummary)
+        {
+            readyAgentCount = 0;
+            readinessSummary = string.Empty;
+            if (GameNetwork.IsServer)
+            {
+                readinessSummary = "not-client";
+                return false;
+            }
+
+            Mission mission = Mission.Current;
+            if (mission == null)
+            {
+                readinessSummary = "mission-null";
+                return false;
+            }
+
+            if (!ExactSiegeAssaultInitialMaterializationRuntime.IsValidatedScenario(
+                    mission,
+                    out string scenarioDiagnostics))
+            {
+                readinessSummary =
+                    "siege-assault-scenario-not-validated " +
+                    (scenarioDiagnostics ?? "unknown");
+                return false;
+            }
+
+            if (!CoopMissionNetworkBridge.TryGetClientCurrentMaterializedAgentEntrySnapshotIdentity(
+                    out int transmissionId,
+                    out int expectedAgentCount,
+                    out string payloadHash,
+                    out string mapReadinessSummary))
+            {
+                readinessSummary =
+                    "materialized-map-not-ready " +
+                    (mapReadinessSummary ?? "unknown");
+                return false;
+            }
+
+            int deferredAgentMaterializationPendingCount =
+                BattleMapSpawnHandoffPatch.GetDeferredClientAgentMaterializationPendingCount(
+                    out string deferredAgentMaterializationSummary);
+            if (deferredAgentMaterializationPendingCount > 0)
+            {
+                readinessSummary =
+                    "deferred-agent-materialization-pending " +
+                    (deferredAgentMaterializationSummary ?? "unknown");
+                return false;
+            }
+
+            if (!BattleMapSpawnHandoffPatch.IsDeferredClientAgentBootstrapQuiet(
+                    TimeSpan.FromMilliseconds(250),
+                    out string quietSummary))
+            {
+                readinessSummary =
+                    "initial-agent-bootstrap-settle-pending " +
+                    (quietSummary ?? "unknown");
+                return false;
+            }
+
+            if (_lastClientAuthoritativeMaterializedEntrySnapshotObservedUtc == DateTime.MinValue)
+            {
+                readinessSummary = "authoritative-materialized-entry-snapshot-unobserved";
+                return false;
+            }
+
+            TimeSpan observedAge =
+                DateTime.UtcNow - _lastClientAuthoritativeMaterializedEntrySnapshotObservedUtc;
+            if (observedAge < ClientReconnectFinalizeSettleDelay)
+            {
+                readinessSummary =
+                    "authoritative-materialized-entry-snapshot-settle-pending" +
+                    " ObservedAgeSeconds=" + observedAge.TotalSeconds.ToString("F2") +
+                    " PendingSettleSeconds=" + ClientReconnectFinalizeSettleDelay.TotalSeconds.ToString("F2");
+                return false;
+            }
+
+            if (expectedAgentCount <= 0 ||
+                _clientAuthoritativeMaterializedEntryObservedAgentIndices.Count < expectedAgentCount)
+            {
+                readinessSummary =
+                    "authoritative-materialized-entry-map-incomplete" +
+                    " TransmissionId=" + transmissionId +
+                    " ExpectedAgentCount=" + expectedAgentCount +
+                    " ObservedAgentCount=" +
+                    _clientAuthoritativeMaterializedEntryObservedAgentIndices.Count;
+                return false;
+            }
+
+            int inactiveAgentCount = 0;
+            var inactiveSamples = new List<int>();
+            foreach (int agentIndex in _clientAuthoritativeMaterializedEntryObservedAgentIndices)
+            {
+                // Exact external siege materializes campaign cavalry as foot agents. A mount here is
+                // therefore invalid and must never become part of the local readiness contract.
+                if (!TryGetActiveMissionAgentByIndex(mission, agentIndex, out Agent agent) ||
+                    agent == null ||
+                    agent.IsMount ||
+                    !agent.IsHuman ||
+                    !agent.IsActive() ||
+                    agent.Team == null ||
+                    agent.Team.Side == BattleSideEnum.None)
+                {
+                    inactiveAgentCount++;
+                    if (inactiveSamples.Count < 6)
+                        inactiveSamples.Add(agentIndex);
+                    continue;
+                }
+
+                readyAgentCount++;
+            }
+
+            if (readyAgentCount != expectedAgentCount || inactiveAgentCount > 0)
+            {
+                readinessSummary =
+                    "active-authoritative-materialized-foot-agents-pending" +
+                    " ExpectedAgentCount=" + expectedAgentCount +
+                    " ReadyAgentCount=" + readyAgentCount +
+                    " InactiveAgentCount=" + inactiveAgentCount +
+                    " Samples=[" + string.Join(",", inactiveSamples) + "]";
+                return false;
+            }
+
+            readinessSummary =
+                "ready" +
+                " TransmissionId=" + transmissionId +
+                " ExpectedAgentCount=" + expectedAgentCount +
+                " ReadyAgentCount=" + readyAgentCount +
+                " PayloadHash=" + payloadHash +
+                " FootOnly=True";
             return true;
         }
 
@@ -15488,12 +15928,18 @@ namespace CoopSpectator.MissionBehaviors
                     mission,
                     assignedPeerIndices,
                     out _);
+            bool assignedPeersInitialSiegeAssaultMaterializationReady =
+                CoopMissionNetworkBridge.AreAssignedPeersInitialSiegeAssaultMaterializationReady(
+                    mission,
+                    assignedPeerIndices,
+                    out _);
             return AreBattlefieldArmiesReadyForStart(mission, out _, out _, out _) &&
                 assignedPeerCount > 0 &&
                 controlledPeerCount >= assignedPeerCount &&
                 assignedPeersInitialMaterializationReady &&
                 assignedPeersInitialFieldBattleMaterializationReady &&
-                assignedPeersInitialVillageBattleMaterializationReady;
+                assignedPeersInitialVillageBattleMaterializationReady &&
+                assignedPeersInitialSiegeAssaultMaterializationReady;
         }
 
         private static bool AreBattlefieldArmiesReadyForStart(

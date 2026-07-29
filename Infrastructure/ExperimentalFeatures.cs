@@ -111,6 +111,14 @@ namespace CoopSpectator.Infrastructure
         public const bool EnableExactVillageBattleInitialMaterializationRuntime = true;
 
         /// <summary>
+        /// Exact external-siege initial materialization: pace the native client
+        /// CreateAgent replay and require a siege-specific readiness acknowledgement
+        /// before battle start. The native server remains the only army spawner,
+        /// reinforcements remain native, and siege cavalry stays projected to foot.
+        /// </summary>
+        public const bool EnableExactSiegeAssaultInitialMaterializationRuntime = true;
+
+        /// <summary>
         /// Exact SiegeMissionWithDeployment scene initializer profile: mirror the
         /// native campaign siege initializer fields that affect scene material
         /// and campaign-mode object setup, while keeping map-patch repair out of
@@ -278,6 +286,14 @@ namespace CoopSpectator.Infrastructure
         /// </summary>
         public static readonly bool EnableExactCreateAgentCorridorDiagnostics =
             IsEnvironmentFlagEnabled("COOPSPECTATOR_EXACT_CREATE_AGENT_DIAGNOSTICS");
+
+        /// <summary>
+        /// Targeted live AI wield-state diagnostics for exact external sieges.
+        /// Disabled by default because it samples the active mission agent set.
+        /// The observer is read-only and never repairs or changes agent equipment.
+        /// </summary>
+        public static readonly bool EnableAiWieldStateDiagnostics =
+            IsEnvironmentFlagEnabled("COOPSPECTATOR_AI_WIELD_DIAGNOSTICS");
 
         private static bool IsEnvironmentFlagEnabled(string variableName)
         {

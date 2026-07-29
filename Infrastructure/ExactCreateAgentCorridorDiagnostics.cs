@@ -21,6 +21,7 @@ namespace CoopSpectator.Infrastructure
             new Dictionary<string, ServerCreateAgentPendingState>(StringComparer.Ordinal);
         private static readonly Dictionary<int, ServerCreateAgentExpectedState> ServerStatesByAgentIndex =
             new Dictionary<int, ServerCreateAgentExpectedState>();
+        private static Mission _serverStateMission;
 
         private static bool IsVerboseEnabled => ExperimentalFeatures.EnableExactCreateAgentCorridorDiagnostics;
 
@@ -123,6 +124,7 @@ namespace CoopSpectator.Infrastructure
                 ClientStatesByAgentIndex.Clear();
                 PendingServerStatesByEntryId.Clear();
                 ServerStatesByAgentIndex.Clear();
+                _serverStateMission = null;
             }
 
             ModLogger.Info(
@@ -163,6 +165,7 @@ namespace CoopSpectator.Infrastructure
             if (!GameNetwork.IsServer || exactOrigin == null || entryState == null)
                 return;
 
+            EnsureServerMissionScope(Mission.Current);
             lock (Sync)
             {
                 PendingServerStatesByEntryId[entryState.EntryId ?? string.Empty] = new ServerCreateAgentPendingState
@@ -294,6 +297,14 @@ namespace CoopSpectator.Infrastructure
             if (!GameNetwork.IsServer || createAgent == null)
                 return false;
 
+            Mission currentMission = Mission.Current;
+            if (currentMission == null)
+            {
+                reason = "server-mission-unavailable";
+                return false;
+            }
+
+            EnsureServerMissionScope(currentMission);
             ServerCreateAgentExpectedState state = null;
             lock (Sync)
             {
@@ -384,6 +395,22 @@ namespace CoopSpectator.Infrastructure
                 " ServerSpawnSpawnWeaponSlots={" + (state.ServerSpawnSpawnWeaponSlotVector ?? "unknown") + "}";
             Log("server-create-agent-onwrite-sanitized", details, persistToRuntimeBundle: false);
             return true;
+        }
+
+        private static void EnsureServerMissionScope(Mission mission)
+        {
+            if (!GameNetwork.IsServer || mission == null)
+                return;
+
+            lock (Sync)
+            {
+                if (ReferenceEquals(_serverStateMission, mission))
+                    return;
+
+                PendingServerStatesByEntryId.Clear();
+                ServerStatesByAgentIndex.Clear();
+                _serverStateMission = mission;
+            }
         }
 
         private static bool ShouldForceServerSpawnBaselineRepair(

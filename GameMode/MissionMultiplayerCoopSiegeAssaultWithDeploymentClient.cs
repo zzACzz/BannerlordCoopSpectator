@@ -39,6 +39,9 @@ namespace CoopSpectator.GameMode
 
             ModLogger.Info("MissionMultiplayerCoopSiegeAssaultWithDeploymentClient OnBehaviorInitialize. Scene=" + (Mission?.SceneName ?? "null"));
             base.OnBehaviorInitialize();
+            CoopBattlePhaseRuntimeState.StartMission(
+                Mission,
+                "CoopSiegeAssaultWithDeploymentClient.OnBehaviorInitialize");
         }
 
         public override void AfterStart()
