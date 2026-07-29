@@ -79,6 +79,13 @@ namespace CoopSpectator.MissionBehaviors
                         requireNonGateLane: false,
                         out diagnostics);
 
+                case CoopSiegeAssaultFormationOrderKind.OccupyAttackerBarricades:
+                    return TryOccupyAttackerBarricades(
+                        mission,
+                        team,
+                        requestedFormations,
+                        out diagnostics);
+
                 case CoopSiegeAssaultFormationOrderKind.OccupyArcherPositions:
                     return TryOccupyArcherPositions(
                         mission,
@@ -330,6 +337,99 @@ namespace CoopSpectator.MissionBehaviors
             return true;
         }
 
+        private static bool TryOccupyAttackerBarricades(
+            Mission mission,
+            Team team,
+            List<Formation> formations,
+            out string diagnostics)
+        {
+            diagnostics = "attacker-team-required";
+            if (team.Side != BattleSideEnum.Attacker ||
+                !(team.TeamAI is TeamAISiegeAttacker attackerAi))
+            {
+                return false;
+            }
+
+            List<ArcherPosition> allPositions = attackerAi.ArcherPositions
+                .Where(position => position?.Entity != null)
+                .ToList();
+            if (allPositions.Count <= 0)
+            {
+                diagnostics = "no-attacker-archer-positions";
+                return false;
+            }
+
+            List<SiegeLane> currentLanes =
+                (TeamAISiegeComponent.SiegeLanes ?? new List<SiegeLane>())
+                    .Where(IsUsableAttackerLane)
+                    .ToList();
+            List<ArcherPosition> preferredPositions = currentLanes.Count > 0
+                ? allPositions
+                    .Where(position => currentLanes.Any(lane =>
+                        position.IsArcherPositionRelatedToSide(lane.LaneSide)))
+                    .ToList()
+                : new List<ArcherPosition>();
+            if (preferredPositions.Count <= 0)
+                preferredPositions.AddRange(allPositions);
+
+            List<Formation> rangedFormations = formations
+                .Where(formation =>
+                    formation.AI?.GetBehavior<BehaviorSparseSkirmish>() != null &&
+                    formation.QuerySystem != null &&
+                    formation.QuerySystem.IsRangedFormation)
+                .OrderByDescending(formation => formation.CountOfUnits)
+                .ToList();
+            if (rangedFormations.Count <= 0)
+            {
+                diagnostics = "no-ranged-formations";
+                return false;
+            }
+
+            CancelPlayerDirectedOrders(
+                mission,
+                team,
+                rangedFormations,
+                "replace-with-occupy-attacker-barricades");
+
+            var availablePositions = new List<ArcherPosition>(preferredPositions);
+            var acceptedFormations = new List<Formation>();
+            foreach (Formation formation in rangedFormations)
+            {
+                if (availablePositions.Count <= 0)
+                    availablePositions.AddRange(preferredPositions);
+
+                ArcherPosition archerPosition = availablePositions
+                    .OrderBy(position =>
+                        formation.CachedAveragePosition.DistanceSquared(
+                            position.Entity.GlobalPosition.AsVec2))
+                    .First();
+                availablePositions.Remove(archerPosition);
+
+                formation.AI.ResetBehaviorWeights();
+                TacticComponent.SetDefaultBehaviorWeights(formation);
+                BehaviorSparseSkirmish behavior =
+                    formation.AI.SetBehaviorWeight<BehaviorSparseSkirmish>(1f);
+                behavior.ArcherPosition = archerPosition.Entity;
+                archerPosition.SetLastAssignedFormation(team.TeamIndex, formation);
+                ActiveOrdersByFormation[formation] =
+                    CoopSiegeAssaultFormationOrderKind.OccupyAttackerBarricades;
+                acceptedFormations.Add(formation);
+            }
+
+            CoopMissionNetworkBridge.UpdateVoluntaryFormationAiControl(
+                mission,
+                team,
+                acceptedFormations,
+                isAiControlled: true,
+                "player-directed-occupy-attacker-barricades");
+
+            diagnostics =
+                "applied Formations=" + FormatFormationIndices(acceptedFormations) +
+                " Positions=" + preferredPositions.Count +
+                " Rejected=" + (formations.Count - acceptedFormations.Count);
+            return true;
+        }
+
         private static bool TryOccupyArcherPositions(
             Mission mission,
             Team team,
@@ -471,6 +571,21 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             return lane.IsBreach || HasActivePrimarySiegeWeapon(lane);
+        }
+
+        private static bool IsUsableAttackerLane(SiegeLane lane)
+        {
+            if (lane == null)
+                return false;
+
+            try
+            {
+                return !lane.CalculateIsLaneUnusable();
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static bool HasActivePrimarySiegeWeapon(SiegeLane lane)

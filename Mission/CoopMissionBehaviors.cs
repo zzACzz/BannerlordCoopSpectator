@@ -2,6 +2,7 @@
 // Призначення: логіка місії для кооп-спектатора — клієнтський зворотний зв'язок (етап 3.5), логування стану для Етапу 3.3 (spectator/unit/spawn), заглушка серверного спавну (етап 3.4).
 
 using System; // Exception
+using System.Collections.Concurrent;
 using System.Collections.Generic; // List<string>
 using System.Collections; // IEnumerable
 using System.Linq; // Distinct, FirstOrDefault
@@ -4299,7 +4300,8 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly Dictionary<string, int> MaterializedEquipmentMissCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, int> MaterializedEquipmentNormalizedFallbackCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, int> MaterializedCombatProfileApplyCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        private static readonly Dictionary<int, MaterializedCombatProfileRuntimeState> _materializedCombatProfilesByAgentIndex = new Dictionary<int, MaterializedCombatProfileRuntimeState>();
+        private static readonly object MaterializedEquipmentCountersSync = new object();
+        private static readonly ConcurrentDictionary<int, MaterializedCombatProfileRuntimeState> _materializedCombatProfilesByAgentIndex = new ConcurrentDictionary<int, MaterializedCombatProfileRuntimeState>();
         private static readonly Queue<int> _pendingMaterializedCombatProfileRefreshAgentIndices = new Queue<int>();
         private static readonly Dictionary<int, Agent> _pendingMaterializedCombatProfileRefreshAgentsByIndex = new Dictionary<int, Agent>();
         private static readonly Dictionary<string, MaterializedBattleResultEntryRuntimeState> _materializedBattleResultEntriesByEntryId = new Dictionary<string, MaterializedBattleResultEntryRuntimeState>(StringComparer.OrdinalIgnoreCase);
@@ -4332,8 +4334,11 @@ namespace CoopSpectator.MissionBehaviors
         private static PropertyInfo _agentDrivenPropertiesProperty;
         private static bool _agentDrivenPropertiesPropertyResolved;
         private static bool _loggedMissingAgentDrivenPropertiesAccessor;
+        [ThreadStatic]
         private static MaterializedCombatProfileRuntimeState _drivenPropertyBaselineProfileContext;
+        [ThreadStatic]
         private static Agent _drivenPropertyBaselineAgentContext;
+        [ThreadStatic]
         private static bool _drivenPropertyBaselineMountContext;
         private const int MaxRecordedBattleResultCombatEvents = 16384;
         private const int MaxBattleResultDebugSampleCount = 24;
@@ -4345,6 +4350,7 @@ namespace CoopSpectator.MissionBehaviors
 
         private sealed class MaterializedCombatProfileRuntimeState
         {
+            public object DrivenPropertySyncRoot { get; } = new object();
             public string EntryId { get; set; }
             public string PartyId { get; set; }
             public string OriginalCharacterId { get; set; }
@@ -19708,9 +19714,9 @@ namespace CoopSpectator.MissionBehaviors
                 _loggedAutomatedMaterializedEntrySkipIds.Clear();
                 _loggedSuppressedMaterializedEquipmentKeys.Clear();
                 _loggedManualMaterializedSiegeRespawnRejectKeys.Clear();
-                MaterializedEquipmentResolutionSourceCounts.Clear();
-                MaterializedEquipmentMissCounts.Clear();
-                MaterializedEquipmentNormalizedFallbackCounts.Clear();
+                ClearMaterializedEquipmentCounter(MaterializedEquipmentResolutionSourceCounts);
+                ClearMaterializedEquipmentCounter(MaterializedEquipmentMissCounts);
+                ClearMaterializedEquipmentCounter(MaterializedEquipmentNormalizedFallbackCounts);
                 ResetMaterializedCombatProfileRuntimeState();
                 ResetMaterializedSiegeReinforcementWaveRuntimeState();
                 _nextIncompleteBattleSnapshotRefreshUtc = DateTime.MinValue;
@@ -24841,7 +24847,7 @@ namespace CoopSpectator.MissionBehaviors
             _materializedCombatProfilesByAgentIndex.Clear();
             _pendingMaterializedCombatProfileRefreshAgentIndices.Clear();
             _pendingMaterializedCombatProfileRefreshAgentsByIndex.Clear();
-            MaterializedCombatProfileApplyCounts.Clear();
+            ClearMaterializedEquipmentCounter(MaterializedCombatProfileApplyCounts);
             _lastMaterializedCombatProfileMission = null;
             _lastCombatProfileDrivenRefreshMission = null;
             _lastCombatProfileDrivenRefreshMissionTime = -1f;
@@ -24883,7 +24889,7 @@ namespace CoopSpectator.MissionBehaviors
             _materializedCombatProfilesByAgentIndex.Clear();
             _pendingMaterializedCombatProfileRefreshAgentIndices.Clear();
             _pendingMaterializedCombatProfileRefreshAgentsByIndex.Clear();
-            MaterializedCombatProfileApplyCounts.Clear();
+            ClearMaterializedEquipmentCounter(MaterializedCombatProfileApplyCounts);
             _lastMaterializedCombatProfileMission = mission;
             _lastCombatProfileDrivenRefreshMission = null;
             _lastCombatProfileDrivenRefreshMissionTime = -1f;
@@ -25437,7 +25443,7 @@ namespace CoopSpectator.MissionBehaviors
             _materializedAgentInstanceByIndex.Remove(agentIndex);
             _customAiTargetPulseStateByAgentIndex.Remove(agentIndex);
             _clientAuthoritativeMaterializedEntryObservedAgentIndices.Remove(agentIndex);
-            _materializedCombatProfilesByAgentIndex.Remove(agentIndex);
+            _materializedCombatProfilesByAgentIndex.TryRemove(agentIndex, out _);
             _materializedBattleResultSpawnInstanceIdsByAgentIndex.Remove(agentIndex);
             _materializedBattleResultLastHitDebugByVictimAgentIndex.Remove(agentIndex);
             if (clearRemovedGuard)
@@ -26861,9 +26867,10 @@ namespace CoopSpectator.MissionBehaviors
                 suppressApproximateHeroRangedBallistics &&
                 CoopCampaignDerivedAgentStatCalculateModel.IsActiveForMission(mission);
 
-            SetDrivenPropertyBaselineContext(profile, agent, isMountContext: false);
+            System.Threading.Monitor.Enter(profile.DrivenPropertySyncRoot);
             try
             {
+                SetDrivenPropertyBaselineContext(profile, agent, isMountContext: false);
                 if (TryApplyPrimaryWeaponSkillDrivenStats(agentDrivenProperties, primaryWeapon, templateRelevantSkill, desiredRelevantSkill))
                 {
                     applied = true;
@@ -26922,6 +26929,7 @@ namespace CoopSpectator.MissionBehaviors
             finally
             {
                 ClearDrivenPropertyBaselineContext();
+                System.Threading.Monitor.Exit(profile.DrivenPropertySyncRoot);
             }
         }
 
@@ -27650,9 +27658,10 @@ namespace CoopSpectator.MissionBehaviors
             float mountManeuverBaseFactor = 1f + templateRiding * 0.0035f;
             float mountManeuverDesiredFactor = 1f + desiredRiding * 0.0035f;
 
-            SetDrivenPropertyBaselineContext(profile, mountAgent, isMountContext: true);
+            System.Threading.Monitor.Enter(profile.DrivenPropertySyncRoot);
             try
             {
+                SetDrivenPropertyBaselineContext(profile, mountAgent, isMountContext: true);
                 applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.MountSpeed, mountSpeedBaseFactor, mountSpeedDesiredFactor);
                 applied |= TryScaleDrivenProperty(agentDrivenProperties, DrivenProperty.MountManeuver, mountManeuverBaseFactor, mountManeuverDesiredFactor);
                 if (applied)
@@ -27669,6 +27678,7 @@ namespace CoopSpectator.MissionBehaviors
             finally
             {
                 ClearDrivenPropertyBaselineContext();
+                System.Threading.Monitor.Exit(profile.DrivenPropertySyncRoot);
             }
         }
 
@@ -32907,10 +32917,24 @@ namespace CoopSpectator.MissionBehaviors
             if (counters == null || string.IsNullOrWhiteSpace(key))
                 return;
 
-            if (counters.TryGetValue(key, out int currentCount))
-                counters[key] = currentCount + 1;
-            else
-                counters[key] = 1;
+            lock (MaterializedEquipmentCountersSync)
+            {
+                if (counters.TryGetValue(key, out int currentCount))
+                    counters[key] = currentCount + 1;
+                else
+                    counters[key] = 1;
+            }
+        }
+
+        private static void ClearMaterializedEquipmentCounter(Dictionary<string, int> counters)
+        {
+            if (counters == null)
+                return;
+
+            lock (MaterializedEquipmentCountersSync)
+            {
+                counters.Clear();
+            }
         }
 
         private static void LogMaterializedEquipmentCoverageSummaryIfNeeded()
@@ -32921,11 +32945,15 @@ namespace CoopSpectator.MissionBehaviors
             if (!IsSyntheticRuntime() && !HasLiveCombatProfileCoverageSignal())
                 return;
 
-            bool hasCoverageData =
-                (MaterializedEquipmentResolutionSourceCounts != null && MaterializedEquipmentResolutionSourceCounts.Count > 0) ||
-                (MaterializedEquipmentMissCounts != null && MaterializedEquipmentMissCounts.Count > 0) ||
-                (MaterializedEquipmentNormalizedFallbackCounts != null && MaterializedEquipmentNormalizedFallbackCounts.Count > 0) ||
-                (MaterializedCombatProfileApplyCounts != null && MaterializedCombatProfileApplyCounts.Count > 0);
+            bool hasCoverageData;
+            lock (MaterializedEquipmentCountersSync)
+            {
+                hasCoverageData =
+                    (MaterializedEquipmentResolutionSourceCounts != null && MaterializedEquipmentResolutionSourceCounts.Count > 0) ||
+                    (MaterializedEquipmentMissCounts != null && MaterializedEquipmentMissCounts.Count > 0) ||
+                    (MaterializedEquipmentNormalizedFallbackCounts != null && MaterializedEquipmentNormalizedFallbackCounts.Count > 0) ||
+                    (MaterializedCombatProfileApplyCounts != null && MaterializedCombatProfileApplyCounts.Count > 0);
+            }
             if (!hasCoverageData)
                 return;
 
@@ -32947,38 +32975,44 @@ namespace CoopSpectator.MissionBehaviors
 
         private static bool HasLiveCombatProfileCoverageSignal()
         {
-            if (MaterializedCombatProfileApplyCounts == null || MaterializedCombatProfileApplyCounts.Count == 0)
-                return false;
-
-            foreach (KeyValuePair<string, int> entry in MaterializedCombatProfileApplyCounts)
+            lock (MaterializedEquipmentCountersSync)
             {
-                if (entry.Value <= 0 || string.IsNullOrWhiteSpace(entry.Key))
-                    continue;
+                if (MaterializedCombatProfileApplyCounts == null || MaterializedCombatProfileApplyCounts.Count == 0)
+                    return false;
 
-                if (!string.Equals(entry.Key, "registered", StringComparison.OrdinalIgnoreCase) &&
-                    !string.Equals(entry.Key, "perks", StringComparison.OrdinalIgnoreCase) &&
-                    !string.Equals(entry.Key, "mount", StringComparison.OrdinalIgnoreCase) &&
-                    !string.Equals(entry.Key, "perk-mount", StringComparison.OrdinalIgnoreCase))
+                foreach (KeyValuePair<string, int> entry in MaterializedCombatProfileApplyCounts)
                 {
-                    return true;
-                }
-            }
+                    if (entry.Value <= 0 || string.IsNullOrWhiteSpace(entry.Key))
+                        continue;
 
-            return false;
+                    if (!string.Equals(entry.Key, "registered", StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(entry.Key, "perks", StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(entry.Key, "mount", StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(entry.Key, "perk-mount", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
         }
 
         private static string FormatMaterializedEquipmentCounterSummary(Dictionary<string, int> counters, int take)
         {
-            if (counters == null || counters.Count == 0)
-                return "(none)";
+            lock (MaterializedEquipmentCountersSync)
+            {
+                if (counters == null || counters.Count == 0)
+                    return "(none)";
 
-            return string.Join(
-                ", ",
-                counters
-                    .OrderByDescending(pair => pair.Value)
-                    .ThenBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
-                    .Take(Math.Max(1, take))
-                    .Select(pair => pair.Key + "=" + pair.Value));
+                return string.Join(
+                    ", ",
+                    counters
+                        .OrderByDescending(pair => pair.Value)
+                        .ThenBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+                        .Take(Math.Max(1, take))
+                        .Select(pair => pair.Key + "=" + pair.Value));
+            }
         }
 
         private static ItemObject TryGetMaterializedEquipmentItem(string itemId)
@@ -35259,7 +35293,7 @@ namespace CoopSpectator.MissionBehaviors
             if (_materializedCombatProfilesByAgentIndex.TryGetValue(sourceAgent.Index, out MaterializedCombatProfileRuntimeState combatProfile))
             {
                 _materializedCombatProfilesByAgentIndex[targetAgent.Index] = combatProfile;
-                _materializedCombatProfilesByAgentIndex.Remove(sourceAgent.Index);
+                _materializedCombatProfilesByAgentIndex.TryRemove(sourceAgent.Index, out _);
             }
 
             if (_materializedBattleResultLastHitDebugByVictimAgentIndex.TryGetValue(sourceAgent.Index, out MaterializedBattleResultLastHitDebugState lastHitDebug))

@@ -6958,6 +6958,8 @@ namespace CoopSpectator.UI
                     return "Coop Battle: assault walls order sent.";
                 case CoopSiegeAssaultFormationOrderKind.UseSiegeMachines:
                     return "Coop Battle: use siege machines order sent.";
+                case CoopSiegeAssaultFormationOrderKind.OccupyAttackerBarricades:
+                    return "Coop Battle: occupy barricades order sent.";
                 case CoopSiegeAssaultFormationOrderKind.OccupyArcherPositions:
                     return "Coop Battle: occupy wall positions order sent.";
                 default:
@@ -7124,6 +7126,11 @@ namespace CoopSpectator.UI
                         "order_movement_follow",
                         CoopSiegeAssaultFormationOrderKind.UseSiegeMachines,
                         new TextObject("{=CoopUseSiegeMachines}Use Siege Machines")));
+                siegeSet.AddOrder(
+                    new CoopSiegeAssaultFormationVisualOrder(
+                        "order_toggle_fire",
+                        CoopSiegeAssaultFormationOrderKind.OccupyAttackerBarricades,
+                        new TextObject("{=CoopOccupyAttackerBarricades}Occupy Barricades")));
             }
             else if (team.Side == BattleSideEnum.Defender)
             {

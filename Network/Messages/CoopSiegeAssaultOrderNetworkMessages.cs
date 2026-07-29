@@ -9,7 +9,8 @@ namespace CoopSpectator.Network.Messages
         AttackGate = 0,
         AssaultWalls = 1,
         UseSiegeMachines = 2,
-        OccupyArcherPositions = 3
+        OccupyArcherPositions = 3,
+        OccupyAttackerBarricades = 4
     }
 
     [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromClient)]
@@ -24,7 +25,7 @@ namespace CoopSpectator.Network.Messages
         private static readonly CompressionInfo.Integer OrderKindCompression =
             new CompressionInfo.Integer(
                 (int)CoopSiegeAssaultFormationOrderKind.AttackGate,
-                (int)CoopSiegeAssaultFormationOrderKind.OccupyArcherPositions,
+                (int)CoopSiegeAssaultFormationOrderKind.OccupyAttackerBarricades,
                 maximumValueGiven: true);
 
         public CoopSiegeAssaultFormationOrderMessage(
