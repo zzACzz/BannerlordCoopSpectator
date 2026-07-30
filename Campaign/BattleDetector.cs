@@ -191,6 +191,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
         private sealed class BattleResultCharacterAggregate
         {
+            public string SideId { get; set; }
             public string PartyId { get; set; }
             public string IdentityKey { get; set; }
             public string HeroId { get; set; }
@@ -1114,6 +1115,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 {
                     aggregate = new BattleResultCharacterAggregate
                     {
+                        SideId = entry.SideId,
                         PartyId = entry.PartyId ?? string.Empty,
                         IdentityKey = identityKey,
                         HeroId = entry.HeroId,
@@ -3426,11 +3428,31 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                             pair.Value))
                         .Where(pair => pair.Key != null)
                         .ToList();
+                BattleSideEnum finalWinnerSide = TryResolveWinnerSideEnum(result.WinnerSide);
+                BattleSideEnum finalDefeatedSide = finalWinnerSide == BattleSideEnum.None
+                    ? BattleSideEnum.None
+                    : finalWinnerSide.GetOppositeSide();
+                List<Hero> finalDefeatedUnconsciousHeroes =
+                    BuildBattleResultCharacterAggregates(result)
+                        .Values
+                        .Where(aggregate =>
+                            aggregate != null &&
+                            aggregate.HeroShouldBeWounded &&
+                            TryResolveBattleSideEnumLoose(aggregate.SideId) == finalDefeatedSide)
+                        .Select(aggregate =>
+                            TryResolveCharacterObjectFromIds(
+                                aggregate.HeroId,
+                                aggregate.OriginalCharacterId,
+                                aggregate.CharacterId)?.HeroObject)
+                        .Where(hero => hero != null)
+                        .Distinct()
+                        .ToList();
                 finalLandBattleCompletionArmed =
                     ExactLandBattleCampaignBattleAdapter.TryArmFinalEncounterCompletion(
                         PlayerEncounter.Battle,
                         result,
                         finalHeroHitPoints,
+                        finalDefeatedUnconsciousHeroes,
                         out finalLandBattleCompletionDiagnostics);
             }
             bool exitRequested = TryRequestLocalMissionExit(mission, "campaign battle_result bridge");
