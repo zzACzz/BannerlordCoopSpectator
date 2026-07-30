@@ -33,10 +33,12 @@ namespace CoopSpectator.Infrastructure
                        scenarioContext.ScenarioKind,
                        FieldBattleScenarioKind,
                        StringComparison.OrdinalIgnoreCase) &&
-                   string.Equals(
-                       scenarioContext.CampaignBattleType,
-                       FieldBattleCampaignBattleType,
-                       StringComparison.OrdinalIgnoreCase);
+                   (string.Equals(
+                        scenarioContext.CampaignBattleType,
+                        FieldBattleCampaignBattleType,
+                        StringComparison.OrdinalIgnoreCase) ||
+                    ExactReliefScenarioContract.IsReliefScenario(
+                        scenarioContext));
         }
 
         public static bool IsValidatedFieldBattleScenario(
@@ -59,6 +61,19 @@ namespace CoopSpectator.Infrastructure
             diagnostics = "not-field-battle-scenario";
             if (!IsFieldBattleScenario(scenarioContext))
                 return false;
+
+            if (ExactReliefScenarioContract.IsReliefScenario(
+                    scenarioContext) &&
+                !ExactReliefScenarioContract.IsValidatedScenario(
+                    scenarioContext,
+                    runtimeScene,
+                    out string reliefDiagnostics))
+            {
+                diagnostics =
+                    "relief-field-pre-mission-contract-invalid {" +
+                    reliefDiagnostics + "}";
+                return false;
+            }
 
             if (string.IsNullOrWhiteSpace(runtimeScene) ||
                 !SceneRuntimeClassifier.IsCampaignBattleScene(runtimeScene))
@@ -125,10 +140,32 @@ namespace CoopSpectator.Infrastructure
             BattleScenarioContextMessage scenarioContext = snapshot?.ScenarioContext;
             if (ExactReliefScenarioContract.IsReliefScenario(scenarioContext))
             {
-                return ExactReliefScenarioContract.IsValidatedScenario(
-                    scenarioContext,
-                    runtimeScene,
-                    out diagnostics);
+                if (!ExactReliefScenarioContract.IsValidatedScenario(
+                        scenarioContext,
+                        runtimeScene,
+                        out string reliefDiagnostics))
+                {
+                    diagnostics = reliefDiagnostics;
+                    return false;
+                }
+
+                if (!IsValidatedFieldBattleScenario(
+                        snapshot,
+                        scenarioContext,
+                        runtimeScene,
+                        out string fieldBattleDiagnostics))
+                {
+                    diagnostics =
+                        "relief-field-contract-invalid {" +
+                        fieldBattleDiagnostics + "}";
+                    return false;
+                }
+
+                diagnostics =
+                    "Mode=Relief " +
+                    "Relief={" + reliefDiagnostics + "} " +
+                    "FieldBattle={" + fieldBattleDiagnostics + "}";
+                return true;
             }
 
             if (SallyOutScenarioContract.IsSallyOutScenario(scenarioContext))

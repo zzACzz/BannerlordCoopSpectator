@@ -97,22 +97,17 @@ namespace CoopSpectator.Campaign.Relief
                 return false;
             }
 
-            if (initializerRecord.SceneHasMapPatch)
+            if (!initializerRecord.SceneHasMapPatch)
             {
-                diagnostics = "mission-initializer-map-patch-enabled";
+                diagnostics = "mission-initializer-map-patch-disabled";
                 return false;
             }
 
-            if (!CampaignMissionShellRuntimeState.TryGetMissionShell(
-                    expectedScene,
-                    out string missionShell,
-                    out string missionShellDiagnostics) ||
-                !CampaignMissionShellRuntimeState
-                    .IsWithDeploymentMissionShell(missionShell))
+            if (!SceneRuntimeClassifier.IsCampaignBattleScene(expectedScene))
             {
                 diagnostics =
-                    "mission-shell-unsupported {" +
-                    missionShellDiagnostics + "}";
+                    "relief-field-scene-invalid Scene=" +
+                    expectedScene;
                 return false;
             }
 
@@ -122,18 +117,12 @@ namespace CoopSpectator.Campaign.Relief
                 return false;
             }
 
-            if (mission.GetMissionBehavior<SallyOutMissionController>() == null)
-            {
-                diagnostics = "native-relief-controller-missing";
-                return false;
-            }
-
             diagnostics =
                 "validated Settlement=" + settlement.StringId +
                 " Scene=" + expectedScene +
                 " PlayerSide=" + battle.PlayerSide +
-                " MissionShell=" + missionShell +
-                " SceneHasMapPatch=False";
+                " MissionMode=Battle" +
+                " SceneHasMapPatch=True";
             return true;
         }
 
@@ -167,8 +156,15 @@ namespace CoopSpectator.Campaign.Relief
                 result?.MapScene ??
                 snapshot?.MultiplayerScene ??
                 snapshot?.MapScene;
-            if (!ExactReliefScenarioContract.IsValidatedScenario(
-                    scenarioContext,
+            if (!ExactReliefScenarioContract.IsReliefScenario(
+                    scenarioContext))
+            {
+                diagnostics = "relief-scenario-identity-invalid";
+                return false;
+            }
+
+            if (!ExactLandBattleScenarioContract.IsValidatedScenario(
+                    snapshot,
                     runtimeScene,
                     out string scenarioDiagnostics))
             {

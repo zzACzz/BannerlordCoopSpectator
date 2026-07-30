@@ -4956,15 +4956,25 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 MapEvent battle = TryGetCurrentMapEventSafe();
                 Settlement encounterSettlement = PlayerEncounter.EncounterSettlement ?? battle?.MapEventSettlement ?? MobileParty.MainParty?.CurrentSettlement;
                 string siegeSubtype = ResolveSiegeSubtype(battle, encounterSettlement, missionScene);
-                bool isSiegeBattle = !string.IsNullOrWhiteSpace(siegeSubtype);
+                bool isReliefBattle = string.Equals(
+                    siegeSubtype,
+                    ExactReliefScenarioContract.SiegeSubtype,
+                    StringComparison.OrdinalIgnoreCase);
+                bool isSiegeBattle =
+                    !string.IsNullOrWhiteSpace(siegeSubtype) &&
+                    !isReliefBattle;
 
                 return new BattleScenarioContextMessage
                 {
                     CampaignBattleType = battle?.EventType.ToString() ?? string.Empty,
                     ScenarioKind = ResolveScenarioKind(battle, encounterSettlement, missionScene, isSiegeBattle),
                     IsSiegeBattle = isSiegeBattle,
-                    Source = battle != null ? "map-event+settlement" : "scene/settlement-fallback",
-                    SiegeContext = isSiegeBattle
+                    Source = isReliefBattle
+                        ? "map-event+settlement:relief-field-battle"
+                        : battle != null
+                            ? "map-event+settlement"
+                            : "scene/settlement-fallback",
+                    SiegeContext = !string.IsNullOrWhiteSpace(siegeSubtype)
                         ? BuildSiegeContextSafe(encounterSettlement, siegeSubtype, missionScene)
                         : null
                 };
@@ -5056,8 +5066,12 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             string siegeSubtype,
             string missionScene)
         {
+            string missionShellScene = Mission.Current?.SceneName;
+            if (string.IsNullOrWhiteSpace(missionShellScene))
+                missionShellScene = missionScene;
+
             CampaignMissionShellRuntimeState.TryGetMissionShell(
-                missionScene,
+                missionShellScene,
                 out string missionShell,
                 out _);
             var siegeContext = new BattleSiegeContextMessage
@@ -10859,29 +10873,6 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         ? "native-siege-ambush-mission-scene"
                         : "siege-ambush-contract-invalid:" +
                           siegeAmbushDiagnostics;
-                    return context;
-                }
-
-                if (ExactReliefCampaignBattleAdapter.IsCampaignStage(
-                        battle,
-                        encounterSettlement))
-                {
-                    bool contractValid =
-                        ExactReliefCampaignBattleAdapter
-                            .TryValidateActiveMission(
-                                battle,
-                                encounterSettlement,
-                                mission,
-                                out string expectedScene,
-                                out string reliefDiagnostics);
-                    context.BattleSceneName =
-                        !string.IsNullOrWhiteSpace(expectedScene)
-                            ? expectedScene
-                            : missionSceneName;
-                    context.Source = contractValid
-                        ? "native-relief-mission-scene"
-                        : "relief-contract-invalid:" +
-                          reliefDiagnostics;
                     return context;
                 }
 

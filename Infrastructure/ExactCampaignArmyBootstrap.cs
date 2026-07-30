@@ -461,8 +461,7 @@ namespace CoopSpectator.Infrastructure
                 }
                 bool useSiegeAmbushController = RequiresSiegeAmbushController(scenarioContext);
                 bool useReliefController =
-                    ExactReliefScenarioContract.IsReliefScenario(
-                        scenarioContext);
+                    IsReliefSiegeSubtype(scenarioContext);
                 bool useLordsHallController = IsLordsHallSiegeSubtype(scenarioContext);
                 bool isLandSallyOutScenario = SallyOutScenarioContract.IsSallyOutScenario(scenarioContext);
                 bool isSiegeAmbushScenario =
@@ -1321,8 +1320,11 @@ namespace CoopSpectator.Infrastructure
 
         private static bool IsReliefSiegeSubtype(BattleScenarioContextMessage scenarioContext)
         {
-            return ExactReliefScenarioContract.IsReliefScenario(
-                scenarioContext);
+            return scenarioContext?.IsSiegeBattle == true &&
+                   string.Equals(
+                       scenarioContext.SiegeContext?.SiegeSubtype,
+                       ExactReliefScenarioContract.SiegeSubtype,
+                       StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsSiegeAssaultSubtype(BattleScenarioContextMessage scenarioContext)

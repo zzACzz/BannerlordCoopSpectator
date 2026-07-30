@@ -13,10 +13,11 @@ namespace CoopSpectator.Infrastructure.Relief
         public static bool IsReliefScenario(
             BattleScenarioContextMessage scenarioContext)
         {
-            return scenarioContext?.IsSiegeBattle == true &&
+            return scenarioContext != null &&
+                   !scenarioContext.IsSiegeBattle &&
                    string.Equals(
                        scenarioContext.ScenarioKind,
-                       "Siege",
+                       ExactLandBattleScenarioContract.FieldBattleScenarioKind,
                        StringComparison.OrdinalIgnoreCase) &&
                    string.Equals(
                        scenarioContext.CampaignBattleType,
@@ -79,27 +80,15 @@ namespace CoopSpectator.Infrastructure.Relief
                 return false;
             }
 
-            if (!CampaignMissionShellRuntimeState.IsWithDeploymentMissionShell(
-                    siegeContext.MissionShell))
-            {
-                diagnostics =
-                    CampaignMissionShellRuntimeState.IsNoDeploymentMissionShell(
-                        siegeContext.MissionShell)
-                        ? "mission-shell-unsupported-no-deployment"
-                        : "mission-shell-invalid Value=" +
-                          (siegeContext.MissionShell ?? string.Empty);
-                return false;
-            }
-
             if (!siegeContext.HasMissionInitializerRecord)
             {
                 diagnostics = "mission-initializer-missing";
                 return false;
             }
 
-            if (siegeContext.MissionInitializerSceneHasMapPatch)
+            if (!siegeContext.MissionInitializerSceneHasMapPatch)
             {
-                diagnostics = "mission-initializer-map-patch-enabled";
+                diagnostics = "mission-initializer-map-patch-disabled";
                 return false;
             }
 
@@ -112,15 +101,16 @@ namespace CoopSpectator.Infrastructure.Relief
             }
 
             if (string.IsNullOrWhiteSpace(runtimeScene) ||
+                !SceneRuntimeClassifier.IsCampaignBattleScene(runtimeScene) ||
                 !string.Equals(
                     expectedScene,
                     runtimeScene,
                     StringComparison.OrdinalIgnoreCase))
             {
                 diagnostics =
-                    "runtime-scene-mismatch Runtime=" +
+                    "relief-field-runtime-scene-invalid Runtime=" +
                     (runtimeScene ?? string.Empty) +
-                    " Expected=" + expectedScene;
+                    " SourceMissionScene=" + expectedScene;
                 return false;
             }
 
@@ -128,8 +118,9 @@ namespace CoopSpectator.Infrastructure.Relief
                 "Mode=Relief" +
                 " Settlement=" + siegeContext.SettlementId +
                 " Scene=" + runtimeScene +
-                " MissionShell=" + siegeContext.MissionShell +
-                " SceneHasMapPatch=False";
+                " SourceMissionScene=" + expectedScene +
+                " SceneHasMapPatch=True" +
+                " TacticalMode=FieldBattle";
             return true;
         }
     }
