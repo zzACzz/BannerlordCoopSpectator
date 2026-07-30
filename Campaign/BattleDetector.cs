@@ -24,6 +24,7 @@ using TaleWorlds.Core;
 using TaleWorlds.Library;
 using Helpers;
 using TaleWorlds.ObjectSystem;
+using CoopSpectator.Campaign.Capture;
 using CoopSpectator.Campaign.LandBattle;
 using CoopSpectator.Campaign.LordsHall;
 using CoopSpectator.Campaign.Relief;
@@ -3428,25 +3429,10 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                             pair.Value))
                         .Where(pair => pair.Key != null)
                         .ToList();
-                BattleSideEnum finalWinnerSide = TryResolveWinnerSideEnum(result.WinnerSide);
-                BattleSideEnum finalDefeatedSide = finalWinnerSide == BattleSideEnum.None
-                    ? BattleSideEnum.None
-                    : finalWinnerSide.GetOppositeSide();
                 List<Hero> finalDefeatedUnconsciousHeroes =
-                    BuildBattleResultCharacterAggregates(result)
-                        .Values
-                        .Where(aggregate =>
-                            aggregate != null &&
-                            aggregate.HeroShouldBeWounded &&
-                            TryResolveBattleSideEnumLoose(aggregate.SideId) == finalDefeatedSide)
-                        .Select(aggregate =>
-                            TryResolveCharacterObjectFromIds(
-                                aggregate.HeroId,
-                                aggregate.OriginalCharacterId,
-                                aggregate.CharacterId)?.HeroObject)
-                        .Where(hero => hero != null)
-                        .Distinct()
-                        .ToList();
+                    BuildFinalDefeatedUnconsciousHeroCandidates(
+                        result,
+                        includePendingLordsHallStage: false);
                 finalLandBattleCompletionArmed =
                     ExactLandBattleCampaignBattleAdapter.TryArmFinalEncounterCompletion(
                         PlayerEncounter.Battle,
@@ -3454,6 +3440,22 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         finalHeroHitPoints,
                         finalDefeatedUnconsciousHeroes,
                         out finalLandBattleCompletionDiagnostics);
+            }
+            bool finalSiegeHeroCaptureArmed = false;
+            string finalSiegeHeroCaptureDiagnostics = "not-requested";
+            if (encounterPrepared && ShouldArmFinalSiegeHeroCapture(result))
+            {
+                List<Hero> finalSiegeDefeatedUnconsciousHeroes =
+                    BuildFinalDefeatedUnconsciousHeroCandidates(
+                        result,
+                        includePendingLordsHallStage:
+                            LordsHallResultBridge.IsLordsHallResult(result));
+                finalSiegeHeroCaptureArmed = ExactCampaignHeroCaptureRuntime.TryArm(
+                    PlayerEncounter.Battle,
+                    result,
+                    result.BattleStage,
+                    finalSiegeDefeatedUnconsciousHeroes,
+                    out finalSiegeHeroCaptureDiagnostics);
             }
             bool exitRequested = TryRequestLocalMissionExit(mission, "campaign battle_result bridge");
             if (exitRequested)
@@ -3480,6 +3482,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     "EncounterPrepared=" + encounterPrepared + " " +
                     "FinalLandBattleCompletionArmed=" + finalLandBattleCompletionArmed + " " +
                     "FinalLandBattleCompletionDiagnostics=[" + finalLandBattleCompletionDiagnostics + "] " +
+                    "FinalSiegeHeroCaptureArmed=" + finalSiegeHeroCaptureArmed + " " +
+                    "FinalSiegeHeroCaptureDiagnostics=[" + finalSiegeHeroCaptureDiagnostics + "] " +
                     "NativeSiegeAmbushAftermath=" + useNativeSiegeAmbushAftermath + " " +
                     "BattleId=" + (result.BattleId ?? "null") +
                     " WinnerSide=" + (result.WinnerSide ?? "none") +
@@ -4312,6 +4316,84 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 summary.HeroSkillXpApplied.ToString(
                     "0.#",
                     CultureInfo.InvariantCulture) + ".");
+        }
+
+        private static bool ShouldArmFinalSiegeHeroCapture(
+            CoopBattleResultBridgeFile.BattleResultSnapshot result)
+        {
+            MapEvent battle = PlayerEncounter.Battle;
+            if (battle?.IsSiegeAssault != true ||
+                result?.IsFinalStage != true ||
+                result.DefenderPushedBack ||
+                TryResolveWinnerSideEnum(result.WinnerSide) == BattleSideEnum.None)
+            {
+                return false;
+            }
+
+            return string.Equals(
+                       result.BattleStage,
+                       "SiegeAssault",
+                       StringComparison.OrdinalIgnoreCase) ||
+                   LordsHallResultBridge.IsLordsHallResult(result);
+        }
+
+        private static List<Hero> BuildFinalDefeatedUnconsciousHeroCandidates(
+            CoopBattleResultBridgeFile.BattleResultSnapshot result,
+            bool includePendingLordsHallStage)
+        {
+            var candidates = new HashSet<Hero>();
+            var currentStageHeroes = new HashSet<Hero>();
+            BattleSideEnum winnerSide = TryResolveWinnerSideEnum(result?.WinnerSide);
+            if (winnerSide == BattleSideEnum.None)
+                return candidates.ToList();
+
+            BattleSideEnum defeatedSide = winnerSide.GetOppositeSide();
+            foreach (BattleResultCharacterAggregate aggregate in
+                     BuildBattleResultCharacterAggregates(result).Values)
+            {
+                if (aggregate == null ||
+                    !aggregate.IsHero ||
+                    TryResolveBattleSideEnumLoose(aggregate.SideId) != defeatedSide)
+                {
+                    continue;
+                }
+
+                Hero hero = TryResolveCharacterObjectFromIds(
+                    aggregate.HeroId,
+                    aggregate.OriginalCharacterId,
+                    aggregate.CharacterId)?.HeroObject;
+                if (hero == null)
+                    continue;
+
+                currentStageHeroes.Add(hero);
+                if (aggregate.HeroShouldBeWounded)
+                    candidates.Add(hero);
+            }
+
+            if (!includePendingLordsHallStage)
+                return candidates.ToList();
+
+            foreach (CoopBattleResultBridgeFile.BattleResultEntrySnapshot entry in
+                     _pendingLordsHallPrisonerEntries.Where(item => item != null))
+            {
+                if (!entry.IsHero ||
+                    entry.UnconsciousCount <= 0 ||
+                    TryResolveBattleSideEnumLoose(entry.SideId) != defeatedSide)
+                {
+                    continue;
+                }
+
+                Hero hero = TryResolveCharacterObjectFromIds(
+                    entry.HeroId,
+                    entry.OriginalCharacterId,
+                    entry.CharacterId)?.HeroObject;
+                if (hero == null || currentStageHeroes.Contains(hero))
+                    continue;
+
+                candidates.Add(hero);
+            }
+
+            return candidates.ToList();
         }
 
         private static bool ShouldCommitFinalLandBattleWinner(

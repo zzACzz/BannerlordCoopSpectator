@@ -3,16 +3,16 @@ using HarmonyLib;
 using TaleWorlds.CampaignSystem.Encounters;
 using TaleWorlds.CampaignSystem.MapEvents;
 
-namespace CoopSpectator.Campaign.LandBattle
+namespace CoopSpectator.Campaign.Capture
 {
     [HarmonyPatch(typeof(MapEvent), "CaptureDefeatedPartyMembers")]
-    internal static class ExactLandBattleHeroCaptureDistributionPatch
+    internal static class ExactCampaignHeroCaptureDistributionPatch
     {
         private static void Prefix(MapEvent __instance)
         {
             try
             {
-                if (!ExactLandBattleCampaignBattleAdapter.TryPrepareFinalFieldBattleHeroCapturesForNativeDistribution(
+                if (!ExactCampaignHeroCaptureRuntime.TryPrepareForNativeDistribution(
                         __instance,
                         out string diagnostics))
                 {
@@ -20,26 +20,26 @@ namespace CoopSpectator.Campaign.LandBattle
                 }
 
                 ModLogger.Info(
-                    "ExactLandBattleHeroCaptureDistributionPatch: evaluated final field-battle hero capture before " +
+                    "ExactCampaignHeroCaptureDistributionPatch: evaluated exact campaign hero capture before " +
                     "native capture distribution. " + diagnostics + ".");
             }
             catch (System.Exception ex)
             {
                 ModLogger.Info(
-                    "ExactLandBattleHeroCaptureDistributionPatch: failed to prepare final field-battle hero capture; " +
+                    "ExactCampaignHeroCaptureDistributionPatch: failed to prepare exact campaign hero capture; " +
                     "native capture distribution will continue. Error=" + ex.Message);
             }
         }
     }
 
     [HarmonyPatch(typeof(PlayerEncounter), "DoCaptureHeroes")]
-    internal static class ExactLandBattleHeroCapturePatch
+    internal static class ExactCampaignHeroCaptureConversationPatch
     {
         private static void Prefix()
         {
             try
             {
-                if (!ExactLandBattleCampaignBattleAdapter.TryReconcileFinalFieldBattleHeroCaptures(
+                if (!ExactCampaignHeroCaptureRuntime.TryReconcileBeforeNativeConversation(
                         PlayerEncounter.Battle,
                         out string diagnostics))
                 {
@@ -47,13 +47,13 @@ namespace CoopSpectator.Campaign.LandBattle
                 }
 
                 ModLogger.Info(
-                    "ExactLandBattleHeroCapturePatch: evaluated final field-battle hero capture contract. " +
-                    diagnostics + ".");
+                    "ExactCampaignHeroCaptureConversationPatch: evaluated exact campaign hero capture before " +
+                    "native captured-lord conversation. " + diagnostics + ".");
             }
             catch (System.Exception ex)
             {
                 ModLogger.Info(
-                    "ExactLandBattleHeroCapturePatch: failed to reconcile final field-battle hero capture; " +
+                    "ExactCampaignHeroCaptureConversationPatch: failed to reconcile exact campaign hero capture; " +
                     "native captured-lord flow will continue. Error=" + ex.Message);
             }
         }

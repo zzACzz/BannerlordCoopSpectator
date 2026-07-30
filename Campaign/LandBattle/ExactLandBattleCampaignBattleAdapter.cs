@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using CoopSpectator.Campaign.Capture;
 using CoopSpectator.Campaign.Relief;
 using CoopSpectator.Campaign.SallyOut;
 using CoopSpectator.Campaign.VillageBattle;
@@ -9,11 +10,7 @@ using CoopSpectator.Infrastructure.SallyOut;
 using CoopSpectator.Infrastructure.VillageBattle;
 using CoopSpectator.Network.Messages;
 using TaleWorlds.CampaignSystem;
-using TaleWorlds.CampaignSystem.Actions;
-using TaleWorlds.CampaignSystem.Encounters;
 using TaleWorlds.CampaignSystem.MapEvents;
-using TaleWorlds.CampaignSystem.Party;
-using TaleWorlds.CampaignSystem.Roster;
 using TaleWorlds.Core;
 
 namespace CoopSpectator.Campaign.LandBattle
@@ -30,11 +27,6 @@ namespace CoopSpectator.Campaign.LandBattle
         private static string _lastConsumedFinalEncounterResultId;
         private static readonly Dictionary<Hero, int> PendingFinalEncounterHeroHitPoints =
             new Dictionary<Hero, int>();
-        private static MapEvent _pendingFinalFieldBattleHeroCaptureBattle;
-        private static string _pendingFinalFieldBattleHeroCaptureResultId;
-        private static bool _pendingFinalFieldBattleMainPartyIsSoleEligibleCaptor;
-        private static readonly List<Hero> PendingFinalFieldBattleHeroCaptureCandidates =
-            new List<Hero>();
 
         public static bool IsFinalEncounterResult(
             MapEvent battle,
@@ -62,11 +54,11 @@ namespace CoopSpectator.Campaign.LandBattle
             }
 
             string resultId = ResolveResultId(result);
+            int cachedHeroHitPoints;
             lock (FinalEncounterCompletionSync)
             {
                 _lastConsumedFinalEncounterResultId = null;
                 ClearFinalEncounterCompletionNoLock();
-                ClearFinalFieldBattleHeroCaptureNoLock();
                 _pendingFinalEncounterBattle = battle;
                 _pendingFinalEncounterResultId = resultId;
                 _pendingFinalEncounterWinnerSide = result.WinnerSide;
@@ -83,35 +75,23 @@ namespace CoopSpectator.Campaign.LandBattle
                     }
                 }
 
-                if (string.Equals(mode, "FieldBattle", StringComparison.Ordinal) &&
-                    IsPlayerWinner(battle, result.WinnerSide))
-                {
-                    _pendingFinalFieldBattleHeroCaptureBattle = battle;
-                    _pendingFinalFieldBattleHeroCaptureResultId = resultId;
-                    _pendingFinalFieldBattleMainPartyIsSoleEligibleCaptor =
-                        IsMainPartySoleEligibleCaptor(battle);
-
-                    if (defeatedUnconsciousHeroes != null)
-                    {
-                        foreach (Hero hero in defeatedUnconsciousHeroes)
-                        {
-                            if (hero == null || PendingFinalFieldBattleHeroCaptureCandidates.Contains(hero))
-                                continue;
-
-                            PendingFinalFieldBattleHeroCaptureCandidates.Add(hero);
-                        }
-                    }
-                }
-
-                diagnostics =
-                    "armed Mode=" + mode +
-                    " ResultId=" + resultId +
-                    " WinnerSide=" + result.WinnerSide +
-                    " CachedHeroHp=" + PendingFinalEncounterHeroHitPoints.Count +
-                    " HeroCaptureCandidates=" + PendingFinalFieldBattleHeroCaptureCandidates.Count +
-                    " MainPartySoleEligibleCaptor=" + _pendingFinalFieldBattleMainPartyIsSoleEligibleCaptor;
-                return true;
+                cachedHeroHitPoints = PendingFinalEncounterHeroHitPoints.Count;
             }
+
+            bool heroCaptureArmed = ExactCampaignHeroCaptureRuntime.TryArm(
+                battle,
+                result,
+                mode,
+                defeatedUnconsciousHeroes,
+                out string heroCaptureDiagnostics);
+            diagnostics =
+                "armed Mode=" + mode +
+                " ResultId=" + resultId +
+                " WinnerSide=" + result.WinnerSide +
+                " CachedHeroHp=" + cachedHeroHitPoints +
+                " HeroCaptureArmed=" + heroCaptureArmed +
+                " HeroCapture={" + heroCaptureDiagnostics + "}";
+            return true;
         }
 
         public static bool TryConsumeFinalEncounterCompletion(
@@ -132,7 +112,6 @@ namespace CoopSpectator.Campaign.LandBattle
                 if (!ReferenceEquals(_pendingFinalEncounterBattle, battle))
                 {
                     ClearFinalEncounterCompletionNoLock();
-                    ClearFinalFieldBattleHeroCaptureNoLock();
                     diagnostics = "contract-battle-mismatch";
                     return false;
                 }
@@ -183,255 +162,6 @@ namespace CoopSpectator.Campaign.LandBattle
             {
                 _lastConsumedFinalEncounterResultId = resultId;
             }
-            return true;
-        }
-
-        public static bool TryReconcileFinalFieldBattleHeroCaptures(
-            MapEvent battle,
-            out string diagnostics)
-        {
-            diagnostics = "hero-capture-contract-not-pending";
-            List<Hero> candidates;
-            string resultId;
-            bool mainPartyIsSoleEligibleCaptor;
-
-            lock (FinalEncounterCompletionSync)
-            {
-                if (_pendingFinalFieldBattleHeroCaptureBattle == null)
-                    return false;
-
-                resultId = _pendingFinalFieldBattleHeroCaptureResultId;
-                if (!ReferenceEquals(_pendingFinalFieldBattleHeroCaptureBattle, battle))
-                {
-                    ClearFinalFieldBattleHeroCaptureNoLock();
-                    diagnostics = "hero-capture-contract-battle-mismatch";
-                    return true;
-                }
-
-                if (!string.Equals(
-                        _lastConsumedFinalEncounterResultId,
-                        resultId,
-                        StringComparison.Ordinal))
-                {
-                    ClearFinalFieldBattleHeroCaptureNoLock();
-                    diagnostics = "hero-capture-contract-final-encounter-not-consumed";
-                    return true;
-                }
-
-                candidates = new List<Hero>(PendingFinalFieldBattleHeroCaptureCandidates);
-                mainPartyIsSoleEligibleCaptor = _pendingFinalFieldBattleMainPartyIsSoleEligibleCaptor;
-                ClearFinalFieldBattleHeroCaptureNoLock();
-            }
-
-            if (!mainPartyIsSoleEligibleCaptor)
-            {
-                diagnostics =
-                    "ResultId=" + resultId +
-                    " Action=skip-main-party-not-sole-eligible-captor";
-                return true;
-            }
-
-            if (battle == null ||
-                battle.WinningSide == BattleSideEnum.None ||
-                battle.WinningSide != battle.PlayerSide ||
-                battle.RetreatingSide != BattleSideEnum.None)
-            {
-                diagnostics =
-                    "ResultId=" + resultId +
-                    " Action=skip-non-capturing-battle-state";
-                return true;
-            }
-
-            PlayerEncounter encounter = PlayerEncounter.Current;
-            TroopRoster captureRoster = encounter?.RosterToReceiveLootPrisoners;
-            if (captureRoster == null)
-            {
-                diagnostics =
-                    "ResultId=" + resultId +
-                    " Action=skip-capture-roster-unavailable";
-                return true;
-            }
-
-            int queued = 0;
-            int alreadyQueued = 0;
-            int alreadyCaptured = 0;
-            int skippedInvalid = 0;
-            int skippedDead = 0;
-            int skippedDeathMarked = 0;
-            int skippedCannotBecomePrisoner = 0;
-            int reappliedWoundedState = 0;
-            var queuedSamples = new List<string>();
-            foreach (Hero hero in candidates)
-            {
-                if (hero == null)
-                {
-                    skippedInvalid++;
-                    continue;
-                }
-
-                if (!hero.IsAlive)
-                {
-                    skippedInvalid++;
-                    skippedDead++;
-                    continue;
-                }
-
-                if (hero.DeathMark != KillCharacterAction.KillCharacterActionDetail.None)
-                {
-                    skippedInvalid++;
-                    skippedDeathMarked++;
-                    continue;
-                }
-
-                if (!hero.CanBecomePrisoner())
-                {
-                    skippedInvalid++;
-                    skippedCannotBecomePrisoner++;
-                    continue;
-                }
-
-                if (hero.IsPrisoner)
-                {
-                    alreadyCaptured++;
-                    continue;
-                }
-
-                if (GetRosterCount(captureRoster, hero.CharacterObject) > 0)
-                {
-                    alreadyQueued++;
-                    continue;
-                }
-
-                if (!hero.IsWounded)
-                {
-                    hero.MakeWounded(null, KillCharacterAction.KillCharacterActionDetail.None);
-                    reappliedWoundedState++;
-                }
-
-                captureRoster.AddToCounts(hero.CharacterObject, 1);
-                queued++;
-                if (queuedSamples.Count < 8)
-                    queuedSamples.Add(hero.StringId ?? hero.Name?.ToString() ?? "unknown-hero");
-            }
-
-            diagnostics =
-                "ResultId=" + resultId +
-                " Candidates=" + candidates.Count +
-                " Queued=" + queued +
-                " AlreadyQueued=" + alreadyQueued +
-                " AlreadyCaptured=" + alreadyCaptured +
-                " SkippedInvalid=" + skippedInvalid +
-                " SkippedDead=" + skippedDead +
-                " SkippedDeathMarked=" + skippedDeathMarked +
-                " SkippedCannotBecomePrisoner=" + skippedCannotBecomePrisoner +
-                " ReappliedWoundedState=" + reappliedWoundedState +
-                " Samples=[" + string.Join("; ", queuedSamples) + "]" +
-                " Action=reconcile-before-native-captured-lord-conversation";
-            return true;
-        }
-
-        public static bool TryPrepareFinalFieldBattleHeroCapturesForNativeDistribution(
-            MapEvent battle,
-            out string diagnostics)
-        {
-            diagnostics = "hero-capture-contract-not-pending";
-            List<Hero> candidates;
-            string resultId;
-            bool mainPartyIsSoleEligibleCaptor;
-
-            lock (FinalEncounterCompletionSync)
-            {
-                if (_pendingFinalFieldBattleHeroCaptureBattle == null)
-                    return false;
-
-                resultId = _pendingFinalFieldBattleHeroCaptureResultId;
-                if (!ReferenceEquals(_pendingFinalFieldBattleHeroCaptureBattle, battle))
-                {
-                    ClearFinalFieldBattleHeroCaptureNoLock();
-                    diagnostics = "hero-capture-contract-battle-mismatch";
-                    return true;
-                }
-
-                if (!string.Equals(
-                        _lastConsumedFinalEncounterResultId,
-                        resultId,
-                        StringComparison.Ordinal))
-                {
-                    diagnostics = "hero-capture-contract-final-encounter-not-consumed";
-                    return true;
-                }
-
-                candidates = new List<Hero>(PendingFinalFieldBattleHeroCaptureCandidates);
-                mainPartyIsSoleEligibleCaptor = _pendingFinalFieldBattleMainPartyIsSoleEligibleCaptor;
-            }
-
-            if (!mainPartyIsSoleEligibleCaptor)
-            {
-                diagnostics =
-                    "ResultId=" + resultId +
-                    " Action=skip-main-party-not-sole-eligible-captor";
-                return true;
-            }
-
-            if (battle == null ||
-                battle.WinningSide == BattleSideEnum.None ||
-                battle.WinningSide != battle.PlayerSide ||
-                battle.RetreatingSide != BattleSideEnum.None)
-            {
-                diagnostics =
-                    "ResultId=" + resultId +
-                    " Action=skip-non-capturing-battle-state";
-                return true;
-            }
-
-            int alreadyWounded = 0;
-            int reappliedWoundedState = 0;
-            int skippedDead = 0;
-            int skippedDeathMarked = 0;
-            int skippedCannotBecomePrisoner = 0;
-            var reappliedSamples = new List<string>();
-            foreach (Hero hero in candidates)
-            {
-                if (hero == null || !hero.IsAlive)
-                {
-                    skippedDead++;
-                    continue;
-                }
-
-                if (hero.DeathMark != KillCharacterAction.KillCharacterActionDetail.None)
-                {
-                    skippedDeathMarked++;
-                    continue;
-                }
-
-                if (!hero.CanBecomePrisoner())
-                {
-                    skippedCannotBecomePrisoner++;
-                    continue;
-                }
-
-                if (hero.IsWounded)
-                {
-                    alreadyWounded++;
-                    continue;
-                }
-
-                hero.MakeWounded(null, KillCharacterAction.KillCharacterActionDetail.None);
-                reappliedWoundedState++;
-                if (reappliedSamples.Count < 8)
-                    reappliedSamples.Add(hero.StringId ?? hero.Name?.ToString() ?? "unknown-hero");
-            }
-
-            diagnostics =
-                "ResultId=" + resultId +
-                " Candidates=" + candidates.Count +
-                " AlreadyWounded=" + alreadyWounded +
-                " ReappliedWoundedState=" + reappliedWoundedState +
-                " SkippedDead=" + skippedDead +
-                " SkippedDeathMarked=" + skippedDeathMarked +
-                " SkippedCannotBecomePrisoner=" + skippedCannotBecomePrisoner +
-                " Samples=[" + string.Join("; ", reappliedSamples) + "]" +
-                " Action=prepare-before-native-capture-distribution";
             return true;
         }
 
@@ -553,67 +283,6 @@ namespace CoopSpectator.Campaign.LandBattle
                    string.Equals(winnerSide, "Defender", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static bool IsPlayerWinner(MapEvent battle, string winnerSide)
-        {
-            if (battle == null || battle.PlayerSide == BattleSideEnum.None)
-                return false;
-
-            return (battle.PlayerSide == BattleSideEnum.Attacker &&
-                    string.Equals(winnerSide, "Attacker", StringComparison.OrdinalIgnoreCase)) ||
-                   (battle.PlayerSide == BattleSideEnum.Defender &&
-                    string.Equals(winnerSide, "Defender", StringComparison.OrdinalIgnoreCase));
-        }
-
-        private static bool IsMainPartySoleEligibleCaptor(MapEvent battle)
-        {
-            if (battle == null || battle.WinningSide == BattleSideEnum.None)
-                return false;
-
-            int eligibleCaptorCount = 0;
-            bool mainPartyEligible = false;
-            foreach (MapEventParty winnerParty in battle.GetMapEventSide(battle.WinningSide).Parties)
-            {
-                PartyBase party = winnerParty?.Party;
-                if (party?.MemberRoster == null ||
-                    party.MemberRoster.Count <= 0 ||
-                    winnerParty.ContributionToBattle <= 0)
-                {
-                    continue;
-                }
-
-                MobileParty mobileParty = party.MobileParty;
-                if (mobileParty != null &&
-                    (mobileParty.IsVillager ||
-                     mobileParty.IsCaravan ||
-                     mobileParty.IsPatrolParty ||
-                     ((mobileParty.IsGarrison || mobileParty.IsMilitia) &&
-                      mobileParty.CurrentSettlement?.IsVillage == true)))
-                {
-                    continue;
-                }
-
-                eligibleCaptorCount++;
-                if (party == PartyBase.MainParty)
-                    mainPartyEligible = true;
-            }
-
-            return mainPartyEligible && eligibleCaptorCount == 1;
-        }
-
-        private static int GetRosterCount(TroopRoster roster, CharacterObject character)
-        {
-            if (roster == null || character == null)
-                return 0;
-
-            foreach (TroopRosterElement element in roster.GetTroopRoster())
-            {
-                if (element.Character == character)
-                    return Math.Max(0, element.Number);
-            }
-
-            return 0;
-        }
-
         private static string ResolveResultId(CoopBattleResultBridgeFile.BattleResultSnapshot result)
         {
             if (!string.IsNullOrWhiteSpace(result?.ResultId))
@@ -632,12 +301,5 @@ namespace CoopSpectator.Campaign.LandBattle
             PendingFinalEncounterHeroHitPoints.Clear();
         }
 
-        private static void ClearFinalFieldBattleHeroCaptureNoLock()
-        {
-            _pendingFinalFieldBattleHeroCaptureBattle = null;
-            _pendingFinalFieldBattleHeroCaptureResultId = null;
-            _pendingFinalFieldBattleMainPartyIsSoleEligibleCaptor = false;
-            PendingFinalFieldBattleHeroCaptureCandidates.Clear();
-        }
     }
 }
