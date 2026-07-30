@@ -1850,11 +1850,12 @@ namespace CoopSpectator.MissionBehaviors
                     team,
                     source,
                     preferredNativeMarkerInterval,
-                    refreshOnGeometryChange: isExactFieldBattle || isExactVillageBattle);
+                    refreshOnGeometryChange:
+                        isExactSallyOut || isExactFieldBattle || isExactVillageBattle);
             if (ensuredNativeBoundaryMarkers)
             {
 #if !COOPSPECTATOR_DEDICATED
-                if (isExactFieldBattle || isExactVillageBattle)
+                if (isExactSallyOut || isExactFieldBattle || isExactVillageBattle)
                 {
                     TryEnsureProminentFieldBattleFrontBoundaryMarkers(
                         mission,
