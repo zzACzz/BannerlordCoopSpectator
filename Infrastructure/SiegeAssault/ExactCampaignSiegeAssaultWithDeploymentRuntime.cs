@@ -482,6 +482,29 @@ namespace CoopSpectator.Infrastructure
                    IsSiegeAssaultScenario(scenarioContext);
         }
 
+        public static bool ShouldUseServerNativeExactSiegeAgentOwnership(Mission mission)
+        {
+            if (mission == null ||
+                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(
+                    mission.SceneName ?? string.Empty))
+            {
+                return false;
+            }
+
+            if (ShouldUseFullNativeArmySpawnRuntime(mission))
+                return true;
+
+            if (!ExperimentalFeatures.EnableExactSiegeAmbushInitialMaterializationRuntime)
+                return false;
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext ??
+                CoopPreMissionTopologyRuntimeState.GetActiveScenarioContext();
+            return SiegeAmbushScenarioContract.IsSiegeAmbushScenario(scenarioContext);
+        }
+
         public static bool TryEnsureMissionBehaviorContract(
             Mission mission,
             BattleScenarioContextMessage scenarioContext,

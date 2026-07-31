@@ -487,6 +487,9 @@ namespace CoopSpectator.Infrastructure
 
         private static bool IsVerboseDiagnosticsEnabled()
         {
+            if (!CoopDebugConfig.VerboseDiagnostics)
+                return false;
+
             string value = Environment.GetEnvironmentVariable("COOPSPECTATOR_CAPTAIN_PERK_DIAGNOSTICS");
             if (string.IsNullOrWhiteSpace(value))
                 return false;

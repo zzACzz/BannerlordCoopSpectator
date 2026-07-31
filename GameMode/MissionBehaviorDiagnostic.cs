@@ -25,24 +25,27 @@ namespace CoopSpectator.GameMode
 
         public override void AfterStart()
         {
-            ModLogger.Info("MissionBehaviorDiagnostic AfterStart ENTER");
             base.AfterStart();
+            if (!ExperimentalFeatures.EnableVerboseDiagnostics)
+                return;
+
+            ModLogger.Verbose("MissionBehaviorDiagnostic AfterStart ENTER");
             Mission mission = Mission;
             if (mission == null) return;
             try
             {
                 List<MissionBehavior> behaviors = mission.MissionBehaviors;
-                if (behaviors == null) { ModLogger.Info("MissionBehaviorDiagnostic: MissionBehaviors is null."); return; }
+                if (behaviors == null) { ModLogger.Verbose("MissionBehaviorDiagnostic: MissionBehaviors is null."); return; }
                 foreach (string name in CriticalTypeNames)
                 {
                     bool found = ContainsBehavior(behaviors, name);
-                    ModLogger.Info("MissionBehaviorDiagnostic: GetMissionBehavior<" + name + "> = " + (found ? "OK" : "NULL"));
+                    ModLogger.Verbose("MissionBehaviorDiagnostic: GetMissionBehavior<" + name + "> = " + (found ? "OK" : "NULL"));
                 }
 
                 foreach (string name in BattleMapUiParityTypeNames)
                 {
                     bool found = ContainsBehavior(behaviors, name);
-                    ModLogger.Info("MissionBehaviorDiagnostic: UIParity<" + name + "> = " + (found ? "OK" : "NULL"));
+                    ModLogger.Verbose("MissionBehaviorDiagnostic: UIParity<" + name + "> = " + (found ? "OK" : "NULL"));
                 }
 
                 List<string> relevantBehaviorTypes = new List<string>();
@@ -60,15 +63,15 @@ namespace CoopSpectator.GameMode
                     }
                 }
 
-                ModLogger.Info(
+                ModLogger.Verbose(
                     "MissionBehaviorDiagnostic: relevant UI behavior types = " +
                     (relevantBehaviorTypes.Count > 0 ? string.Join(", ", relevantBehaviorTypes) : "(none)"));
             }
             catch (Exception ex)
             {
-                ModLogger.Info("MissionBehaviorDiagnostic: " + ex.Message);
+                ModLogger.Info("MissionBehaviorDiagnostic failed: " + ex.Message);
             }
-            ModLogger.Info("MissionBehaviorDiagnostic AfterStart EXIT");
+            ModLogger.Verbose("MissionBehaviorDiagnostic AfterStart EXIT");
         }
 
         public override void OnMissionTick(float dt)
@@ -82,7 +85,7 @@ namespace CoopSpectator.GameMode
             if (!_loggedBattleMapClientObserverFallback)
             {
                 _loggedBattleMapClientObserverFallback = true;
-                ModLogger.Info(
+                ModLogger.Verbose(
                     "MissionBehaviorDiagnostic: running battle-map client exact visual observer fallback because CoopMissionClientLogic is not injected in crash-isolation stack.");
             }
 

@@ -406,6 +406,7 @@ namespace CoopSpectator
                     TryApplyExactCampaignNetworkObjectBootstrapPatch();
                     TryApplyBattleMapSpawnHandoffPatch();
                     TryApplyMissionItemUsageSetFlagsGuardPatch();
+                    TryApplyCoopNetworkSafeAgentBlowPatch();
                     TryApplyCommanderDeploymentMissionNetworkComponentPatch();
                     TryApplyLateJoinPeerBootstrapGatePatch();
                     TryApplyFinishedLoadingMissionReadyGatePatch();
@@ -651,6 +652,20 @@ namespace CoopSpectator
             catch (Exception ex)
             {
                 ModLogger.Info("CoopSpectatorDedicated: MissionItemUsageSetFlagsGuard patch apply failed: " + ex.Message);
+            }
+        }
+
+        private static void TryApplyCoopNetworkSafeAgentBlowPatch()
+        {
+            try
+            {
+                if (_harmony == null)
+                    _harmony = new Harmony("com.coopspectator.dedicated");
+                CoopNetworkSafeAgentBlowPatch.Apply(_harmony);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopSpectatorDedicated: CoopNetworkSafeAgentBlow patch apply failed: " + ex.Message);
             }
         }
 

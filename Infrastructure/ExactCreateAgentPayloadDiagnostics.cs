@@ -114,7 +114,8 @@ namespace CoopSpectator.Infrastructure
             ExactCreateAgentPayloadDiagnosticProfile.FullExact
         };
 
-        private static readonly bool DiagnosticsEnabled = true;
+        private static bool DiagnosticsEnabled =>
+            ExperimentalFeatures.EnableExactCreateAgentPayloadDiagnostics;
         private static readonly ExactCreateAgentPayloadDiagnosticMode ActiveMode =
             ExactCreateAgentPayloadDiagnosticMode.SweepByEntryHash;
         private static readonly ExactCreateAgentPayloadDiagnosticProfile SingleProfile =

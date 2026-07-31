@@ -226,6 +226,7 @@ namespace CoopSpectator.Patches
         private static DateTime _lastDeferredClientAgentBootstrapMutationUtc = DateTime.MinValue;
         private static int _sallyOutClientAdaptiveReplayGroupLimit = 1;
         private static int _sallyOutClientAdaptiveStableTickCount;
+        private static Mission _initialSallyOutClientMaterializationCompletedMission;
         private static readonly TimeSpan LocalFollowEchoSuppressionWindow = TimeSpan.FromSeconds(2);
         private static readonly TimeSpan DeferredClientSiegeMissionObjectReplayDelay = TimeSpan.FromMilliseconds(750);
         private static readonly TimeSpan DeferredClientSiegeMissingMissionObjectDropDelay = TimeSpan.FromSeconds(8);
@@ -283,6 +284,7 @@ namespace CoopSpectator.Patches
             public bool UseFieldBattleNativeStartupPacing;
             public bool UseVillageBattleNativeStartupPacing;
             public bool UseSiegeAssaultNativeStartupPacing;
+            public bool UseSiegeAmbushNativeStartupPacing;
             public string DeferralReason;
         }
 
@@ -897,12 +899,15 @@ namespace CoopSpectator.Patches
                 _lastDeferredClientAgentBootstrapMutationUtc = DateTime.MinValue;
                 _sallyOutClientAdaptiveReplayGroupLimit = MinSallyOutClientCreateAgentReplayGroupsPerTick;
                 _sallyOutClientAdaptiveStableTickCount = 0;
+                _initialSallyOutClientMaterializationCompletedMission = null;
             }
             ExactFieldBattleInitialMaterializationRuntime.Reset(
                 source ?? "BattleMapSpawnHandoffPatch.ResetRuntimeState");
             ExactVillageBattleInitialMaterializationRuntime.Reset(
                 source ?? "BattleMapSpawnHandoffPatch.ResetRuntimeState");
             ExactSiegeAssaultInitialMaterializationRuntime.Reset(
+                source ?? "BattleMapSpawnHandoffPatch.ResetRuntimeState");
+            ExactSiegeAmbushInitialMaterializationRuntime.Reset(
                 source ?? "BattleMapSpawnHandoffPatch.ResetRuntimeState");
             _delayedLocalControlledWeaponStateReplayDepth = 0;
             _unsafeImmediateClientAgentBaselineMaterializationDepth = 0;
@@ -2738,6 +2743,10 @@ namespace CoopSpectator.Patches
                         fieldBattleMaterializedMapApplied,
                         fieldBattleMaterializedMapReadinessSummary,
                         out string siegeAssaultPacingReason);
+                bool useInitialSiegeAmbushCreateAgentPacing =
+                    ExactSiegeAmbushInitialMaterializationRuntime.ShouldPaceInitialClientCreateAgent(
+                        mission,
+                        out string siegeAmbushPacingReason);
                 ExactCreateAgentCorridorDiagnostics.ObserveClientCreateAgentPrefix(
                     createAgent,
                     snapshotReadyForExactHeroHandoff,
@@ -2830,6 +2839,28 @@ namespace CoopSpectator.Patches
                             " HeroLike=" + IsHeroLikeCreateAgentPayload(createAgent) +
                             " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
                             " Reason=" + (siegeAssaultPacingReason ?? "unknown"));
+                    }
+                    return false;
+                }
+
+                if (useInitialSiegeAmbushCreateAgentPacing &&
+                    !createAgent.IsPlayerAgent &&
+                    createAgent.Peer == null)
+                {
+                    RegisterDeferredClientCreateAgentPayload(
+                        createAgent,
+                        siegeAmbushPacingReason,
+                        useSiegeAmbushNativeStartupPacing: true);
+                    if (ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+                    {
+                        ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: deferred initial siege-ambush CreateAgent for paced native client replay. " +
+                            "AgentIndex=" + createAgent.AgentIndex +
+                            " MountAgentIndex=" + createAgent.MountAgentIndex +
+                            " TeamIndex=" + createAgent.TeamIndex +
+                            " HeroLike=" + IsHeroLikeCreateAgentPayload(createAgent) +
+                            " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
+                            " Reason=" + (siegeAmbushPacingReason ?? "unknown"));
                     }
                     return false;
                 }
@@ -3068,7 +3099,7 @@ namespace CoopSpectator.Patches
                             : "agent-bootstrap-deferred:" + (snapshotReadinessSummary ?? "unknown"));
                     if (ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
                     {
-                        ModLogger.Info(
+                        ModLogger.Verbose(
                             "BattleMapSpawnHandoffPatch: deferred client AgentSetFormation because agent bootstrap is still deferred. " +
                             "AgentIndex=" + agentSetFormation.AgentIndex +
                             " FormationIndex=" + agentSetFormation.FormationIndex);
@@ -3106,7 +3137,7 @@ namespace CoopSpectator.Patches
                     RegisterDeferredClientSetAgentActionSetPayload(
                         setAgentActionSet,
                         "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client SetAgentActionSet until current battle snapshot is applied. " +
                         "AgentIndex=" + setAgentActionSet.AgentIndex +
                         " Reason=" + (snapshotReadinessSummary ?? "unknown"));
@@ -3121,7 +3152,7 @@ namespace CoopSpectator.Patches
                     RegisterDeferredClientSetAgentActionSetPayload(
                         setAgentActionSet,
                         "agent-bootstrap-deferred");
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client SetAgentActionSet because agent bootstrap is still deferred. " +
                         "AgentIndex=" + setAgentActionSet.AgentIndex);
                     return false;
@@ -3432,6 +3463,18 @@ namespace CoopSpectator.Patches
             if (!GameNetwork.IsClient || GameNetwork.IsServer || mission == null)
                 return false;
 
+            if (CoopBattlePhaseRuntimeState.GetPhase() >= CoopBattlePhase.BattleActive)
+            {
+                reason = "sally-out-already-active";
+                return false;
+            }
+
+            if (ReferenceEquals(_initialSallyOutClientMaterializationCompletedMission, mission))
+            {
+                reason = "sally-out-initial-materialization-complete";
+                return false;
+            }
+
             BattleScenarioContextMessage scenarioContext =
                 BattleSnapshotRuntimeState.GetScenarioContext() ??
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
@@ -3457,6 +3500,14 @@ namespace CoopSpectator.Patches
                 "validated-sally-out-initial-materialization MaterializedMap={" +
                 (materializedMapReadinessSummary ?? "pending") + "}";
             return true;
+        }
+
+        internal static void MarkInitialSallyOutClientMaterializationComplete(Mission mission)
+        {
+            if (!GameNetwork.IsClient || GameNetwork.IsServer || mission == null)
+                return;
+
+            _initialSallyOutClientMaterializationCompletedMission = mission;
         }
 
         private static bool TryMaterializeDeferredSallyOutMountBeforeHero(
@@ -3802,7 +3853,7 @@ namespace CoopSpectator.Patches
             return mission != null &&
                    createAgent != null &&
                    !GameNetwork.IsServer &&
-                   !ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseFullNativeArmySpawnRuntime(mission) &&
+                   !ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseServerNativeExactSiegeAgentOwnership(mission) &&
                    !createAgent.IsPlayerAgent &&
                    createAgent.Peer == null &&
                    createAgent.MountAgentIndex < 0 &&
@@ -4055,7 +4106,8 @@ namespace CoopSpectator.Patches
             if (!GameNetwork.IsClient ||
                 GameNetwork.IsServer ||
                 mission == null ||
-                CoopBattlePhaseRuntimeState.GetPhase() >= CoopBattlePhase.BattleActive)
+                CoopBattlePhaseRuntimeState.GetPhase() >= CoopBattlePhase.BattleActive ||
+                ReferenceEquals(_initialSallyOutClientMaterializationCompletedMission, mission))
             {
                 return false;
             }
@@ -4200,6 +4252,15 @@ namespace CoopSpectator.Patches
                 ExactSiegeAssaultInitialMaterializationRuntime.IsValidatedScenario(
                     mission,
                     out _);
+            bool useAdaptiveSiegeAmbushReplay =
+                !useAdaptiveSallyOutReplay &&
+                !useAdaptiveFieldBattleReplay &&
+                !useAdaptiveVillageBattleReplay &&
+                !useAdaptiveSiegeAssaultReplay &&
+                CoopBattlePhaseRuntimeState.GetPhase() < CoopBattlePhase.BattleActive &&
+                ExactSiegeAmbushInitialMaterializationRuntime.IsValidatedScenario(
+                    mission,
+                    out _);
             int pacedGroupLimit = MaxSallyOutClientCreateAgentReplayGroupsPerTick;
             TimeSpan replayTickGap = TimeSpan.Zero;
             if (useAdaptiveSallyOutReplay)
@@ -4243,12 +4304,24 @@ namespace CoopSpectator.Patches
                     return;
                 }
             }
+            else if (useAdaptiveSiegeAmbushReplay)
+            {
+                if (!ExactSiegeAmbushInitialMaterializationRuntime.TryPrepareAdaptiveReplay(
+                        mission,
+                        replayTickUtc,
+                        out pacedGroupLimit,
+                        out replayTickGap))
+                {
+                    return;
+                }
+            }
 
             int maxBundleCount =
                 useAdaptiveSallyOutReplay ||
                 useAdaptiveFieldBattleReplay ||
                 useAdaptiveVillageBattleReplay ||
-                useAdaptiveSiegeAssaultReplay
+                useAdaptiveSiegeAssaultReplay ||
+                useAdaptiveSiegeAmbushReplay
                 ? pacedGroupLimit
                 : int.MaxValue;
             var replayStopwatch = System.Diagnostics.Stopwatch.StartNew();
@@ -4383,6 +4456,16 @@ namespace CoopSpectator.Patches
                         agentBootstrapSnapshot.Bundles.Count,
                         source);
                 }
+                else if (useAdaptiveSiegeAmbushReplay)
+                {
+                    ExactSiegeAmbushInitialMaterializationRuntime.ObserveAdaptiveReplay(
+                        mission,
+                        replayStopwatch.Elapsed,
+                        replayTickGap,
+                        admittedPacedGroupCount,
+                        agentBootstrapSnapshot.Bundles.Count,
+                        source);
+                }
             }
         }
 
@@ -4484,7 +4567,8 @@ namespace CoopSpectator.Patches
             bool useSallyOutNativeStartupPacing = false,
             bool useFieldBattleNativeStartupPacing = false,
             bool useVillageBattleNativeStartupPacing = false,
-            bool useSiegeAssaultNativeStartupPacing = false)
+            bool useSiegeAssaultNativeStartupPacing = false,
+            bool useSiegeAmbushNativeStartupPacing = false)
         {
             if (createAgent == null)
                 return;
@@ -4508,6 +4592,7 @@ namespace CoopSpectator.Patches
                     UseFieldBattleNativeStartupPacing = useFieldBattleNativeStartupPacing,
                     UseVillageBattleNativeStartupPacing = useVillageBattleNativeStartupPacing,
                     UseSiegeAssaultNativeStartupPacing = useSiegeAssaultNativeStartupPacing,
+                    UseSiegeAmbushNativeStartupPacing = useSiegeAmbushNativeStartupPacing,
                     DeferralReason = snapshotReadinessSummary
                 };
                 ScheduleDeferredClientAgentBootstrapBundleNoLock(bundle);
@@ -7921,6 +8006,8 @@ namespace CoopSpectator.Patches
                 candidate?.UseVillageBattleNativeStartupPacing == true);
             bool useSiegeAssaultNativeStartupPacing = deferredPayloads.Any(candidate =>
                 candidate?.UseSiegeAssaultNativeStartupPacing == true);
+            bool useSiegeAmbushNativeStartupPacing = deferredPayloads.Any(candidate =>
+                candidate?.UseSiegeAmbushNativeStartupPacing == true);
             Dictionary<int, int> pacedMountToRiderAgentIndex = deferredPayloads
                 .Where(candidate =>
                     UsesMountedInitialNativeStartupPacing(candidate) &&
@@ -7967,6 +8054,7 @@ namespace CoopSpectator.Patches
                 useFieldBattleNativeStartupPacing ||
                 useVillageBattleNativeStartupPacing ||
                 useSiegeAssaultNativeStartupPacing ||
+                useSiegeAmbushNativeStartupPacing ||
                 nowUtc >= _nextSallyOutClientCreateAgentReplayUtc;
             TimeSpan pacedReplayTimeBudget = useFieldBattleNativeStartupPacing
                 ? ExactFieldBattleInitialMaterializationRuntime.ReplayTimeBudget
@@ -7974,7 +8062,9 @@ namespace CoopSpectator.Patches
                     ? ExactVillageBattleInitialMaterializationRuntime.ReplayTimeBudget
                     : useSiegeAssaultNativeStartupPacing
                         ? ExactSiegeAssaultInitialMaterializationRuntime.ReplayTimeBudget
-                        : SallyOutClientCreateAgentReplayTimeBudget;
+                        : useSiegeAmbushNativeStartupPacing
+                            ? ExactSiegeAmbushInitialMaterializationRuntime.ReplayTimeBudget
+                            : SallyOutClientCreateAgentReplayTimeBudget;
             HashSet<int> admittedPacedInitialGroups = new HashSet<int>();
             int admittedPacedInitialGroupCount = 0;
             DateTime pacedInitialReplayStartUtc = DateTime.MinValue;
@@ -8029,6 +8119,12 @@ namespace CoopSpectator.Patches
                                     mission,
                                     pacedInitialReplayStartUtc);
                             }
+                            else if (useSiegeAmbushNativeStartupPacing)
+                            {
+                                ExactSiegeAmbushInitialMaterializationRuntime.MarkReplayGroupStarted(
+                                    mission,
+                                    pacedInitialReplayStartUtc);
+                            }
                             else
                             {
                                 _nextSallyOutClientCreateAgentReplayUtc =
@@ -8068,7 +8164,8 @@ namespace CoopSpectator.Patches
                         createAgent,
                         out strictExactHeroCandidate);
                     if (!handledPacedHero &&
-                        deferredPayload.UseSiegeAssaultNativeStartupPacing != true)
+                        deferredPayload.UseSiegeAssaultNativeStartupPacing != true &&
+                        deferredPayload.UseSiegeAmbushNativeStartupPacing != true)
                     {
                         handledPacedHero = TryHandleMountedHeroCreateAgentViaPayloadAdapter(
                             mission,
@@ -8268,7 +8365,7 @@ namespace CoopSpectator.Patches
                         RemoveDeferredClientCreateAgentPayload(createAgent.AgentIndex);
                         if (exactSiegeNativeFallback || ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
                         {
-                            ModLogger.Info(
+                            ModLogger.Verbose(
                                 "BattleMapSpawnHandoffPatch: replayed deferred client CreateAgent after battle snapshot apply. " +
                                 "AgentIndex=" + createAgent.AgentIndex +
                                 " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
@@ -8322,7 +8419,8 @@ namespace CoopSpectator.Patches
             return deferredPayload?.UseSallyOutNativeStartupPacing == true ||
                    deferredPayload?.UseFieldBattleNativeStartupPacing == true ||
                    deferredPayload?.UseVillageBattleNativeStartupPacing == true ||
-                   deferredPayload?.UseSiegeAssaultNativeStartupPacing == true;
+                   deferredPayload?.UseSiegeAssaultNativeStartupPacing == true ||
+                   deferredPayload?.UseSiegeAmbushNativeStartupPacing == true;
         }
 
         private static bool UsesMountedInitialNativeStartupPacing(
@@ -8386,7 +8484,7 @@ namespace CoopSpectator.Patches
                     RemoveDeferredClientAgentSetFormationPayload(agentSetFormation.AgentIndex);
                     if (ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
                     {
-                        ModLogger.Info(
+                        ModLogger.Verbose(
                             "BattleMapSpawnHandoffPatch: replayed deferred client AgentSetFormation after agent materialization. " +
                             "AgentIndex=" + agentSetFormation.AgentIndex +
                             " FormationIndex=" + agentSetFormation.FormationIndex +
@@ -8453,7 +8551,7 @@ namespace CoopSpectator.Patches
                         missionNetworkComponent,
                         new object[] { setAgentActionSet });
                     RemoveDeferredClientSetAgentActionSetPayload(setAgentActionSet.AgentIndex);
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: replayed deferred client SetAgentActionSet after battle snapshot apply. " +
                         "AgentIndex=" + setAgentActionSet.AgentIndex +
                         " Attempts=" + deferredPayload.Attempts +
@@ -8521,7 +8619,7 @@ namespace CoopSpectator.Patches
                         missionNetworkComponent,
                         new object[] { synchronizeAgentSpawnEquipment });
                     RemoveDeferredClientSynchronizeAgentEquipmentPayload(synchronizeAgentSpawnEquipment.AgentIndex);
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: replayed deferred client SynchronizeAgentSpawnEquipment after battle snapshot apply. " +
                         "AgentIndex=" + synchronizeAgentSpawnEquipment.AgentIndex +
                         " Attempts=" + deferredPayload.Attempts +
@@ -8592,7 +8690,7 @@ namespace CoopSpectator.Patches
                         missionNetworkComponent,
                         new object[] { spawnWeaponWithNewEntity });
                     RemoveDeferredClientSpawnWeaponWithNewEntityPayload(spawnWeaponWithNewEntity.ForcedIndex);
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: replayed deferred client SpawnWeaponWithNewEntity after battle snapshot apply. " +
                         "ForcedIndex=" + spawnWeaponWithNewEntity.ForcedIndex +
                         " ParentMissionObjectId=" + GetMissionObjectIdValue(spawnWeaponWithNewEntity.ParentMissionObjectId) +
@@ -8665,7 +8763,7 @@ namespace CoopSpectator.Patches
                         missionNetworkComponent,
                         new object[] { attachWeaponToSpawnedWeapon });
                     RemoveDeferredClientAttachWeaponToSpawnedWeaponPayload(attachWeaponToSpawnedWeapon);
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: replayed deferred client AttachWeaponToSpawnedWeapon after battle snapshot apply. " +
                         "MissionObjectId=" + GetMissionObjectIdValue(attachWeaponToSpawnedWeapon.MissionObjectId) +
                         " Weapon=" + (attachWeaponToSpawnedWeapon.Weapon.Item?.StringId ?? "null") +
@@ -8737,7 +8835,7 @@ namespace CoopSpectator.Patches
                         new object[] { spawnAttachedWeaponOnSpawnedWeapon });
                     RemoveDeferredClientSpawnAttachedWeaponOnSpawnedWeaponPayload(
                         spawnAttachedWeaponOnSpawnedWeapon.ForcedIndex);
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: replayed deferred client SpawnAttachedWeaponOnSpawnedWeapon after battle snapshot apply. " +
                         "SpawnedWeaponId=" + GetMissionObjectIdValue(spawnAttachedWeaponOnSpawnedWeapon.SpawnedWeaponId) +
                         " AttachmentIndex=" + spawnAttachedWeaponOnSpawnedWeapon.AttachmentIndex +
@@ -8812,7 +8910,7 @@ namespace CoopSpectator.Patches
                         missionNetworkComponent,
                         new object[] { spawnAttachedWeaponOnCorpse });
                     RemoveDeferredClientSpawnAttachedWeaponOnCorpsePayload(spawnAttachedWeaponOnCorpse);
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: replayed deferred client SpawnAttachedWeaponOnCorpse after battle snapshot apply. " +
                         "AgentIndex=" + spawnAttachedWeaponOnCorpse.AgentIndex +
                         " AttachedIndex=" + spawnAttachedWeaponOnCorpse.AttachedIndex +
@@ -8948,7 +9046,7 @@ namespace CoopSpectator.Patches
                         deferredPayload.DeferredUtc);
                     if (ExperimentalFeatures.EnableExactSiegeMissionObjectSyncDiagnostics)
                     {
-                        ModLogger.Info(
+                        ModLogger.Verbose(
                             "BattleMapSpawnHandoffPatch: replayed deferred client SynchronizeMissionObject after battle snapshot apply. " +
                             "MissionObjectId=" + GetMissionObjectIdValue(synchronizeMissionObject.MissionObjectId) +
                             " Attempts=" + deferredPayload.Attempts +
@@ -9427,7 +9525,7 @@ namespace CoopSpectator.Patches
                     RemoveDeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayload(
                         attachWeapon.AgentIndex,
                         attachWeapon);
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: replayed deferred client AttachWeaponToWeaponInAgentEquipmentSlot after battle snapshot apply. " +
                         "AgentIndex=" + attachWeapon.AgentIndex +
                         " SlotIndex=" + attachWeapon.SlotIndex +
@@ -9495,7 +9593,7 @@ namespace CoopSpectator.Patches
                     RemoveDeferredClientAttachWeaponToAgentPayload(
                         attachWeaponToAgent.AgentIndex,
                         attachWeaponToAgent);
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: replayed deferred client AttachWeaponToAgent after battle snapshot apply. " +
                         "AgentIndex=" + attachWeaponToAgent.AgentIndex +
                         " BoneIndex=" + attachWeaponToAgent.BoneIndex +
@@ -9563,7 +9661,7 @@ namespace CoopSpectator.Patches
                     RemoveDeferredClientSetWeaponNetworkDataPayload(
                         setWeaponNetworkData.AgentIndex,
                         setWeaponNetworkData);
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: replayed deferred client SetWeaponNetworkData after battle snapshot apply. " +
                         "AgentIndex=" + setWeaponNetworkData.AgentIndex +
                         " WeaponEquipmentIndex=" + setWeaponNetworkData.WeaponEquipmentIndex +
@@ -9685,7 +9783,7 @@ namespace CoopSpectator.Patches
                     continue;
                 }
 
-                if (IsRedundantFullNativeExactSiegeClientWeaponAmmoZeroUpdate(
+                if (IsRedundantServerNativeExactSiegeClientWeaponAmmoZeroUpdate(
                         mission,
                         agent,
                         setWeaponAmmoData))
@@ -9738,7 +9836,7 @@ namespace CoopSpectator.Patches
                     RemoveDeferredClientSetWeaponAmmoDataPayload(
                         setWeaponAmmoData.AgentIndex,
                         setWeaponAmmoData);
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: replayed deferred client SetWeaponAmmoData after battle snapshot apply. " +
                         "AgentIndex=" + setWeaponAmmoData.AgentIndex +
                         " WeaponEquipmentIndex=" + setWeaponAmmoData.WeaponEquipmentIndex +
@@ -9763,7 +9861,7 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static bool IsRedundantFullNativeExactSiegeClientWeaponAmmoZeroUpdate(
+        private static bool IsRedundantServerNativeExactSiegeClientWeaponAmmoZeroUpdate(
             Mission mission,
             Agent agent,
             SetWeaponAmmoData setWeaponAmmoData)
@@ -9772,7 +9870,7 @@ namespace CoopSpectator.Patches
                 agent == null ||
                 setWeaponAmmoData == null ||
                 GameNetwork.IsServer ||
-                !ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseFullNativeArmySpawnRuntime(mission) ||
+                !ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseServerNativeExactSiegeAgentOwnership(mission) ||
                 !agent.IsActive() ||
                 agent.IsMount ||
                 agent.MissionPeer != null ||
@@ -11981,7 +12079,7 @@ namespace CoopSpectator.Patches
             if (CoopMissionSpawnLogic.ShouldUseFieldMaterializedSiegeReplayRuntime(mission))
                 return false;
 
-            if (ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseFullNativeArmySpawnRuntime(mission))
+            if (ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseServerNativeExactSiegeAgentOwnership(mission))
                 return false;
 
             string entryId = null;
@@ -12060,7 +12158,7 @@ namespace CoopSpectator.Patches
             if (CoopMissionSpawnLogic.ShouldUseFieldMaterializedSiegeReplayRuntime(mission))
                 return false;
 
-            if (ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseFullNativeArmySpawnRuntime(mission))
+            if (ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseServerNativeExactSiegeAgentOwnership(mission))
                 return false;
 
             EquipmentIndex weaponEquipmentIndex = setWeaponAmmoData.WeaponEquipmentIndex;
@@ -12206,7 +12304,7 @@ namespace CoopSpectator.Patches
                 return;
 
             _lastDeferredExactSiegeUnsafeWeaponReloadPhaseKey = key;
-            ModLogger.Info(
+            ModLogger.Verbose(
                 "BattleMapSpawnHandoffPatch: deferred client SetWeaponReloadPhase because exact siege mission weapon slot is not native-safe. " +
                 "AgentIndex=" + setWeaponReloadPhase.AgentIndex +
                 " EquipmentIndex=" + setWeaponReloadPhase.EquipmentIndex +
@@ -12727,7 +12825,7 @@ namespace CoopSpectator.Patches
                     continue;
                 }
 
-                if (ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseFullNativeArmySpawnRuntime(mission) &&
+                if (ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseServerNativeExactSiegeAgentOwnership(mission) &&
                     !DoesDeferredClientWeaponReloadPhaseUsageStateStillMatch(
                         deferredPayload,
                         agent,
@@ -12827,7 +12925,7 @@ namespace CoopSpectator.Patches
                     RemoveDeferredClientSetWeaponReloadPhasePayload(
                         setWeaponReloadPhase.AgentIndex,
                         setWeaponReloadPhase);
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: replayed deferred client SetWeaponReloadPhase after battle snapshot apply. " +
                         "AgentIndex=" + setWeaponReloadPhase.AgentIndex +
                         " EquipmentIndex=" + setWeaponReloadPhase.EquipmentIndex +
@@ -12929,7 +13027,7 @@ namespace CoopSpectator.Patches
                         createMissile.AgentIndex);
                     if (ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
                     {
-                        ModLogger.Info(
+                        ModLogger.Verbose(
                             "BattleMapSpawnHandoffPatch: replayed deferred client CreateMissile after battle snapshot apply. " +
                             "MissileIndex=" + createMissile.MissileIndex +
                             " AgentIndex=" + createMissile.AgentIndex +
@@ -13113,7 +13211,7 @@ namespace CoopSpectator.Patches
                         IsDeferredClientProjectileVisualGracePayload(deferredPayload);
                     if (!transitionedToVisualGrace)
                         RemoveDeferredClientHandleMissileCollisionReactionPayload(handleMissileCollisionReaction);
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: replayed deferred client HandleMissileCollisionReaction after battle snapshot apply. " +
                         "MissileIndex=" + handleMissileCollisionReaction.MissileIndex +
                         " AttackerAgentIndex=" + handleMissileCollisionReaction.AttackerAgentIndex +
@@ -13183,7 +13281,7 @@ namespace CoopSpectator.Patches
                         missionNetworkComponent,
                         new object[] { setWieldedItemIndex });
                     RemoveDeferredClientSetWieldedItemIndexPayload(setWieldedItemIndex.AgentIndex, setWieldedItemIndex);
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: replayed deferred client SetWieldedItemIndex after battle snapshot apply. " +
                         "AgentIndex=" + setWieldedItemIndex.AgentIndex +
                         " WieldedItemIndex=" + setWieldedItemIndex.WieldedItemIndex +
@@ -13283,7 +13381,7 @@ namespace CoopSpectator.Patches
                     RemoveDeferredClientStartSwitchingWeaponUsageIndexPayload(
                         startSwitchingWeaponUsageIndex.AgentIndex,
                         startSwitchingWeaponUsageIndex);
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: replayed deferred client StartSwitchingWeaponUsageIndex after battle snapshot apply. " +
                         "AgentIndex=" + startSwitchingWeaponUsageIndex.AgentIndex +
                         " EquipmentIndex=" + startSwitchingWeaponUsageIndex.EquipmentIndex +
@@ -13385,7 +13483,7 @@ namespace CoopSpectator.Patches
                     RemoveDeferredClientWeaponUsageIndexChangePayload(
                         weaponUsageIndexChangeMessage.AgentIndex,
                         weaponUsageIndexChangeMessage);
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: replayed deferred client WeaponUsageIndexChangeMessage after battle snapshot apply. " +
                         "AgentIndex=" + weaponUsageIndexChangeMessage.AgentIndex +
                         " SlotIndex=" + weaponUsageIndexChangeMessage.SlotIndex +
@@ -13453,7 +13551,7 @@ namespace CoopSpectator.Patches
                         missionNetworkComponent,
                         new object[] { setAgentHealth });
                     RemoveDeferredClientSetAgentHealthPayload(setAgentHealth.AgentIndex);
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: replayed deferred client SetAgentHealth after battle snapshot apply. " +
                         "AgentIndex=" + setAgentHealth.AgentIndex +
                         " Health=" + setAgentHealth.Health +
@@ -13519,7 +13617,7 @@ namespace CoopSpectator.Patches
                         missionNetworkComponent,
                         new object[] { makeAgentDead });
                     RemoveDeferredClientMakeAgentDeadPayload(makeAgentDead.AgentIndex);
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: replayed deferred client MakeAgentDead after battle snapshot apply. " +
                         "AgentIndex=" + makeAgentDead.AgentIndex +
                         " IsKilled=" + makeAgentDead.IsKilled +
@@ -14524,7 +14622,7 @@ namespace CoopSpectator.Patches
             if (mission == null ||
                 createAgent == null ||
                 GameNetwork.IsServer ||
-                ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseFullNativeArmySpawnRuntime(mission) ||
+                ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseServerNativeExactSiegeAgentOwnership(mission) ||
                 createAgent.IsPlayerAgent ||
                 createAgent.Peer != null ||
                 createAgent.MountAgentIndex >= 0 ||
@@ -16242,7 +16340,7 @@ namespace CoopSpectator.Patches
                     RegisterDeferredClientSynchronizeAgentEquipmentPayload(
                         synchronizeAgentSpawnEquipment,
                         "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client SynchronizeAgentSpawnEquipment until current battle snapshot is applied. " +
                         "AgentIndex=" + synchronizeAgentSpawnEquipment.AgentIndex +
                         " Reason=" + (snapshotReadinessSummary ?? "unknown"));
@@ -16261,7 +16359,7 @@ namespace CoopSpectator.Patches
                     RegisterDeferredClientSynchronizeAgentEquipmentPayload(
                         synchronizeAgentSpawnEquipment,
                         "agent-createagent-deferred");
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client SynchronizeAgentSpawnEquipment because CreateAgent is still deferred. " +
                         "AgentIndex=" + synchronizeAgentSpawnEquipment.AgentIndex);
                     return false;
@@ -16847,7 +16945,7 @@ namespace CoopSpectator.Patches
                         remappedExactSiegeMissionObjectId);
                     if (ExperimentalFeatures.EnableExactSiegeMissionObjectSyncDiagnostics)
                     {
-                        ModLogger.Info(
+                        ModLogger.Verbose(
                             "BattleMapSpawnHandoffPatch: deferred client SynchronizeMissionObject until current battle snapshot is applied. " +
                             "MissionObjectId=" + GetMissionObjectIdValue(synchronizeMissionObject.MissionObjectId) +
                             " Reason=" + (snapshotReadinessSummary ?? "unknown"));
@@ -16886,7 +16984,7 @@ namespace CoopSpectator.Patches
                         synchronizeMissionObject,
                         "spawn-weapon-deferred",
                         remappedExactSiegeMissionObjectId);
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client SynchronizeMissionObject because SpawnWeaponWithNewEntity is still deferred. " +
                         "MissionObjectId=" + GetMissionObjectIdValue(synchronizeMissionObject.MissionObjectId));
                     return false;
@@ -17783,7 +17881,7 @@ namespace CoopSpectator.Patches
                     RegisterDeferredClientSpawnWeaponWithNewEntityPayload(
                         spawnWeaponWithNewEntity,
                         "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client SpawnWeaponWithNewEntity until current battle snapshot is applied. " +
                         "ForcedIndex=" + spawnWeaponWithNewEntity.ForcedIndex +
                         " ParentMissionObjectId=" + GetMissionObjectIdValue(spawnWeaponWithNewEntity.ParentMissionObjectId) +
@@ -17834,7 +17932,7 @@ namespace CoopSpectator.Patches
                     RegisterDeferredClientAttachWeaponToSpawnedWeaponPayload(
                         attachWeaponToSpawnedWeapon,
                         "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client AttachWeaponToSpawnedWeapon until current battle snapshot is applied. " +
                         "MissionObjectId=" + GetMissionObjectIdValue(attachWeaponToSpawnedWeapon.MissionObjectId) +
                         " Weapon=" + (attachWeaponToSpawnedWeapon.Weapon.Item?.StringId ?? "null") +
@@ -17847,7 +17945,7 @@ namespace CoopSpectator.Patches
                     RegisterDeferredClientAttachWeaponToSpawnedWeaponPayload(
                         attachWeaponToSpawnedWeapon,
                         "spawn-weapon-deferred");
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client AttachWeaponToSpawnedWeapon because SpawnWeaponWithNewEntity is still deferred. " +
                         "MissionObjectId=" + GetMissionObjectIdValue(attachWeaponToSpawnedWeapon.MissionObjectId) +
                         " Weapon=" + (attachWeaponToSpawnedWeapon.Weapon.Item?.StringId ?? "null"));
@@ -17894,7 +17992,7 @@ namespace CoopSpectator.Patches
                     RegisterDeferredClientSpawnAttachedWeaponOnSpawnedWeaponPayload(
                         spawnAttachedWeaponOnSpawnedWeapon,
                         "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client SpawnAttachedWeaponOnSpawnedWeapon until current battle snapshot is applied. " +
                         "SpawnedWeaponId=" + GetMissionObjectIdValue(spawnAttachedWeaponOnSpawnedWeapon.SpawnedWeaponId) +
                         " AttachmentIndex=" + spawnAttachedWeaponOnSpawnedWeapon.AttachmentIndex +
@@ -17908,7 +18006,7 @@ namespace CoopSpectator.Patches
                     RegisterDeferredClientSpawnAttachedWeaponOnSpawnedWeaponPayload(
                         spawnAttachedWeaponOnSpawnedWeapon,
                         "spawn-weapon-deferred");
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client SpawnAttachedWeaponOnSpawnedWeapon because parent spawned weapon is still deferred. " +
                         "SpawnedWeaponId=" + GetMissionObjectIdValue(spawnAttachedWeaponOnSpawnedWeapon.SpawnedWeaponId) +
                         " AttachmentIndex=" + spawnAttachedWeaponOnSpawnedWeapon.AttachmentIndex +
@@ -17957,7 +18055,7 @@ namespace CoopSpectator.Patches
                     RegisterDeferredClientSpawnAttachedWeaponOnCorpsePayload(
                         spawnAttachedWeaponOnCorpse,
                         "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client SpawnAttachedWeaponOnCorpse until current battle snapshot is applied. " +
                         "AgentIndex=" + spawnAttachedWeaponOnCorpse.AgentIndex +
                         " AttachedIndex=" + spawnAttachedWeaponOnCorpse.AttachedIndex +
@@ -17976,7 +18074,7 @@ namespace CoopSpectator.Patches
                     RegisterDeferredClientSpawnAttachedWeaponOnCorpsePayload(
                         spawnAttachedWeaponOnCorpse,
                         "agent-bootstrap-deferred");
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client SpawnAttachedWeaponOnCorpse because corpse agent bootstrap is still deferred. " +
                         "AgentIndex=" + spawnAttachedWeaponOnCorpse.AgentIndex +
                         " AttachedIndex=" + spawnAttachedWeaponOnCorpse.AttachedIndex +
@@ -18025,7 +18123,7 @@ namespace CoopSpectator.Patches
                     RegisterDeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayload(
                         attachWeapon,
                         "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client AttachWeaponToWeaponInAgentEquipmentSlot until current battle snapshot is applied. " +
                         "AgentIndex=" + attachWeapon.AgentIndex +
                         " SlotIndex=" + attachWeapon.SlotIndex +
@@ -18041,7 +18139,7 @@ namespace CoopSpectator.Patches
                     RegisterDeferredClientAttachWeaponToWeaponInAgentEquipmentSlotPayload(
                         attachWeapon,
                         "agent-bootstrap-deferred");
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client AttachWeaponToWeaponInAgentEquipmentSlot because agent bootstrap is still deferred. " +
                         "AgentIndex=" + attachWeapon.AgentIndex +
                         " SlotIndex=" + attachWeapon.SlotIndex);
@@ -18079,7 +18177,7 @@ namespace CoopSpectator.Patches
                     RegisterDeferredClientAttachWeaponToAgentPayload(
                         attachWeaponToAgent,
                         "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client AttachWeaponToAgent until current battle snapshot is applied. " +
                         "AgentIndex=" + attachWeaponToAgent.AgentIndex +
                         " BoneIndex=" + attachWeaponToAgent.BoneIndex +
@@ -18095,7 +18193,7 @@ namespace CoopSpectator.Patches
                     RegisterDeferredClientAttachWeaponToAgentPayload(
                         attachWeaponToAgent,
                         "agent-bootstrap-deferred");
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client AttachWeaponToAgent because agent bootstrap is still deferred. " +
                         "AgentIndex=" + attachWeaponToAgent.AgentIndex +
                         " BoneIndex=" + attachWeaponToAgent.BoneIndex);
@@ -18203,7 +18301,7 @@ namespace CoopSpectator.Patches
                     RegisterDeferredClientSetWeaponNetworkDataPayload(
                         setWeaponNetworkData,
                         "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client SetWeaponNetworkData until current battle snapshot is applied. " +
                         "AgentIndex=" + setWeaponNetworkData.AgentIndex +
                         " WeaponEquipmentIndex=" + setWeaponNetworkData.WeaponEquipmentIndex +
@@ -18219,7 +18317,7 @@ namespace CoopSpectator.Patches
                     RegisterDeferredClientSetWeaponNetworkDataPayload(
                         setWeaponNetworkData,
                         "agent-bootstrap-deferred");
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client SetWeaponNetworkData because agent bootstrap is still deferred. " +
                         "AgentIndex=" + setWeaponNetworkData.AgentIndex +
                         " WeaponEquipmentIndex=" + setWeaponNetworkData.WeaponEquipmentIndex);
@@ -18331,7 +18429,7 @@ namespace CoopSpectator.Patches
                     RegisterDeferredClientSetWeaponAmmoDataPayload(
                         setWeaponAmmoData,
                         "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client SetWeaponAmmoData until current battle snapshot is applied. " +
                         "AgentIndex=" + setWeaponAmmoData.AgentIndex +
                         " WeaponEquipmentIndex=" + setWeaponAmmoData.WeaponEquipmentIndex +
@@ -18348,7 +18446,7 @@ namespace CoopSpectator.Patches
                     RegisterDeferredClientSetWeaponAmmoDataPayload(
                         setWeaponAmmoData,
                         "agent-bootstrap-deferred");
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client SetWeaponAmmoData because agent bootstrap is still deferred. " +
                         "AgentIndex=" + setWeaponAmmoData.AgentIndex +
                         " WeaponEquipmentIndex=" + setWeaponAmmoData.WeaponEquipmentIndex +
@@ -18491,7 +18589,7 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
-                if (IsRedundantFullNativeExactSiegeClientWeaponAmmoZeroUpdate(
+                if (IsRedundantServerNativeExactSiegeClientWeaponAmmoZeroUpdate(
                         mission,
                         agent,
                         setWeaponAmmoData))
@@ -18615,7 +18713,7 @@ namespace CoopSpectator.Patches
                     RegisterDeferredClientSetWeaponReloadPhasePayload(
                         setWeaponReloadPhase,
                         "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client SetWeaponReloadPhase until current battle snapshot is applied. " +
                         "AgentIndex=" + setWeaponReloadPhase.AgentIndex +
                         " EquipmentIndex=" + setWeaponReloadPhase.EquipmentIndex +
@@ -18631,7 +18729,7 @@ namespace CoopSpectator.Patches
                     RegisterDeferredClientSetWeaponReloadPhasePayload(
                         setWeaponReloadPhase,
                         "agent-bootstrap-deferred");
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client SetWeaponReloadPhase because agent bootstrap is still deferred. " +
                         "AgentIndex=" + setWeaponReloadPhase.AgentIndex +
                         " EquipmentIndex=" + setWeaponReloadPhase.EquipmentIndex);
@@ -18785,7 +18883,7 @@ namespace CoopSpectator.Patches
                         " DeferredReason=" + (exactSiegeUnsafeReason ?? "unknown"),
                         "deferred-exact-native-unsafe",
                         "prefix");
-                    if (ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseFullNativeArmySpawnRuntime(mission) &&
+                    if (ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseServerNativeExactSiegeAgentOwnership(mission) &&
                         !string.IsNullOrWhiteSpace(exactSiegeUnsafeReason) &&
                         exactSiegeUnsafeReason.StartsWith(
                             "mission-weapon-current-usage-not-ranged:",
@@ -18816,7 +18914,7 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
-                if (ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseFullNativeArmySpawnRuntime(mission))
+                if (ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseServerNativeExactSiegeAgentOwnership(mission))
                 {
                     RemoveDeferredClientSetWeaponReloadPhasePayload(
                         setWeaponReloadPhase.AgentIndex,
@@ -18907,7 +19005,7 @@ namespace CoopSpectator.Patches
                     RegisterDeferredClientStartSwitchingWeaponUsageIndexPayload(
                         startSwitchingWeaponUsageIndex,
                         "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client StartSwitchingWeaponUsageIndex until current battle snapshot is applied. " +
                         "AgentIndex=" + startSwitchingWeaponUsageIndex.AgentIndex +
                         " EquipmentIndex=" + startSwitchingWeaponUsageIndex.EquipmentIndex +
@@ -18924,7 +19022,7 @@ namespace CoopSpectator.Patches
                     RegisterDeferredClientStartSwitchingWeaponUsageIndexPayload(
                         startSwitchingWeaponUsageIndex,
                         "agent-bootstrap-deferred");
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client StartSwitchingWeaponUsageIndex because agent bootstrap is still deferred. " +
                         "AgentIndex=" + startSwitchingWeaponUsageIndex.AgentIndex +
                         " EquipmentIndex=" + startSwitchingWeaponUsageIndex.EquipmentIndex +
@@ -19013,7 +19111,7 @@ namespace CoopSpectator.Patches
                     RegisterDeferredClientWeaponUsageIndexChangePayload(
                         weaponUsageIndexChangeMessage,
                         "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client WeaponUsageIndexChangeMessage until current battle snapshot is applied. " +
                         "AgentIndex=" + weaponUsageIndexChangeMessage.AgentIndex +
                         " SlotIndex=" + weaponUsageIndexChangeMessage.SlotIndex +
@@ -19030,7 +19128,7 @@ namespace CoopSpectator.Patches
                     RegisterDeferredClientWeaponUsageIndexChangePayload(
                         weaponUsageIndexChangeMessage,
                         "agent-bootstrap-deferred");
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client WeaponUsageIndexChangeMessage because agent bootstrap is still deferred. " +
                         "AgentIndex=" + weaponUsageIndexChangeMessage.AgentIndex +
                         " SlotIndex=" + weaponUsageIndexChangeMessage.SlotIndex +
@@ -19091,7 +19189,7 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
-                if (ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseFullNativeArmySpawnRuntime(mission))
+                if (ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseServerNativeExactSiegeAgentOwnership(mission))
                 {
                     RemoveDeferredClientSetWeaponReloadPhasePayload(
                         weaponUsageIndexChangeMessage.AgentIndex,
@@ -19132,7 +19230,7 @@ namespace CoopSpectator.Patches
                         "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
                     if (ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
                     {
-                        ModLogger.Info(
+                        ModLogger.Verbose(
                             "BattleMapSpawnHandoffPatch: deferred client CreateMissile until current battle snapshot is applied. " +
                             "MissileIndex=" + createMissile.MissileIndex +
                             " AgentIndex=" + createMissile.AgentIndex +
@@ -19151,7 +19249,7 @@ namespace CoopSpectator.Patches
                         "agent-bootstrap-deferred");
                     if (ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
                     {
-                        ModLogger.Info(
+                        ModLogger.Verbose(
                             "BattleMapSpawnHandoffPatch: deferred client CreateMissile because shooter bootstrap is still deferred. " +
                             "MissileIndex=" + createMissile.MissileIndex +
                             " AgentIndex=" + createMissile.AgentIndex);
@@ -19200,7 +19298,7 @@ namespace CoopSpectator.Patches
                     RegisterDeferredClientHandleMissileCollisionReactionPayload(
                         handleMissileCollisionReaction,
                         "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client HandleMissileCollisionReaction until current battle snapshot is applied. " +
                         "MissileIndex=" + handleMissileCollisionReaction.MissileIndex +
                         " AttackerAgentIndex=" + handleMissileCollisionReaction.AttackerAgentIndex +
@@ -19216,7 +19314,7 @@ namespace CoopSpectator.Patches
                     RegisterDeferredClientHandleMissileCollisionReactionPayload(
                         handleMissileCollisionReaction,
                         "missile-create-deferred");
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client HandleMissileCollisionReaction because CreateMissile is still deferred. " +
                         "MissileIndex=" + handleMissileCollisionReaction.MissileIndex +
                         " AttackerAgentIndex=" + handleMissileCollisionReaction.AttackerAgentIndex +
@@ -19260,7 +19358,7 @@ namespace CoopSpectator.Patches
                         RegisterDeferredClientHandleMissileCollisionReactionPayload(
                             handleMissileCollisionReaction,
                             "attacker-bootstrap-deferred");
-                        ModLogger.Info(
+                        ModLogger.Verbose(
                             "BattleMapSpawnHandoffPatch: deferred client HandleMissileCollisionReaction because attacker bootstrap is still deferred. " +
                             "MissileIndex=" + handleMissileCollisionReaction.MissileIndex +
                             " AttackerAgentIndex=" + handleMissileCollisionReaction.AttackerAgentIndex);
@@ -19283,7 +19381,7 @@ namespace CoopSpectator.Patches
                         RegisterDeferredClientHandleMissileCollisionReactionPayload(
                             handleMissileCollisionReaction,
                             "attached-bootstrap-deferred");
-                        ModLogger.Info(
+                        ModLogger.Verbose(
                             "BattleMapSpawnHandoffPatch: deferred client HandleMissileCollisionReaction because attached-agent bootstrap is still deferred. " +
                             "MissileIndex=" + handleMissileCollisionReaction.MissileIndex +
                             " AttachedAgentIndex=" + handleMissileCollisionReaction.AttachedAgentIndex);
@@ -19414,8 +19512,8 @@ namespace CoopSpectator.Patches
                             setAgentHealth,
                             "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
                         __state = true;
-                        ModLogger.Info(
-                            "BattleMapSpawnHandoffPatch: deferred client SetAgentHealth until current battle snapshot is applied. " +
+                    ModLogger.Verbose(
+                        "BattleMapSpawnHandoffPatch: deferred client SetAgentHealth until current battle snapshot is applied. " +
                             "AgentIndex=" + setAgentHealth.AgentIndex +
                             " Health=" + setAgentHealth.Health +
                             " Reason=" + (snapshotReadinessSummary ?? "unknown"));
@@ -19443,7 +19541,7 @@ namespace CoopSpectator.Patches
                         setAgentHealth,
                         "agent-bootstrap-deferred");
                     __state = true;
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client SetAgentHealth because agent bootstrap is still deferred. " +
                         "AgentIndex=" + setAgentHealth.AgentIndex +
                         " Health=" + setAgentHealth.Health);
@@ -19572,7 +19670,7 @@ namespace CoopSpectator.Patches
                         RegisterDeferredClientMakeAgentDeadPayload(
                             makeAgentDead,
                             "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
-                        ModLogger.Info(
+                        ModLogger.Verbose(
                             "BattleMapSpawnHandoffPatch: deferred client MakeAgentDead until current battle snapshot is applied. " +
                             "AgentIndex=" + makeAgentDead.AgentIndex +
                             " IsKilled=" + makeAgentDead.IsKilled +
@@ -19599,7 +19697,7 @@ namespace CoopSpectator.Patches
                     RegisterDeferredClientMakeAgentDeadPayload(
                         makeAgentDead,
                         "agent-bootstrap-deferred");
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client MakeAgentDead because agent bootstrap is still deferred. " +
                         "AgentIndex=" + makeAgentDead.AgentIndex +
                         " IsKilled=" + makeAgentDead.IsKilled);
@@ -19645,7 +19743,7 @@ namespace CoopSpectator.Patches
                         setWieldedItemIndex,
                         "snapshot-not-ready:" + (snapshotReadinessSummary ?? "unknown"));
                     __state = true;
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client SetWieldedItemIndex until current battle snapshot is applied. " +
                         "AgentIndex=" + setWieldedItemIndex.AgentIndex +
                         " WieldedItemIndex=" + setWieldedItemIndex.WieldedItemIndex +
@@ -19662,7 +19760,7 @@ namespace CoopSpectator.Patches
                         setWieldedItemIndex,
                         "agent-createagent-deferred");
                     __state = true;
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "BattleMapSpawnHandoffPatch: deferred client SetWieldedItemIndex because CreateAgent is still deferred. " +
                         "AgentIndex=" + setWieldedItemIndex.AgentIndex +
                         " WieldedItemIndex=" + setWieldedItemIndex.WieldedItemIndex);
@@ -20227,7 +20325,7 @@ namespace CoopSpectator.Patches
             }
 
             Mission mission = Mission.Current;
-            if (ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseFullNativeArmySpawnRuntime(mission) &&
+            if (ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseServerNativeExactSiegeAgentOwnership(mission) &&
                 !IsLocalMissionPeerControlledAgent(agent) &&
                 agent.Character?.IsHero != true &&
                 !(agent.Character?.StringId ?? string.Empty).EndsWith("_hero", StringComparison.Ordinal))
@@ -20319,7 +20417,7 @@ namespace CoopSpectator.Patches
                 return false;
             }
 
-            if (ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseFullNativeArmySpawnRuntime(mission))
+            if (ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseServerNativeExactSiegeAgentOwnership(mission))
                 return false;
 
             Equipment expectedEquipment = CoopMissionSpawnLogic.BuildSnapshotEquipmentForExactRuntime(
@@ -23632,6 +23730,7 @@ namespace CoopSpectator.Patches
 
             TryInvokeParameterlessMethod(orderUiHandler, "InitializeInADisgustingManner");
             TryInvokeParameterlessMethod(orderUiHandler, "ValidateInADisgustingManner");
+            TryEnableExactCommanderNativeOrderTick(orderUiHandler, mission);
 
             object dataSource = TryGetInstanceMemberValue(orderUiHandler, "_dataSource");
             if (dataSource == null)
@@ -23817,6 +23916,8 @@ namespace CoopSpectator.Patches
 
             if (!ReferenceEquals(mission.PlayerTeam, team))
                 mission.PlayerTeam = team;
+
+            TryEnableExactCommanderNativeOrderTick(orderUiHandler, mission);
 
             OrderController playerOrderController = team.PlayerOrderController;
             if (playerOrderController == null)
@@ -24455,6 +24556,8 @@ namespace CoopSpectator.Patches
                 entryId: null,
                 ref dataSource);
 
+            TryEnableExactCommanderNativeOrderTick(orderUiHandler, mission);
+
             if (ShouldUseNativeFormationOnlyCommanderOrderInput(orderUiHandler, mission, dataSource))
                 return;
 
@@ -24572,7 +24675,12 @@ namespace CoopSpectator.Patches
                             }
                             else
                             {
-                                object visualOrderExecutionParameters = TryInvokeMethod(orderUiHandler, "GetVisualOrderExecutionParameters");
+                                bool hasFreshRequiredOrderPosition =
+                                    !DoesExactCommanderVisualOrderRequireWorldPosition(visualOrder) ||
+                                    TryPrepareFreshExactCommanderOrderPosition(orderUiHandler, mission, team);
+                                object visualOrderExecutionParameters = hasFreshRequiredOrderPosition
+                                    ? TryInvokeMethod(orderUiHandler, "GetVisualOrderExecutionParameters")
+                                    : null;
                                 if (orderItem != null && visualOrderExecutionParameters != null)
                                 {
                                     handled = TryInvokeMethodSuccessfully(orderItem, "ExecuteAction", visualOrderExecutionParameters);
@@ -24642,6 +24750,78 @@ namespace CoopSpectator.Patches
                 " IsToggleOrderShown=" + TryGetInstanceBool(dataSource, "IsToggleOrderShown") +
                 " SelectedFormationCount=" + (playerOrderController.SelectedFormations?.Count.ToString() ?? "null") +
                 " Mission=" + (mission.SceneName ?? "null"));
+        }
+
+        private static bool TryEnableExactCommanderNativeOrderTick(object orderUiHandler, Mission mission)
+        {
+            if (orderUiHandler == null || mission == null)
+                return false;
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            if (!ExactCampaignCommanderDeploymentRuntime.IsExactLandBattleScenario(mission, scenarioContext))
+                return false;
+
+            if (!TryGetInstanceBool(orderUiHandler, "_shouldTick"))
+                TrySetInstanceMemberValue(orderUiHandler, "_shouldTick", true);
+
+            return TryGetInstanceBool(orderUiHandler, "IsValidForTick");
+        }
+
+        private static bool DoesExactCommanderVisualOrderRequireWorldPosition(object visualOrder)
+        {
+            if (visualOrder == null)
+                return false;
+
+            string visualOrderTypeName = visualOrder.GetType().Name;
+            if (string.Equals(visualOrderTypeName, "MoveVisualOrder", StringComparison.Ordinal))
+                return true;
+
+            object useWorldPositionTarget =
+                TryGetInstanceMemberValue(visualOrder, "_useWorldPositionTarget") ??
+                TryGetInstanceMemberValue(visualOrder, "UseWorldPositionTarget");
+            return useWorldPositionTarget is bool boolValue && boolValue;
+        }
+
+        private static bool TryPrepareFreshExactCommanderOrderPosition(
+            object orderUiHandler,
+            Mission mission,
+            Team team)
+        {
+            if (orderUiHandler == null || mission?.Scene == null || team == null)
+                return false;
+
+            // Native OnBeforeOrder forces OrderFlag to refresh from the current cursor ray.
+            // If that refresh cannot run, never reuse the fallback VM's stale position.
+            if (!TryInvokeParameterlessMethod(orderUiHandler, "OnBeforeOrder"))
+                return false;
+
+            object missionScreen = TryGetInstanceMemberValue(orderUiHandler, "MissionScreen");
+            object orderFlag = TryGetInstanceMemberValue(missionScreen, "OrderFlag");
+            object positionValue = TryGetInstanceMemberValue(orderFlag, "Position");
+            if (!(positionValue is Vec3 position) ||
+                float.IsNaN(position.x) || float.IsInfinity(position.x) ||
+                float.IsNaN(position.y) || float.IsInfinity(position.y) ||
+                float.IsNaN(position.z) || float.IsInfinity(position.z))
+            {
+                return false;
+            }
+
+            try
+            {
+                var worldPosition = new WorldPosition(
+                    mission.Scene,
+                    UIntPtr.Zero,
+                    position,
+                    hasValidZ: false);
+                return worldPosition.IsValid && mission.IsOrderPositionAvailable(worldPosition, team);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static bool ShouldUseNativeFormationOnlyCommanderOrderInput(

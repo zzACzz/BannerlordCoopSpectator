@@ -86,25 +86,28 @@ namespace CoopSpectator.Infrastructure
                 }
             }
 
-            string contractSummary = BuildContractSummary(contract.EntryId);
-            string validationSummary = BuildValidationSummary(contract.EntryId);
-            string runtimeSummary = BuildRuntimeStateSummary(contract.EntryId);
-            ModLogger.Info(
-                "ExactTransferContractRuntimeCache: registered pre-spawn contract. " +
-                "EntryId=" + contract.EntryId +
-                " Source=" + (source ?? "unknown") +
-                " " + contractSummary +
-                " " + validationSummary +
-                " " + runtimeSummary);
-            if (GameNetwork.IsServer)
+            if (ExperimentalFeatures.EnableVerboseDiagnostics)
             {
-                ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
-                    "exact-transfer-pre-spawn-contract",
+                string contractSummary = BuildContractSummary(contract.EntryId);
+                string validationSummary = BuildValidationSummary(contract.EntryId);
+                string runtimeSummary = BuildRuntimeStateSummary(contract.EntryId);
+                ModLogger.Verbose(
+                    "ExactTransferContractRuntimeCache: registered pre-spawn contract. " +
                     "EntryId=" + contract.EntryId +
                     " Source=" + (source ?? "unknown") +
                     " " + contractSummary +
                     " " + validationSummary +
                     " " + runtimeSummary);
+                if (GameNetwork.IsServer)
+                {
+                    ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                        "exact-transfer-pre-spawn-contract",
+                        "EntryId=" + contract.EntryId +
+                        " Source=" + (source ?? "unknown") +
+                        " " + contractSummary +
+                        " " + validationSummary +
+                        " " + runtimeSummary);
+                }
             }
         }
 

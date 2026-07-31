@@ -768,7 +768,9 @@ namespace CoopSpectator.MissionBehaviors
         public bool TryEnsureProminentFieldBattleFrontBoundaryMarkersForTeam(
             DefaultMissionDeploymentPlan deploymentPlan,
             Team team,
-            string source)
+            string source,
+            Vec2 preferredForwardDirection,
+            string forwardDirectionSource)
         {
             if (deploymentPlan == null || team == null || team.Side == BattleSideEnum.None)
                 return false;
@@ -799,6 +801,7 @@ namespace CoopSpectator.MissionBehaviors
                     if (!TryResolveFieldBattleFrontBoundaryLine(
                             points,
                             in deploymentFrame,
+                            preferredForwardDirection,
                             out Vec2 startPoint,
                             out Vec2 endPoint))
                     {
@@ -841,6 +844,7 @@ namespace CoopSpectator.MissionBehaviors
                         "Side=" + team.Side +
                         " BoundaryCount=" + boundaryIndex +
                         " CreatedMarkerCount=" + createdMarkerCount +
+                        " ForwardSource=" + (forwardDirectionSource ?? "deployment-frame") +
                         " Source=" + (source ?? "unknown"));
                 }
             }
@@ -965,6 +969,7 @@ namespace CoopSpectator.MissionBehaviors
         private static bool TryResolveFieldBattleFrontBoundaryLine(
             IList<Vec2> points,
             in MatrixFrame deploymentFrame,
+            Vec2 preferredForwardDirection,
             out Vec2 startPoint,
             out Vec2 endPoint)
         {
@@ -973,9 +978,18 @@ namespace CoopSpectator.MissionBehaviors
             if (points == null || points.Count < 2)
                 return false;
 
+            bool usePreferredForwardDirection =
+                preferredForwardDirection.IsValid &&
+                preferredForwardDirection.Length > 0.001f;
             Vec2 origin = deploymentFrame.origin.AsVec2;
-            Vec2 forward = deploymentFrame.rotation.f.AsVec2;
-            Vec2 lateral = deploymentFrame.rotation.s.AsVec2;
+            Vec2 forward = usePreferredForwardDirection
+                ? preferredForwardDirection
+                : deploymentFrame.rotation.f.AsVec2;
+            Vec2 lateral = usePreferredForwardDirection
+                ? new Vec2(-forward.y, forward.x)
+                : deploymentFrame.rotation.s.AsVec2;
+            if (!origin.IsValid && usePreferredForwardDirection)
+                origin = points[0];
             if (!origin.IsValid || !forward.IsValid || !lateral.IsValid ||
                 forward.Length <= 0.001f || lateral.Length <= 0.001f)
             {
@@ -1496,6 +1510,11 @@ namespace CoopSpectator.MissionBehaviors
             new Dictionary<BattleSideEnum, Dictionary<string, string>>();
         private static readonly HashSet<BattleSideEnum> NativeBoundaryInitializedSides =
             new HashSet<BattleSideEnum>();
+        private static Mission _sallyOutBoundaryAlignmentMission;
+        private static readonly Dictionary<BattleSideEnum, string> SallyOutAlignedBoundaryGeometrySignatures =
+            new Dictionary<BattleSideEnum, string>();
+        private static readonly Dictionary<BattleSideEnum, Vec2> SallyOutAlignedBoundaryForwardDirections =
+            new Dictionary<BattleSideEnum, Vec2>();
         private static Mission _fieldBattleBoundaryAlignmentMission;
         private static readonly Dictionary<BattleSideEnum, string> FieldBattleAlignedBoundaryGeometrySignatures =
             new Dictionary<BattleSideEnum, string>();
@@ -1852,10 +1871,19 @@ namespace CoopSpectator.MissionBehaviors
                     preferredNativeMarkerInterval,
                     refreshOnGeometryChange:
                         isExactSallyOut || isExactFieldBattle || isExactVillageBattle);
+#if !COOPSPECTATOR_DEDICATED
+            bool ensuredProminentSallyOutBoundaryMarkers =
+                isExactSallyOut &&
+                TryEnsureProminentFieldBattleFrontBoundaryMarkers(
+                    mission,
+                    missionScreen,
+                    team,
+                    source);
+#endif
             if (ensuredNativeBoundaryMarkers)
             {
 #if !COOPSPECTATOR_DEDICATED
-                if (isExactSallyOut || isExactFieldBattle || isExactVillageBattle)
+                if (isExactFieldBattle || isExactVillageBattle)
                 {
                     TryEnsureProminentFieldBattleFrontBoundaryMarkers(
                         mission,
@@ -1868,6 +1896,9 @@ namespace CoopSpectator.MissionBehaviors
             }
 
 #if !COOPSPECTATOR_DEDICATED
+            if (ensuredProminentSallyOutBoundaryMarkers)
+                return true;
+
             CoopSiegeDeploymentBoundaryMarkerView coopMarker = ResolveExistingCoopBoundaryMarker(mission);
             if (coopMarker == null)
             {
@@ -2020,6 +2051,13 @@ namespace CoopSpectator.MissionBehaviors
                     _nativeBoundaryGeometryMission = null;
                     NativeBoundaryGeometrySignatures.Clear();
                     NativeBoundaryInitializedSides.Clear();
+                }
+
+                if (ReferenceEquals(_sallyOutBoundaryAlignmentMission, mission))
+                {
+                    _sallyOutBoundaryAlignmentMission = null;
+                    SallyOutAlignedBoundaryGeometrySignatures.Clear();
+                    SallyOutAlignedBoundaryForwardDirections.Clear();
                 }
 
 #if !COOPSPECTATOR_DEDICATED
@@ -3682,6 +3720,21 @@ namespace CoopSpectator.MissionBehaviors
                     return false;
                 }
 
+                EnsureExactSallyOutBoundaryAlignmentState(mission);
+                string currentGeometrySignature =
+                    BuildExactFieldBattleBoundaryGeometrySignature(deploymentBoundaries);
+                if (SallyOutAlignedBoundaryGeometrySignatures.TryGetValue(
+                        team.Side,
+                        out string alignedGeometrySignature) &&
+                    string.Equals(
+                        currentGeometrySignature,
+                        alignedGeometrySignature,
+                        StringComparison.Ordinal) &&
+                    HasUsableExactSallyOutDeploymentBoundaryPoints(deploymentBoundaries))
+                {
+                    return true;
+                }
+
                 originalBoundaries = CloneExactSallyOutDeploymentBoundaries(deploymentBoundaries);
                 object currentDeploymentFrameValue =
                     DefaultTeamDeploymentPlanDeploymentFrameField.GetValue(teamPlan);
@@ -3691,17 +3744,43 @@ namespace CoopSpectator.MissionBehaviors
                     originalDeploymentFrame = currentDeploymentFrame;
                 }
 
-                List<Vec2> placementSamples = CollectExactSallyOutPlacementSamples(mission, team);
-                if (placementSamples.Count <= 0)
-                    return false;
-
                 Team enemyTeam = mission.Teams?
                     .FirstOrDefault(candidate =>
                         candidate != null &&
                         candidate.Side != BattleSideEnum.None &&
                         candidate.Side != team.Side);
-                List<Vec2> enemyPlacementSamples =
-                    CollectExactSallyOutPlacementSamples(mission, enemyTeam);
+                List<FieldBattlePlacementSample> rawPlacementSamples =
+                    CollectExactFieldBattlePlacementSamples(mission, team);
+                List<FieldBattlePlacementSample> rawEnemyPlacementSamples =
+                    CollectExactFieldBattlePlacementSamples(mission, enemyTeam);
+                List<FieldBattlePlacementSample> corePlacementSamples =
+                    SelectExactFieldBattleDominantPlacementSamples(
+                        rawPlacementSamples,
+                        rawEnemyPlacementSamples,
+                        out List<FieldBattlePlacementSample> ignoredPlacementSamples);
+                List<FieldBattlePlacementSample> coreEnemyPlacementSamples =
+                    SelectExactFieldBattleDominantPlacementSamples(
+                        rawEnemyPlacementSamples,
+                        rawPlacementSamples,
+                        out List<FieldBattlePlacementSample> ignoredEnemyPlacementSamples);
+                List<Vec2> placementSamples = corePlacementSamples
+                    .Select(sample => sample.Position)
+                    .ToList();
+                if (placementSamples.Count <= 0)
+                    return false;
+
+                List<Vec2> enemyPlacementSamples = coreEnemyPlacementSamples
+                    .Select(sample => sample.Position)
+                    .ToList();
+                if (!TryResolveExactFieldBattleForwardDirection(
+                        team,
+                        placementSamples,
+                        enemyPlacementSamples,
+                        out Vec2 forwardDirection))
+                {
+                    return false;
+                }
+
                 if (HasUsableExactSallyOutDeploymentBoundaryPoints(deploymentBoundaries) &&
                     AreExactSallyOutPlacementSamplesInsideBoundaries(
                         deploymentPlan,
@@ -3712,16 +3791,27 @@ namespace CoopSpectator.MissionBehaviors
                         team,
                         enemyPlacementSamples))
                 {
+                    SallyOutAlignedBoundaryGeometrySignatures[team.Side] =
+                        currentGeometrySignature;
+                    SallyOutAlignedBoundaryForwardDirections[team.Side] =
+                        forwardDirection;
                     return true;
                 }
 
-                if (!TryResolveExactSallyOutForwardDirection(
-                        mission,
-                        team,
-                        placementSamples,
-                        out Vec2 forwardDirection))
+                if (CoopDebugConfig.OrderOfBattleDiagnostics &&
+                    (ignoredPlacementSamples.Count > 0 ||
+                     ignoredEnemyPlacementSamples.Count > 0))
                 {
-                    return false;
+                    ModLogger.Info(
+                        "CoopSiegeDeploymentBoundaryRuntime: filtered exact SallyOut cross-side placement outliers. " +
+                        "Side=" + team.Side +
+                        " OwnRaw=" + rawPlacementSamples.Count +
+                        " OwnCore=" + corePlacementSamples.Count +
+                        " OwnIgnored=" + ignoredPlacementSamples.Count +
+                        " EnemyRaw=" + rawEnemyPlacementSamples.Count +
+                        " EnemyCore=" + coreEnemyPlacementSamples.Count +
+                        " EnemyIgnored=" + ignoredEnemyPlacementSamples.Count +
+                        " Source=" + (source ?? "unknown"));
                 }
 
                 Vec2 lateralDirection = new Vec2(-forwardDirection.y, forwardDirection.x);
@@ -3832,6 +3922,13 @@ namespace CoopSpectator.MissionBehaviors
                     return false;
                 }
 
+                string repairedGeometrySignature =
+                    BuildExactFieldBattleBoundaryGeometrySignature(deploymentBoundaries);
+                SallyOutAlignedBoundaryGeometrySignatures[team.Side] =
+                    repairedGeometrySignature;
+                SallyOutAlignedBoundaryForwardDirections[team.Side] =
+                    forwardDirection;
+
                 if (CoopDebugConfig.OrderOfBattleDiagnostics)
                 {
                     ModLogger.Info(
@@ -3870,6 +3967,31 @@ namespace CoopSpectator.MissionBehaviors
 
                 return false;
             }
+        }
+
+        private static void EnsureExactSallyOutBoundaryAlignmentState(Mission mission)
+        {
+            if (ReferenceEquals(_sallyOutBoundaryAlignmentMission, mission))
+                return;
+
+            _sallyOutBoundaryAlignmentMission = mission;
+            SallyOutAlignedBoundaryGeometrySignatures.Clear();
+            SallyOutAlignedBoundaryForwardDirections.Clear();
+        }
+
+        private static bool TryGetExactSallyOutAlignedForwardDirection(
+            Mission mission,
+            BattleSideEnum side,
+            out Vec2 forwardDirection)
+        {
+            forwardDirection = Vec2.Invalid;
+            if (mission == null || side == BattleSideEnum.None)
+                return false;
+
+            EnsureExactSallyOutBoundaryAlignmentState(mission);
+            return SallyOutAlignedBoundaryForwardDirections.TryGetValue(side, out forwardDirection) &&
+                   forwardDirection.IsValid &&
+                   forwardDirection.LengthSquared > 0.0001f;
         }
 
         private static List<(string id, MBList<Vec2> points)> CloneExactSallyOutDeploymentBoundaries(
@@ -4054,66 +4176,6 @@ namespace CoopSpectator.MissionBehaviors
 
             Vec2 towardEnemy = Vec2.Zero;
             if (enemySamples != null && enemySamples.Count > 0)
-            {
-                Vec2 enemyMean = Vec2.Zero;
-                for (int i = 0; i < enemySamples.Count; i++)
-                    enemyMean += enemySamples[i];
-                enemyMean *= 1f / enemySamples.Count;
-                towardEnemy = enemyMean - teamMean;
-            }
-
-            if (!forwardDirection.IsValid || forwardDirection.LengthSquared <= 0.0001f)
-                forwardDirection = towardEnemy;
-            if (!forwardDirection.IsValid || forwardDirection.LengthSquared <= 0.0001f)
-                return false;
-
-            forwardDirection = forwardDirection.Normalized();
-            if (towardEnemy.IsValid &&
-                towardEnemy.LengthSquared > 0.0001f &&
-                DotExactSallyOutBoundary(forwardDirection, towardEnemy) < 0f)
-            {
-                forwardDirection = -forwardDirection;
-            }
-
-            return true;
-        }
-
-        private static bool TryResolveExactSallyOutForwardDirection(
-            Mission mission,
-            Team team,
-            IList<Vec2> teamSamples,
-            out Vec2 forwardDirection)
-        {
-            forwardDirection = Vec2.Zero;
-            if (mission == null || team == null || teamSamples == null || teamSamples.Count <= 0)
-                return false;
-
-            if (team.FormationsIncludingEmpty != null)
-            {
-                foreach (Formation formation in team.FormationsIncludingEmpty)
-                {
-                    if (formation == null || formation.CountOfUnits <= 0)
-                        continue;
-
-                    Vec2 direction = formation.Direction;
-                    if (direction.IsValid && direction.LengthSquared > 0.0001f)
-                        forwardDirection += direction.Normalized();
-                }
-            }
-
-            Vec2 teamMean = Vec2.Zero;
-            for (int i = 0; i < teamSamples.Count; i++)
-                teamMean += teamSamples[i];
-            teamMean *= 1f / teamSamples.Count;
-
-            Team enemyTeam = mission.Teams?
-                .FirstOrDefault(candidate =>
-                    candidate != null &&
-                    candidate.Side != BattleSideEnum.None &&
-                    candidate.Side != team.Side);
-            List<Vec2> enemySamples = CollectExactSallyOutPlacementSamples(mission, enemyTeam);
-            Vec2 towardEnemy = Vec2.Zero;
-            if (enemySamples.Count > 0)
             {
                 Vec2 enemyMean = Vec2.Zero;
                 for (int i = 0; i < enemySamples.Count; i++)
@@ -4382,11 +4444,31 @@ namespace CoopSpectator.MissionBehaviors
                         BoundaryMarkerInterval);
                 }
 
+                Vec2 preferredForwardDirection = Vec2.Invalid;
+                string forwardDirectionSource = "deployment-frame";
+                if (IsExactSallyOutDeploymentScenario(mission))
+                {
+                    if (TryGetExactSallyOutAlignedForwardDirection(
+                            mission,
+                            team.Side,
+                            out Vec2 sallyOutForwardDirection))
+                    {
+                        preferredForwardDirection = sallyOutForwardDirection;
+                        forwardDirectionSource = "sally-out-fixed-initial-layout";
+                    }
+                    else
+                    {
+                        forwardDirectionSource = "sally-out-direction-unavailable";
+                    }
+                }
+
                 return marker != null &&
                        marker.TryEnsureProminentFieldBattleFrontBoundaryMarkersForTeam(
                            deploymentPlan,
                            team,
-                           source ?? "unknown");
+                           source ?? "unknown",
+                           preferredForwardDirection,
+                           forwardDirectionSource);
             }
             catch (Exception ex)
             {
@@ -4916,6 +4998,13 @@ namespace CoopSpectator.MissionBehaviors
                 out _);
         }
 
+        private static bool IsValidatedInitialSiegeAmbushMaterializationScenario(Mission mission)
+        {
+            return ExactSiegeAmbushInitialMaterializationRuntime.IsValidatedScenario(
+                mission,
+                out _);
+        }
+
         internal readonly struct ClientBattleSnapshotProgressInfo
         {
             public ClientBattleSnapshotProgressInfo(
@@ -5044,6 +5133,8 @@ namespace CoopSpectator.MissionBehaviors
             new Dictionary<int, int>();
         private readonly Dictionary<int, int> _acknowledgedInitialSiegeAssaultMaterializationTransmissionIdByPeer =
             new Dictionary<int, int>();
+        private readonly Dictionary<int, int> _acknowledgedInitialSiegeAmbushMaterializationTransmissionIdByPeer =
+            new Dictionary<int, int>();
         private readonly Dictionary<int, int> _acknowledgedVillageBattleDeploymentBoundaryRevisionByPeer =
             new Dictionary<int, int>();
         private readonly Dictionary<int, DateTime> _lastSentVillageBattleDeploymentBoundaryUtcByPeer =
@@ -5099,6 +5190,8 @@ namespace CoopSpectator.MissionBehaviors
         private DateTime _lastClientInitialVillageBattleMaterializationReadySentUtc = DateTime.MinValue;
         private DateTime _nextClientInitialSiegeAssaultMaterializationReadinessPollUtc = DateTime.MinValue;
         private DateTime _lastClientInitialSiegeAssaultMaterializationReadySentUtc = DateTime.MinValue;
+        private DateTime _nextClientInitialSiegeAmbushMaterializationReadinessPollUtc = DateTime.MinValue;
+        private DateTime _lastClientInitialSiegeAmbushMaterializationReadySentUtc = DateTime.MinValue;
         private DateTime _lastClientVillageBattleDeploymentBoundaryReadySentUtc = DateTime.MinValue;
         private int _lastClientVillageBattleDeploymentBoundaryReadyRevision;
         private string _lastClientVillageBattleDeploymentBoundaryReadyHash = string.Empty;
@@ -5112,11 +5205,14 @@ namespace CoopSpectator.MissionBehaviors
         private int _clientConfirmedInitialVillageBattleMaterializationReadyAgentCount;
         private int _clientConfirmedInitialSiegeAssaultMaterializationTransmissionId;
         private int _clientConfirmedInitialSiegeAssaultMaterializationReadyAgentCount;
+        private int _clientConfirmedInitialSiegeAmbushMaterializationTransmissionId;
+        private int _clientConfirmedInitialSiegeAmbushMaterializationReadyAgentCount;
         private string _lastClientBattleReconnectFinalizeReadinessSummary = string.Empty;
         private string _lastClientInitialAgentMaterializationReadinessSummary = string.Empty;
         private string _lastClientInitialFieldBattleMaterializationReadinessSummary = string.Empty;
         private string _lastClientInitialVillageBattleMaterializationReadinessSummary = string.Empty;
         private string _lastClientInitialSiegeAssaultMaterializationReadinessSummary = string.Empty;
+        private string _lastClientInitialSiegeAmbushMaterializationReadinessSummary = string.Empty;
         private string _clientAppliedBattleDataReadinessStage = string.Empty;
         private bool _delayedClientAgentControlDiagnosticsPending;
         private int _delayedClientAgentControlDiagnosticsTicksRemaining;
@@ -5953,6 +6049,8 @@ namespace CoopSpectator.MissionBehaviors
                     HandleClientInitialVillageBattleMaterializationReady);
                 registerer.RegisterBaseHandler<CoopInitialSiegeAssaultMaterializationReadyMessage>(
                     HandleClientInitialSiegeAssaultMaterializationReady);
+                registerer.RegisterBaseHandler<CoopInitialSiegeAmbushMaterializationReadyMessage>(
+                    HandleClientInitialSiegeAmbushMaterializationReady);
                 registerer.RegisterBaseHandler<CoopVillageBattleDeploymentBoundaryReadyMessage>(
                     HandleClientVillageBattleDeploymentBoundaryReady);
                 registerer.RegisterBaseHandler<CoopMaterializedReinforcementBatchPreparedMessage>(
@@ -6153,6 +6251,7 @@ namespace CoopSpectator.MissionBehaviors
                 TrySendClientInitialFieldBattleMaterializationReadyIfNeeded();
                 TrySendClientInitialVillageBattleMaterializationReadyIfNeeded();
                 TrySendClientInitialSiegeAssaultMaterializationReadyIfNeeded();
+                TrySendClientInitialSiegeAmbushMaterializationReadyIfNeeded();
                 TrySendClientVillageBattleDeploymentBoundaryReadyIfNeeded();
                 TrySendClientMaterializedReinforcementBatchPreparedAcks();
                 TrySendClientMaterializedReinforcementBatchReadyAcks();
@@ -6351,6 +6450,7 @@ namespace CoopSpectator.MissionBehaviors
                         _clientConfirmedInitialAgentMaterializationReadyAgentCount,
                         payloadHash));
                 GameNetwork.EndModuleEventAsClient();
+                BattleMapSpawnHandoffPatch.MarkInitialSallyOutClientMaterializationComplete(Mission);
                 _lastClientInitialAgentMaterializationReadySentUtc = nowUtc;
             }
             catch (Exception ex)
@@ -6669,6 +6769,106 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
+        private void TrySendClientInitialSiegeAmbushMaterializationReadyIfNeeded()
+        {
+            if (!GameNetwork.IsClient ||
+                !GameNetwork.IsSessionActive ||
+                Mission == null ||
+                !IsValidatedInitialSiegeAmbushMaterializationScenario(Mission) ||
+                CoopBattlePhaseRuntimeState.GetPhase() >= CoopBattlePhase.BattleActive ||
+                HasClientBattleProgressedBeyondInitialMaterializationReadiness())
+            {
+                return;
+            }
+
+            if (!TryGetClientCurrentMaterializedAgentEntrySnapshotIdentity(
+                    out int transmissionId,
+                    out int entryCount,
+                    out string payloadHash,
+                    out string mapReadinessSummary))
+            {
+                _lastClientInitialSiegeAmbushMaterializationReadinessSummary =
+                    "materialized-map-not-ready " + (mapReadinessSummary ?? "unknown");
+                return;
+            }
+
+            DateTime nowUtc = DateTime.UtcNow;
+            if (_clientConfirmedInitialSiegeAmbushMaterializationTransmissionId != transmissionId)
+            {
+                if (nowUtc < _nextClientInitialSiegeAmbushMaterializationReadinessPollUtc)
+                    return;
+
+                _nextClientInitialSiegeAmbushMaterializationReadinessPollUtc =
+                    nowUtc + InitialAgentMaterializationReadinessPollInterval;
+                if (!CoopMissionSpawnLogic.IsClientInitialSiegeAmbushMaterializationReady(
+                        out int readyAgentCount,
+                        out string readinessSummary))
+                {
+                    _lastClientInitialSiegeAmbushMaterializationReadinessSummary =
+                        readinessSummary ?? "unknown";
+                    return;
+                }
+
+                if (readyAgentCount != entryCount)
+                {
+                    _lastClientInitialSiegeAmbushMaterializationReadinessSummary =
+                        "ready-agent-count-mismatch" +
+                        " ReadyAgentCount=" + readyAgentCount +
+                        " EntryCount=" + entryCount;
+                    return;
+                }
+
+                _clientConfirmedInitialSiegeAmbushMaterializationTransmissionId = transmissionId;
+                _clientConfirmedInitialSiegeAmbushMaterializationReadyAgentCount = readyAgentCount;
+                _lastClientInitialSiegeAmbushMaterializationReadySentUtc = DateTime.MinValue;
+                _lastClientInitialSiegeAmbushMaterializationReadinessSummary =
+                    readinessSummary ?? "ready";
+            }
+
+            if (_lastClientInitialSiegeAmbushMaterializationReadySentUtc != DateTime.MinValue &&
+                nowUtc - _lastClientInitialSiegeAmbushMaterializationReadySentUtc <
+                    InitialAgentMaterializationReadyRetryDelay)
+            {
+                return;
+            }
+
+            bool firstSend =
+                _lastClientInitialSiegeAmbushMaterializationReadySentUtc == DateTime.MinValue;
+            try
+            {
+                GameNetwork.BeginModuleEventAsClient();
+                GameNetwork.WriteMessage(
+                    new CoopInitialSiegeAmbushMaterializationReadyMessage(
+                        transmissionId,
+                        entryCount,
+                        _clientConfirmedInitialSiegeAmbushMaterializationReadyAgentCount,
+                        payloadHash));
+                GameNetwork.EndModuleEventAsClient();
+                ExactSiegeAmbushInitialMaterializationRuntime
+                    .MarkInitialClientMaterializationComplete(Mission);
+                _lastClientInitialSiegeAmbushMaterializationReadySentUtc = nowUtc;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: client siege-ambush initial materialization readiness send failed. " +
+                    "Error=" + ex.Message);
+                return;
+            }
+
+            if (firstSend || ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: sent client siege-ambush initial materialization readiness. " +
+                    "TransmissionId=" + transmissionId +
+                    " EntryCount=" + entryCount +
+                    " ReadyAgentCount=" +
+                    _clientConfirmedInitialSiegeAmbushMaterializationReadyAgentCount +
+                    " ReadinessSummary={" +
+                    (_lastClientInitialSiegeAmbushMaterializationReadinessSummary ?? "unknown") + "}");
+            }
+        }
+
         private void TrySendClientVillageBattleDeploymentBoundaryReadyIfNeeded()
         {
             if (!GameNetwork.IsClient ||
@@ -6829,6 +7029,7 @@ namespace CoopSpectator.MissionBehaviors
             _acknowledgedInitialFieldBattleMaterializationTransmissionIdByPeer.Clear();
             _acknowledgedInitialVillageBattleMaterializationTransmissionIdByPeer.Clear();
             _acknowledgedInitialSiegeAssaultMaterializationTransmissionIdByPeer.Clear();
+            _acknowledgedInitialSiegeAmbushMaterializationTransmissionIdByPeer.Clear();
             _acknowledgedVillageBattleDeploymentBoundaryRevisionByPeer.Clear();
             _lastSentVillageBattleDeploymentBoundaryUtcByPeer.Clear();
             _completedMaterializedAgentEntryTransmissionByPeer.Clear();
@@ -13261,22 +13462,7 @@ namespace CoopSpectator.MissionBehaviors
 
         private static bool IsCommanderDeploymentOrderOfBattleDiagnosticsEnabled()
         {
-            try
-            {
-                string value = Environment.GetEnvironmentVariable("COOPSPECTATOR_OOB_DIAGNOSTICS");
-                if (string.IsNullOrWhiteSpace(value))
-                    return false;
-
-                value = value.Trim();
-                return value.Equals("1", StringComparison.OrdinalIgnoreCase) ||
-                       value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
-                       value.Equals("yes", StringComparison.OrdinalIgnoreCase) ||
-                       value.Equals("on", StringComparison.OrdinalIgnoreCase);
-            }
-            catch
-            {
-                return false;
-            }
+            return CoopDebugConfig.OrderOfBattleDiagnostics;
         }
 
         private static Agent ResolveMissionAgent(int agentIndex)
@@ -14180,6 +14366,72 @@ namespace CoopSpectator.MissionBehaviors
             {
                 ModLogger.Info(
                     "CoopMissionNetworkBridge: processed client external-siege initial materialization readiness. " +
+                    "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                    " TransmissionId=" + message.TransmissionId +
+                    " ExpectedTransmissionId=" + expectedTransmissionId +
+                    " AcknowledgedMapTransmissionId=" + acknowledgedMapTransmissionId +
+                    " EntryCount=" + message.EntryCount +
+                    " ExpectedEntryCount=" + expectedEntryCount +
+                    " ReadyAgentCount=" + message.ReadyAgentCount +
+                    " HashMatched=" + string.Equals(
+                        message.PayloadHash,
+                        expectedPayloadHash,
+                        StringComparison.Ordinal) +
+                    " Accepted=" + accepted);
+            }
+
+            return true;
+        }
+
+        private bool HandleClientInitialSiegeAmbushMaterializationReady(
+            NetworkCommunicator peer,
+            GameNetworkMessage baseMessage)
+        {
+            if (!(baseMessage is CoopInitialSiegeAmbushMaterializationReadyMessage message))
+                return false;
+
+            if (peer == null || Mission == null)
+                return true;
+
+            if (IsValidatedInitialSiegeAmbushMaterializationScenario(Mission) &&
+                CoopBattlePhaseRuntimeState.GetPhase() >= CoopBattlePhase.BattleActive)
+            {
+                return true;
+            }
+
+            _expectedMaterializedAgentEntryTransmissionIdByPeer.TryGetValue(
+                peer.Index,
+                out int expectedTransmissionId);
+            _acknowledgedMaterializedAgentEntryTransmissionIdByPeer.TryGetValue(
+                peer.Index,
+                out int acknowledgedMapTransmissionId);
+            _expectedMaterializedAgentEntryCountByPeer.TryGetValue(
+                peer.Index,
+                out int expectedEntryCount);
+            _expectedMaterializedAgentEntryPayloadHashByPeer.TryGetValue(
+                peer.Index,
+                out string expectedPayloadHash);
+
+            bool accepted =
+                IsValidatedInitialSiegeAmbushMaterializationScenario(Mission) &&
+                CoopBattlePhaseRuntimeState.GetPhase() < CoopBattlePhase.BattleActive &&
+                expectedTransmissionId > 0 &&
+                message.TransmissionId == expectedTransmissionId &&
+                acknowledgedMapTransmissionId == expectedTransmissionId &&
+                message.EntryCount == expectedEntryCount &&
+                message.ReadyAgentCount == expectedEntryCount &&
+                !string.IsNullOrWhiteSpace(expectedPayloadHash) &&
+                string.Equals(message.PayloadHash, expectedPayloadHash, StringComparison.Ordinal);
+            if (accepted)
+            {
+                _acknowledgedInitialSiegeAmbushMaterializationTransmissionIdByPeer[peer.Index] =
+                    message.TransmissionId;
+            }
+
+            if (!accepted || ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: processed client siege-ambush initial materialization readiness. " +
                     "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
                     " TransmissionId=" + message.TransmissionId +
                     " ExpectedTransmissionId=" + expectedTransmissionId +
@@ -15297,7 +15549,7 @@ namespace CoopSpectator.MissionBehaviors
                 SendBattleSnapshotManifest(peer, transportState);
                 if (transportState.TryPrimeInitialActiveWindow(nowUtc))
                 {
-                    ModLogger.Info(
+                    ModLogger.Verbose(
                         "CoopMissionNetworkBridge: primed initial V2 battle snapshot active window after manifest. " +
                         "Peer=" + (peer.UserName ?? "null") +
                         " TransmissionId=" + transportState.TransmissionId +
@@ -15310,7 +15562,7 @@ namespace CoopSpectator.MissionBehaviors
                      !transportState.HasActiveWindow &&
                      transportState.TryPrimeInitialActiveWindow(nowUtc))
             {
-                ModLogger.Info(
+                ModLogger.Verbose(
                     "CoopMissionNetworkBridge: primed initial V2 battle snapshot active window after existing manifest. " +
                     "Peer=" + (peer.UserName ?? "null") +
                     " TransmissionId=" + transportState.TransmissionId +
@@ -15324,7 +15576,7 @@ namespace CoopSpectator.MissionBehaviors
             if (transportState.IsActiveWindowSatisfiedByClient &&
                 transportState.TryAdvanceToNextWindow())
             {
-                ModLogger.Info(
+                ModLogger.Verbose(
                     "CoopMissionNetworkBridge: advanced V2 battle snapshot active window. " +
                     "Peer=" + (peer.UserName ?? "null") +
                     " TransmissionId=" + transportState.TransmissionId +
@@ -15473,7 +15725,7 @@ namespace CoopSpectator.MissionBehaviors
                 message.HighestContiguousChunkIndex,
                 message.ReceivedChunkCount,
                 DateTime.UtcNow);
-            ModLogger.Info(
+            ModLogger.Verbose(
                 "CoopMissionNetworkBridge: accepted V2 battle snapshot range ack. " +
                 "Peer=" + (peer.UserName ?? "null") +
                 " TransmissionId=" + message.TransmissionId +
@@ -16882,7 +17134,7 @@ namespace CoopSpectator.MissionBehaviors
                     assemblyStateKind));
                 GameNetwork.EndModuleEventAsClient();
                 assemblyState.MarkProgressAckSent(DateTime.UtcNow);
-                ModLogger.Info(
+                ModLogger.Verbose(
                     "CoopMissionNetworkBridge: sent client V2 battle snapshot range ack. " +
                     "TransmissionId=" + assemblyState.TransmissionId +
                     " HighestContiguous=" + assemblyState.HighestContiguousChunkIndex +
@@ -17400,6 +17652,7 @@ namespace CoopSpectator.MissionBehaviors
             _acknowledgedInitialFieldBattleMaterializationTransmissionIdByPeer.Remove(peerIndex);
             _acknowledgedInitialVillageBattleMaterializationTransmissionIdByPeer.Remove(peerIndex);
             _acknowledgedInitialSiegeAssaultMaterializationTransmissionIdByPeer.Remove(peerIndex);
+            _acknowledgedInitialSiegeAmbushMaterializationTransmissionIdByPeer.Remove(peerIndex);
             _acknowledgedVillageBattleDeploymentBoundaryRevisionByPeer.Remove(peerIndex);
             _lastSentVillageBattleDeploymentBoundaryUtcByPeer.Remove(peerIndex);
             _completedMaterializedAgentEntryTransmissionByPeer.Remove(peerIndex);
@@ -17419,6 +17672,7 @@ namespace CoopSpectator.MissionBehaviors
             _acknowledgedInitialFieldBattleMaterializationTransmissionIdByPeer.Remove(peerIndex);
             _acknowledgedInitialVillageBattleMaterializationTransmissionIdByPeer.Remove(peerIndex);
             _acknowledgedInitialSiegeAssaultMaterializationTransmissionIdByPeer.Remove(peerIndex);
+            _acknowledgedInitialSiegeAmbushMaterializationTransmissionIdByPeer.Remove(peerIndex);
             _acknowledgedVillageBattleDeploymentBoundaryRevisionByPeer.Remove(peerIndex);
             _lastSentVillageBattleDeploymentBoundaryUtcByPeer.Remove(peerIndex);
             _completedMaterializedAgentEntryTransmissionByPeer.Remove(peerIndex);
@@ -17778,6 +18032,80 @@ namespace CoopSpectator.MissionBehaviors
             return ready;
         }
 
+        internal static bool AreAssignedPeersInitialSiegeAmbushMaterializationReady(
+            Mission mission,
+            IReadOnlyCollection<int> assignedPeerIndices,
+            out string readinessSummary)
+        {
+            readinessSummary = string.Empty;
+            if (!GameNetwork.IsServer || mission == null)
+            {
+                readinessSummary = "invalid-server-mission-context";
+                return false;
+            }
+
+            if (!IsValidatedInitialSiegeAmbushMaterializationScenario(mission))
+            {
+                readinessSummary = "not-siege-ambush";
+                return true;
+            }
+
+            if (assignedPeerIndices == null || assignedPeerIndices.Count <= 0)
+            {
+                readinessSummary = "assigned-peers-empty";
+                return false;
+            }
+
+            CoopMissionNetworkBridge bridge = mission.GetMissionBehavior<CoopMissionNetworkBridge>();
+            if (bridge == null)
+            {
+                readinessSummary = "bridge-null";
+                return false;
+            }
+
+            int readyPeerCount = 0;
+            var pendingPeerSummaries = new List<string>();
+            foreach (int peerIndex in assignedPeerIndices.Distinct())
+            {
+                bridge._expectedMaterializedAgentEntryTransmissionIdByPeer.TryGetValue(
+                    peerIndex,
+                    out int expectedTransmissionId);
+                bridge._acknowledgedMaterializedAgentEntryTransmissionIdByPeer.TryGetValue(
+                    peerIndex,
+                    out int acknowledgedMapTransmissionId);
+                bridge._acknowledgedInitialSiegeAmbushMaterializationTransmissionIdByPeer.TryGetValue(
+                    peerIndex,
+                    out int acknowledgedReadyTransmissionId);
+                bool peerReady =
+                    expectedTransmissionId > 0 &&
+                    acknowledgedMapTransmissionId == expectedTransmissionId &&
+                    acknowledgedReadyTransmissionId == expectedTransmissionId;
+                if (peerReady)
+                {
+                    readyPeerCount++;
+                    continue;
+                }
+
+                if (pendingPeerSummaries.Count < 6)
+                {
+                    pendingPeerSummaries.Add(
+                        peerIndex +
+                        ":expected=" + expectedTransmissionId +
+                        ",map=" + acknowledgedMapTransmissionId +
+                        ",ready=" + acknowledgedReadyTransmissionId);
+                }
+            }
+
+            int assignedPeerCount = assignedPeerIndices.Distinct().Count();
+            bool ready = readyPeerCount == assignedPeerCount;
+            readinessSummary =
+                "Ready=" + ready +
+                " AssignedPeers=" + assignedPeerCount +
+                " ReadyPeers=" + readyPeerCount +
+                " Pending=[" + string.Join(";", pendingPeerSummaries) + "]";
+            return ready;
+        }
+
         private bool TryAcknowledgePeerBattleSnapshot(NetworkCommunicator peer, string rawTransmissionId)
         {
             if (peer == null || string.IsNullOrWhiteSpace(rawTransmissionId) || !int.TryParse(rawTransmissionId, out int transmissionId))
@@ -17887,6 +18215,9 @@ namespace CoopSpectator.MissionBehaviors
             Mission.Current
                 ?.GetMissionBehavior<CoopMissionNetworkBridge>()
                 ?.ResetClientInitialSiegeAssaultMaterializationReadiness();
+            Mission.Current
+                ?.GetMissionBehavior<CoopMissionNetworkBridge>()
+                ?.ResetClientInitialSiegeAmbushMaterializationReadiness();
         }
 
         private static void MarkClientMaterializedAgentEntrySnapshotApplied(
@@ -17913,6 +18244,9 @@ namespace CoopSpectator.MissionBehaviors
             Mission.Current
                 ?.GetMissionBehavior<CoopMissionNetworkBridge>()
                 ?.ResetClientInitialSiegeAssaultMaterializationReadiness();
+            Mission.Current
+                ?.GetMissionBehavior<CoopMissionNetworkBridge>()
+                ?.ResetClientInitialSiegeAmbushMaterializationReadiness();
             _clientObservedMaterializedAgentEntryMission = null;
             _clientObservedMaterializedAgentEntryTransmissionId = 0;
             _clientAppliedMaterializedAgentEntryTransmissionId = 0;
@@ -17957,6 +18291,15 @@ namespace CoopSpectator.MissionBehaviors
             _clientConfirmedInitialSiegeAssaultMaterializationTransmissionId = 0;
             _clientConfirmedInitialSiegeAssaultMaterializationReadyAgentCount = 0;
             _lastClientInitialSiegeAssaultMaterializationReadinessSummary = string.Empty;
+        }
+
+        private void ResetClientInitialSiegeAmbushMaterializationReadiness()
+        {
+            _nextClientInitialSiegeAmbushMaterializationReadinessPollUtc = DateTime.MinValue;
+            _lastClientInitialSiegeAmbushMaterializationReadySentUtc = DateTime.MinValue;
+            _clientConfirmedInitialSiegeAmbushMaterializationTransmissionId = 0;
+            _clientConfirmedInitialSiegeAmbushMaterializationReadyAgentCount = 0;
+            _lastClientInitialSiegeAmbushMaterializationReadinessSummary = string.Empty;
         }
 
         private bool HasClientBattleProgressedBeyondInitialMaterializationReadiness()

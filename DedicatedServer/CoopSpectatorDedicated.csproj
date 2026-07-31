@@ -86,6 +86,7 @@
     <Compile Include="..\Infrastructure\Relief\ExactReliefScenarioContract.cs" Link="Infrastructure\Relief\ExactReliefScenarioContract.cs" />
     <Compile Include="..\Infrastructure\SallyOut\SallyOutScenarioContract.cs" Link="Infrastructure\SallyOut\SallyOutScenarioContract.cs" />
     <Compile Include="..\Infrastructure\SiegeAmbush\SiegeAmbushScenarioContract.cs" Link="Infrastructure\SiegeAmbush\SiegeAmbushScenarioContract.cs" />
+    <Compile Include="..\Infrastructure\SiegeAmbush\ExactSiegeAmbushInitialMaterializationRuntime.cs" Link="Infrastructure\SiegeAmbush\ExactSiegeAmbushInitialMaterializationRuntime.cs" />
     <Compile Include="..\Infrastructure\VillageBattle\ExactVillageBattleScenarioContract.cs" Link="Infrastructure\VillageBattle\ExactVillageBattleScenarioContract.cs" />
     <Compile Include="..\Infrastructure\VillageBattle\ExactVillageBattleInitialMaterializationRuntime.cs" Link="Infrastructure\VillageBattle\ExactVillageBattleInitialMaterializationRuntime.cs" />
     <Compile Include="..\Infrastructure\VillageBattle\ExactVillageBattleDeploymentBoundaryRuntime.cs" Link="Infrastructure\VillageBattle\ExactVillageBattleDeploymentBoundaryRuntime.cs" />
@@ -168,6 +169,7 @@
     <Compile Include="..\Patches\BattleMapSpawnHandoffPatch.cs" Link="Patches\BattleMapSpawnHandoffPatch.cs" />
     <Compile Include="..\Patches\CoopBotsControlledCountPatch.cs" Link="Patches\CoopBotsControlledCountPatch.cs" />
     <Compile Include="..\Patches\MissionItemUsageSetFlagsGuardPatch.cs" Link="Patches\MissionItemUsageSetFlagsGuardPatch.cs" />
+    <Compile Include="..\Patches\CoopNetworkSafeAgentBlowPatch.cs" Link="Patches\CoopNetworkSafeAgentBlowPatch.cs" />
     <Compile Include="..\Patches\CommanderDeploymentMissionNetworkComponentPatch.cs" Link="Patches\CommanderDeploymentMissionNetworkComponentPatch.cs" />
     <Compile Include="..\Patches\LateJoinPeerBootstrapGatePatch.cs" Link="Patches\LateJoinPeerBootstrapGatePatch.cs" />
     <Compile Include="..\Patches\FinishedLoadingMissionReadyGatePatch.cs" Link="Patches\FinishedLoadingMissionReadyGatePatch.cs" />

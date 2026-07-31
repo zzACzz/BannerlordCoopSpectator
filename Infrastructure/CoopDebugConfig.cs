@@ -9,6 +9,7 @@ namespace CoopSpectator.Infrastructure
     /// </summary>
     public static class CoopDebugConfig
     {
+        private const string EnvVerboseDiagnostics = "COOPSPECTATOR_VERBOSE_DIAGNOSTICS";
         private const string EnvDebugTexts = "COOP_DEBUG_TEXTS";
         private const string EnvDebugDedicatedStdio = "COOP_DEBUG_DEDICATED_STDIO";
         private const string EnvOrderOfBattleDiagnostics = "COOPSPECTATOR_OOB_DIAGNOSTICS";
@@ -28,36 +29,44 @@ namespace CoopSpectator.Infrastructure
         private static readonly object SharedDebugOverrideLock = new object();
 
         /// <summary>Увімкнути reflection dump API GameTextManager та двофазну валідацію ключа (BeforeLoad/AfterLoad).</summary>
-        public static bool DebugTexts => GetEnvBool(EnvDebugTexts);
+        public static bool VerboseDiagnostics => GetEnvBool(EnvVerboseDiagnostics);
+
+        public static bool DebugTexts =>
+            VerboseDiagnostics && GetEnvBool(EnvDebugTexts);
 
         /// <summary>Увімкнути збір stdout/stderr процесу Dedicated Helper у файл (dedicated_stdout.log).</summary>
-        public static bool DebugDedicatedStdio => GetEnvBool(EnvDebugDedicatedStdio);
+        public static bool DebugDedicatedStdio =>
+            VerboseDiagnostics && GetEnvBool(EnvDebugDedicatedStdio);
 
         /// <summary>Enable focused Order of Battle formation/count diagnostics.</summary>
-        public static bool OrderOfBattleDiagnostics => GetEnvBool(EnvOrderOfBattleDiagnostics);
+        public static bool OrderOfBattleDiagnostics =>
+            VerboseDiagnostics && GetEnvBool(EnvOrderOfBattleDiagnostics);
 
         /// <summary>Enable focused, deduplicated exact field-battle deployment-boundary diagnostics.</summary>
         public static bool FieldBattleBoundaryDiagnostics =>
-            GetEnvBool(EnvFieldBattleBoundaryDiagnostics);
+            VerboseDiagnostics && GetEnvBool(EnvFieldBattleBoundaryDiagnostics);
 
         /// <summary>Enable focused, deduplicated village-battle deployment-boundary diagnostics.</summary>
         public static bool VillageBattleBoundaryDiagnostics =>
-            GetEnvBool(EnvVillageBattleBoundaryDiagnostics);
+            VerboseDiagnostics && GetEnvBool(EnvVillageBattleBoundaryDiagnostics);
 
         /// <summary>Enable focused possession/corpse/controlled-agent diagnostics.</summary>
         public static bool PossessionDiagnostics =>
-            _possessionDiagnosticsRuntimeOverride ??
-            GetSharedPossessionDiagnosticsOverride() ??
-            GetEnvBool(EnvPossessionDiagnostics);
+            VerboseDiagnostics &&
+            (_possessionDiagnosticsRuntimeOverride ??
+             GetSharedPossessionDiagnosticsOverride() ??
+             GetEnvBool(EnvPossessionDiagnostics));
 
         /// <summary>Enable focused exact-siege morale, panic, and retreat diagnostics.</summary>
         public static bool MoraleDiagnostics =>
-            _moraleDiagnosticsRuntimeOverride ??
-            GetSharedMoraleDiagnosticsOverride() ??
-            GetEnvBool(EnvMoraleDiagnostics);
+            VerboseDiagnostics &&
+            (_moraleDiagnosticsRuntimeOverride ??
+             GetSharedMoraleDiagnosticsOverride() ??
+             GetEnvBool(EnvMoraleDiagnostics));
 
         /// <summary>Enable per-agent combat-model damage and projectile samples.</summary>
-        public static bool CombatModelDiagnostics => GetEnvBool(EnvCombatModelDiagnostics);
+        public static bool CombatModelDiagnostics =>
+            VerboseDiagnostics && GetEnvBool(EnvCombatModelDiagnostics);
 
         public static void SetPossessionDiagnosticsRuntimeOverride(bool? enabled)
         {

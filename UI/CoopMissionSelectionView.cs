@@ -3734,9 +3734,15 @@ namespace CoopSpectator.UI
 
             try
             {
-                TrySetInstanceProperty(orderTroopPlacer, "SuspendTroopPlacer", false);
-                TryInvokeInstanceMethod(orderTroopPlacer, "RestrictOrdersToDeploymentBoundaries", true);
-                TryEnsureCommanderDeploymentBoundaries("native-placement-activate");
+                bool boundariesReady =
+                    TryEnsureCommanderDeploymentBoundaries("native-placement-activate");
+                bool blockExactSallyOutPlacement =
+                    IsCurrentExactSallyOutCommanderDeploymentScenario(Mission) &&
+                    !boundariesReady;
+                TrySetInstanceProperty(
+                    orderTroopPlacer,
+                    "SuspendTroopPlacer",
+                    blockExactSallyOutPlacement);
                 object orderFlag = TryGetInstancePropertyValue(orderTroopPlacer, "OrderFlag");
                 if (missionScreen != null && orderFlag != null)
                 {
@@ -4699,12 +4705,12 @@ namespace CoopSpectator.UI
             TryEnsureCommanderDeploymentBoundaries("commander-deployment-boundary-tick");
         }
 
-        private void TryEnsureCommanderDeploymentBoundaries(string source)
+        private bool TryEnsureCommanderDeploymentBoundaries(string source)
         {
             Mission mission = Mission;
             Team team = mission?.PlayerTeam;
             if (mission == null || team == null)
-                return;
+                return false;
 
             bool boundariesReady = CoopSiegeDeploymentBoundaryRuntime.TryEnsureDeploymentPlanBoundaries(
                 mission,
@@ -4722,8 +4728,10 @@ namespace CoopSpectator.UI
             object orderTroopPlacer = ResolveNativeCommanderOrderTroopPlacer();
             if (orderTroopPlacer != null)
             {
+                bool isExactSallyOut =
+                    IsCurrentExactSallyOutCommanderDeploymentScenario(mission);
                 bool mayRemainUnrestrictedWithoutReadyBoundaries =
-                    IsCurrentExactSallyOutCommanderDeploymentScenario(mission) ||
+                    isExactSallyOut ||
                     IsCurrentExactFieldBattleCommanderDeploymentScenario(mission) ||
                     IsCurrentExactVillageBattleCommanderDeploymentScenario(mission);
                 bool restrictToBoundaries =
@@ -4733,7 +4741,16 @@ namespace CoopSpectator.UI
                     orderTroopPlacer,
                     "RestrictOrdersToDeploymentBoundaries",
                     restrictToBoundaries);
+                if (isExactSallyOut)
+                {
+                    TrySetInstanceProperty(
+                        orderTroopPlacer,
+                        "SuspendTroopPlacer",
+                        !boundariesReady);
+                }
             }
+
+            return boundariesReady;
         }
 
         private void TryTickCommanderDeploymentFreeCamera(float dt)

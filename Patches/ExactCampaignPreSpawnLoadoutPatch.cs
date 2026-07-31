@@ -236,14 +236,6 @@ namespace CoopSpectator.Patches
                 };
             }
 
-            string details =
-                "EntryId=" + exactOrigin.EntryId +
-                " TroopId=" + exactOrigin.TroopId +
-                " AgentIndex=" + (__result?.Index.ToString() ?? "null") +
-                " SpawnFromAgentVisuals=" + spawnFromAgentVisuals +
-                " EquipmentInjected=" + WasEquipmentInjectedForEntry(exactOrigin.EntryId) +
-                " " + payloadDiagnostic.ToSummary();
-            ModLogger.Info("ExactCampaignPreSpawnLoadoutPatch: Mission.SpawnAgent result. " + details);
             CoopMissionSpawnLogic.QueueExactCampaignNativeSpawnedAgentRegistration(
                 __result,
                 exactOrigin.EntryId,
@@ -255,8 +247,24 @@ namespace CoopSpectator.Patches
                 __result,
                 spawnFromAgentVisuals,
                 WasEquipmentInjectedForEntry(exactOrigin.EntryId));
-            ExactBattleAgentSpawnTraceBridgeFile.AppendRecord("pre-spawn-payload-result|" + details);
-            ExactBattleRuntimeBundleBridgeFile.AppendContractEvent("server-pre-spawn-payload-result", details);
+            if (ExperimentalFeatures.EnableVerboseDiagnostics)
+            {
+                string details =
+                    "EntryId=" + exactOrigin.EntryId +
+                    " TroopId=" + exactOrigin.TroopId +
+                    " AgentIndex=" + (__result?.Index.ToString() ?? "null") +
+                    " SpawnFromAgentVisuals=" + spawnFromAgentVisuals +
+                    " EquipmentInjected=" + WasEquipmentInjectedForEntry(exactOrigin.EntryId) +
+                    " " + payloadDiagnostic.ToSummary();
+                ModLogger.Verbose(
+                    "ExactCampaignPreSpawnLoadoutPatch: Mission.SpawnAgent result. " +
+                    details);
+                ExactBattleAgentSpawnTraceBridgeFile.AppendRecord(
+                    "pre-spawn-payload-result|" + details);
+                ExactBattleRuntimeBundleBridgeFile.AppendContractEvent(
+                    "server-pre-spawn-payload-result",
+                    details);
+            }
         }
 
         public static bool WasEquipmentInjectedForEntry(string entryId)

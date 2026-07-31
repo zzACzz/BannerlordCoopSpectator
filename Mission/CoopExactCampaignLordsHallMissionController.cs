@@ -167,7 +167,12 @@ namespace CoopSpectator.MissionBehaviors
                         agent.WieldInitialWeapons(Agent.WeaponWieldActionType.Instant);
                     agent.SetWatchState(Agent.WatchState.Alarmed);
                     if (_side == BattleSideEnum.Defender)
-                        agent.SetBehaviorValueSet(HumanAIComponent.BehaviorValueSet.DefensiveArrangementMove);
+                    {
+                        // The campaign controller finishes defender activation in DefaultMove.
+                        // Keeping DefensiveArrangementMove here makes agents wait at their assigned
+                        // points until an enemy comes close instead of actively defending the hall.
+                        agent.SetBehaviorValueSet(HumanAIComponent.BehaviorValueSet.DefaultMove);
+                    }
                     activatedCount++;
                 }
 

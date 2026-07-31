@@ -6,6 +6,16 @@ namespace CoopSpectator.Infrastructure
     /// </summary>
     public static class ExperimentalFeatures
     {
+        private const string VerboseDiagnosticsEnvironmentVariable =
+            "COOPSPECTATOR_VERBOSE_DIAGNOSTICS";
+
+        /// <summary>
+        /// Master opt-in for diagnostic probes and high-volume runtime traces.
+        /// Release and pre-release runs keep this disabled by default.
+        /// </summary>
+        public static readonly bool EnableVerboseDiagnostics =
+            IsEnvironmentFlagEnabledCore(VerboseDiagnosticsEnvironmentVariable);
+
         /// <summary>
         /// Stable baseline: use vanilla TeamDeathmatch in listed flow and keep the
         /// custom TdmClone game-mode path disabled until reintroduced deliberately.
@@ -119,6 +129,14 @@ namespace CoopSpectator.Infrastructure
         public const bool EnableExactSiegeAssaultInitialMaterializationRuntime = true;
 
         /// <summary>
+        /// Exact siege-engine ambush initial materialization: keep server-native
+        /// ownership, pace client CreateAgent replay in rider/mount groups, and
+        /// require an ambush-specific readiness acknowledgement before battle start.
+        /// Active-battle reinforcement CreateAgent messages remain immediate/native.
+        /// </summary>
+        public const bool EnableExactSiegeAmbushInitialMaterializationRuntime = true;
+
+        /// <summary>
         /// Exact SiegeMissionWithDeployment scene initializer profile: mirror the
         /// native campaign siege initializer fields that affect scene material
         /// and campaign-mode object setup, while keeping map-patch repair out of
@@ -212,6 +230,14 @@ namespace CoopSpectator.Infrastructure
             IsEnvironmentFlagEnabled("COOPSPECTATOR_EXACT_AGENT_CONTRACT_DIAGNOSTICS");
 
         /// <summary>
+        /// Experimental per-entry CreateAgent payload profile sweep. This changes
+        /// which exact equipment fields are included and must remain opt-in.
+        /// </summary>
+        public static readonly bool EnableExactCreateAgentPayloadDiagnostics =
+            IsEnvironmentFlagEnabled(
+                "COOPSPECTATOR_EXACT_CREATE_AGENT_PAYLOAD_DIAGNOSTICS");
+
+        /// <summary>
         /// Exact campaign scene bootstrap path: replace the hybrid delayed
         /// materialization layer with a native-like `MissionAgentSpawnLogic`
         /// flow backed by snapshot-driven custom troop suppliers.
@@ -296,6 +322,12 @@ namespace CoopSpectator.Infrastructure
             IsEnvironmentFlagEnabled("COOPSPECTATOR_AI_WIELD_DIAGNOSTICS");
 
         private static bool IsEnvironmentFlagEnabled(string variableName)
+        {
+            return EnableVerboseDiagnostics &&
+                   IsEnvironmentFlagEnabledCore(variableName);
+        }
+
+        private static bool IsEnvironmentFlagEnabledCore(string variableName)
         {
             return string.Equals(
                 global::System.Environment.GetEnvironmentVariable(variableName),

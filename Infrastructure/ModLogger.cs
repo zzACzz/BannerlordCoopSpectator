@@ -16,6 +16,14 @@ namespace CoopSpectator.Infrastructure // Оголошуємо простір і
             Print("INFO", message, null); // Друкуємо повідомлення з рівнем INFO
         } // Завершуємо блок методу
 
+        public static void Verbose(string message)
+        {
+            if (!ExperimentalFeatures.EnableVerboseDiagnostics)
+                return;
+
+            Print("TRACE", message, null);
+        }
+
         public static void Warn(string message) // Оголошуємо метод для попереджень
         { // Починаємо блок методу
             Print("WARN", message, null); // Друкуємо повідомлення з рівнем WARN

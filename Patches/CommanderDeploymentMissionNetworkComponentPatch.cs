@@ -252,11 +252,6 @@ namespace CoopSpectator.Patches
                 TryRefreshNativeSelectionFromShadow(networkPeer, team, orderController);
                 List<Formation> selectedFormations =
                     ResolveActiveSelectedFormations(networkPeer, team, orderController);
-                CancelPlayerDirectedSiegeWeaponAttackForOrder(
-                    team,
-                    selectedFormations,
-                    message.OrderType,
-                    "position-order");
                 var orderPosition = new WorldPosition(
                     mission.Scene,
                     UIntPtr.Zero,
@@ -270,6 +265,28 @@ namespace CoopSpectator.Patches
                         ref orderPosition,
                         "server-position-order");
                 }
+                if (!TryValidateCommanderOrderPosition(
+                        mission,
+                        team,
+                        message.Position,
+                        ref orderPosition,
+                        requireOrderPositionAvailable: true))
+                {
+                    LogOrderDiagnostics(
+                        "position-order-rejected-invalid-position",
+                        networkPeer,
+                        orderController,
+                        "OrderType=" + message.OrderType +
+                        " Position=" + message.Position);
+                    __result = true;
+                    return false;
+                }
+
+                CancelPlayerDirectedSiegeWeaponAttackForOrder(
+                    team,
+                    selectedFormations,
+                    message.OrderType,
+                    "position-order");
                 orderController.SetOrderWithPosition(message.OrderType, orderPosition);
                 UpdateCommanderFormationAiControlForOrder(
                     team,
@@ -426,11 +443,6 @@ namespace CoopSpectator.Patches
                     TryRefreshNativeSelectionFromShadow(networkPeer, team, orderController);
                 List<Formation> selectedFormations =
                     ResolveActiveSelectedFormations(networkPeer, team, orderController);
-                CancelPlayerDirectedSiegeWeaponAttackForOrder(
-                    team,
-                    selectedFormations,
-                    message.OrderType,
-                    "two-position-order");
 
                 LogOrderDiagnostics(
                     "two-positions-entry",
@@ -459,6 +471,36 @@ namespace CoopSpectator.Patches
                             ref position2,
                             "server-two-position-order-end");
                     }
+                    bool hasValidStartPosition = TryValidateCommanderOrderPosition(
+                        mission,
+                        team,
+                        message.Position1,
+                        ref position1,
+                        requireOrderPositionAvailable: true);
+                    bool hasValidEndPosition = TryValidateCommanderOrderPosition(
+                        mission,
+                        team,
+                        message.Position2,
+                        ref position2,
+                        requireOrderPositionAvailable: false);
+                    if (!hasValidStartPosition || !hasValidEndPosition)
+                    {
+                        LogOrderDiagnostics(
+                            "two-position-order-rejected-invalid-position",
+                            networkPeer,
+                            orderController,
+                            "OrderType=" + message.OrderType +
+                            " Position1=" + message.Position1 +
+                            " Position2=" + message.Position2);
+                        __result = true;
+                        return false;
+                    }
+
+                    CancelPlayerDirectedSiegeWeaponAttackForOrder(
+                        team,
+                        selectedFormations,
+                        message.OrderType,
+                        "two-position-order");
                     bool nativeSelectionMatchesShadow = !shouldUseShadowSelection ||
                         IsNativeSelectionEquivalentToShadow(orderController, shadowFormations);
                     if (nativeSelectionMatchesShadow)
@@ -1413,6 +1455,36 @@ namespace CoopSpectator.Patches
             return string.Join(",", parts.ToArray());
         }
 
+        private static bool TryValidateCommanderOrderPosition(
+            Mission mission,
+            Team team,
+            Vec3 rawPosition,
+            ref WorldPosition worldPosition,
+            bool requireOrderPositionAvailable)
+        {
+            if (mission?.Scene == null ||
+                team == null ||
+                float.IsNaN(rawPosition.x) || float.IsInfinity(rawPosition.x) ||
+                float.IsNaN(rawPosition.y) || float.IsInfinity(rawPosition.y) ||
+                float.IsNaN(rawPosition.z) || float.IsInfinity(rawPosition.z))
+            {
+                return false;
+            }
+
+            try
+            {
+                if (!worldPosition.IsValid)
+                    return false;
+
+                return !requireOrderPositionAvailable ||
+                       mission.IsOrderPositionAvailable(worldPosition, team);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private static void LogOrderDiagnostics(
             string stage,
             NetworkCommunicator peer,
@@ -1438,17 +1510,7 @@ namespace CoopSpectator.Patches
 
         private static bool IsOrderOfBattleDiagnosticsEnabled()
         {
-            try
-            {
-                string value = Environment.GetEnvironmentVariable("COOPSPECTATOR_OOB_DIAGNOSTICS");
-                return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(value, "true", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase);
-            }
-            catch
-            {
-                return false;
-            }
+            return CoopDebugConfig.OrderOfBattleDiagnostics;
         }
 
         private static string BuildSelectedFormationSummary(OrderController orderController)
