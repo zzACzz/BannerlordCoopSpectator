@@ -1,0 +1,18 @@
+<Prefab>
+  <Window>
+    <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" DoNotAcceptEvents="true">
+      <Children>
+        <Widget DataSource="{Markers}" WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" DoNotAcceptEvents="true">
+          <ItemTemplate>
+            <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="260" SuggestedHeight="38" Position="@Position" PositionXOffset="-130" PositionYOffset="-54" IsVisible="@IsVisible" DoNotAcceptEvents="true">
+              <Children>
+                <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Sprite="BlankWhiteSquare_9" Color="@BackgroundColor" DoNotAcceptEvents="true" />
+                <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginLeft="10" MarginRight="10" Brush="ScoreboardDefaultFontBrush" Brush.FontSize="19" Brush.FontColor="@TextColor" Brush.TextHorizontalAlignment="Center" Brush.TextVerticalAlignment="Center" Text="@Name" DoNotAcceptEvents="true" />
+              </Children>
+            </Widget>
+          </ItemTemplate>
+        </Widget>
+      </Children>
+    </Widget>
+  </Window>
+</Prefab>

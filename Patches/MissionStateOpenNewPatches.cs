@@ -279,6 +279,7 @@ namespace CoopSpectator.Patches
                 list.Add(new CoopMissionNetworkBridge());
                 list.Add(new CoopMissionClientLogic());
 #if !COOPSPECTATOR_DEDICATED
+                list.Add(new CoopSpectator.UI.CoopPlayerNameplateMissionView());
                 if (ExperimentalFeatures.EnableCustomCoopSelectionOverlay)
                 {
                     list.Add(new CoopSpectator.UI.CoopMissionSelectionView());
@@ -365,6 +366,7 @@ namespace CoopSpectator.Patches
             }
 
 #if !COOPSPECTATOR_DEDICATED
+            list.Add(new CoopSpectator.UI.CoopPlayerNameplateMissionView());
             if (ExperimentalFeatures.EnableCustomCoopSelectionOverlay)
             {
                 list.Add(new CoopMissionNetworkBridge());

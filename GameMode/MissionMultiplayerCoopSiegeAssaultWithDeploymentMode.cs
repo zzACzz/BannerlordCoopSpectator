@@ -222,6 +222,9 @@ namespace CoopSpectator.GameMode
                 ModLogger.Info("CoopSiegeAssaultWithDeployment client: skipped MissionGauntletFormationMarker for siege replay client isolation.");
             }
 #if !COOPSPECTATOR_DEDICATED
+            if (!isDedicated)
+                list.Add(new CoopSpectator.UI.CoopPlayerNameplateMissionView());
+
             if (ExperimentalFeatures.EnableCustomCoopSelectionOverlay &&
                 ExperimentalFeatures.EnableSiegeReplayCustomCoopSelectionOverlay)
             {
