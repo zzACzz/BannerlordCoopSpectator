@@ -17003,8 +17003,18 @@ namespace CoopSpectator.MissionBehaviors
                         int pulsedFormationAgents = 0;
                         if (useNativeLordsHallController)
                         {
-                            // Lords-hall movement and firing orders are owned by the dedicated
-                            // controller. Keep the formation detached from field-battle TeamAI.
+                            // Keep native lords-hall defensive movement frames, but release the
+                            // temporary pre-battle firing hold. The campaign controller expects
+                            // defenders to fire at will and attackers to retain their prior order.
+                            if (wasHeld)
+                            {
+                                formation.SetFiringOrder(
+                                    hadPreviousFiringOrder
+                                        ? previousFiringOrder
+                                        : team.Side == BattleSideEnum.Defender
+                                            ? FiringOrder.FiringOrderFireAtWill
+                                            : FiringOrder.FiringOrderHoldYourFire);
+                            }
                             formation.SetControlledByAI(false, false);
                         }
                         else if (isPlayerOwnedFormation)

@@ -413,9 +413,6 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 ModLogger.Info("CoopBattle client: skipped CoopMissionClientLogic for battle-map crash isolation.");
             }
 #if !COOPSPECTATOR_DEDICATED
-            if (!isDedicated)
-                list.Add(new CoopSpectator.UI.CoopPlayerNameplateMissionView());
-
             if (ExperimentalFeatures.EnableCustomCoopSelectionOverlay)
             {
                 list.Add(new CoopSpectator.UI.CoopMissionSelectionView());

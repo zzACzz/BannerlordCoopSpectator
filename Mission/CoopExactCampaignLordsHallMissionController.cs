@@ -116,6 +116,8 @@ namespace CoopSpectator.MissionBehaviors
                     AgentFlag agentFlags = agent.GetAgentFlags();
                     agent.SetAgentFlags((AgentFlag)((uint)agentFlags & 0xFFEFFFFFu));
                     agent.WieldInitialWeapons(Agent.WeaponWieldActionType.Instant);
+                    agent.SetWatchState(Agent.WatchState.Alarmed);
+                    agent.SetBehaviorValueSet(HumanAIComponent.BehaviorValueSet.DefensiveArrangementMove);
                     spawnPoint.AssignAgent(agent);
                 }
             }
@@ -164,14 +166,9 @@ namespace CoopSpectator.MissionBehaviors
                         continue;
 
                     if (_side != BattleSideEnum.Defender)
-                        agent.WieldInitialWeapons(Agent.WeaponWieldActionType.Instant);
-                    agent.SetWatchState(Agent.WatchState.Alarmed);
-                    if (_side == BattleSideEnum.Defender)
                     {
-                        // The campaign controller finishes defender activation in DefaultMove.
-                        // Keeping DefensiveArrangementMove here makes agents wait at their assigned
-                        // points until an enemy comes close instead of actively defending the hall.
-                        agent.SetBehaviorValueSet(HumanAIComponent.BehaviorValueSet.DefaultMove);
+                        agent.WieldInitialWeapons(Agent.WeaponWieldActionType.Instant);
+                        agent.SetWatchState(Agent.WatchState.Alarmed);
                     }
                     activatedCount++;
                 }
