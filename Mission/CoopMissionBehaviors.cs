@@ -30976,20 +30976,28 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             Mission mission = agent.Mission ?? Mission.Current;
-            if (mission == null ||
-                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(
-                    mission.SceneName ?? string.Empty))
+            if (mission == null)
             {
                 return false;
             }
-
-            if (!IsHeroEntryEligibleForExactPersonalPerks(entryState))
-                return true;
 
             BattleScenarioContextMessage scenarioContext =
                 BattleSnapshotRuntimeState.GetScenarioContext() ??
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            bool isExactSiegeAssaultWithDeployment =
+                SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(
+                    mission.SceneName ?? string.Empty);
+            bool isExactSallyOut =
+                MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(
+                    mission.SceneName ?? string.Empty) &&
+                SallyOutScenarioContract.IsSallyOutScenario(scenarioContext);
+            if (!isExactSiegeAssaultWithDeployment && !isExactSallyOut)
+                return false;
+
+            if (!IsHeroEntryEligibleForExactPersonalPerks(entryState))
+                return true;
+
             return SiegeAmbushScenarioContract.IsSiegeAmbushScenario(scenarioContext) &&
                    entryState.ServerCreateContractResolved &&
                    entryState.ServerCreateInjectEquipment &&

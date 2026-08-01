@@ -11880,9 +11880,11 @@ namespace CoopSpectator.MissionBehaviors
                         !ReferenceEquals(formation.PlayerOwner, captainAgent) ||
                         captainOrderController == null ||
                         !ReferenceEquals(captainOrderController.Owner, captainAgent) ||
-                        captainPeer.ControlledFormation == null;
+                        !ReferenceEquals(captainPeer.ControlledFormation, formation);
                     if (requiresNativeSergeantAssignment)
                         team.AssignPlayerAsSergeantOfFormation(captainPeer, formation.FormationIndex);
+
+                    ClearDuplicateControlledFormationOwners(team, captainPeer, formation);
 
                     formation.PlayerOwner = captainAgent;
                     if (voluntarilyAiControlledFormationIndices.Contains(formation.Index) &&
@@ -11948,6 +11950,29 @@ namespace CoopSpectator.MissionBehaviors
                     " CampaignCommanderPlayerControlled=" + campaignCommanderIsPlayerControlled +
                     " PreserveNativeBesiegerActivationHold=" + keepFormationAiDisabled +
                     " Source=" + (source ?? "unknown"));
+            }
+        }
+
+        private static void ClearDuplicateControlledFormationOwners(
+            Team team,
+            MissionPeer authoritativePeer,
+            Formation formation)
+        {
+            if (team == null || authoritativePeer == null || formation == null)
+                return;
+
+            for (int i = 0; i < GameNetwork.NetworkPeers.Count; i++)
+            {
+                MissionPeer candidatePeer = GameNetwork.NetworkPeers[i]?.GetComponent<MissionPeer>();
+                if (candidatePeer == null ||
+                    ReferenceEquals(candidatePeer, authoritativePeer) ||
+                    !ReferenceEquals(candidatePeer.Team, team) ||
+                    !ReferenceEquals(candidatePeer.ControlledFormation, formation))
+                {
+                    continue;
+                }
+
+                candidatePeer.ControlledFormation = null;
             }
         }
 

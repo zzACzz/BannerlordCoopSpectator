@@ -208,19 +208,16 @@ namespace CoopSpectator.GameMode
             list.Add(new MissionBehaviorDiagnostic());
             list.Add(new CoopMissionNetworkBridge());
             AddOptional(list, MissionBehaviorHelpers.TryCreateMissionAgentLabelUiParityView(mission), "MissionAgentLabelUIHandler");
+            AddOptional(list, MissionBehaviorHelpers.TryCreateMissionMultiplayerMarkerUiHandler(), "MissionMultiplayerMarkerUIHandler");
             AddOptional(
                 list,
                 MissionBehaviorHelpers.TryCreateBehaviorFromLoadedAssemblies("TaleWorlds.MountAndBlade.View.MissionViews.MissionFormationTargetSelectionHandler"),
                 "MissionFormationTargetSelectionHandler");
             AddOptional(list, MissionBehaviorHelpers.TryCreateMissionMultiplayerEscapeMenu("Battle"), "MissionMultiplayerEscapeMenu");
-            if (ExperimentalFeatures.EnableSiegeReplayFormationMarkerUi)
-            {
-                AddOptional(list, MissionBehaviorHelpers.TryCreateMissionFormationMarkerUiParityView(mission), "MissionFormationMarkerUIHandler");
-            }
-            else
-            {
-                ModLogger.Info("CoopSiegeAssaultWithDeployment client: skipped MissionGauntletFormationMarker for siege replay client isolation.");
-            }
+            AddOptional(
+                list,
+                MissionBehaviorHelpers.TryCreateMissionFormationMarkerUiParityView(mission),
+                "MissionFormationMarkerUIHandler");
 #if !COOPSPECTATOR_DEDICATED
             if (ExperimentalFeatures.EnableCustomCoopSelectionOverlay &&
                 ExperimentalFeatures.EnableSiegeReplayCustomCoopSelectionOverlay)

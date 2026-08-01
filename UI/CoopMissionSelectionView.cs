@@ -2804,22 +2804,122 @@ namespace CoopSpectator.UI
             OrderController orderController = Mission?.PlayerTeam?.PlayerOrderController;
             Agent agent = Agent.Main ?? orderController?.Owner;
             Formation formation = ResolveCommanderBattleFocusedFormation();
-            WorldPosition? orderPosition = null;
             Mission mission = Mission;
-            if (mission?.Scene != null && MissionScreen != null)
-            {
-                try
-                {
-                    Vec3 orderFlagPosition = MissionScreen.GetOrderFlagPosition();
-                    orderPosition = new WorldPosition(mission.Scene, UIntPtr.Zero, orderFlagPosition, hasValidZ: false);
-                }
-                catch
-                {
-                    orderPosition = null;
-                }
-            }
+            WorldPosition? orderPosition = TryResolveCommanderBattleOrderPosition(
+                mission,
+                orderController?.Team ?? mission?.PlayerTeam,
+                out WorldPosition resolvedOrderPosition)
+                ? resolvedOrderPosition
+                : (WorldPosition?)null;
 
             return new VisualOrderExecutionParameters(agent, formation, orderPosition);
+        }
+
+        private bool TryResolveCommanderBattleOrderPosition(
+            Mission mission,
+            Team team,
+            out WorldPosition orderPosition)
+        {
+            orderPosition = WorldPosition.Invalid;
+            if (mission?.Scene == null || MissionScreen == null || team == null)
+                return false;
+
+            try
+            {
+                Vec3 orderFlagPosition = MissionScreen.GetOrderFlagPosition();
+                if (TryCreateValidCommanderBattleOrderPosition(
+                        mission,
+                        team,
+                        orderFlagPosition,
+                        out orderPosition))
+                {
+                    return true;
+                }
+
+                Vec2 screenPoint = MissionScreen.MouseVisible
+                    ? TaleWorlds.InputSystem.Input.MousePositionRanged
+                    : new Vec2(0.5f, 0.5f);
+                MissionScreen.ScreenPointToWorldRay(
+                    screenPoint,
+                    out Vec3 rayBegin,
+                    out Vec3 rayEnd);
+                if (!mission.Scene.RayCastForClosestEntityOrTerrain(
+                        rayBegin,
+                        rayEnd,
+                        out float collisionDistance,
+                        out Vec3 fallbackPosition,
+                        out WeakGameEntity collidedEntity,
+                        0.3f,
+                        (BodyFlags)67188481))
+                {
+                    return false;
+                }
+
+                return TryCreateValidCommanderBattleOrderPosition(
+                    mission,
+                    team,
+                    fallbackPosition,
+                    out orderPosition);
+            }
+            catch
+            {
+                orderPosition = WorldPosition.Invalid;
+                return false;
+            }
+        }
+
+        private static bool TryCreateValidCommanderBattleOrderPosition(
+            Mission mission,
+            Team team,
+            Vec3 position,
+            out WorldPosition orderPosition)
+        {
+            orderPosition = WorldPosition.Invalid;
+            if (mission?.Scene == null ||
+                team == null ||
+                !IsFiniteCommanderBattleOrderPosition(position) ||
+                position.z <= -99999f)
+            {
+                return false;
+            }
+
+            try
+            {
+                WorldPosition candidate = new WorldPosition(
+                    mission.Scene,
+                    UIntPtr.Zero,
+                    position,
+                    hasValidZ: false);
+                if (!candidate.IsValid ||
+                    !mission.IsFormationUnitPositionAvailable(ref candidate, team) ||
+                    !mission.IsOrderPositionAvailable(candidate, team))
+                {
+                    return false;
+                }
+
+                Vec3 groundPosition = candidate.GetGroundVec3();
+                if (!IsFiniteCommanderBattleOrderPosition(groundPosition))
+                    return false;
+
+                orderPosition = new WorldPosition(
+                    mission.Scene,
+                    UIntPtr.Zero,
+                    groundPosition,
+                    hasValidZ: true);
+                return true;
+            }
+            catch
+            {
+                orderPosition = WorldPosition.Invalid;
+                return false;
+            }
+        }
+
+        private static bool IsFiniteCommanderBattleOrderPosition(Vec3 position)
+        {
+            return !float.IsNaN(position.x) && !float.IsInfinity(position.x) &&
+                   !float.IsNaN(position.y) && !float.IsInfinity(position.y) &&
+                   !float.IsNaN(position.z) && !float.IsInfinity(position.z);
         }
 
         private void TryUpdateCommanderBattleOrderVmUnchecked()

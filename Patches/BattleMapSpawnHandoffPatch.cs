@@ -21259,6 +21259,20 @@ namespace CoopSpectator.Patches
                     return true;
                 }
 
+                if (!IsExactSiegeCommanderOrderWorldPositionValid(
+                        mission,
+                        team,
+                        position1,
+                        requireOrderPositionAvailable: true) ||
+                    !IsExactSiegeCommanderOrderWorldPositionValid(
+                        mission,
+                        team,
+                        position2,
+                        requireOrderPositionAvailable: false))
+                {
+                    return false;
+                }
+
                 OrderController agentOrderController = team.GetOrderControllerOf(mainAgent);
                 ApplyLocalExactCommanderOrderOwnershipState(
                     mission,
@@ -21315,6 +21329,44 @@ namespace CoopSpectator.Patches
                     ex.GetType().Name + ":" + ex.Message);
                 return false;
             }
+        }
+
+        private static bool IsExactSiegeCommanderOrderWorldPositionValid(
+            Mission mission,
+            Team team,
+            WorldPosition position,
+            bool requireOrderPositionAvailable)
+        {
+            if (mission?.Scene == null || team == null || !position.IsValid)
+                return false;
+
+            try
+            {
+                Vec3 rawPosition = position.GetVec3WithoutValidity();
+                if (!IsFiniteExactSiegeCommanderOrderPosition(rawPosition) ||
+                    rawPosition.z <= -99999f)
+                {
+                    return false;
+                }
+
+                Vec3 groundPosition = position.GetGroundVec3();
+                if (!IsFiniteExactSiegeCommanderOrderPosition(groundPosition))
+                    return false;
+
+                return !requireOrderPositionAvailable ||
+                       mission.IsOrderPositionAvailable(position, team);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool IsFiniteExactSiegeCommanderOrderPosition(Vec3 position)
+        {
+            return !float.IsNaN(position.x) && !float.IsInfinity(position.x) &&
+                   !float.IsNaN(position.y) && !float.IsInfinity(position.y) &&
+                   !float.IsNaN(position.z) && !float.IsInfinity(position.z);
         }
 
         private static bool TryResolveExactSiegeCommanderTwoPositionOrderBridge(

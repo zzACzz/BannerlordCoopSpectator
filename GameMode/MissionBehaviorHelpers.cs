@@ -317,6 +317,46 @@ namespace CoopSpectator.GameMode
             return null;
         }
 
+        public static MissionBehavior TryCreateMissionMultiplayerMarkerUiHandler()
+        {
+            try
+            {
+                Type multiplayerViewCreatorType =
+                    Type.GetType(
+                        "TaleWorlds.MountAndBlade.Multiplayer.View.MissionViews.MultiplayerViewCreator, TaleWorlds.MountAndBlade.Multiplayer.View",
+                        throwOnError: false)
+                    ?? TryResolveTypeFromLoadedAssemblies("TaleWorlds.MountAndBlade.Multiplayer.View.MissionViews.MultiplayerViewCreator");
+                if (multiplayerViewCreatorType == null)
+                {
+                    ModLogger.Info("MissionBehaviorHelpers: MissionMultiplayerMarkerUIHandler creation skipped because MultiplayerViewCreator is unavailable in current runtime.");
+                    return null;
+                }
+
+                MethodInfo createMethod = multiplayerViewCreatorType.GetMethod(
+                    "CreateMissionFlagMarkerUIHandler",
+                    BindingFlags.Public | BindingFlags.Static,
+                    binder: null,
+                    types: Type.EmptyTypes,
+                    modifiers: null);
+                if (createMethod == null)
+                {
+                    ModLogger.Info("MissionBehaviorHelpers: MissionMultiplayerMarkerUIHandler creation skipped because MultiplayerViewCreator.CreateMissionFlagMarkerUIHandler() was not found.");
+                    return null;
+                }
+
+                if (createMethod.Invoke(null, Array.Empty<object>()) is MissionBehavior behavior)
+                    return behavior;
+
+                ModLogger.Info("MissionBehaviorHelpers: MissionMultiplayerMarkerUIHandler creation returned null or non-MissionBehavior.");
+                return null;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("MissionBehaviorHelpers: MissionMultiplayerMarkerUIHandler creation failed: " + ex.Message);
+                return null;
+            }
+        }
+
         public static MissionBehavior TryCreateMissionFormationMarkerUiHandler(Mission mission)
         {
             return TryCreateViewCreatorBehavior(
