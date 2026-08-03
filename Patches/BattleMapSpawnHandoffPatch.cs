@@ -723,11 +723,7 @@ namespace CoopSpectator.Patches
             TryApplyPatchStep(nameof(CoopBotsControlledCountPatch), () => CoopBotsControlledCountPatch.Apply(harmony));
             TryApplyPatchStep(nameof(PatchBattleSnapshotRuntimeStateFiveModeWeaponUsageProtocol), () => PatchBattleSnapshotRuntimeStateFiveModeWeaponUsageProtocol(harmony));
             TryApplyPatchStep(nameof(PatchMissionPeerFollowedAgent), () => PatchMissionPeerFollowedAgent(harmony));
-            TryApplyPatchStep(nameof(PatchAgentTeleportToPositionCorridorDiagnostics), () => PatchAgentTeleportToPositionCorridorDiagnostics(harmony));
-            TryApplyPatchStep(nameof(PatchMissionTickCorridorDiagnostics), () => PatchMissionTickCorridorDiagnostics(harmony));
-            TryApplyPatchStep(nameof(PatchClientNativeExecutionBoundaryCorridorDiagnostics), () => PatchClientNativeExecutionBoundaryCorridorDiagnostics(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentCreateAgent), () => PatchMissionNetworkComponentCreateAgent(harmony));
-            TryApplyPatchStep(nameof(PatchMissionNetworkComponentAgentVisualsLifecycleDiagnostics), () => PatchMissionNetworkComponentAgentVisualsLifecycleDiagnostics(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentAgentSetFormation), () => PatchMissionNetworkComponentAgentSetFormation(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetAgentActionSet), () => PatchMissionNetworkComponentSetAgentActionSet(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSynchronizeAgentEquipment), () => PatchMissionNetworkComponentSynchronizeAgentEquipment(harmony));
@@ -1155,27 +1151,6 @@ namespace CoopSpectator.Patches
                 postfix: new HarmonyMethod(postfix),
                 finalizer: new HarmonyMethod(finalizer));
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix/postfix/finalizer applied to MissionNetworkComponent.HandleServerEventCreateAgent.");
-        }
-
-        private static void PatchAgentTeleportToPositionCorridorDiagnostics(Harmony harmony)
-        {
-            MethodInfo target = typeof(Agent).GetMethod(
-                nameof(Agent.TeleportToPosition),
-                BindingFlags.Instance | BindingFlags.Public,
-                null,
-                new[] { typeof(Vec3) },
-                null);
-            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
-                nameof(Agent_TeleportToPosition_CorridorDiagnostics_Prefix),
-                BindingFlags.Static | BindingFlags.NonPublic);
-            if (target == null || prefix == null)
-            {
-                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.TeleportToPosition(Vec3) not found. Skip corridor diagnostics.");
-                return;
-            }
-
-            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
-            ModLogger.Info("BattleMapSpawnHandoffPatch: diagnostic prefix applied to Agent.TeleportToPosition(Vec3).");
         }
 
         private static void PatchMissionTickCorridorDiagnostics(Harmony harmony)
@@ -2854,16 +2829,6 @@ namespace CoopSpectator.Patches
             {
                 ModLogger.Info("BattleMapSpawnHandoffPatch: local SetAgentPeer visual finalization failed: " + ex.Message);
             }
-        }
-
-        private static void Agent_TeleportToPosition_CorridorDiagnostics_Prefix(
-            Agent __instance,
-            Vec3 position)
-        {
-            ExactCreateAgentCorridorDiagnostics.ObserveManagedAgentTeleport(
-                __instance,
-                position,
-                "BattleMapSpawnHandoffPatch Agent.TeleportToPosition prefix");
         }
 
         private static void Mission_Tick_CorridorDiagnostics_Prefix(
