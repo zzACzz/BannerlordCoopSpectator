@@ -14505,10 +14505,8 @@ namespace CoopSpectator.Patches
                 createTimeSpawnEquipment[EquipmentIndex.Horse] = default;
                 createTimeSpawnEquipment[EquipmentIndex.HorseHarness] = default;
             }
-            MissionEquipment createTimeMissionEquipment = ResolveStrictExactHeroCreateAgentMissionEquipment(
-                createTimeSpawnEquipment,
-                banner,
-                createAgent);
+            MissionEquipment createTimeMissionEquipment =
+                ResolveStrictExactHeroCreateAgentMissionEquipment(createAgent);
             if (createTimeSpawnEquipment == null || createTimeMissionEquipment == null)
                 return false;
 
@@ -14666,18 +14664,13 @@ namespace CoopSpectator.Patches
                 createAgent,
                 character);
             Banner banner = ResolveStrictExactHeroCreateAgentBanner(teamFromTeamIndex, formation);
-            Equipment createTimeSpawnEquipment = CoopMissionSpawnLogic.BuildSnapshotEquipmentForExactRuntime(
-                entryState,
-                includeWeapons: true,
-                honorExactVisualContracts: false,
-                includeArmorVisuals: true,
-                includeMountVisuals: false);
-            if (createTimeSpawnEquipment == null)
+            Equipment createTimeSpawnEquipment = createAgent.SpawnEquipment?.Clone(false);
+            MissionEquipment createTimeMissionEquipment = createAgent.MissionEquipment;
+            if (createTimeSpawnEquipment == null || createTimeMissionEquipment == null)
                 return false;
 
             createTimeSpawnEquipment[EquipmentIndex.Horse] = default;
             createTimeSpawnEquipment[EquipmentIndex.HorseHarness] = default;
-            MissionEquipment createTimeMissionEquipment = new MissionEquipment(createTimeSpawnEquipment, banner);
 
             Vec2 initialDirection = createAgent.Direction;
             if (initialDirection.LengthSquared <= 0.001f)
@@ -14939,15 +14932,8 @@ namespace CoopSpectator.Patches
                 createAgent,
                 createTimeCharacter);
             Banner banner = ResolveStrictExactHeroCreateAgentBanner(teamFromTeamIndex, formation);
-            Equipment createTimeSpawnEquipment =
-                exactVisualHybridEligible
-                    ? BuildMountedHeroExactVisualHybridSpawnEquipment(contract, createAgent)
-                    : createAgent.SpawnEquipment?.Clone(false);
-            MissionEquipment createTimeMissionEquipment =
-                exactVisualHybridEligible
-                    ? BuildMountedHeroExactVisualHybridMissionEquipment(createTimeSpawnEquipment, createAgent, banner)
-                    : createAgent.MissionEquipment ??
-                      (createTimeSpawnEquipment != null ? new MissionEquipment(createTimeSpawnEquipment, banner) : null);
+            Equipment createTimeSpawnEquipment = createAgent.SpawnEquipment?.Clone(false);
+            MissionEquipment createTimeMissionEquipment = createAgent.MissionEquipment;
             if (createTimeSpawnEquipment == null || createTimeMissionEquipment == null || createTimeCharacter == null)
                 return false;
 
@@ -15007,7 +14993,7 @@ namespace CoopSpectator.Patches
                     " ContractCharacter=" + (createTimeCharacter?.StringId ?? "null") +
                     " MountAgentIndex=" + createAgent.MountAgentIndex +
                     " FormationIndex=" + createAgent.FormationIndex +
-                    " ExactVisualHybridEligible=" + exactVisualHybridEligible +
+                    " LegacyExactVisualHybridCandidateIgnored=" + exactVisualHybridEligible +
                     " PayloadMissionWeapons={" + BuildMissionEquipmentWeaponSummary(createTimeMissionEquipment) + "}" +
                     " PayloadMount={" + BuildEquipmentSummary(createTimeSpawnEquipment, EquipmentIndex.Horse, EquipmentIndex.HorseHarness) + "}" +
                     " Source=battle-map payload mounted hero CreateAgent";
@@ -15144,41 +15130,6 @@ namespace CoopSpectator.Patches
             entryState = candidateEntryState;
             resolutionSource = "payload-candidate-" + (resolutionState ?? "resolved");
             return true;
-        }
-
-        private static Equipment BuildMountedHeroExactVisualHybridSpawnEquipment(
-            ExactTransferSpawnContract contract,
-            CreateAgent createAgent)
-        {
-            Equipment hybridEquipment = contract?.Equipment?.SpawnEquipment?.Clone(false);
-            if (hybridEquipment == null)
-                return createAgent?.SpawnEquipment?.Clone(false);
-
-            Equipment payloadSpawnEquipment = createAgent?.SpawnEquipment;
-            for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
-            {
-                if (hybridEquipment[slot].Item != null)
-                    continue;
-
-                hybridEquipment[slot] =
-                    payloadSpawnEquipment != null
-                        ? payloadSpawnEquipment.GetEquipmentFromSlot(slot)
-                        : default;
-            }
-
-            return hybridEquipment;
-        }
-
-        private static MissionEquipment BuildMountedHeroExactVisualHybridMissionEquipment(
-            Equipment hybridSpawnEquipment,
-            CreateAgent createAgent,
-            Banner banner)
-        {
-            if (hybridSpawnEquipment == null)
-                return createAgent?.MissionEquipment;
-
-            MissionEquipment hybridMissionEquipment = new MissionEquipment(hybridSpawnEquipment, banner);
-            return hybridMissionEquipment;
         }
 
         private static void TryCanonicalizeStrictMountedHeroSynchronizeAgentEquipmentPayload(
@@ -16025,20 +15976,15 @@ namespace CoopSpectator.Patches
             ExactTransferSpawnContract contract,
             CreateAgent createAgent)
         {
-            if (contract?.Equipment?.SpawnEquipment != null)
-                return contract.Equipment.SpawnEquipment.Clone(false);
+            if (createAgent?.SpawnEquipment != null)
+                return createAgent.SpawnEquipment.Clone(false);
 
-            return createAgent?.SpawnEquipment?.Clone(false);
+            return contract?.Equipment?.SpawnEquipment?.Clone(false);
         }
 
         private static MissionEquipment ResolveStrictExactHeroCreateAgentMissionEquipment(
-            Equipment createTimeSpawnEquipment,
-            Banner banner,
             CreateAgent createAgent)
         {
-            if (createTimeSpawnEquipment != null)
-                return new MissionEquipment(createTimeSpawnEquipment, banner);
-
             return createAgent?.MissionEquipment;
         }
 
@@ -16461,13 +16407,6 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
-                TryCanonicalizeExactHeroSynchronizeAgentEquipmentWeaponSlots(
-                    mission,
-                    synchronizeAgentSpawnEquipment,
-                    agent);
-                TryCanonicalizeStrictMountedHeroSynchronizeAgentEquipmentPayload(
-                    synchronizeAgentSpawnEquipment,
-                    agent);
                 // SynchronizeAgentSpawnEquipment and every later weapon-state message use the
                 // server's slot indices as one shared contract. Reordering a non-hero payload
                 // only on the client makes a later SetWieldedItemIndex target another item.
@@ -19832,13 +19771,6 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
-                if (setWieldedItemIndex.IsWieldedOnSpawn &&
-                    TrySuppressStrictExactHeroStaleOnSpawnWield(setWieldedItemIndex, agent))
-                {
-                    __state = true;
-                    return false;
-                }
-
                 if (ShouldUseSafeStringIdCreateAgentPathOnClient(mission) &&
                     TrySuppressExactSiegeHeroUnsafePostPossessionSetWieldedItemIndex(
                         mission,
@@ -20546,137 +20478,6 @@ namespace CoopSpectator.Patches
             {
             }
 
-            return true;
-        }
-
-        private static bool TrySuppressStrictExactHeroStaleOnSpawnWield(
-            SetWieldedItemIndex setWieldedItemIndex,
-            Agent agent)
-        {
-            if (setWieldedItemIndex == null || agent == null || agent.IsMount)
-                return false;
-
-            if (!CoopMissionSpawnLogic.ShouldSuppressStrictExactHeroOnSpawnWield(
-                    agent,
-                    out string entryId,
-                    out string suppressReason))
-            {
-                return false;
-            }
-
-            bool localInitialWieldAlreadyApplied =
-                CoopMissionSpawnLogic.HasStrictExactHeroLocalInitialWieldBeenApplied(
-                    agent,
-                    entryId,
-                    out string localInitialWieldVersionKey,
-                    out string localInitialWieldVersionStateSummary);
-            bool retryLocalInitialWieldDueToCurrentNone =
-                localInitialWieldAlreadyApplied &&
-                ShouldRetryStrictExactHeroLocalInitialWield(agent);
-            bool localInitialWieldApplied = false;
-            string localInitialWieldResult =
-                localInitialWieldAlreadyApplied
-                    ? "strict-exact-hero-local-initial-wield-already-applied"
-                    : "(none)";
-            string localInitialWieldIssue = "(none)";
-
-            if (retryLocalInitialWieldDueToCurrentNone)
-            {
-                CoopMissionSpawnLogic.InvalidateStrictExactHeroLocalInitialWieldAppliedMarker(
-                    agent,
-                    entryId,
-                    "battle-map handoff strict exact hero stale on-spawn wield suppression",
-                    "current-wield-none-retry");
-                localInitialWieldAlreadyApplied = false;
-                localInitialWieldResult = "strict-exact-hero-local-initial-wield-retry-after-stale-applied-key";
-            }
-
-            if (!localInitialWieldAlreadyApplied)
-            {
-                localInitialWieldApplied = CoopMissionSpawnLogic.TryApplyStrictExactHeroLocalInitialWield(
-                    agent,
-                    entryId,
-                    "battle-map handoff strict exact hero stale on-spawn wield suppression",
-                    out localInitialWieldResult,
-                    out localInitialWieldIssue);
-            }
-
-            bool localInitialWieldAppliedForCurrentVersion =
-                CoopMissionSpawnLogic.HasStrictExactHeroLocalInitialWieldBeenApplied(
-                    agent,
-                    entryId,
-                    out localInitialWieldVersionKey,
-                    out localInitialWieldVersionStateSummary);
-
-            string allowVanillaOnSpawnWieldFallbackReason = "(none)";
-            bool allowVanillaOnSpawnWieldFallback =
-                setWieldedItemIndex.IsWieldedOnSpawn &&
-                !localInitialWieldAppliedForCurrentVersion &&
-                CoopMissionSpawnLogic.ShouldAllowVanillaOnSpawnWieldFallbackForStrictHero(
-                    agent,
-                    entryId,
-                    out allowVanillaOnSpawnWieldFallbackReason);
-
-            if (allowVanillaOnSpawnWieldFallback)
-            {
-                ModLogger.Info(
-                    "BattleMapSpawnHandoffPatch: allowed vanilla strict exact-hero on-spawn SetWieldedItemIndex fallback because local strict wield refresh did not materialize a usable weapon state. " +
-                    "AgentIndex=" + agent.Index +
-                    " EntryId=" + (entryId ?? "null") +
-                    " TeamSide=" + agent.Team?.Side +
-                    " PayloadWieldedItemIndex=" + setWieldedItemIndex.WieldedItemIndex +
-                    " PayloadIsLeftHand=" + setWieldedItemIndex.IsLeftHand +
-                    " PayloadIsWieldedInstantly=" + setWieldedItemIndex.IsWieldedInstantly +
-                    " PayloadIsWieldedOnSpawn=" + setWieldedItemIndex.IsWieldedOnSpawn +
-                    " PayloadMainHandUsageIndex=" + setWieldedItemIndex.MainHandCurrentUsageIndex +
-                    " SuppressedReason=" + (suppressReason ?? "strict-exact-hero-stale-onspawn-wield") +
-                    " LocalInitialWieldApplied=" + localInitialWieldApplied +
-                    " LocalInitialWieldAlreadyApplied=" + localInitialWieldAlreadyApplied +
-                    " LocalInitialWieldAppliedForCurrentVersion=" + localInitialWieldAppliedForCurrentVersion +
-                    " LocalInitialWieldVersionKey=" + (string.IsNullOrWhiteSpace(localInitialWieldVersionKey) ? "(none)" : localInitialWieldVersionKey) +
-                    " LocalInitialWieldVersionState=" + (localInitialWieldVersionStateSummary ?? "(none)") +
-                    " LocalInitialWieldResult=" + (localInitialWieldResult ?? "(none)") +
-                    " LocalInitialWieldIssue=" + (localInitialWieldIssue ?? "(none)") +
-                    " AllowVanillaReason=" + (allowVanillaOnSpawnWieldFallbackReason ?? "(none)"));
-                return false;
-            }
-
-            string payloadSummary =
-                "PayloadWieldedItemIndex=" + setWieldedItemIndex.WieldedItemIndex +
-                " PayloadIsLeftHand=" + setWieldedItemIndex.IsLeftHand +
-                " PayloadIsWieldedInstantly=" + setWieldedItemIndex.IsWieldedInstantly +
-                " PayloadIsWieldedOnSpawn=" + setWieldedItemIndex.IsWieldedOnSpawn +
-                " PayloadMainHandUsageIndex=" + setWieldedItemIndex.MainHandCurrentUsageIndex +
-                " SuppressedReason=" + (suppressReason ?? "strict-exact-hero-stale-onspawn-wield") +
-                " LocalInitialWieldApplied=" + localInitialWieldApplied +
-                " LocalInitialWieldAlreadyApplied=" + localInitialWieldAlreadyApplied +
-                " LocalInitialWieldAppliedForCurrentVersion=" + localInitialWieldAppliedForCurrentVersion +
-                " RetryLocalInitialWieldDueToCurrentNone=" + retryLocalInitialWieldDueToCurrentNone +
-                " LocalInitialWieldVersionKey=" + (string.IsNullOrWhiteSpace(localInitialWieldVersionKey) ? "(none)" : localInitialWieldVersionKey) +
-                " LocalInitialWieldVersionState=" + (localInitialWieldVersionStateSummary ?? "(none)") +
-                " LocalInitialWieldResult=" + (localInitialWieldResult ?? "(none)") +
-                " LocalInitialWieldIssue=" + (localInitialWieldIssue ?? "(none)");
-
-            ModLogger.Info(
-                "BattleMapSpawnHandoffPatch: suppressed stale strict exact-hero on-spawn SetWieldedItemIndex after contract adapter materialization. " +
-                "AgentIndex=" + agent.Index +
-                " EntryId=" + (entryId ?? "null") +
-                " TeamSide=" + agent.Team?.Side +
-                " " + payloadSummary);
-            ExactCreateAgentCorridorDiagnostics.ObserveClientSetWieldedItemIndex(
-                setWieldedItemIndex,
-                agent,
-                suppressed: true,
-                source: "battle-map handoff SetWieldedItemIndex strict exact hero guard");
-            CoopMissionSpawnLogic.ObserveClientSetWieldedItemIndex(
-                setWieldedItemIndex.AgentIndex,
-                setWieldedItemIndex.IsWieldedOnSpawn,
-                "battle-map handoff SetWieldedItemIndex strict exact hero guard");
-            CoopMissionSpawnLogic.TraceClientMountedHeroNetworkContract(
-                agent,
-                "client-set-wielded-item-index-suppressed",
-                "battle-map handoff SetWieldedItemIndex strict exact hero guard",
-                payloadSummary);
             return true;
         }
 

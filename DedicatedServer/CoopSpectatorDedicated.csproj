@@ -121,6 +121,7 @@
     <Compile Include="..\Infrastructure\ExactTransferSpawnContract.cs" Link="Infrastructure\ExactTransferSpawnContract.cs" />
     <Compile Include="..\Infrastructure\ExactTransferRuntimeState.cs" Link="Infrastructure\ExactTransferRuntimeState.cs" />
     <Compile Include="..\Infrastructure\ExactTransferStageMachine.cs" Link="Infrastructure\ExactTransferStageMachine.cs" />
+    <Compile Include="..\Infrastructure\ExactWeaponSlotMaterializationPolicy.cs" Link="Infrastructure\ExactWeaponSlotMaterializationPolicy.cs" />
     <Compile Include="..\Infrastructure\ExactTransferContractBuilder.cs" Link="Infrastructure\ExactTransferContractBuilder.cs" />
     <Compile Include="..\Infrastructure\ExactTransferContractValidator.cs" Link="Infrastructure\ExactTransferContractValidator.cs" />
     <Compile Include="..\Infrastructure\ExactTransferContractRuntimeCache.cs" Link="Infrastructure\ExactTransferContractRuntimeCache.cs" />

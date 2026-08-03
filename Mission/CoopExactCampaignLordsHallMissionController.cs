@@ -115,7 +115,7 @@ namespace CoopSpectator.MissionBehaviors
                     _spawnedAgents.Add(agent);
                     AgentFlag agentFlags = agent.GetAgentFlags();
                     agent.SetAgentFlags((AgentFlag)((uint)agentFlags & 0xFFEFFFFFu));
-                    agent.WieldInitialWeapons(Agent.WeaponWieldActionType.Instant);
+                    TryWieldInitialSlots(agent);
                     agent.SetWatchState(Agent.WatchState.Alarmed);
                     agent.SetBehaviorValueSet(HumanAIComponent.BehaviorValueSet.DefensiveArrangementMove);
                     spawnPoint.AssignAgent(agent);
@@ -167,13 +167,41 @@ namespace CoopSpectator.MissionBehaviors
 
                     if (_side != BattleSideEnum.Defender)
                     {
-                        agent.WieldInitialWeapons(Agent.WeaponWieldActionType.Instant);
+                        TryWieldInitialSlots(agent);
                         agent.SetWatchState(Agent.WatchState.Alarmed);
                     }
                     activatedCount++;
                 }
 
                 return activatedCount;
+            }
+
+            private static void TryWieldInitialSlots(Agent agent)
+            {
+                if (agent == null)
+                    return;
+
+                string entryId = (agent.Origin as ExactCampaignSnapshotAgentOrigin)?.EntryId;
+                if (string.IsNullOrWhiteSpace(entryId))
+                {
+                    CoopMissionSpawnLogic.TryResolveSelectableEntryId(agent, out entryId);
+                }
+
+                RosterEntryState entryState = !string.IsNullOrWhiteSpace(entryId)
+                    ? BattleSnapshotRuntimeState.GetEntryState(entryId)
+                    : null;
+                if (entryState == null)
+                {
+                    agent.WieldInitialWeapons(Agent.WeaponWieldActionType.Instant);
+                    return;
+                }
+
+                ExactWeaponSlotMaterializationPolicy.TryWieldResolvedInitialSlots(
+                    agent,
+                    entryState,
+                    Agent.WeaponWieldActionType.Instant,
+                    out _,
+                    out _);
             }
         }
 

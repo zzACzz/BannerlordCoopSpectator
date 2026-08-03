@@ -32,6 +32,7 @@ namespace CoopSpectator.Infrastructure
             public string SlotLabel { get; set; }
             public string ItemId { get; set; }
             public ItemObject Item { get; set; }
+            public EquipmentElement Element { get; set; }
             public MountedWeaponRole Role { get; set; }
         }
 
@@ -148,12 +149,11 @@ namespace CoopSpectator.Infrastructure
             AddSlot(equipment, EquipmentIndex.Cape, "Cape", ResolveCreateTimeSlotItemId(equipment.SpawnEquipment, EquipmentIndex.Cape, entryState.CombatCapeId), mustExistAtCreateAgentTime: false, canBeLateSynchronized: true);
             AddSlot(equipment, EquipmentIndex.Horse, "Horse", ResolveCreateTimeSlotItemId(equipment.SpawnEquipment, EquipmentIndex.Horse, entryState.CombatHorseId), mustExistAtCreateAgentTime: entryState.IsMounted, canBeLateSynchronized: false, isMountedCritical: entryState.IsMounted);
             AddSlot(equipment, EquipmentIndex.HorseHarness, "HorseHarness", ResolveCreateTimeSlotItemId(equipment.SpawnEquipment, EquipmentIndex.HorseHarness, entryState.CombatHorseHarnessId), mustExistAtCreateAgentTime: entryState.IsMounted && !string.IsNullOrWhiteSpace(entryState.CombatHorseHarnessId), canBeLateSynchronized: false, isMountedCritical: entryState.IsMounted);
-
-            NormalizeStrictHeroWeaponLayout(
-                equipment,
-                entryState,
-                isStrictHeroEntry || isRuntimeExactSupported,
-                ShouldApplyMountedWeaponLayoutPolicy(entryState, teamIndex));
+            equipment.WeaponSlotsPreserved = true;
+            equipment.AmmoLayoutValid = true;
+            equipment.WeaponSlotPolicySummary = "original-multiplayer-mirror-slots-preserved";
+            equipment.MountedWeaponLayoutNormalized = false;
+            equipment.MountedWeaponLayoutSummary = "legacy-fallback-not-used";
         }
 
         private static void PopulateMount(ExactTransferMountContract mount, RosterEntryState entryState)
@@ -193,26 +193,46 @@ namespace CoopSpectator.Infrastructure
 
             try
             {
-                equipment.SpawnEquipment.GetInitialWeaponIndicesToEquip(
-                    out EquipmentIndex mainHandWeaponIndex,
-                    out EquipmentIndex offHandWeaponIndex,
-                    out bool _,
-                    Equipment.InitialWeaponEquipPreference.Any);
-                initialWield.PreferredMainHandSlotIndex = (int)mainHandWeaponIndex;
-                initialWield.PreferredOffHandSlotIndex = (int)offHandWeaponIndex;
-                bool applyMountedWeaponLayoutPolicy = ShouldApplyMountedWeaponLayoutPolicy(entryState, -1);
-                initialWield.HasWeapon2Risk =
-                    applyMountedWeaponLayoutPolicy &&
-                    (DoesEquipmentContainUnsafeRangedWeapon2Layout(equipment.SpawnEquipment) ||
-                     mainHandWeaponIndex == EquipmentIndex.Weapon2);
+                if (!ExactWeaponSlotMaterializationPolicy.TryResolveInitialWield(
+                        equipment.SpawnEquipment,
+                        entryState,
+                        out ExactWeaponSlotResolution resolution))
+                {
+                    initialWield.InitialWieldResolved = false;
+                    initialWield.InitialWieldResolutionSummary = "no-semantic-main-hand-candidate";
+                    return;
+                }
+
+                initialWield.PreferredMainHandSlotIndex =
+                    resolution.MainHandSlot != EquipmentIndex.None
+                        ? (int?)resolution.MainHandSlot
+                        : null;
+                initialWield.PreferredOffHandSlotIndex =
+                    resolution.OffHandSlot != EquipmentIndex.None
+                        ? (int?)resolution.OffHandSlot
+                        : null;
+                initialWield.PreferredMainHandUsageIndex =
+                    resolution.MainHandSlot != EquipmentIndex.None
+                        ? (int?)resolution.MainHandUsageIndex
+                        : null;
+                initialWield.InitialWieldResolved = true;
+                initialWield.MainHandNotUsableWithOneHand = resolution.MainHandNotUsableWithOneHand;
+                initialWield.MainHandRequiresAmmo = resolution.MainHandRequiresAmmo;
+                initialWield.MainHandHasCompatibleAmmo = resolution.HasCompatibleAmmo;
+                initialWield.InitialWieldResolutionSummary = resolution.Summary;
+                equipment.AmmoLayoutValid =
+                    !resolution.MainHandRequiresAmmo || resolution.HasCompatibleAmmo;
+                equipment.WeaponSlotPolicySummary = resolution.Summary;
+                equipment.MissionEquipment = new MissionEquipment(equipment.SpawnEquipment, null);
+                ExactWeaponSlotMaterializationPolicy.TryApplyPreSpawnUsage(
+                    equipment.MissionEquipment,
+                    resolution,
+                    out _);
             }
             catch
             {
-                bool applyMountedWeaponLayoutPolicy = ShouldApplyMountedWeaponLayoutPolicy(entryState, -1);
-                initialWield.HasWeapon2Risk =
-                    applyMountedWeaponLayoutPolicy &&
-                    (DoesEquipmentContainUnsafeRangedWeapon2Layout(equipment.SpawnEquipment) ||
-                     !string.IsNullOrWhiteSpace(entryState.CombatItem2Id));
+                initialWield.InitialWieldResolved = false;
+                initialWield.InitialWieldResolutionSummary = "semantic-initial-wield-resolution-failed";
             }
         }
 
@@ -265,7 +285,7 @@ namespace CoopSpectator.Infrastructure
                     !string.IsNullOrWhiteSpace(entryState.CombatItem3Id));
         }
 
-        internal static bool TryNormalizeStrictHeroWeaponLayoutInPlace(
+        internal static bool TryNormalizeLegacyWeaponLayoutFallbackInPlace(
             Equipment equipment,
             RosterEntryState entryState,
             out bool normalized,
@@ -282,7 +302,6 @@ namespace CoopSpectator.Infrastructure
 
             bool hasRanged = slots.Any(slot => slot.Role == MountedWeaponRole.Ranged);
             bool hasAmmo = slots.Any(slot => slot.Role == MountedWeaponRole.Ammo);
-            bool hasUnsafeRangedWeapon2Layout = DoesEquipmentContainUnsafeRangedWeapon2Layout(equipment);
             bool applyMountedWeaponLayoutPolicy = ShouldApplyMountedWeaponLayoutPolicy(entryState, -1);
             if (!hasRanged && !hasAmmo && !DoesWeapon2ContainLiveCandidate(equipment))
             {
@@ -293,7 +312,7 @@ namespace CoopSpectator.Infrastructure
             List<MountedWeaponSlotState> orderedSlots = null;
             if (!entryState.IsHero && applyMountedWeaponLayoutPolicy && hasRanged && hasAmmo)
                 orderedSlots = BuildCanonicalMountedRangedAiWeaponLayout(slots);
-            else if (applyMountedWeaponLayoutPolicy && hasRanged && hasAmmo && hasUnsafeRangedWeapon2Layout)
+            else if (entryState.IsHero && applyMountedWeaponLayoutPolicy && hasRanged && hasAmmo)
                 orderedSlots = BuildCanonicalStrictHeroRangedWeaponLayout(slots);
             else if (applyMountedWeaponLayoutPolicy && (hasRanged || hasAmmo || DoesWeapon2ContainLiveCandidate(equipment)))
                 orderedSlots = BuildCanonicalMountedWeaponLayout(slots, hasAmmo);
@@ -312,33 +331,6 @@ namespace CoopSpectator.Infrastructure
                 "Before={" + BuildMountedLayoutSummary(slots, slots) +
                 "} After={" + BuildMountedLayoutSummary(slots, orderedSlots) + "}";
             return true;
-        }
-
-        private static void NormalizeStrictHeroWeaponLayout(
-            ExactTransferEquipmentContract equipment,
-            RosterEntryState entryState,
-            bool isStrictHeroEntry,
-            bool applyMountedWeaponLayoutPolicy)
-        {
-            if (equipment?.SpawnEquipment == null || entryState == null || !isStrictHeroEntry)
-                return;
-
-            if (!TryNormalizeStrictHeroWeaponLayoutInPlace(
-                    equipment.SpawnEquipment,
-                    entryState,
-                    out bool normalized,
-                    out string summary))
-            {
-                return;
-            }
-
-            // Treat already-canonical mounted ranged layouts as normalized for the
-            // downstream exact-contract diagnostics. Those diagnostics only need to
-            // know whether the current layout is safe, not whether a reorder happened.
-            equipment.MountedWeaponLayoutNormalized =
-                applyMountedWeaponLayoutPolicy &&
-                (normalized || HasSafeMountedRangedWeaponLayout(equipment.SpawnEquipment));
-            equipment.MountedWeaponLayoutSummary = summary;
         }
 
         internal static bool ShouldApplyMountedWeaponLayoutPolicy(RosterEntryState entryState, int teamIndex)
@@ -473,10 +465,10 @@ namespace CoopSpectator.Infrastructure
         private static List<MountedWeaponSlotState> ResolveMountedWeaponSlots(Equipment equipment)
         {
             var slots = new List<MountedWeaponSlotState>();
-            TryAddMountedWeaponSlot(slots, EquipmentIndex.Weapon0, equipment?[EquipmentIndex.Weapon0].Item);
-            TryAddMountedWeaponSlot(slots, EquipmentIndex.Weapon1, equipment?[EquipmentIndex.Weapon1].Item);
-            TryAddMountedWeaponSlot(slots, EquipmentIndex.Weapon2, equipment?[EquipmentIndex.Weapon2].Item);
-            TryAddMountedWeaponSlot(slots, EquipmentIndex.Weapon3, equipment?[EquipmentIndex.Weapon3].Item);
+            TryAddMountedWeaponSlot(slots, EquipmentIndex.Weapon0, equipment?[EquipmentIndex.Weapon0] ?? default);
+            TryAddMountedWeaponSlot(slots, EquipmentIndex.Weapon1, equipment?[EquipmentIndex.Weapon1] ?? default);
+            TryAddMountedWeaponSlot(slots, EquipmentIndex.Weapon2, equipment?[EquipmentIndex.Weapon2] ?? default);
+            TryAddMountedWeaponSlot(slots, EquipmentIndex.Weapon3, equipment?[EquipmentIndex.Weapon3] ?? default);
             return slots;
         }
 
@@ -506,8 +498,9 @@ namespace CoopSpectator.Infrastructure
         private static void TryAddMountedWeaponSlot(
             List<MountedWeaponSlotState> slots,
             EquipmentIndex slot,
-            ItemObject item)
+            EquipmentElement element)
         {
+            ItemObject item = element.Item;
             if (slots == null || item == null)
                 return;
 
@@ -517,6 +510,7 @@ namespace CoopSpectator.Infrastructure
                 SlotLabel = slot.ToString(),
                 ItemId = item.StringId,
                 Item = item,
+                Element = element,
                 Role = ResolveMountedWeaponRole(item)
             });
         }
@@ -755,7 +749,10 @@ namespace CoopSpectator.Infrastructure
                     continue;
                 }
 
-                equipment.SpawnEquipment[targetSlots[i]] = new EquipmentElement(normalizedSlot.Item, null, null, false);
+                equipment.SpawnEquipment[targetSlots[i]] =
+                    normalizedSlot.Element.Item != null
+                        ? normalizedSlot.Element
+                        : new EquipmentElement(normalizedSlot.Item, null, null, false);
                 if (slotContract != null)
                 {
                     slotContract.ItemId = normalizedSlot.ItemId;
@@ -791,7 +788,10 @@ namespace CoopSpectator.Infrastructure
                 if (normalizedSlot?.Item == null)
                     continue;
 
-                equipment[targetSlots[i]] = new EquipmentElement(normalizedSlot.Item, null, null, false);
+                equipment[targetSlots[i]] =
+                    normalizedSlot.Element.Item != null
+                        ? normalizedSlot.Element
+                        : new EquipmentElement(normalizedSlot.Item, null, null, false);
             }
         }
 
@@ -863,20 +863,6 @@ namespace CoopSpectator.Infrastructure
             return string.Join(", ", parts);
         }
 
-        private static bool HasSafeMountedRangedWeaponLayout(Equipment equipment)
-        {
-            if (equipment == null)
-                return false;
-
-            List<MountedWeaponSlotState> slots = ResolveMountedWeaponSlots(equipment);
-            bool hasRanged = slots.Any(slot => slot.Role == MountedWeaponRole.Ranged);
-            bool hasAmmo = slots.Any(slot => slot.Role == MountedWeaponRole.Ammo);
-            if (!hasRanged || !hasAmmo)
-                return false;
-
-            return !DoesEquipmentContainUnsafeRangedWeapon2Layout(equipment);
-        }
-
         private static bool DoesWeapon2ContainLiveCandidate(Equipment equipment)
         {
             ItemObject item = equipment?[EquipmentIndex.Weapon2].Item;
@@ -890,90 +876,20 @@ namespace CoopSpectator.Infrastructure
                    role == MountedWeaponRole.Other;
         }
 
-        private static bool DoesEquipmentContainUnsafeRangedWeapon2Layout(Equipment equipment)
-        {
-            if (equipment == null)
-                return false;
-
-            MountedWeaponRole role0 = ResolveMountedWeaponRole(equipment[EquipmentIndex.Weapon0].Item);
-            MountedWeaponRole role1 = ResolveMountedWeaponRole(equipment[EquipmentIndex.Weapon1].Item);
-            MountedWeaponRole role2 = ResolveMountedWeaponRole(equipment[EquipmentIndex.Weapon2].Item);
-            MountedWeaponRole role3 = ResolveMountedWeaponRole(equipment[EquipmentIndex.Weapon3].Item);
-
-            bool hasRanged = role0 == MountedWeaponRole.Ranged ||
-                             role1 == MountedWeaponRole.Ranged ||
-                             role2 == MountedWeaponRole.Ranged ||
-                             role3 == MountedWeaponRole.Ranged;
-            bool hasAmmo = role0 == MountedWeaponRole.Ammo ||
-                           role1 == MountedWeaponRole.Ammo ||
-                           role2 == MountedWeaponRole.Ammo ||
-                           role3 == MountedWeaponRole.Ammo;
-            if (!hasRanged || !hasAmmo)
-                return false;
-
-            if (role0 == MountedWeaponRole.Ammo)
-                return true;
-
-            if (role0 == MountedWeaponRole.Ranged)
-                return role1 != MountedWeaponRole.Ammo;
-
-            bool leadingLiveSlot =
-                role0 == MountedWeaponRole.Melee ||
-                role0 == MountedWeaponRole.Polearm ||
-                role0 == MountedWeaponRole.Shield ||
-                role0 == MountedWeaponRole.Other;
-            if (leadingLiveSlot && (role1 != MountedWeaponRole.Ranged || role2 != MountedWeaponRole.Ammo))
-                return true;
-
-            return role2 == MountedWeaponRole.Ranged &&
-                   (role1 == MountedWeaponRole.Ammo || role3 == MountedWeaponRole.Ammo);
-        }
-
         private static MountedWeaponRole ResolveMountedWeaponRole(ItemObject item)
         {
-            if (item == null)
-                return MountedWeaponRole.Other;
-
-            WeaponComponentData primaryWeapon = item.PrimaryWeapon;
-            if (primaryWeapon != null)
+            switch (ExactWeaponSlotMaterializationPolicy.ResolveRole(item))
             {
-                if (primaryWeapon.IsShield)
+                case ExactWeaponSlotRole.Shield:
                     return MountedWeaponRole.Shield;
-                if (primaryWeapon.IsPolearm)
+                case ExactWeaponSlotRole.Polearm:
                     return MountedWeaponRole.Polearm;
-                if (primaryWeapon.IsAmmo)
-                    return MountedWeaponRole.Ammo;
-                if (primaryWeapon.IsRangedWeapon ||
-                    primaryWeapon.WeaponClass == WeaponClass.Javelin ||
-                    primaryWeapon.WeaponClass == WeaponClass.ThrowingAxe ||
-                    primaryWeapon.WeaponClass == WeaponClass.ThrowingKnife ||
-                    primaryWeapon.WeaponClass == WeaponClass.Stone ||
-                    primaryWeapon.WeaponClass == WeaponClass.SlingStone)
-                {
+                case ExactWeaponSlotRole.Ranged:
+                case ExactWeaponSlotRole.Thrown:
                     return MountedWeaponRole.Ranged;
-                }
-
-                if (primaryWeapon.IsOneHanded || primaryWeapon.IsTwoHanded || primaryWeapon.IsMeleeWeapon)
-                    return MountedWeaponRole.Melee;
-            }
-
-            switch (item.ItemType)
-            {
-                case ItemObject.ItemTypeEnum.Shield:
-                    return MountedWeaponRole.Shield;
-                case ItemObject.ItemTypeEnum.Polearm:
-                    return MountedWeaponRole.Polearm;
-                case ItemObject.ItemTypeEnum.Bow:
-                case ItemObject.ItemTypeEnum.Crossbow:
-                case ItemObject.ItemTypeEnum.Sling:
-                case ItemObject.ItemTypeEnum.Thrown:
-                    return MountedWeaponRole.Ranged;
-                case ItemObject.ItemTypeEnum.Arrows:
-                case ItemObject.ItemTypeEnum.Bolts:
-                case ItemObject.ItemTypeEnum.SlingStones:
+                case ExactWeaponSlotRole.Ammo:
                     return MountedWeaponRole.Ammo;
-                case ItemObject.ItemTypeEnum.OneHandedWeapon:
-                case ItemObject.ItemTypeEnum.TwoHandedWeapon:
+                case ExactWeaponSlotRole.Melee:
                     return MountedWeaponRole.Melee;
                 default:
                     return MountedWeaponRole.Other;
