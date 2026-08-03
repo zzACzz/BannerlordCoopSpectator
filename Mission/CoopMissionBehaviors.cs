@@ -154,6 +154,9 @@ namespace CoopSpectator.MissionBehaviors
 
             TryReleaseStaleClientMainAgent(mission);
             TryRestoreClientMainAgentFromMissionPeer(mission);
+            ExactCreateAgentCorridorDiagnostics.TrySampleClientAgentAndPreviewVisualPositions(
+                mission,
+                "CoopMissionClientLogic.OnMissionTick");
             CoopMissionSpawnLogic.TryRunClientExactCampaignVisualObserver(mission);
             CoopMissionSpawnLogic.TryRunClientGlobalCaptainAgentStatRefresh(mission);
             CoopMissionSpawnLogic.TryRunAiWieldStateDiagnostics(
@@ -5808,6 +5811,9 @@ namespace CoopSpectator.MissionBehaviors
             if (!_hasLoggedStart) return;
             BattleAgentCapacityPolicy.Tick(Mission, "CoopMissionSpawnLogic.OnMissionTick");
             ExactSiegeMoraleDiagnostics.Tick(Mission, "CoopMissionSpawnLogic.OnMissionTick");
+            ExactCreateAgentCorridorDiagnostics.TrySampleServerAgentPositions(
+                Mission,
+                "CoopMissionSpawnLogic.OnMissionTick");
             TryRestoreExpiredMaterializedPossessionProtection(Mission, "CoopMissionSpawnLogic.OnMissionTick");
             TryRunAiWieldStateDiagnostics(Mission, "CoopMissionSpawnLogic.OnMissionTick");
             _timeUntilNextPeerLog -= dt;

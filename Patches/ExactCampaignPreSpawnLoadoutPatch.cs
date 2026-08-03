@@ -159,6 +159,7 @@ namespace CoopSpectator.Patches
                 exactTransferContract,
                 payloadDiagnostic,
                 exactEquipment,
+                agentBuildData,
                 injectEquipment,
                 spawnFromAgentVisuals);
 
@@ -258,6 +259,7 @@ namespace CoopSpectator.Patches
             ExactCreateAgentCorridorDiagnostics.ObserveServerSpawnResult(
                 exactOrigin,
                 payloadDiagnostic,
+                agentBuildData,
                 __result,
                 spawnFromAgentVisuals,
                 WasEquipmentInjectedForEntry(exactOrigin.EntryId));

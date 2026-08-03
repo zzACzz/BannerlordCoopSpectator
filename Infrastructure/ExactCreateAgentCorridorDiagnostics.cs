@@ -7,7 +7,9 @@ using System.Text;
 using CoopSpectator.MissionBehaviors;
 using NetworkMessages.FromServer;
 using TaleWorlds.Core;
+using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
+using TaleWorlds.MountAndBlade.Network.Messages;
 using TaleWorlds.ObjectSystem;
 
 namespace CoopSpectator.Infrastructure
@@ -21,9 +23,54 @@ namespace CoopSpectator.Infrastructure
             new Dictionary<string, ServerCreateAgentPendingState>(StringComparer.Ordinal);
         private static readonly Dictionary<int, ServerCreateAgentExpectedState> ServerStatesByAgentIndex =
             new Dictionary<int, ServerCreateAgentExpectedState>();
+        private static readonly Dictionary<int, ClientAgentPositionVisualState> ClientAgentPositionVisualStates =
+            new Dictionary<int, ClientAgentPositionVisualState>();
+        private static readonly Dictionary<int, ServerAgentPositionState> ServerAgentPositionStates =
+            new Dictionary<int, ServerAgentPositionState>();
+        private static readonly Dictionary<string, ClientPeerPreviewVisualState> ClientPeerPreviewVisualStates =
+            new Dictionary<string, ClientPeerPreviewVisualState>(StringComparer.Ordinal);
+        private static Dictionary<int, ClientNativeMissionTickAgentState> _clientNativeMissionTickExitStates =
+            new Dictionary<int, ClientNativeMissionTickAgentState>();
         private static Mission _serverStateMission;
+        private static Mission _serverPositionMission;
+        private static DateTime _nextServerPositionSampleUtc = DateTime.MinValue;
+        private static DateTime _serverBattleActiveObservedUtc = DateTime.MinValue;
+        private static string _lastServerPositionPhase;
+        private static Mission _clientPositionVisualMission;
+        private static DateTime _nextClientPositionVisualSampleUtc = DateTime.MinValue;
+        private static DateTime _clientBattleActiveObservedUtc = DateTime.MinValue;
+        private static string _lastClientPositionVisualPhase;
+        private static Mission _clientNativeMissionTickMission;
+        private static long _clientNativeMissionTickSequence;
+        private static long _clientNativeExecutionBoundarySequence;
+
+        private static readonly TimeSpan ClientPositionVisualSampleInterval = TimeSpan.FromMilliseconds(250d);
+        private static readonly TimeSpan ClientPositionVisualBattleActiveWindow = TimeSpan.FromSeconds(10d);
+        private static readonly TimeSpan ServerPositionSampleInterval = TimeSpan.FromMilliseconds(100d);
+        private static readonly TimeSpan ServerPositionBattleActiveWindow = TimeSpan.FromSeconds(10d);
+        private const float ClientPositionVisualMovementThreshold = 1f;
+        private const float ClientPositionVisualMismatchThreshold = 0.5f;
+        private const float ServerPositionLargeMovementThreshold = 20f;
+        private const float ManagedTeleportDiagnosticThreshold = 20f;
+        private const float ClientNativeMissionTickLargeMovementThreshold = 20f;
+        private const int MaxPeerPreviewVisualIndexToSample = 15;
+        private static readonly MethodInfo MissionPeerGetVisualsMethod =
+            typeof(MissionPeer).GetMethod(
+                "GetVisuals",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                null,
+                new[] { typeof(int) },
+                null);
+        private static readonly FieldInfo AgentNativePointerField =
+            typeof(Agent).GetField("_pointer", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo AgentPositionPointerField =
+            typeof(Agent).GetField("_positionPointer", BindingFlags.Instance | BindingFlags.NonPublic);
 
         private static bool IsVerboseEnabled => ExperimentalFeatures.EnableExactCreateAgentCorridorDiagnostics;
+
+        internal static bool IsClientNativeMissionTickBoundaryDiagnosticsEnabled => IsVerboseEnabled;
+
+        internal static bool IsClientNativeExecutionBoundaryDiagnosticsEnabled => IsVerboseEnabled;
 
         private sealed class ClientCreateAgentCorridorState
         {
@@ -43,6 +90,65 @@ namespace CoopSpectator.Infrastructure
             public int WieldEventCount { get; set; }
             public int EquipmentSyncEventCount { get; set; }
             public int CreateAgentOnReadEventCount { get; set; }
+        }
+
+        private sealed class ClientAgentPositionVisualState
+        {
+            public Vec3 Position { get; set; }
+            public Vec3 VisualPosition { get; set; }
+            public Vec3 VisualFrameOrigin { get; set; }
+            public bool HasVisualPosition { get; set; }
+            public bool HasVisualFrame { get; set; }
+            public bool VisualsValid { get; set; }
+            public bool VisualsVisible { get; set; }
+            public int TeamIndex { get; set; }
+            public int FormationIndex { get; set; }
+        }
+
+        private sealed class ServerAgentPositionState
+        {
+            public Vec3 Position { get; set; }
+            public int TeamIndex { get; set; }
+            public int FormationIndex { get; set; }
+        }
+
+        private sealed class ClientPeerPreviewVisualState
+        {
+            public Vec3 FrameOrigin { get; set; }
+            public bool HasFrame { get; set; }
+            public bool VisualsValid { get; set; }
+            public bool VisualsVisible { get; set; }
+            public string CharacterId { get; set; }
+        }
+
+        private sealed class ClientNativeMissionTickBoundaryState
+        {
+            public long Sequence { get; set; }
+            public Dictionary<int, ClientNativeMissionTickAgentState> EntryStates { get; set; }
+        }
+
+        private sealed class ClientNativeExecutionBoundaryState
+        {
+            public Mission Mission { get; set; }
+            public long Sequence { get; set; }
+            public string Boundary { get; set; }
+            public int ManagedThreadId { get; set; }
+            public Dictionary<int, ClientNativeMissionTickAgentState> EntryStates { get; set; }
+        }
+
+        private sealed class ClientNativeMissionTickAgentState
+        {
+            public int AgentIndex { get; set; }
+            public string CharacterId { get; set; }
+            public Vec3 Position { get; set; }
+            public ulong AgentPointer { get; set; }
+            public ulong PositionPointer { get; set; }
+            public int TeamIndex { get; set; }
+            public string TeamSide { get; set; }
+            public int FormationIndex { get; set; }
+            public AgentControllerType Controller { get; set; }
+            public bool IsAiControlled { get; set; }
+            public bool IsMainAgent { get; set; }
         }
 
         private sealed class ServerCreateAgentPendingState
@@ -124,7 +230,22 @@ namespace CoopSpectator.Infrastructure
                 ClientStatesByAgentIndex.Clear();
                 PendingServerStatesByEntryId.Clear();
                 ServerStatesByAgentIndex.Clear();
+                ClientAgentPositionVisualStates.Clear();
+                ServerAgentPositionStates.Clear();
+                ClientPeerPreviewVisualStates.Clear();
+                _clientNativeMissionTickExitStates =
+                    new Dictionary<int, ClientNativeMissionTickAgentState>();
                 _serverStateMission = null;
+                _serverPositionMission = null;
+                _nextServerPositionSampleUtc = DateTime.MinValue;
+                _serverBattleActiveObservedUtc = DateTime.MinValue;
+                _lastServerPositionPhase = null;
+                _clientPositionVisualMission = null;
+                _nextClientPositionVisualSampleUtc = DateTime.MinValue;
+                _clientBattleActiveObservedUtc = DateTime.MinValue;
+                _lastClientPositionVisualPhase = null;
+                _clientNativeMissionTickMission = null;
+                _clientNativeMissionTickSequence = 0L;
             }
 
             ModLogger.Info(
@@ -159,6 +280,7 @@ namespace CoopSpectator.Infrastructure
             ExactTransferSpawnContract contract,
             ExactCreateAgentPayloadDiagnosticDecision payloadDiagnostic,
             Equipment exactEquipment,
+            AgentBuildData agentBuildData,
             bool injectEquipment,
             bool spawnFromAgentVisuals)
         {
@@ -207,6 +329,7 @@ namespace CoopSpectator.Infrastructure
                 " PreSpawnWeapons={" + ExactCreateAgentPayloadDiagnostics.BuildEquipmentWeaponLayoutSummary(exactEquipment) + "}" +
                 " PreSpawnWeaponSlots={" + BuildEquipmentWeaponSlotVector(exactEquipment) + "}" +
                 " PreSpawnMount={" + ExactCreateAgentPayloadDiagnostics.BuildEquipmentMountLayoutSummary(exactEquipment) + "}" +
+                " BuildDataBeforeNative={" + BuildAgentBuildDataPositionSummary(agentBuildData) + "}" +
                 " " + (payloadDiagnostic?.ToSummary() ?? "ExactCreateAgentPayloadDiagnostic={State=absent}") +
                 " " + (payloadDiagnostic?.ToWeaponLayoutSummary() ?? "ExactCreateAgentWeaponLayout={State=absent}");
             Log("server-pre-spawn-payload", details, persistToRuntimeBundle: false);
@@ -215,6 +338,7 @@ namespace CoopSpectator.Infrastructure
         internal static void ObserveServerSpawnResult(
             ExactCampaignSnapshotAgentOrigin exactOrigin,
             ExactCreateAgentPayloadDiagnosticDecision payloadDiagnostic,
+            AgentBuildData agentBuildData,
             Agent result,
             bool spawnFromAgentVisuals,
             bool equipmentInjected)
@@ -269,6 +393,7 @@ namespace CoopSpectator.Infrastructure
                     " AgentIndex=" + (result?.Index.ToString() ?? "null") +
                     " SpawnFromAgentVisuals=" + spawnFromAgentVisuals +
                     " EquipmentInjected=" + equipmentInjected +
+                    " BuildDataAfterNative={" + BuildAgentBuildDataPositionSummary(agentBuildData) + "}" +
                     " SpawnedAgent={" + BuildAgentSummary(result) + "}" +
                     " SpawnedAgentSpawnWeaponSlots={" + BuildEquipmentWeaponSlotVector(result?.SpawnEquipment) + "}" +
                     " SpawnedAgentMissionWeaponSlots={" + BuildMissionEquipmentWeaponSlotVector(result?.Equipment) + "}" +
@@ -790,6 +915,874 @@ namespace CoopSpectator.Infrastructure
             Log("client-create-agent-postfix", details, persistToRuntimeBundle: false);
         }
 
+        internal static void ObserveClientDeferredCreateAgentStage(
+            CreateAgent createAgent,
+            Agent agent,
+            string stage,
+            int attempts,
+            string source)
+        {
+            if (GameNetwork.IsServer || createAgent == null || !IsVerboseEnabled)
+                return;
+
+            string details =
+                "AgentIndex=" + createAgent.AgentIndex +
+                " Stage=" + (stage ?? "unknown") +
+                " Attempts=" + attempts +
+                " Payload={" + BuildCreateAgentPayloadSummary(createAgent) + "}" +
+                " MaterializedAgent={" + BuildAgentSummary(agent) + "}" +
+                " Source=" + (source ?? "unknown");
+            Log("client-deferred-create-agent-stage", details, persistToRuntimeBundle: false);
+        }
+
+        internal static void ObserveClientAgentVisualsNetworkMessage(
+            GameNetworkMessage baseMessage,
+            string stage,
+            string source)
+        {
+            if (!GameNetwork.IsClient || GameNetwork.IsServer || !IsVerboseEnabled || baseMessage == null)
+                return;
+
+            try
+            {
+                NetworkCommunicator peer = null;
+                int? visualsIndex = null;
+                string messageSummary;
+                if (baseMessage is CreateAgentVisuals createAgentVisuals)
+                {
+                    peer = createAgentVisuals.Peer;
+                    visualsIndex = createAgentVisuals.VisualsIndex;
+                    messageSummary =
+                        "CreateAgentVisuals={Peer=" + DescribePeer(peer) +
+                        ",VisualsIndex=" + createAgentVisuals.VisualsIndex +
+                        ",CharacterId=" + (createAgentVisuals.Character?.StringId ?? "null") +
+                        ",SelectedEquipmentSetIndex=" + createAgentVisuals.SelectedEquipmentSetIndex +
+                        ",TroopCountInFormation=" + createAgentVisuals.TroopCountInFormation +
+                        ",Weapons={" + ExactCreateAgentPayloadDiagnostics.BuildEquipmentWeaponLayoutSummary(createAgentVisuals.Equipment) +
+                        "}}";
+                }
+                else if (baseMessage is RemoveAgentVisualsForPeer removeAll)
+                {
+                    peer = removeAll.Peer;
+                    messageSummary = "RemoveAgentVisualsForPeer={Peer=" + DescribePeer(peer) + "}";
+                }
+                else if (baseMessage is RemoveAgentVisualsFromIndexForPeer removeIndex)
+                {
+                    peer = removeIndex.Peer;
+                    visualsIndex = removeIndex.VisualsIndex;
+                    messageSummary =
+                        "RemoveAgentVisualsFromIndexForPeer={Peer=" + DescribePeer(peer) +
+                        ",VisualsIndex=" + removeIndex.VisualsIndex + "}";
+                }
+                else
+                {
+                    return;
+                }
+
+                MissionPeer missionPeer = peer?.GetComponent<MissionPeer>();
+                string visualState = visualsIndex.HasValue
+                    ? BuildPeerPreviewVisualSummary(missionPeer, visualsIndex.Value)
+                    : BuildAllPeerPreviewVisualsSummary(missionPeer);
+                Log(
+                    "client-agent-visuals-network-message",
+                    "Stage=" + (stage ?? "unknown") +
+                    " Message={" + messageSummary + "}" +
+                    " MissionPeer={TeamIndex=" + (missionPeer?.Team?.TeamIndex.ToString() ?? "null") +
+                    ",TeamSide=" + (missionPeer?.Team?.Side.ToString() ?? "null") +
+                    ",HasSpawnedAgentVisuals=" + (missionPeer?.HasSpawnedAgentVisuals.ToString() ?? "null") +
+                    ",ControlledAgentIndex=" + (missionPeer?.ControlledAgent?.Index.ToString() ?? "null") + "}" +
+                    " VisualState={" + visualState + "}" +
+                    " Source=" + (source ?? "unknown"),
+                    persistToRuntimeBundle: false);
+            }
+            catch (Exception ex)
+            {
+                Log(
+                    "client-agent-visuals-network-message-error",
+                    "Stage=" + (stage ?? "unknown") +
+                    " MessageType=" + baseMessage.GetType().FullName +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message +
+                    " Source=" + (source ?? "unknown"),
+                    persistToRuntimeBundle: false);
+            }
+        }
+
+        internal static void TrySampleServerAgentPositions(Mission mission, string source)
+        {
+            if (!GameNetwork.IsServer || !IsVerboseEnabled || mission == null ||
+                !IsSupportedAgentPositionDiagnosticScene(mission.SceneName))
+            {
+                return;
+            }
+
+            DateTime nowUtc = DateTime.UtcNow;
+            CoopBattlePhase phase = CoopBattlePhaseRuntimeState.GetPhase();
+            lock (Sync)
+            {
+                if (!ReferenceEquals(_serverPositionMission, mission))
+                {
+                    ServerAgentPositionStates.Clear();
+                    _serverPositionMission = mission;
+                    _nextServerPositionSampleUtc = DateTime.MinValue;
+                    _serverBattleActiveObservedUtc = DateTime.MinValue;
+                    _lastServerPositionPhase = null;
+                }
+
+                if (phase >= CoopBattlePhase.BattleEnded)
+                    return;
+                if (phase >= CoopBattlePhase.BattleActive)
+                {
+                    if (_serverBattleActiveObservedUtc == DateTime.MinValue)
+                        _serverBattleActiveObservedUtc = nowUtc;
+                    if (nowUtc - _serverBattleActiveObservedUtc > ServerPositionBattleActiveWindow)
+                        return;
+                }
+
+                if (nowUtc < _nextServerPositionSampleUtc)
+                    return;
+                _nextServerPositionSampleUtc = nowUtc + ServerPositionSampleInterval;
+            }
+
+            string phaseName = phase.ToString();
+            bool phaseChanged;
+            lock (Sync)
+            {
+                phaseChanged = !string.Equals(_lastServerPositionPhase, phaseName, StringComparison.Ordinal);
+                if (phaseChanged)
+                    _lastServerPositionPhase = phaseName;
+            }
+
+            if (phaseChanged)
+            {
+                Log(
+                    "server-position-sample-phase",
+                    "Phase=" + phaseName +
+                    " Mission=" + (mission.SceneName ?? "null") +
+                    " Source=" + (source ?? "unknown"),
+                    persistToRuntimeBundle: false);
+            }
+
+            SampleServerLiveAgents(mission, phaseName, source);
+        }
+
+        internal static void ObserveManagedAgentTeleport(Agent agent, Vec3 targetPosition, string source)
+        {
+            if (!IsVerboseEnabled || agent?.Mission == null ||
+                !IsSupportedAgentPositionDiagnosticScene(agent.Mission.SceneName))
+            {
+                return;
+            }
+
+            try
+            {
+                Vec3 currentPosition = agent.Position;
+                float distanceSquared = DistanceSquared(currentPosition, targetPosition);
+                float thresholdSquared =
+                    ManagedTeleportDiagnosticThreshold * ManagedTeleportDiagnosticThreshold;
+                if (distanceSquared < thresholdSquared)
+                    return;
+
+                string stackTrace = (Environment.StackTrace ?? string.Empty)
+                    .Replace("\r", string.Empty)
+                    .Replace("\n", " <- ");
+                if (stackTrace.Length > 4096)
+                    stackTrace = stackTrace.Substring(0, 4096);
+
+                string processRole = GameNetwork.IsServer
+                    ? "server"
+                    : GameNetwork.IsClient
+                        ? "client"
+                        : "offline";
+                Log(
+                    "managed-agent-teleport",
+                    "Role=" + processRole +
+                    " Phase=" + CoopBattlePhaseRuntimeState.GetPhase() +
+                    " AgentIndex=" + agent.Index +
+                    " CharacterId=" + ((agent.Character as BasicCharacterObject)?.StringId ?? "null") +
+                    " TeamIndex=" + (agent.Team?.TeamIndex.ToString() ?? "null") +
+                    " TeamSide=" + (agent.Team?.Side.ToString() ?? "null") +
+                    " FormationIndex=" + (agent.Formation?.Index.ToString() ?? "null") +
+                    " CurrentPosition=" + FormatVec3(currentPosition) +
+                    " TargetPosition=" + FormatVec3(targetPosition) +
+                    " Distance=" + Math.Sqrt(distanceSquared).ToString("0.###", CultureInfo.InvariantCulture) +
+                    " Formation={" + BuildFormationPositionSummary(agent.Formation, currentPosition.AsVec2) + "}" +
+                    " Source=" + (source ?? "unknown") +
+                    " StackTrace=" + stackTrace,
+                    persistToRuntimeBundle: false);
+            }
+            catch (Exception ex)
+            {
+                Log(
+                    "managed-agent-teleport-observer-error",
+                    "AgentIndex=" + (agent?.Index.ToString() ?? "null") +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message +
+                    " Source=" + (source ?? "unknown"),
+                    persistToRuntimeBundle: false);
+            }
+        }
+
+        internal static object CaptureClientNativeMissionTickEntry(Mission mission, string source)
+        {
+            if (!GameNetwork.IsClient || GameNetwork.IsServer || !IsVerboseEnabled || mission == null ||
+                !IsSupportedAgentPositionDiagnosticScene(mission.SceneName))
+            {
+                return null;
+            }
+
+            try
+            {
+                Dictionary<int, ClientNativeMissionTickAgentState> previousExitStates;
+                long sequence;
+                lock (Sync)
+                {
+                    if (!ReferenceEquals(_clientNativeMissionTickMission, mission))
+                    {
+                        _clientNativeMissionTickMission = mission;
+                        _clientNativeMissionTickExitStates =
+                            new Dictionary<int, ClientNativeMissionTickAgentState>();
+                        _clientNativeMissionTickSequence = 0L;
+                    }
+
+                    sequence = ++_clientNativeMissionTickSequence;
+                    previousExitStates = _clientNativeMissionTickExitStates;
+                }
+
+                Dictionary<int, ClientNativeMissionTickAgentState> entryStates =
+                    ReadClientNativeMissionTickAgentStates(mission);
+                ObserveClientNativeMissionTickPositionTransitions(
+                    mission,
+                    previousExitStates,
+                    entryStates,
+                    sequence,
+                    "previous-native-tick-exit-to-current-entry",
+                    source);
+                return new ClientNativeMissionTickBoundaryState
+                {
+                    Sequence = sequence,
+                    EntryStates = entryStates
+                };
+            }
+            catch (Exception ex)
+            {
+                Log(
+                    "client-native-mission-tick-entry-error",
+                    "Error=" + ex.GetType().Name + ":" + ex.Message +
+                    " Source=" + (source ?? "unknown"),
+                    persistToRuntimeBundle: false);
+                return null;
+            }
+        }
+
+        internal static void ObserveClientNativeMissionTickExit(
+            Mission mission,
+            object boundaryState,
+            string source)
+        {
+            if (!GameNetwork.IsClient || GameNetwork.IsServer || !IsVerboseEnabled || mission == null ||
+                !(boundaryState is ClientNativeMissionTickBoundaryState captured) ||
+                !IsSupportedAgentPositionDiagnosticScene(mission.SceneName))
+            {
+                return;
+            }
+
+            try
+            {
+                Dictionary<int, ClientNativeMissionTickAgentState> exitStates =
+                    ReadClientNativeMissionTickAgentStates(mission);
+                ObserveClientNativeMissionTickPositionTransitions(
+                    mission,
+                    captured.EntryStates,
+                    exitStates,
+                    captured.Sequence,
+                    "inside-native-mission-tick",
+                    source);
+                lock (Sync)
+                {
+                    if (ReferenceEquals(_clientNativeMissionTickMission, mission))
+                        _clientNativeMissionTickExitStates = exitStates;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log(
+                    "client-native-mission-tick-exit-error",
+                    "Sequence=" + captured.Sequence +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message +
+                    " Source=" + (source ?? "unknown"),
+                    persistToRuntimeBundle: false);
+            }
+        }
+
+        internal static object CaptureClientNativeExecutionBoundaryEntry(
+            Mission mission,
+            string boundary,
+            string source)
+        {
+            if (!GameNetwork.IsClient || GameNetwork.IsServer || !IsVerboseEnabled || mission == null ||
+                !IsSupportedAgentPositionDiagnosticScene(mission.SceneName))
+            {
+                return null;
+            }
+
+            try
+            {
+                long sequence;
+                lock (Sync)
+                {
+                    sequence = ++_clientNativeExecutionBoundarySequence;
+                }
+
+                return new ClientNativeExecutionBoundaryState
+                {
+                    Mission = mission,
+                    Sequence = sequence,
+                    Boundary = boundary ?? "unknown",
+                    ManagedThreadId = System.Threading.Thread.CurrentThread.ManagedThreadId,
+                    EntryStates = ReadClientNativeMissionTickAgentStates(mission)
+                };
+            }
+            catch (Exception ex)
+            {
+                Log(
+                    "client-native-execution-boundary-entry-error",
+                    "Boundary=" + (boundary ?? "unknown") +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message +
+                    " Source=" + (source ?? "unknown"),
+                    persistToRuntimeBundle: false);
+                return null;
+            }
+        }
+
+        internal static void ObserveClientNativeExecutionBoundaryExit(
+            Mission mission,
+            object boundaryState,
+            string source)
+        {
+            if (!GameNetwork.IsClient || GameNetwork.IsServer || !IsVerboseEnabled || mission == null ||
+                !(boundaryState is ClientNativeExecutionBoundaryState captured) ||
+                !ReferenceEquals(captured.Mission, mission) ||
+                !IsSupportedAgentPositionDiagnosticScene(mission.SceneName))
+            {
+                return;
+            }
+
+            try
+            {
+                Dictionary<int, ClientNativeMissionTickAgentState> exitStates =
+                    ReadClientNativeMissionTickAgentStates(mission);
+                ObserveClientNativeMissionTickPositionTransitions(
+                    mission,
+                    captured.EntryStates,
+                    exitStates,
+                    captured.Sequence,
+                    "inside-" + captured.Boundary,
+                    source,
+                    "client-native-execution-boundary-position-transition",
+                    " EntryThreadId=" + captured.ManagedThreadId +
+                    " ExitThreadId=" + System.Threading.Thread.CurrentThread.ManagedThreadId);
+            }
+            catch (Exception ex)
+            {
+                Log(
+                    "client-native-execution-boundary-exit-error",
+                    "Boundary=" + (captured.Boundary ?? "unknown") +
+                    " Sequence=" + captured.Sequence +
+                    " EntryThreadId=" + captured.ManagedThreadId +
+                    " ExitThreadId=" + System.Threading.Thread.CurrentThread.ManagedThreadId +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message +
+                    " Source=" + (source ?? "unknown"),
+                    persistToRuntimeBundle: false);
+            }
+        }
+
+        private static Dictionary<int, ClientNativeMissionTickAgentState> ReadClientNativeMissionTickAgentStates(
+            Mission mission)
+        {
+            var states = new Dictionary<int, ClientNativeMissionTickAgentState>();
+            if (mission?.AllAgents == null)
+                return states;
+
+            foreach (Agent agent in mission.AllAgents)
+            {
+                if (agent == null || agent.IsMount || !agent.IsActive())
+                    continue;
+
+                try
+                {
+                    states[agent.Index] = new ClientNativeMissionTickAgentState
+                    {
+                        AgentIndex = agent.Index,
+                        CharacterId = (agent.Character as BasicCharacterObject)?.StringId,
+                        Position = agent.Position,
+                        AgentPointer = ReadAgentNativePointer(AgentNativePointerField, agent),
+                        PositionPointer = ReadAgentNativePointer(AgentPositionPointerField, agent),
+                        TeamIndex = agent.Team?.TeamIndex ?? -1,
+                        TeamSide = agent.Team?.Side.ToString() ?? "null",
+                        FormationIndex = agent.Formation?.Index ?? -1,
+                        Controller = agent.Controller,
+                        IsAiControlled = agent.IsAIControlled,
+                        IsMainAgent = agent.IsMainAgent
+                    };
+                }
+                catch (Exception ex)
+                {
+                    Log(
+                        "client-native-mission-tick-agent-read-error",
+                        "AgentIndex=" + agent.Index +
+                        " Error=" + ex.GetType().Name + ":" + ex.Message,
+                        persistToRuntimeBundle: false);
+                }
+            }
+
+            return states;
+        }
+
+        private static void ObserveClientNativeMissionTickPositionTransitions(
+            Mission mission,
+            IReadOnlyDictionary<int, ClientNativeMissionTickAgentState> previousStates,
+            IReadOnlyDictionary<int, ClientNativeMissionTickAgentState> currentStates,
+            long sequence,
+            string boundary,
+            string source,
+            string eventName = "client-native-mission-tick-position-transition",
+            string additionalFields = null)
+        {
+            if (previousStates == null || currentStates == null || previousStates.Count == 0)
+                return;
+
+            float thresholdSquared =
+                ClientNativeMissionTickLargeMovementThreshold * ClientNativeMissionTickLargeMovementThreshold;
+            foreach (KeyValuePair<int, ClientNativeMissionTickAgentState> pair in currentStates)
+            {
+                ClientNativeMissionTickAgentState current = pair.Value;
+                if (current == null ||
+                    !previousStates.TryGetValue(pair.Key, out ClientNativeMissionTickAgentState previous) ||
+                    previous == null)
+                {
+                    continue;
+                }
+
+                float distanceSquared = DistanceSquared(previous.Position, current.Position);
+                if (distanceSquared < thresholdSquared)
+                    continue;
+
+                Log(
+                    eventName ?? "client-native-mission-tick-position-transition",
+                    "Boundary=" + (boundary ?? "unknown") +
+                    " Sequence=" + sequence +
+                    " Phase=" + CoopBattlePhaseRuntimeState.GetPhase() +
+                    " AgentIndex=" + current.AgentIndex +
+                    " CharacterId=" + (current.CharacterId ?? "null") +
+                    " PreviousPosition=" + FormatVec3(previous.Position) +
+                    " Position=" + FormatVec3(current.Position) +
+                    " MovementDistance=" + Math.Sqrt(distanceSquared).ToString("0.###", CultureInfo.InvariantCulture) +
+                    " PreviousNative={" + BuildClientNativeMissionTickAgentStateSummary(previous) + "}" +
+                    " CurrentNative={" + BuildClientNativeMissionTickAgentStateSummary(current) + "}" +
+                    " AgentPointerChanged=" + (previous.AgentPointer != current.AgentPointer) +
+                    " PositionPointerChanged=" + (previous.PositionPointer != current.PositionPointer) +
+                    " ClosestOtherCurrentAgent={" + BuildClosestOtherNativeAgentSummary(
+                        currentStates,
+                        current.Position,
+                        current.AgentIndex) + "}" +
+                    " LocalOwnership={" + BuildClientLocalOwnershipSummary(mission) + "}" +
+                    (additionalFields ?? string.Empty) +
+                    " Source=" + (source ?? "unknown"),
+                    persistToRuntimeBundle: false);
+            }
+        }
+
+        private static ulong ReadAgentNativePointer(FieldInfo field, Agent agent)
+        {
+            if (field == null || agent == null)
+                return 0UL;
+
+            object value = field.GetValue(agent);
+            return value is UIntPtr pointer ? pointer.ToUInt64() : 0UL;
+        }
+
+        private static string BuildClientNativeMissionTickAgentStateSummary(
+            ClientNativeMissionTickAgentState state)
+        {
+            if (state == null)
+                return "State=absent";
+
+            return
+                "AgentIndex=" + state.AgentIndex +
+                ",CharacterId=" + (state.CharacterId ?? "null") +
+                ",Position=" + FormatVec3(state.Position) +
+                ",AgentPointer=" + FormatNativePointer(state.AgentPointer) +
+                ",PositionPointer=" + FormatNativePointer(state.PositionPointer) +
+                ",TeamIndex=" + state.TeamIndex +
+                ",TeamSide=" + (state.TeamSide ?? "null") +
+                ",FormationIndex=" + state.FormationIndex +
+                ",Controller=" + state.Controller +
+                ",IsAiControlled=" + state.IsAiControlled +
+                ",IsMainAgent=" + state.IsMainAgent;
+        }
+
+        private static string BuildClosestOtherNativeAgentSummary(
+            IReadOnlyDictionary<int, ClientNativeMissionTickAgentState> states,
+            Vec3 position,
+            int excludedAgentIndex)
+        {
+            ClientNativeMissionTickAgentState closest = null;
+            float closestDistanceSquared = float.MaxValue;
+            if (states != null)
+            {
+                foreach (ClientNativeMissionTickAgentState state in states.Values)
+                {
+                    if (state == null || state.AgentIndex == excludedAgentIndex)
+                        continue;
+
+                    float distanceSquared = DistanceSquared(position, state.Position);
+                    if (distanceSquared >= closestDistanceSquared)
+                        continue;
+
+                    closest = state;
+                    closestDistanceSquared = distanceSquared;
+                }
+            }
+
+            return closest == null
+                ? "State=none"
+                : BuildClientNativeMissionTickAgentStateSummary(closest) +
+                  ",Distance=" + Math.Sqrt(closestDistanceSquared).ToString("0.###", CultureInfo.InvariantCulture);
+        }
+
+        private static string BuildClientLocalOwnershipSummary(Mission mission)
+        {
+            try
+            {
+                MissionPeer localMissionPeer = GameNetwork.MyPeer?.GetComponent<MissionPeer>();
+                return
+                    "AgentMainIndex=" + (Agent.Main?.Index.ToString() ?? "null") +
+                    ",MainAgentServerIndex=" + (mission?.MainAgentServer?.Index.ToString() ?? "null") +
+                    ",PeerControlledAgentIndex=" + (localMissionPeer?.ControlledAgent?.Index.ToString() ?? "null") +
+                    ",PeerFollowedAgentIndex=" + (localMissionPeer?.FollowedAgent?.Index.ToString() ?? "null") +
+                    ",NetworkControlledAgentIndex=" + (GameNetwork.MyPeer?.ControlledAgent?.Index.ToString() ?? "null");
+            }
+            catch (Exception ex)
+            {
+                return "State=unavailable,Error=" + ex.GetType().Name + ":" + ex.Message;
+            }
+        }
+
+        private static string FormatNativePointer(ulong value)
+        {
+            return value == 0UL ? "null" : "0x" + value.ToString("X", CultureInfo.InvariantCulture);
+        }
+
+        private static bool IsSupportedAgentPositionDiagnosticScene(string sceneName)
+        {
+            return SceneRuntimeClassifier.IsExactCampaignBattleScene(sceneName ?? string.Empty) ||
+                   SceneRuntimeClassifier.IsValidatedLordsHallScene(sceneName ?? string.Empty);
+        }
+
+        private static void SampleServerLiveAgents(Mission mission, string phaseName, string source)
+        {
+            var observedAgentIndices = new HashSet<int>();
+            if (mission.AllAgents != null)
+            {
+                foreach (Agent agent in mission.AllAgents)
+                {
+                    if (agent == null || agent.IsMount || !agent.IsActive())
+                        continue;
+
+                    observedAgentIndices.Add(agent.Index);
+                    try
+                    {
+                        var current = new ServerAgentPositionState
+                        {
+                            Position = agent.Position,
+                            TeamIndex = agent.Team?.TeamIndex ?? -1,
+                            FormationIndex = agent.Formation?.Index ?? -1
+                        };
+                        ServerAgentPositionState previous;
+                        lock (Sync)
+                        {
+                            ServerAgentPositionStates.TryGetValue(agent.Index, out previous);
+                            ServerAgentPositionStates[agent.Index] = current;
+                        }
+
+                        float distanceSquared = previous == null
+                            ? 0f
+                            : DistanceSquared(previous.Position, current.Position);
+                        float thresholdSquared =
+                            ServerPositionLargeMovementThreshold * ServerPositionLargeMovementThreshold;
+                        bool assignmentChanged = previous != null &&
+                            (previous.TeamIndex != current.TeamIndex ||
+                             previous.FormationIndex != current.FormationIndex);
+                        if (previous != null && distanceSquared < thresholdSquared && !assignmentChanged)
+                            continue;
+
+                        string trigger = previous == null
+                            ? "baseline"
+                            : distanceSquared >= thresholdSquared
+                                ? "large-position-jump"
+                                : "assignment-changed";
+                        Log(
+                            "server-live-agent-position-sample",
+                            "Trigger=" + trigger +
+                            " Phase=" + phaseName +
+                            " AgentIndex=" + agent.Index +
+                            " CharacterId=" + ((agent.Character as BasicCharacterObject)?.StringId ?? "null") +
+                            " TeamIndex=" + current.TeamIndex +
+                            " TeamSide=" + (agent.Team?.Side.ToString() ?? "null") +
+                            " FormationIndex=" + current.FormationIndex +
+                            " PreviousPosition=" + (previous == null ? "unavailable" : FormatVec3(previous.Position)) +
+                            " Position=" + FormatVec3(current.Position) +
+                            " MovementDistance=" +
+                            (previous == null
+                                ? "unavailable"
+                                : Math.Sqrt(distanceSquared).ToString("0.###", CultureInfo.InvariantCulture)) +
+                            " Formation={" + BuildFormationPositionSummary(agent.Formation, current.Position.AsVec2) + "}" +
+                            " Source=" + (source ?? "unknown"),
+                            persistToRuntimeBundle: false);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log(
+                            "server-live-agent-position-sample-error",
+                            "AgentIndex=" + agent.Index +
+                            " Error=" + ex.GetType().Name + ":" + ex.Message +
+                            " Source=" + (source ?? "unknown"),
+                            persistToRuntimeBundle: false);
+                    }
+                }
+            }
+
+            lock (Sync)
+            {
+                foreach (int removedAgentIndex in ServerAgentPositionStates.Keys
+                             .Where(index => !observedAgentIndices.Contains(index))
+                             .ToList())
+                {
+                    ServerAgentPositionStates.Remove(removedAgentIndex);
+                }
+            }
+        }
+
+        internal static void TrySampleClientAgentAndPreviewVisualPositions(Mission mission, string source)
+        {
+            if (!GameNetwork.IsClient || GameNetwork.IsServer || !IsVerboseEnabled || mission == null)
+                return;
+
+            DateTime nowUtc = DateTime.UtcNow;
+            CoopBattlePhase phase = CoopBattlePhaseRuntimeState.GetPhase();
+            lock (Sync)
+            {
+                if (!ReferenceEquals(_clientPositionVisualMission, mission))
+                {
+                    ClientAgentPositionVisualStates.Clear();
+                    ClientPeerPreviewVisualStates.Clear();
+                    _clientPositionVisualMission = mission;
+                    _nextClientPositionVisualSampleUtc = DateTime.MinValue;
+                    _clientBattleActiveObservedUtc = DateTime.MinValue;
+                    _lastClientPositionVisualPhase = null;
+                }
+
+                if (phase >= CoopBattlePhase.BattleEnded)
+                    return;
+                if (phase >= CoopBattlePhase.BattleActive)
+                {
+                    if (_clientBattleActiveObservedUtc == DateTime.MinValue)
+                        _clientBattleActiveObservedUtc = nowUtc;
+                    if (nowUtc - _clientBattleActiveObservedUtc > ClientPositionVisualBattleActiveWindow)
+                        return;
+                }
+
+                if (nowUtc < _nextClientPositionVisualSampleUtc)
+                    return;
+                _nextClientPositionVisualSampleUtc = nowUtc + ClientPositionVisualSampleInterval;
+            }
+
+            string phaseName = phase.ToString();
+            bool phaseChanged;
+            lock (Sync)
+            {
+                phaseChanged = !string.Equals(_lastClientPositionVisualPhase, phaseName, StringComparison.Ordinal);
+                if (phaseChanged)
+                    _lastClientPositionVisualPhase = phaseName;
+            }
+
+            if (phaseChanged)
+            {
+                Log(
+                    "client-position-visual-sample-phase",
+                    "Phase=" + phaseName +
+                    " Mission=" + (mission.SceneName ?? "null") +
+                    " Source=" + (source ?? "unknown"),
+                    persistToRuntimeBundle: false);
+            }
+
+            SampleClientLiveAgents(mission, phaseName, source);
+            SampleClientPeerPreviewVisuals(mission, phaseName, source);
+        }
+
+        private static void SampleClientLiveAgents(Mission mission, string phaseName, string source)
+        {
+            var observedAgentIndices = new HashSet<int>();
+            if (mission.AllAgents != null)
+            {
+                foreach (Agent agent in mission.AllAgents)
+                {
+                    if (agent == null || agent.IsMount || !agent.IsActive())
+                        continue;
+
+                    observedAgentIndices.Add(agent.Index);
+                    try
+                    {
+                        ClientAgentPositionVisualState current = ReadClientAgentPositionVisualState(agent);
+                        ClientAgentPositionVisualState previous;
+                        lock (Sync)
+                        {
+                            ClientAgentPositionVisualStates.TryGetValue(agent.Index, out previous);
+                            ClientAgentPositionVisualStates[agent.Index] = current;
+                        }
+
+                        string trigger = BuildClientAgentPositionVisualTrigger(previous, current);
+                        if (trigger == null)
+                            continue;
+
+                        Log(
+                            "client-live-agent-position-visual-sample",
+                            "Trigger=" + trigger +
+                            " Phase=" + phaseName +
+                            " AgentIndex=" + agent.Index +
+                            " CharacterId=" + ((agent.Character as BasicCharacterObject)?.StringId ?? "null") +
+                            " TeamIndex=" + current.TeamIndex +
+                            " TeamSide=" + (agent.Team?.Side.ToString() ?? "null") +
+                            " FormationIndex=" + current.FormationIndex +
+                            " Position=" + FormatVec3(current.Position) +
+                            " VisualPosition=" + (current.HasVisualPosition ? FormatVec3(current.VisualPosition) : "unavailable") +
+                            " PositionToVisualDistance=" + FormatOptionalDistance(current.Position, current.VisualPosition, current.HasVisualPosition) +
+                            " VisualFrameOrigin=" + (current.HasVisualFrame ? FormatVec3(current.VisualFrameOrigin) : "unavailable") +
+                            " PositionToVisualFrameDistance=" + FormatOptionalDistance(current.Position, current.VisualFrameOrigin, current.HasVisualFrame) +
+                            " VisualsValid=" + current.VisualsValid +
+                            " VisualsVisible=" + current.VisualsVisible +
+                            " Formation={" + BuildFormationPositionSummary(agent.Formation, current.Position.AsVec2) + "}" +
+                            " Source=" + (source ?? "unknown"),
+                            persistToRuntimeBundle: false);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log(
+                            "client-live-agent-position-visual-sample-error",
+                            "AgentIndex=" + agent.Index +
+                            " Error=" + ex.GetType().Name + ":" + ex.Message +
+                            " Source=" + (source ?? "unknown"),
+                            persistToRuntimeBundle: false);
+                    }
+                }
+            }
+
+            List<int> removedAgentIndices;
+            lock (Sync)
+            {
+                removedAgentIndices = ClientAgentPositionVisualStates.Keys
+                    .Where(index => !observedAgentIndices.Contains(index))
+                    .ToList();
+                foreach (int removedAgentIndex in removedAgentIndices)
+                    ClientAgentPositionVisualStates.Remove(removedAgentIndex);
+            }
+
+            foreach (int removedAgentIndex in removedAgentIndices)
+            {
+                Log(
+                    "client-live-agent-position-visual-ended",
+                    "AgentIndex=" + removedAgentIndex +
+                    " Phase=" + phaseName +
+                    " Source=" + (source ?? "unknown"),
+                    persistToRuntimeBundle: false);
+            }
+        }
+
+        private static void SampleClientPeerPreviewVisuals(Mission mission, string phaseName, string source)
+        {
+            var observedPreviewKeys = new HashSet<string>(StringComparer.Ordinal);
+            if (GameNetwork.NetworkPeers != null)
+            {
+                foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+                {
+                    MissionPeer missionPeer = peer?.GetComponent<MissionPeer>();
+                    if (missionPeer == null)
+                        continue;
+
+                    for (int visualsIndex = 0; visualsIndex <= MaxPeerPreviewVisualIndexToSample; visualsIndex++)
+                    {
+                        PeerVisualsHolder holder = TryGetPeerVisuals(missionPeer, visualsIndex);
+
+                        if (holder?.AgentVisuals == null)
+                            continue;
+
+                        string previewKey = peer.Index + "|" + visualsIndex;
+                        observedPreviewKeys.Add(previewKey);
+                        try
+                        {
+                            ClientPeerPreviewVisualState current = ReadClientPeerPreviewVisualState(holder);
+                            ClientPeerPreviewVisualState previous;
+                            lock (Sync)
+                            {
+                                ClientPeerPreviewVisualStates.TryGetValue(previewKey, out previous);
+                                ClientPeerPreviewVisualStates[previewKey] = current;
+                            }
+
+                            string trigger = BuildClientPeerPreviewVisualTrigger(previous, current);
+                            if (trigger == null)
+                                continue;
+
+                            Log(
+                                "client-peer-preview-visual-sample",
+                                "Trigger=" + trigger +
+                                " Phase=" + phaseName +
+                                " Peer=" + DescribePeer(peer) +
+                                " TeamIndex=" + (missionPeer.Team?.TeamIndex.ToString() ?? "null") +
+                                " TeamSide=" + (missionPeer.Team?.Side.ToString() ?? "null") +
+                                " HasSpawnedAgentVisuals=" + missionPeer.HasSpawnedAgentVisuals +
+                                " VisualsIndex=" + visualsIndex +
+                                " CharacterId=" + (current.CharacterId ?? "null") +
+                                " FrameOrigin=" + (current.HasFrame ? FormatVec3(current.FrameOrigin) : "unavailable") +
+                                " VisualsValid=" + current.VisualsValid +
+                                " VisualsVisible=" + current.VisualsVisible +
+                                " ClosestLiveAgent={" + BuildClosestLiveAgentSummary(mission, current.FrameOrigin, current.HasFrame) + "}" +
+                                " Source=" + (source ?? "unknown"),
+                                persistToRuntimeBundle: false);
+                        }
+                        catch (Exception ex)
+                        {
+                            Log(
+                                "client-peer-preview-visual-sample-error",
+                                "Peer=" + DescribePeer(peer) +
+                                " VisualsIndex=" + visualsIndex +
+                                " Error=" + ex.GetType().Name + ":" + ex.Message +
+                                " Source=" + (source ?? "unknown"),
+                                persistToRuntimeBundle: false);
+                        }
+                    }
+                }
+            }
+
+            List<string> removedPreviewKeys;
+            lock (Sync)
+            {
+                removedPreviewKeys = ClientPeerPreviewVisualStates.Keys
+                    .Where(key => !observedPreviewKeys.Contains(key))
+                    .ToList();
+                foreach (string removedPreviewKey in removedPreviewKeys)
+                    ClientPeerPreviewVisualStates.Remove(removedPreviewKey);
+            }
+
+            foreach (string removedPreviewKey in removedPreviewKeys)
+            {
+                Log(
+                    "client-peer-preview-visual-ended",
+                    "PreviewKey=" + removedPreviewKey +
+                    " Phase=" + phaseName +
+                    " Source=" + (source ?? "unknown"),
+                    persistToRuntimeBundle: false);
+            }
+        }
+
         internal static void ObserveClientCreateAgentException(
             CreateAgent createAgent,
             Exception exception,
@@ -1000,6 +1993,8 @@ namespace CoopSpectator.Infrastructure
                 ",TeamIndex=" + createAgent.TeamIndex +
                 ",Side=" + ResolveCreateAgentPayloadBattleSide(createAgent.TeamIndex) +
                 ",FormationIndex=" + createAgent.FormationIndex +
+                ",Position=" + FormatVec3(createAgent.Position) +
+                ",Direction=" + FormatVec2(createAgent.Direction) +
                 ",IsPlayerAgent=" + createAgent.IsPlayerAgent +
                 ",PeerIndex=" + (createAgent.Peer?.Index.ToString() ?? "null") +
                 ",MountAgentIndex=" + createAgent.MountAgentIndex +
@@ -1865,10 +2860,19 @@ namespace CoopSpectator.Infrastructure
             {
             }
 
+            string visualStateSummary = IsVerboseEnabled
+                ? BuildAgentPositionVisualSummary(agent)
+                : "PositionVisualState={State=diagnostics-disabled}";
+
             return
                 "AgentState={Index=" + agent.Index +
                 ",CharacterId=" + ((agent.Character as BasicCharacterObject)?.StringId ?? "null") +
+                ",Position=" + FormatVec3(agent.Position) +
+                "," + visualStateSummary +
+                ",LookDirection=" + FormatVec3(agent.LookDirection) +
+                ",TeamIndex=" + (agent.Team?.TeamIndex.ToString() ?? "null") +
                 ",TeamSide=" + (agent.Team?.Side.ToString() ?? "null") +
+                ",Formation=" + BuildFormationPositionSummary(agent.Formation, agent.Position.AsVec2) +
                 ",MissionPeerIndex=" + (agent.MissionPeer?.Peer?.Index.ToString() ?? "null") +
                 ",MountAgentIndex=" + (agent.MountAgent?.Index.ToString() ?? "null") +
                 ",Active=" + agent.IsActive() +
@@ -1880,6 +2884,381 @@ namespace CoopSpectator.Infrastructure
                 "},MissionWeapons={" + ExactCreateAgentPayloadDiagnostics.BuildMissionEquipmentWeaponLayoutSummary(missionEquipment) +
                 "},MissionWeaponSlots={" + BuildMissionEquipmentWeaponSlotVector(missionEquipment) +
                 "},Mount={" + ExactCreateAgentPayloadDiagnostics.BuildEquipmentMountLayoutSummary(spawnEquipment) + "}}";
+        }
+
+        private static ClientAgentPositionVisualState ReadClientAgentPositionVisualState(Agent agent)
+        {
+            var state = new ClientAgentPositionVisualState
+            {
+                Position = agent.Position,
+                TeamIndex = agent.Team?.TeamIndex ?? -1,
+                FormationIndex = agent.Formation?.Index ?? -1
+            };
+
+            try
+            {
+                state.VisualPosition = agent.VisualPosition;
+                state.HasVisualPosition = state.VisualPosition.IsValid;
+            }
+            catch
+            {
+                state.HasVisualPosition = false;
+            }
+
+            try
+            {
+                MBAgentVisuals visuals = agent.AgentVisuals;
+                state.VisualsValid = visuals != null && visuals.IsValid();
+                if (state.VisualsValid)
+                {
+                    MatrixFrame frame = visuals.GetGlobalFrame();
+                    state.VisualFrameOrigin = frame.origin;
+                    state.HasVisualFrame = frame.origin.IsValid;
+                    state.VisualsVisible = visuals.GetVisible();
+                }
+            }
+            catch
+            {
+                state.VisualsValid = false;
+                state.HasVisualFrame = false;
+                state.VisualsVisible = false;
+            }
+
+            return state;
+        }
+
+        private static ClientPeerPreviewVisualState ReadClientPeerPreviewVisualState(PeerVisualsHolder holder)
+        {
+            var state = new ClientPeerPreviewVisualState();
+            IAgentVisual agentVisual = holder?.AgentVisuals;
+            if (agentVisual == null)
+                return state;
+
+            try
+            {
+                state.CharacterId = agentVisual.GetCharacterObjectID();
+            }
+            catch
+            {
+                state.CharacterId = null;
+            }
+
+            try
+            {
+                MBAgentVisuals visuals = agentVisual.GetVisuals();
+                state.VisualsValid = visuals != null && visuals.IsValid();
+                if (state.VisualsValid)
+                {
+                    MatrixFrame frame = visuals.GetGlobalFrame();
+                    state.FrameOrigin = frame.origin;
+                    state.HasFrame = frame.origin.IsValid;
+                    state.VisualsVisible = visuals.GetVisible();
+                }
+            }
+            catch
+            {
+                state.VisualsValid = false;
+                state.HasFrame = false;
+                state.VisualsVisible = false;
+            }
+
+            return state;
+        }
+
+        private static string BuildClientAgentPositionVisualTrigger(
+            ClientAgentPositionVisualState previous,
+            ClientAgentPositionVisualState current)
+        {
+            if (previous == null)
+                return "baseline";
+
+            var triggers = new List<string>();
+            float movementThresholdSquared =
+                ClientPositionVisualMovementThreshold * ClientPositionVisualMovementThreshold;
+            float mismatchThresholdSquared =
+                ClientPositionVisualMismatchThreshold * ClientPositionVisualMismatchThreshold;
+            if (DistanceSquared(previous.Position, current.Position) >= movementThresholdSquared)
+                triggers.Add("physical-position-moved");
+            if (previous.HasVisualPosition != current.HasVisualPosition ||
+                (previous.HasVisualPosition && current.HasVisualPosition &&
+                 DistanceSquared(previous.VisualPosition, current.VisualPosition) >= movementThresholdSquared))
+            {
+                triggers.Add("visual-position-changed");
+            }
+            if (previous.HasVisualFrame != current.HasVisualFrame ||
+                (previous.HasVisualFrame && current.HasVisualFrame &&
+                 DistanceSquared(previous.VisualFrameOrigin, current.VisualFrameOrigin) >= movementThresholdSquared))
+            {
+                triggers.Add("visual-frame-changed");
+            }
+
+            bool previousPositionVisualMismatch =
+                previous.HasVisualPosition &&
+                DistanceSquared(previous.Position, previous.VisualPosition) >= mismatchThresholdSquared;
+            bool currentPositionVisualMismatch =
+                current.HasVisualPosition &&
+                DistanceSquared(current.Position, current.VisualPosition) >= mismatchThresholdSquared;
+            if (previousPositionVisualMismatch != currentPositionVisualMismatch)
+                triggers.Add(currentPositionVisualMismatch ? "position-visual-mismatch-started" : "position-visual-mismatch-ended");
+
+            bool previousPositionFrameMismatch =
+                previous.HasVisualFrame &&
+                DistanceSquared(previous.Position, previous.VisualFrameOrigin) >= mismatchThresholdSquared;
+            bool currentPositionFrameMismatch =
+                current.HasVisualFrame &&
+                DistanceSquared(current.Position, current.VisualFrameOrigin) >= mismatchThresholdSquared;
+            if (previousPositionFrameMismatch != currentPositionFrameMismatch)
+                triggers.Add(currentPositionFrameMismatch ? "position-frame-mismatch-started" : "position-frame-mismatch-ended");
+
+            if (previous.VisualsValid != current.VisualsValid)
+                triggers.Add("visual-validity-changed");
+            if (previous.VisualsVisible != current.VisualsVisible)
+                triggers.Add("visual-visibility-changed");
+            if (previous.TeamIndex != current.TeamIndex)
+                triggers.Add("team-changed");
+            if (previous.FormationIndex != current.FormationIndex)
+                triggers.Add("formation-changed");
+
+            return triggers.Count > 0 ? string.Join(",", triggers) : null;
+        }
+
+        private static string BuildClientPeerPreviewVisualTrigger(
+            ClientPeerPreviewVisualState previous,
+            ClientPeerPreviewVisualState current)
+        {
+            if (previous == null)
+                return "created-or-first-observed";
+
+            var triggers = new List<string>();
+            float movementThresholdSquared =
+                ClientPositionVisualMovementThreshold * ClientPositionVisualMovementThreshold;
+            if (previous.HasFrame != current.HasFrame ||
+                (previous.HasFrame && current.HasFrame &&
+                 DistanceSquared(previous.FrameOrigin, current.FrameOrigin) >= movementThresholdSquared))
+            {
+                triggers.Add("frame-changed");
+            }
+            if (previous.VisualsValid != current.VisualsValid)
+                triggers.Add("validity-changed");
+            if (previous.VisualsVisible != current.VisualsVisible)
+                triggers.Add("visibility-changed");
+            if (!string.Equals(previous.CharacterId, current.CharacterId, StringComparison.Ordinal))
+                triggers.Add("character-changed");
+
+            return triggers.Count > 0 ? string.Join(",", triggers) : null;
+        }
+
+        private static string BuildAgentPositionVisualSummary(Agent agent)
+        {
+            try
+            {
+                ClientAgentPositionVisualState state = ReadClientAgentPositionVisualState(agent);
+                return
+                    "PositionVisualState={VisualPosition=" +
+                    (state.HasVisualPosition ? FormatVec3(state.VisualPosition) : "unavailable") +
+                    ",PositionToVisualDistance=" +
+                    FormatOptionalDistance(state.Position, state.VisualPosition, state.HasVisualPosition) +
+                    ",VisualFrameOrigin=" +
+                    (state.HasVisualFrame ? FormatVec3(state.VisualFrameOrigin) : "unavailable") +
+                    ",PositionToVisualFrameDistance=" +
+                    FormatOptionalDistance(state.Position, state.VisualFrameOrigin, state.HasVisualFrame) +
+                    ",VisualsValid=" + state.VisualsValid +
+                    ",VisualsVisible=" + state.VisualsVisible + "}";
+            }
+            catch (Exception ex)
+            {
+                return "PositionVisualState={State=unavailable,Error=" + ex.GetType().Name + "}";
+            }
+        }
+
+        private static string BuildPeerPreviewVisualSummary(MissionPeer missionPeer, int visualsIndex)
+        {
+            if (missionPeer == null)
+                return "PeerPreviewVisual={State=mission-peer-absent,VisualsIndex=" + visualsIndex + "}";
+
+            try
+            {
+                PeerVisualsHolder holder = TryGetPeerVisuals(missionPeer, visualsIndex);
+                if (holder?.AgentVisuals == null)
+                    return "PeerPreviewVisual={State=absent,VisualsIndex=" + visualsIndex + "}";
+
+                ClientPeerPreviewVisualState state = ReadClientPeerPreviewVisualState(holder);
+                return
+                    "PeerPreviewVisual={State=present,VisualsIndex=" + visualsIndex +
+                    ",CharacterId=" + (state.CharacterId ?? "null") +
+                    ",FrameOrigin=" + (state.HasFrame ? FormatVec3(state.FrameOrigin) : "unavailable") +
+                    ",VisualsValid=" + state.VisualsValid +
+                    ",VisualsVisible=" + state.VisualsVisible + "}";
+            }
+            catch (Exception ex)
+            {
+                return
+                    "PeerPreviewVisual={State=unavailable,VisualsIndex=" + visualsIndex +
+                    ",Error=" + ex.GetType().Name + ":" + ex.Message + "}";
+            }
+        }
+
+        private static PeerVisualsHolder TryGetPeerVisuals(MissionPeer missionPeer, int visualsIndex)
+        {
+            if (missionPeer == null || MissionPeerGetVisualsMethod == null)
+                return null;
+
+            try
+            {
+                return MissionPeerGetVisualsMethod.Invoke(missionPeer, new object[] { visualsIndex }) as PeerVisualsHolder;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string BuildAllPeerPreviewVisualsSummary(MissionPeer missionPeer)
+        {
+            if (missionPeer == null)
+                return "PeerPreviewVisuals={State=mission-peer-absent}";
+
+            var summaries = new List<string>();
+            for (int visualsIndex = 0; visualsIndex <= MaxPeerPreviewVisualIndexToSample; visualsIndex++)
+            {
+                string summary = BuildPeerPreviewVisualSummary(missionPeer, visualsIndex);
+                if (summary.IndexOf("State=present", StringComparison.Ordinal) >= 0)
+                    summaries.Add(summary);
+            }
+
+            return summaries.Count > 0
+                ? "PeerPreviewVisuals=[" + string.Join("; ", summaries) + "]"
+                : "PeerPreviewVisuals={State=none}";
+        }
+
+        private static string BuildClosestLiveAgentSummary(Mission mission, Vec3 position, bool hasPosition)
+        {
+            if (!hasPosition || mission?.AllAgents == null)
+                return "State=unavailable";
+
+            Agent closest = null;
+            float closestDistanceSquared = float.MaxValue;
+            foreach (Agent agent in mission.AllAgents)
+            {
+                if (agent == null || agent.IsMount || !agent.IsActive())
+                    continue;
+
+                float distanceSquared = DistanceSquared(position, agent.Position);
+                if (distanceSquared >= closestDistanceSquared)
+                    continue;
+
+                closest = agent;
+                closestDistanceSquared = distanceSquared;
+            }
+
+            if (closest == null)
+                return "State=none";
+
+            return
+                "AgentIndex=" + closest.Index +
+                ",CharacterId=" + ((closest.Character as BasicCharacterObject)?.StringId ?? "null") +
+                ",TeamIndex=" + (closest.Team?.TeamIndex.ToString() ?? "null") +
+                ",TeamSide=" + (closest.Team?.Side.ToString() ?? "null") +
+                ",Position=" + FormatVec3(closest.Position) +
+                ",Distance=" + Math.Sqrt(closestDistanceSquared).ToString("0.###", CultureInfo.InvariantCulture);
+        }
+
+        private static string DescribePeer(NetworkCommunicator peer)
+        {
+            return peer == null
+                ? "null"
+                : (peer.UserName ?? "unnamed") + "#" + peer.Index;
+        }
+
+        private static string FormatOptionalDistance(Vec3 left, Vec3 right, bool available)
+        {
+            return available
+                ? Math.Sqrt(DistanceSquared(left, right)).ToString("0.###", CultureInfo.InvariantCulture)
+                : "unavailable";
+        }
+
+        private static float DistanceSquared(Vec3 left, Vec3 right)
+        {
+            float dx = left.x - right.x;
+            float dy = left.y - right.y;
+            float dz = left.z - right.z;
+            return dx * dx + dy * dy + dz * dz;
+        }
+
+        private static string BuildAgentBuildDataPositionSummary(AgentBuildData agentBuildData)
+        {
+            if (agentBuildData == null)
+                return "AgentBuildDataState={State=absent}";
+
+            Vec3? initialPosition = agentBuildData.AgentInitialPosition;
+            Vec2? initialDirection = agentBuildData.AgentInitialDirection;
+            return
+                "AgentBuildDataState={CharacterId=" + (agentBuildData.AgentCharacter?.StringId ?? "null") +
+                ",TeamIndex=" + (agentBuildData.AgentTeam?.TeamIndex.ToString() ?? "null") +
+                ",TeamSide=" + (agentBuildData.AgentTeam?.Side.ToString() ?? "null") +
+                ",HasInitialPosition=" + initialPosition.HasValue +
+                ",InitialPosition=" + FormatNullableVec3(initialPosition) +
+                ",HasInitialDirection=" + initialDirection.HasValue +
+                ",InitialDirection=" + FormatNullableVec2(initialDirection) +
+                ",FormationTroopSpawnIndex=" + agentBuildData.AgentFormationTroopSpawnIndex +
+                ",FormationTroopSpawnCount=" + agentBuildData.AgentFormationTroopSpawnCount +
+                ",SpawnsIntoOwnFormation=" + agentBuildData.AgentSpawnsIntoOwnFormation +
+                ",Formation=" + BuildFormationPositionSummary(
+                    agentBuildData.AgentFormation,
+                    initialPosition?.AsVec2) + "}";
+        }
+
+        private static string BuildFormationPositionSummary(Formation formation, Vec2? referencePosition)
+        {
+            if (formation == null)
+                return "FormationState={State=absent}";
+
+            bool orderPositionValid = formation.OrderPositionIsValid;
+            Vec2 orderPosition = orderPositionValid ? formation.OrderPosition : Vec2.Invalid;
+            string distanceToOrder = "unavailable";
+            if (referencePosition.HasValue &&
+                referencePosition.Value.IsValid &&
+                orderPositionValid &&
+                orderPosition.IsValid)
+            {
+                distanceToOrder = ((float)Math.Sqrt(
+                        referencePosition.Value.DistanceSquared(orderPosition)))
+                    .ToString("0.###", CultureInfo.InvariantCulture);
+            }
+
+            return
+                "FormationState={Index=" + formation.FormationIndex +
+                ",TeamIndex=" + (formation.Team?.TeamIndex.ToString() ?? "null") +
+                ",TeamSide=" + (formation.Team?.Side.ToString() ?? "null") +
+                ",OrderPositionValid=" + orderPositionValid +
+                ",OrderPosition=" + (orderPositionValid ? FormatVec2(orderPosition) : "invalid") +
+                ",Direction=" + FormatVec2(formation.Direction) +
+                ",ReferenceDistanceToOrder=" + distanceToOrder + "}";
+        }
+
+        private static string FormatNullableVec3(Vec3? value)
+        {
+            return value.HasValue ? FormatVec3(value.Value) : "null";
+        }
+
+        private static string FormatNullableVec2(Vec2? value)
+        {
+            return value.HasValue ? FormatVec2(value.Value) : "null";
+        }
+
+        private static string FormatVec3(Vec3 value)
+        {
+            return
+                "(" + value.x.ToString("0.###", CultureInfo.InvariantCulture) +
+                "," + value.y.ToString("0.###", CultureInfo.InvariantCulture) +
+                "," + value.z.ToString("0.###", CultureInfo.InvariantCulture) + ")";
+        }
+
+        private static string FormatVec2(Vec2 value)
+        {
+            return
+                "(" + value.x.ToString("0.###", CultureInfo.InvariantCulture) +
+                "," + value.y.ToString("0.###", CultureInfo.InvariantCulture) + ")";
         }
 
         private static string BuildEquipmentWithMountSummary(Equipment equipment)

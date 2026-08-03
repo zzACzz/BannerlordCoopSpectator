@@ -723,7 +723,11 @@ namespace CoopSpectator.Patches
             TryApplyPatchStep(nameof(CoopBotsControlledCountPatch), () => CoopBotsControlledCountPatch.Apply(harmony));
             TryApplyPatchStep(nameof(PatchBattleSnapshotRuntimeStateFiveModeWeaponUsageProtocol), () => PatchBattleSnapshotRuntimeStateFiveModeWeaponUsageProtocol(harmony));
             TryApplyPatchStep(nameof(PatchMissionPeerFollowedAgent), () => PatchMissionPeerFollowedAgent(harmony));
+            TryApplyPatchStep(nameof(PatchAgentTeleportToPositionCorridorDiagnostics), () => PatchAgentTeleportToPositionCorridorDiagnostics(harmony));
+            TryApplyPatchStep(nameof(PatchMissionTickCorridorDiagnostics), () => PatchMissionTickCorridorDiagnostics(harmony));
+            TryApplyPatchStep(nameof(PatchClientNativeExecutionBoundaryCorridorDiagnostics), () => PatchClientNativeExecutionBoundaryCorridorDiagnostics(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentCreateAgent), () => PatchMissionNetworkComponentCreateAgent(harmony));
+            TryApplyPatchStep(nameof(PatchMissionNetworkComponentAgentVisualsLifecycleDiagnostics), () => PatchMissionNetworkComponentAgentVisualsLifecycleDiagnostics(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentAgentSetFormation), () => PatchMissionNetworkComponentAgentSetFormation(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSetAgentActionSet), () => PatchMissionNetworkComponentSetAgentActionSet(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentSynchronizeAgentEquipment), () => PatchMissionNetworkComponentSynchronizeAgentEquipment(harmony));
@@ -1153,6 +1157,137 @@ namespace CoopSpectator.Patches
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix/postfix/finalizer applied to MissionNetworkComponent.HandleServerEventCreateAgent.");
         }
 
+        private static void PatchAgentTeleportToPositionCorridorDiagnostics(Harmony harmony)
+        {
+            MethodInfo target = typeof(Agent).GetMethod(
+                nameof(Agent.TeleportToPosition),
+                BindingFlags.Instance | BindingFlags.Public,
+                null,
+                new[] { typeof(Vec3) },
+                null);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Agent_TeleportToPosition_CorridorDiagnostics_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Agent.TeleportToPosition(Vec3) not found. Skip corridor diagnostics.");
+                return;
+            }
+
+            harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: diagnostic prefix applied to Agent.TeleportToPosition(Vec3).");
+        }
+
+        private static void PatchMissionTickCorridorDiagnostics(Harmony harmony)
+        {
+            if (!ExactCreateAgentCorridorDiagnostics.IsClientNativeMissionTickBoundaryDiagnosticsEnabled)
+                return;
+
+            MethodInfo target = typeof(Mission).GetMethod(
+                "Tick",
+                BindingFlags.Instance | BindingFlags.NonPublic,
+                null,
+                new[] { typeof(float) },
+                null);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Mission_Tick_CorridorDiagnostics_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Mission_Tick_CorridorDiagnostics_Postfix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null || postfix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Mission.Tick(float) diagnostic target or observer not found. Skip corridor diagnostics.");
+                return;
+            }
+
+            harmony.Patch(
+                target,
+                prefix: new HarmonyMethod(prefix),
+                postfix: new HarmonyMethod(postfix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: diagnostic prefix/postfix applied to Mission.Tick(float).");
+        }
+
+        private static void PatchClientNativeExecutionBoundaryCorridorDiagnostics(Harmony harmony)
+        {
+            if (!ExactCreateAgentCorridorDiagnostics.IsClientNativeExecutionBoundaryDiagnosticsEnabled)
+                return;
+
+            PatchClientNativeExecutionBoundaryMethod(
+                harmony,
+                typeof(GameNetwork).GetMethod(
+                    "Tick",
+                    BindingFlags.Static | BindingFlags.NonPublic,
+                    null,
+                    new[] { typeof(float) },
+                    null),
+                nameof(GameNetwork_Tick_CorridorDiagnostics_Prefix),
+                nameof(GameNetwork_Tick_CorridorDiagnostics_Postfix),
+                "GameNetwork.Tick(float)");
+            PatchClientNativeExecutionBoundaryMethod(
+                harmony,
+                typeof(Mission).GetMethod(
+                    nameof(Mission.OnTick),
+                    BindingFlags.Instance | BindingFlags.Public,
+                    null,
+                    new[] { typeof(float), typeof(float), typeof(bool), typeof(bool) },
+                    null),
+                nameof(Mission_OnTick_CorridorDiagnostics_Prefix),
+                nameof(Mission_OnTick_CorridorDiagnostics_Postfix),
+                "Mission.OnTick(float,float,bool,bool)");
+            PatchClientNativeExecutionBoundaryMethod(
+                harmony,
+                typeof(Mission).GetMethod(
+                    nameof(Mission.TickAgentsAndTeamsAsync),
+                    BindingFlags.Instance | BindingFlags.Public,
+                    null,
+                    new[] { typeof(float) },
+                    null),
+                nameof(Mission_TickAgentsAndTeamsAsync_CorridorDiagnostics_Prefix),
+                nameof(Mission_TickAgentsAndTeamsAsync_CorridorDiagnostics_Postfix),
+                "Mission.TickAgentsAndTeamsAsync(float)");
+            PatchClientNativeExecutionBoundaryMethod(
+                harmony,
+                typeof(Mission).GetMethod(
+                    "TickAgentsAndTeams",
+                    BindingFlags.Instance | BindingFlags.NonPublic,
+                    null,
+                    new[] { typeof(float), typeof(bool) },
+                    null),
+                nameof(Mission_TickAgentsAndTeams_CorridorDiagnostics_Prefix),
+                nameof(Mission_TickAgentsAndTeams_CorridorDiagnostics_Postfix),
+                "Mission.TickAgentsAndTeams(float,bool)");
+        }
+
+        private static void PatchClientNativeExecutionBoundaryMethod(
+            Harmony harmony,
+            MethodInfo target,
+            string prefixName,
+            string postfixName,
+            string displayName)
+        {
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                prefixName,
+                BindingFlags.Static | BindingFlags.NonPublic);
+            MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                postfixName,
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null || postfix == null)
+            {
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: " + displayName +
+                    " diagnostic target or observer not found. Skip corridor diagnostics.");
+                return;
+            }
+
+            harmony.Patch(
+                target,
+                prefix: new HarmonyMethod(prefix),
+                postfix: new HarmonyMethod(postfix));
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: diagnostic prefix/postfix applied to " + displayName + ".");
+        }
+
         private static void PatchMissionNetworkComponentAgentSetFormation(Harmony harmony)
         {
             MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
@@ -1170,6 +1305,49 @@ namespace CoopSpectator.Patches
             _missionNetworkComponentHandleServerEventAgentSetFormationMethod = target;
             harmony.Patch(target, prefix: new HarmonyMethod(prefix));
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventAgentSetFormation.");
+        }
+
+        private static void PatchMissionNetworkComponentAgentVisualsLifecycleDiagnostics(Harmony harmony)
+        {
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventAgentVisualsLifecycleDiagnostics_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventAgentVisualsLifecycleDiagnostics_Postfix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (prefix == null || postfix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: AgentVisuals lifecycle diagnostics methods not found. Skip.");
+                return;
+            }
+
+            string[] targetNames =
+            {
+                "HandleServerEventCreateAgentVisuals",
+                "HandleServerEventRemoveAgentVisualsForPeer",
+                "HandleServerEventRemoveAgentVisualsFromIndexForPeer"
+            };
+            foreach (string targetName in targetNames)
+            {
+                MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                    targetName,
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                if (target == null)
+                {
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: MissionNetworkComponent." + targetName +
+                        " not found for AgentVisuals lifecycle diagnostics. Skip.");
+                    continue;
+                }
+
+                harmony.Patch(
+                    target,
+                    prefix: new HarmonyMethod(prefix),
+                    postfix: new HarmonyMethod(postfix));
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: diagnostic prefix/postfix applied to MissionNetworkComponent." +
+                    targetName + ".");
+            }
         }
 
         private static void PatchMissionNetworkComponentSetAgentActionSet(Harmony harmony)
@@ -2678,6 +2856,111 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static void Agent_TeleportToPosition_CorridorDiagnostics_Prefix(
+            Agent __instance,
+            Vec3 position)
+        {
+            ExactCreateAgentCorridorDiagnostics.ObserveManagedAgentTeleport(
+                __instance,
+                position,
+                "BattleMapSpawnHandoffPatch Agent.TeleportToPosition prefix");
+        }
+
+        private static void Mission_Tick_CorridorDiagnostics_Prefix(
+            Mission __instance,
+            out object __state)
+        {
+            __state = ExactCreateAgentCorridorDiagnostics.CaptureClientNativeMissionTickEntry(
+                __instance,
+                "BattleMapSpawnHandoffPatch Mission.Tick prefix");
+        }
+
+        private static void Mission_Tick_CorridorDiagnostics_Postfix(
+            Mission __instance,
+            object __state)
+        {
+            ExactCreateAgentCorridorDiagnostics.ObserveClientNativeMissionTickExit(
+                __instance,
+                __state,
+                "BattleMapSpawnHandoffPatch Mission.Tick postfix");
+        }
+
+        private static void GameNetwork_Tick_CorridorDiagnostics_Prefix(out object __state)
+        {
+            __state = ExactCreateAgentCorridorDiagnostics.CaptureClientNativeExecutionBoundaryEntry(
+                Mission.Current,
+                "game-network-tick",
+                "BattleMapSpawnHandoffPatch GameNetwork.Tick prefix");
+        }
+
+        private static void GameNetwork_Tick_CorridorDiagnostics_Postfix(object __state)
+        {
+            ExactCreateAgentCorridorDiagnostics.ObserveClientNativeExecutionBoundaryExit(
+                Mission.Current,
+                __state,
+                "BattleMapSpawnHandoffPatch GameNetwork.Tick postfix");
+        }
+
+        private static void Mission_OnTick_CorridorDiagnostics_Prefix(
+            Mission __instance,
+            out object __state)
+        {
+            __state = ExactCreateAgentCorridorDiagnostics.CaptureClientNativeExecutionBoundaryEntry(
+                __instance,
+                "mission-on-tick",
+                "BattleMapSpawnHandoffPatch Mission.OnTick prefix");
+        }
+
+        private static void Mission_OnTick_CorridorDiagnostics_Postfix(
+            Mission __instance,
+            object __state)
+        {
+            ExactCreateAgentCorridorDiagnostics.ObserveClientNativeExecutionBoundaryExit(
+                __instance,
+                __state,
+                "BattleMapSpawnHandoffPatch Mission.OnTick postfix");
+        }
+
+        private static void Mission_TickAgentsAndTeamsAsync_CorridorDiagnostics_Prefix(
+            Mission __instance,
+            out object __state)
+        {
+            __state = ExactCreateAgentCorridorDiagnostics.CaptureClientNativeExecutionBoundaryEntry(
+                __instance,
+                "mission-tick-agents-and-teams-async",
+                "BattleMapSpawnHandoffPatch Mission.TickAgentsAndTeamsAsync prefix");
+        }
+
+        private static void Mission_TickAgentsAndTeamsAsync_CorridorDiagnostics_Postfix(
+            Mission __instance,
+            object __state)
+        {
+            ExactCreateAgentCorridorDiagnostics.ObserveClientNativeExecutionBoundaryExit(
+                __instance,
+                __state,
+                "BattleMapSpawnHandoffPatch Mission.TickAgentsAndTeamsAsync postfix");
+        }
+
+        private static void Mission_TickAgentsAndTeams_CorridorDiagnostics_Prefix(
+            Mission __instance,
+            out object __state)
+        {
+            __state = ExactCreateAgentCorridorDiagnostics.CaptureClientNativeExecutionBoundaryEntry(
+                __instance,
+                "mission-tick-agents-and-teams-callback",
+                "BattleMapSpawnHandoffPatch Mission.TickAgentsAndTeams prefix");
+        }
+
+        private static void Mission_TickAgentsAndTeams_CorridorDiagnostics_Postfix(
+            Mission __instance,
+            object __state)
+        {
+            ExactCreateAgentCorridorDiagnostics.ObserveClientNativeExecutionBoundaryExit(
+                __instance,
+                __state,
+                "BattleMapSpawnHandoffPatch Mission.TickAgentsAndTeams postfix");
+        }
+
         private static bool MissionNetworkComponent_HandleServerEventCreateAgent_Prefix(GameNetworkMessage baseMessage)
         {
             try
@@ -2754,6 +3037,18 @@ namespace CoopSpectator.Patches
                     strictExactCandidate,
                     mountedHeroPayloadCandidate,
                     "battle-map handoff CreateAgent prefix");
+
+                if (useInitialFieldBattleCreateAgentPacing &&
+                    !createAgent.IsPlayerAgent &&
+                    createAgent.Peer == null &&
+                    !hasMountPayload &&
+                    !IsHeroLikeCreateAgentPayload(createAgent))
+                {
+                    // The stock handler must run inside the original network-message context.
+                    // Replaying it later can corrupt the native replication binding even when
+                    // every managed CreateAgent field remains unchanged.
+                    return true;
+                }
 
                 if (useInitialSallyOutCreateAgentPacing &&
                     !createAgent.IsPlayerAgent &&
@@ -3045,6 +3340,24 @@ namespace CoopSpectator.Patches
                 ModLogger.Info("BattleMapSpawnHandoffPatch: CreateAgent prefix mount-payload tracking failed open: " + ex.Message);
                 return true;
             }
+        }
+
+        private static void MissionNetworkComponent_HandleServerEventAgentVisualsLifecycleDiagnostics_Prefix(
+            GameNetworkMessage baseMessage)
+        {
+            ExactCreateAgentCorridorDiagnostics.ObserveClientAgentVisualsNetworkMessage(
+                baseMessage,
+                "pre-native-handler",
+                "BattleMapSpawnHandoffPatch AgentVisuals lifecycle prefix");
+        }
+
+        private static void MissionNetworkComponent_HandleServerEventAgentVisualsLifecycleDiagnostics_Postfix(
+            GameNetworkMessage baseMessage)
+        {
+            ExactCreateAgentCorridorDiagnostics.ObserveClientAgentVisualsNetworkMessage(
+                baseMessage,
+                "post-native-handler",
+                "BattleMapSpawnHandoffPatch AgentVisuals lifecycle postfix");
         }
 
         private static bool MissionNetworkComponent_HandleServerEventAgentSetFormation_Prefix(GameNetworkMessage baseMessage)
@@ -4597,6 +4910,15 @@ namespace CoopSpectator.Patches
                 };
                 ScheduleDeferredClientAgentBootstrapBundleNoLock(bundle);
             }
+
+            ExactCreateAgentCorridorDiagnostics.ObserveClientDeferredCreateAgentStage(
+                createAgent,
+                agent: null,
+                stage: "queued",
+                attempts: 0,
+                source:
+                    "battle-map handoff deferred CreateAgent registration" +
+                    " Reason=" + (snapshotReadinessSummary ?? "unknown"));
         }
 
         private static bool HasDeferredClientCreateAgentPayload(int agentIndex)
@@ -8143,6 +8465,12 @@ namespace CoopSpectator.Patches
                 Agent existingAgent = Mission.MissionNetworkHelper.GetAgentFromIndex(createAgent.AgentIndex, canBeNull: true);
                 if (existingAgent != null && existingAgent.IsActive())
                 {
+                    ExactCreateAgentCorridorDiagnostics.ObserveClientDeferredCreateAgentStage(
+                        createAgent,
+                        existingAgent,
+                        "existing-agent-satisfied",
+                        deferredPayload.Attempts,
+                        source);
                     BindDeferredClientSetWeaponAmmoDataPayloadsToMaterializedAgent(
                         createAgent.AgentIndex,
                         existingAgent,
@@ -8323,6 +8651,12 @@ namespace CoopSpectator.Patches
 
                 try
                 {
+                    ExactCreateAgentCorridorDiagnostics.ObserveClientDeferredCreateAgentStage(
+                        createAgent,
+                        agent: null,
+                        stage: "pre-native-replay",
+                        attempts: deferredPayload.Attempts,
+                        source: source);
                     if (forceNativeReplay)
                         _forcedNativeClientCreateAgentReplayDepth++;
 
@@ -8341,6 +8675,12 @@ namespace CoopSpectator.Patches
                     Agent replayedAgent = Mission.MissionNetworkHelper.GetAgentFromIndex(
                         createAgent.AgentIndex,
                         canBeNull: true);
+                    ExactCreateAgentCorridorDiagnostics.ObserveClientDeferredCreateAgentStage(
+                        createAgent,
+                        replayedAgent,
+                        "post-native-replay",
+                        deferredPayload.Attempts,
+                        source);
                     if (replayedAgent != null && replayedAgent.IsActive())
                     {
                         BindDeferredClientSetWeaponAmmoDataPayloadsToMaterializedAgent(
