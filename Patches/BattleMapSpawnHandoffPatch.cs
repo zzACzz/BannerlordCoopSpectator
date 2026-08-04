@@ -23381,7 +23381,7 @@ namespace CoopSpectator.Patches
                     formation,
                     isOwnedFormation ? orderOwnerAgent : null);
                 TrySetInstanceMemberValue(formation, "HasPlayerControlledTroop", isOwnedFormation);
-                TrySetInstanceMemberValue(formation, "IsPlayerTroopInFormation", isOwnedFormation);
+                TrySetInstanceMemberValue(formation, "IsPlayerTroopInFormation", false);
             }
             PruneUnauthorizedLocalSelectedFormations(playerOrderController, authorizedFormationIndices);
 
@@ -23701,7 +23701,7 @@ namespace CoopSpectator.Patches
                     formation,
                     isOwnedFormation ? mainAgent : null);
                 TrySetInstanceMemberValue(formation, "HasPlayerControlledTroop", isOwnedFormation);
-                TrySetInstanceMemberValue(formation, "IsPlayerTroopInFormation", isOwnedFormation);
+                TrySetInstanceMemberValue(formation, "IsPlayerTroopInFormation", false);
                 if (!isOwnedFormation)
                     continue;
 
@@ -23964,7 +23964,7 @@ namespace CoopSpectator.Patches
                     formation,
                     isOwnedFormation ? mainAgent : null);
                 TrySetInstanceMemberValue(formation, "HasPlayerControlledTroop", isOwnedFormation);
-                TrySetInstanceMemberValue(formation, "IsPlayerTroopInFormation", isOwnedFormation);
+                TrySetInstanceMemberValue(formation, "IsPlayerTroopInFormation", false);
                 if (isOwnedFormation)
                 {
                     formationsWithUnits++;
@@ -24138,7 +24138,7 @@ namespace CoopSpectator.Patches
                     formation,
                     isOwnedFormation ? mainAgent : null);
                 TrySetInstanceMemberValue(formation, "HasPlayerControlledTroop", isOwnedFormation);
-                TrySetInstanceMemberValue(formation, "IsPlayerTroopInFormation", isOwnedFormation);
+                TrySetInstanceMemberValue(formation, "IsPlayerTroopInFormation", false);
                 if (!isOwnedFormation)
                     continue;
 
