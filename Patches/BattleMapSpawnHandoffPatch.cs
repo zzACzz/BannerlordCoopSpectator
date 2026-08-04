@@ -1153,6 +1153,116 @@ namespace CoopSpectator.Patches
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix/postfix/finalizer applied to MissionNetworkComponent.HandleServerEventCreateAgent.");
         }
 
+        private static void PatchMissionTickCorridorDiagnostics(Harmony harmony)
+        {
+            if (!ExactCreateAgentCorridorDiagnostics.IsClientNativeMissionTickBoundaryDiagnosticsEnabled)
+                return;
+
+            MethodInfo target = typeof(Mission).GetMethod(
+                "Tick",
+                BindingFlags.Instance | BindingFlags.NonPublic,
+                null,
+                new[] { typeof(float) },
+                null);
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Mission_Tick_CorridorDiagnostics_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(Mission_Tick_CorridorDiagnostics_Postfix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null || postfix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: Mission.Tick(float) diagnostic target or observer not found. Skip corridor diagnostics.");
+                return;
+            }
+
+            harmony.Patch(
+                target,
+                prefix: new HarmonyMethod(prefix),
+                postfix: new HarmonyMethod(postfix));
+            ModLogger.Info("BattleMapSpawnHandoffPatch: diagnostic prefix/postfix applied to Mission.Tick(float).");
+        }
+
+        private static void PatchClientNativeExecutionBoundaryCorridorDiagnostics(Harmony harmony)
+        {
+            if (!ExactCreateAgentCorridorDiagnostics.IsClientNativeExecutionBoundaryDiagnosticsEnabled)
+                return;
+
+            PatchClientNativeExecutionBoundaryMethod(
+                harmony,
+                typeof(GameNetwork).GetMethod(
+                    "Tick",
+                    BindingFlags.Static | BindingFlags.NonPublic,
+                    null,
+                    new[] { typeof(float) },
+                    null),
+                nameof(GameNetwork_Tick_CorridorDiagnostics_Prefix),
+                nameof(GameNetwork_Tick_CorridorDiagnostics_Postfix),
+                "GameNetwork.Tick(float)");
+            PatchClientNativeExecutionBoundaryMethod(
+                harmony,
+                typeof(Mission).GetMethod(
+                    nameof(Mission.OnTick),
+                    BindingFlags.Instance | BindingFlags.Public,
+                    null,
+                    new[] { typeof(float), typeof(float), typeof(bool), typeof(bool) },
+                    null),
+                nameof(Mission_OnTick_CorridorDiagnostics_Prefix),
+                nameof(Mission_OnTick_CorridorDiagnostics_Postfix),
+                "Mission.OnTick(float,float,bool,bool)");
+            PatchClientNativeExecutionBoundaryMethod(
+                harmony,
+                typeof(Mission).GetMethod(
+                    nameof(Mission.TickAgentsAndTeamsAsync),
+                    BindingFlags.Instance | BindingFlags.Public,
+                    null,
+                    new[] { typeof(float) },
+                    null),
+                nameof(Mission_TickAgentsAndTeamsAsync_CorridorDiagnostics_Prefix),
+                nameof(Mission_TickAgentsAndTeamsAsync_CorridorDiagnostics_Postfix),
+                "Mission.TickAgentsAndTeamsAsync(float)");
+            PatchClientNativeExecutionBoundaryMethod(
+                harmony,
+                typeof(Mission).GetMethod(
+                    "TickAgentsAndTeams",
+                    BindingFlags.Instance | BindingFlags.NonPublic,
+                    null,
+                    new[] { typeof(float), typeof(bool) },
+                    null),
+                nameof(Mission_TickAgentsAndTeams_CorridorDiagnostics_Prefix),
+                nameof(Mission_TickAgentsAndTeams_CorridorDiagnostics_Postfix),
+                "Mission.TickAgentsAndTeams(float,bool)");
+        }
+
+        private static void PatchClientNativeExecutionBoundaryMethod(
+            Harmony harmony,
+            MethodInfo target,
+            string prefixName,
+            string postfixName,
+            string displayName)
+        {
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                prefixName,
+                BindingFlags.Static | BindingFlags.NonPublic);
+            MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                postfixName,
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (target == null || prefix == null || postfix == null)
+            {
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: " + displayName +
+                    " diagnostic target or observer not found. Skip corridor diagnostics.");
+                return;
+            }
+
+            harmony.Patch(
+                target,
+                prefix: new HarmonyMethod(prefix),
+                postfix: new HarmonyMethod(postfix));
+            ModLogger.Info(
+                "BattleMapSpawnHandoffPatch: diagnostic prefix/postfix applied to " + displayName + ".");
+        }
+
         private static void PatchMissionNetworkComponentAgentSetFormation(Harmony harmony)
         {
             MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
@@ -1170,6 +1280,49 @@ namespace CoopSpectator.Patches
             _missionNetworkComponentHandleServerEventAgentSetFormationMethod = target;
             harmony.Patch(target, prefix: new HarmonyMethod(prefix));
             ModLogger.Info("BattleMapSpawnHandoffPatch: prefix applied to MissionNetworkComponent.HandleServerEventAgentSetFormation.");
+        }
+
+        private static void PatchMissionNetworkComponentAgentVisualsLifecycleDiagnostics(Harmony harmony)
+        {
+            MethodInfo prefix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventAgentVisualsLifecycleDiagnostics_Prefix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
+                nameof(MissionNetworkComponent_HandleServerEventAgentVisualsLifecycleDiagnostics_Postfix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (prefix == null || postfix == null)
+            {
+                ModLogger.Info("BattleMapSpawnHandoffPatch: AgentVisuals lifecycle diagnostics methods not found. Skip.");
+                return;
+            }
+
+            string[] targetNames =
+            {
+                "HandleServerEventCreateAgentVisuals",
+                "HandleServerEventRemoveAgentVisualsForPeer",
+                "HandleServerEventRemoveAgentVisualsFromIndexForPeer"
+            };
+            foreach (string targetName in targetNames)
+            {
+                MethodInfo target = typeof(MissionNetworkComponent).GetMethod(
+                    targetName,
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                if (target == null)
+                {
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: MissionNetworkComponent." + targetName +
+                        " not found for AgentVisuals lifecycle diagnostics. Skip.");
+                    continue;
+                }
+
+                harmony.Patch(
+                    target,
+                    prefix: new HarmonyMethod(prefix),
+                    postfix: new HarmonyMethod(postfix));
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: diagnostic prefix/postfix applied to MissionNetworkComponent." +
+                    targetName + ".");
+            }
         }
 
         private static void PatchMissionNetworkComponentSetAgentActionSet(Harmony harmony)
@@ -2678,6 +2831,101 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static void Mission_Tick_CorridorDiagnostics_Prefix(
+            Mission __instance,
+            out object __state)
+        {
+            __state = ExactCreateAgentCorridorDiagnostics.CaptureClientNativeMissionTickEntry(
+                __instance,
+                "BattleMapSpawnHandoffPatch Mission.Tick prefix");
+        }
+
+        private static void Mission_Tick_CorridorDiagnostics_Postfix(
+            Mission __instance,
+            object __state)
+        {
+            ExactCreateAgentCorridorDiagnostics.ObserveClientNativeMissionTickExit(
+                __instance,
+                __state,
+                "BattleMapSpawnHandoffPatch Mission.Tick postfix");
+        }
+
+        private static void GameNetwork_Tick_CorridorDiagnostics_Prefix(out object __state)
+        {
+            __state = ExactCreateAgentCorridorDiagnostics.CaptureClientNativeExecutionBoundaryEntry(
+                Mission.Current,
+                "game-network-tick",
+                "BattleMapSpawnHandoffPatch GameNetwork.Tick prefix");
+        }
+
+        private static void GameNetwork_Tick_CorridorDiagnostics_Postfix(object __state)
+        {
+            ExactCreateAgentCorridorDiagnostics.ObserveClientNativeExecutionBoundaryExit(
+                Mission.Current,
+                __state,
+                "BattleMapSpawnHandoffPatch GameNetwork.Tick postfix");
+        }
+
+        private static void Mission_OnTick_CorridorDiagnostics_Prefix(
+            Mission __instance,
+            out object __state)
+        {
+            __state = ExactCreateAgentCorridorDiagnostics.CaptureClientNativeExecutionBoundaryEntry(
+                __instance,
+                "mission-on-tick",
+                "BattleMapSpawnHandoffPatch Mission.OnTick prefix");
+        }
+
+        private static void Mission_OnTick_CorridorDiagnostics_Postfix(
+            Mission __instance,
+            object __state)
+        {
+            ExactCreateAgentCorridorDiagnostics.ObserveClientNativeExecutionBoundaryExit(
+                __instance,
+                __state,
+                "BattleMapSpawnHandoffPatch Mission.OnTick postfix");
+        }
+
+        private static void Mission_TickAgentsAndTeamsAsync_CorridorDiagnostics_Prefix(
+            Mission __instance,
+            out object __state)
+        {
+            __state = ExactCreateAgentCorridorDiagnostics.CaptureClientNativeExecutionBoundaryEntry(
+                __instance,
+                "mission-tick-agents-and-teams-async",
+                "BattleMapSpawnHandoffPatch Mission.TickAgentsAndTeamsAsync prefix");
+        }
+
+        private static void Mission_TickAgentsAndTeamsAsync_CorridorDiagnostics_Postfix(
+            Mission __instance,
+            object __state)
+        {
+            ExactCreateAgentCorridorDiagnostics.ObserveClientNativeExecutionBoundaryExit(
+                __instance,
+                __state,
+                "BattleMapSpawnHandoffPatch Mission.TickAgentsAndTeamsAsync postfix");
+        }
+
+        private static void Mission_TickAgentsAndTeams_CorridorDiagnostics_Prefix(
+            Mission __instance,
+            out object __state)
+        {
+            __state = ExactCreateAgentCorridorDiagnostics.CaptureClientNativeExecutionBoundaryEntry(
+                __instance,
+                "mission-tick-agents-and-teams-callback",
+                "BattleMapSpawnHandoffPatch Mission.TickAgentsAndTeams prefix");
+        }
+
+        private static void Mission_TickAgentsAndTeams_CorridorDiagnostics_Postfix(
+            Mission __instance,
+            object __state)
+        {
+            ExactCreateAgentCorridorDiagnostics.ObserveClientNativeExecutionBoundaryExit(
+                __instance,
+                __state,
+                "BattleMapSpawnHandoffPatch Mission.TickAgentsAndTeams postfix");
+        }
+
         private static bool MissionNetworkComponent_HandleServerEventCreateAgent_Prefix(GameNetworkMessage baseMessage)
         {
             try
@@ -2754,6 +3002,18 @@ namespace CoopSpectator.Patches
                     strictExactCandidate,
                     mountedHeroPayloadCandidate,
                     "battle-map handoff CreateAgent prefix");
+
+                if (useInitialFieldBattleCreateAgentPacing &&
+                    !createAgent.IsPlayerAgent &&
+                    createAgent.Peer == null &&
+                    !hasMountPayload &&
+                    !IsHeroLikeCreateAgentPayload(createAgent))
+                {
+                    // The stock handler must run inside the original network-message context.
+                    // Replaying it later can corrupt the native replication binding even when
+                    // every managed CreateAgent field remains unchanged.
+                    return true;
+                }
 
                 if (useInitialSallyOutCreateAgentPacing &&
                     !createAgent.IsPlayerAgent &&
@@ -3045,6 +3305,24 @@ namespace CoopSpectator.Patches
                 ModLogger.Info("BattleMapSpawnHandoffPatch: CreateAgent prefix mount-payload tracking failed open: " + ex.Message);
                 return true;
             }
+        }
+
+        private static void MissionNetworkComponent_HandleServerEventAgentVisualsLifecycleDiagnostics_Prefix(
+            GameNetworkMessage baseMessage)
+        {
+            ExactCreateAgentCorridorDiagnostics.ObserveClientAgentVisualsNetworkMessage(
+                baseMessage,
+                "pre-native-handler",
+                "BattleMapSpawnHandoffPatch AgentVisuals lifecycle prefix");
+        }
+
+        private static void MissionNetworkComponent_HandleServerEventAgentVisualsLifecycleDiagnostics_Postfix(
+            GameNetworkMessage baseMessage)
+        {
+            ExactCreateAgentCorridorDiagnostics.ObserveClientAgentVisualsNetworkMessage(
+                baseMessage,
+                "post-native-handler",
+                "BattleMapSpawnHandoffPatch AgentVisuals lifecycle postfix");
         }
 
         private static bool MissionNetworkComponent_HandleServerEventAgentSetFormation_Prefix(GameNetworkMessage baseMessage)
@@ -4597,6 +4875,15 @@ namespace CoopSpectator.Patches
                 };
                 ScheduleDeferredClientAgentBootstrapBundleNoLock(bundle);
             }
+
+            ExactCreateAgentCorridorDiagnostics.ObserveClientDeferredCreateAgentStage(
+                createAgent,
+                agent: null,
+                stage: "queued",
+                attempts: 0,
+                source:
+                    "battle-map handoff deferred CreateAgent registration" +
+                    " Reason=" + (snapshotReadinessSummary ?? "unknown"));
         }
 
         private static bool HasDeferredClientCreateAgentPayload(int agentIndex)
@@ -8143,6 +8430,12 @@ namespace CoopSpectator.Patches
                 Agent existingAgent = Mission.MissionNetworkHelper.GetAgentFromIndex(createAgent.AgentIndex, canBeNull: true);
                 if (existingAgent != null && existingAgent.IsActive())
                 {
+                    ExactCreateAgentCorridorDiagnostics.ObserveClientDeferredCreateAgentStage(
+                        createAgent,
+                        existingAgent,
+                        "existing-agent-satisfied",
+                        deferredPayload.Attempts,
+                        source);
                     BindDeferredClientSetWeaponAmmoDataPayloadsToMaterializedAgent(
                         createAgent.AgentIndex,
                         existingAgent,
@@ -8323,6 +8616,12 @@ namespace CoopSpectator.Patches
 
                 try
                 {
+                    ExactCreateAgentCorridorDiagnostics.ObserveClientDeferredCreateAgentStage(
+                        createAgent,
+                        agent: null,
+                        stage: "pre-native-replay",
+                        attempts: deferredPayload.Attempts,
+                        source: source);
                     if (forceNativeReplay)
                         _forcedNativeClientCreateAgentReplayDepth++;
 
@@ -8341,6 +8640,12 @@ namespace CoopSpectator.Patches
                     Agent replayedAgent = Mission.MissionNetworkHelper.GetAgentFromIndex(
                         createAgent.AgentIndex,
                         canBeNull: true);
+                    ExactCreateAgentCorridorDiagnostics.ObserveClientDeferredCreateAgentStage(
+                        createAgent,
+                        replayedAgent,
+                        "post-native-replay",
+                        deferredPayload.Attempts,
+                        source);
                     if (replayedAgent != null && replayedAgent.IsActive())
                     {
                         BindDeferredClientSetWeaponAmmoDataPayloadsToMaterializedAgent(
@@ -14505,10 +14810,8 @@ namespace CoopSpectator.Patches
                 createTimeSpawnEquipment[EquipmentIndex.Horse] = default;
                 createTimeSpawnEquipment[EquipmentIndex.HorseHarness] = default;
             }
-            MissionEquipment createTimeMissionEquipment = ResolveStrictExactHeroCreateAgentMissionEquipment(
-                createTimeSpawnEquipment,
-                banner,
-                createAgent);
+            MissionEquipment createTimeMissionEquipment =
+                ResolveStrictExactHeroCreateAgentMissionEquipment(createAgent);
             if (createTimeSpawnEquipment == null || createTimeMissionEquipment == null)
                 return false;
 
@@ -14666,18 +14969,13 @@ namespace CoopSpectator.Patches
                 createAgent,
                 character);
             Banner banner = ResolveStrictExactHeroCreateAgentBanner(teamFromTeamIndex, formation);
-            Equipment createTimeSpawnEquipment = CoopMissionSpawnLogic.BuildSnapshotEquipmentForExactRuntime(
-                entryState,
-                includeWeapons: true,
-                honorExactVisualContracts: false,
-                includeArmorVisuals: true,
-                includeMountVisuals: false);
-            if (createTimeSpawnEquipment == null)
+            Equipment createTimeSpawnEquipment = createAgent.SpawnEquipment?.Clone(false);
+            MissionEquipment createTimeMissionEquipment = createAgent.MissionEquipment;
+            if (createTimeSpawnEquipment == null || createTimeMissionEquipment == null)
                 return false;
 
             createTimeSpawnEquipment[EquipmentIndex.Horse] = default;
             createTimeSpawnEquipment[EquipmentIndex.HorseHarness] = default;
-            MissionEquipment createTimeMissionEquipment = new MissionEquipment(createTimeSpawnEquipment, banner);
 
             Vec2 initialDirection = createAgent.Direction;
             if (initialDirection.LengthSquared <= 0.001f)
@@ -14939,15 +15237,8 @@ namespace CoopSpectator.Patches
                 createAgent,
                 createTimeCharacter);
             Banner banner = ResolveStrictExactHeroCreateAgentBanner(teamFromTeamIndex, formation);
-            Equipment createTimeSpawnEquipment =
-                exactVisualHybridEligible
-                    ? BuildMountedHeroExactVisualHybridSpawnEquipment(contract, createAgent)
-                    : createAgent.SpawnEquipment?.Clone(false);
-            MissionEquipment createTimeMissionEquipment =
-                exactVisualHybridEligible
-                    ? BuildMountedHeroExactVisualHybridMissionEquipment(createTimeSpawnEquipment, createAgent, banner)
-                    : createAgent.MissionEquipment ??
-                      (createTimeSpawnEquipment != null ? new MissionEquipment(createTimeSpawnEquipment, banner) : null);
+            Equipment createTimeSpawnEquipment = createAgent.SpawnEquipment?.Clone(false);
+            MissionEquipment createTimeMissionEquipment = createAgent.MissionEquipment;
             if (createTimeSpawnEquipment == null || createTimeMissionEquipment == null || createTimeCharacter == null)
                 return false;
 
@@ -15007,7 +15298,7 @@ namespace CoopSpectator.Patches
                     " ContractCharacter=" + (createTimeCharacter?.StringId ?? "null") +
                     " MountAgentIndex=" + createAgent.MountAgentIndex +
                     " FormationIndex=" + createAgent.FormationIndex +
-                    " ExactVisualHybridEligible=" + exactVisualHybridEligible +
+                    " LegacyExactVisualHybridCandidateIgnored=" + exactVisualHybridEligible +
                     " PayloadMissionWeapons={" + BuildMissionEquipmentWeaponSummary(createTimeMissionEquipment) + "}" +
                     " PayloadMount={" + BuildEquipmentSummary(createTimeSpawnEquipment, EquipmentIndex.Horse, EquipmentIndex.HorseHarness) + "}" +
                     " Source=battle-map payload mounted hero CreateAgent";
@@ -15144,41 +15435,6 @@ namespace CoopSpectator.Patches
             entryState = candidateEntryState;
             resolutionSource = "payload-candidate-" + (resolutionState ?? "resolved");
             return true;
-        }
-
-        private static Equipment BuildMountedHeroExactVisualHybridSpawnEquipment(
-            ExactTransferSpawnContract contract,
-            CreateAgent createAgent)
-        {
-            Equipment hybridEquipment = contract?.Equipment?.SpawnEquipment?.Clone(false);
-            if (hybridEquipment == null)
-                return createAgent?.SpawnEquipment?.Clone(false);
-
-            Equipment payloadSpawnEquipment = createAgent?.SpawnEquipment;
-            for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
-            {
-                if (hybridEquipment[slot].Item != null)
-                    continue;
-
-                hybridEquipment[slot] =
-                    payloadSpawnEquipment != null
-                        ? payloadSpawnEquipment.GetEquipmentFromSlot(slot)
-                        : default;
-            }
-
-            return hybridEquipment;
-        }
-
-        private static MissionEquipment BuildMountedHeroExactVisualHybridMissionEquipment(
-            Equipment hybridSpawnEquipment,
-            CreateAgent createAgent,
-            Banner banner)
-        {
-            if (hybridSpawnEquipment == null)
-                return createAgent?.MissionEquipment;
-
-            MissionEquipment hybridMissionEquipment = new MissionEquipment(hybridSpawnEquipment, banner);
-            return hybridMissionEquipment;
         }
 
         private static void TryCanonicalizeStrictMountedHeroSynchronizeAgentEquipmentPayload(
@@ -16025,20 +16281,15 @@ namespace CoopSpectator.Patches
             ExactTransferSpawnContract contract,
             CreateAgent createAgent)
         {
-            if (contract?.Equipment?.SpawnEquipment != null)
-                return contract.Equipment.SpawnEquipment.Clone(false);
+            if (createAgent?.SpawnEquipment != null)
+                return createAgent.SpawnEquipment.Clone(false);
 
-            return createAgent?.SpawnEquipment?.Clone(false);
+            return contract?.Equipment?.SpawnEquipment?.Clone(false);
         }
 
         private static MissionEquipment ResolveStrictExactHeroCreateAgentMissionEquipment(
-            Equipment createTimeSpawnEquipment,
-            Banner banner,
             CreateAgent createAgent)
         {
-            if (createTimeSpawnEquipment != null)
-                return new MissionEquipment(createTimeSpawnEquipment, banner);
-
             return createAgent?.MissionEquipment;
         }
 
@@ -16461,13 +16712,6 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
-                TryCanonicalizeExactHeroSynchronizeAgentEquipmentWeaponSlots(
-                    mission,
-                    synchronizeAgentSpawnEquipment,
-                    agent);
-                TryCanonicalizeStrictMountedHeroSynchronizeAgentEquipmentPayload(
-                    synchronizeAgentSpawnEquipment,
-                    agent);
                 // SynchronizeAgentSpawnEquipment and every later weapon-state message use the
                 // server's slot indices as one shared contract. Reordering a non-hero payload
                 // only on the client makes a later SetWieldedItemIndex target another item.
@@ -19832,13 +20076,6 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
-                if (setWieldedItemIndex.IsWieldedOnSpawn &&
-                    TrySuppressStrictExactHeroStaleOnSpawnWield(setWieldedItemIndex, agent))
-                {
-                    __state = true;
-                    return false;
-                }
-
                 if (ShouldUseSafeStringIdCreateAgentPathOnClient(mission) &&
                     TrySuppressExactSiegeHeroUnsafePostPossessionSetWieldedItemIndex(
                         mission,
@@ -20546,137 +20783,6 @@ namespace CoopSpectator.Patches
             {
             }
 
-            return true;
-        }
-
-        private static bool TrySuppressStrictExactHeroStaleOnSpawnWield(
-            SetWieldedItemIndex setWieldedItemIndex,
-            Agent agent)
-        {
-            if (setWieldedItemIndex == null || agent == null || agent.IsMount)
-                return false;
-
-            if (!CoopMissionSpawnLogic.ShouldSuppressStrictExactHeroOnSpawnWield(
-                    agent,
-                    out string entryId,
-                    out string suppressReason))
-            {
-                return false;
-            }
-
-            bool localInitialWieldAlreadyApplied =
-                CoopMissionSpawnLogic.HasStrictExactHeroLocalInitialWieldBeenApplied(
-                    agent,
-                    entryId,
-                    out string localInitialWieldVersionKey,
-                    out string localInitialWieldVersionStateSummary);
-            bool retryLocalInitialWieldDueToCurrentNone =
-                localInitialWieldAlreadyApplied &&
-                ShouldRetryStrictExactHeroLocalInitialWield(agent);
-            bool localInitialWieldApplied = false;
-            string localInitialWieldResult =
-                localInitialWieldAlreadyApplied
-                    ? "strict-exact-hero-local-initial-wield-already-applied"
-                    : "(none)";
-            string localInitialWieldIssue = "(none)";
-
-            if (retryLocalInitialWieldDueToCurrentNone)
-            {
-                CoopMissionSpawnLogic.InvalidateStrictExactHeroLocalInitialWieldAppliedMarker(
-                    agent,
-                    entryId,
-                    "battle-map handoff strict exact hero stale on-spawn wield suppression",
-                    "current-wield-none-retry");
-                localInitialWieldAlreadyApplied = false;
-                localInitialWieldResult = "strict-exact-hero-local-initial-wield-retry-after-stale-applied-key";
-            }
-
-            if (!localInitialWieldAlreadyApplied)
-            {
-                localInitialWieldApplied = CoopMissionSpawnLogic.TryApplyStrictExactHeroLocalInitialWield(
-                    agent,
-                    entryId,
-                    "battle-map handoff strict exact hero stale on-spawn wield suppression",
-                    out localInitialWieldResult,
-                    out localInitialWieldIssue);
-            }
-
-            bool localInitialWieldAppliedForCurrentVersion =
-                CoopMissionSpawnLogic.HasStrictExactHeroLocalInitialWieldBeenApplied(
-                    agent,
-                    entryId,
-                    out localInitialWieldVersionKey,
-                    out localInitialWieldVersionStateSummary);
-
-            string allowVanillaOnSpawnWieldFallbackReason = "(none)";
-            bool allowVanillaOnSpawnWieldFallback =
-                setWieldedItemIndex.IsWieldedOnSpawn &&
-                !localInitialWieldAppliedForCurrentVersion &&
-                CoopMissionSpawnLogic.ShouldAllowVanillaOnSpawnWieldFallbackForStrictHero(
-                    agent,
-                    entryId,
-                    out allowVanillaOnSpawnWieldFallbackReason);
-
-            if (allowVanillaOnSpawnWieldFallback)
-            {
-                ModLogger.Info(
-                    "BattleMapSpawnHandoffPatch: allowed vanilla strict exact-hero on-spawn SetWieldedItemIndex fallback because local strict wield refresh did not materialize a usable weapon state. " +
-                    "AgentIndex=" + agent.Index +
-                    " EntryId=" + (entryId ?? "null") +
-                    " TeamSide=" + agent.Team?.Side +
-                    " PayloadWieldedItemIndex=" + setWieldedItemIndex.WieldedItemIndex +
-                    " PayloadIsLeftHand=" + setWieldedItemIndex.IsLeftHand +
-                    " PayloadIsWieldedInstantly=" + setWieldedItemIndex.IsWieldedInstantly +
-                    " PayloadIsWieldedOnSpawn=" + setWieldedItemIndex.IsWieldedOnSpawn +
-                    " PayloadMainHandUsageIndex=" + setWieldedItemIndex.MainHandCurrentUsageIndex +
-                    " SuppressedReason=" + (suppressReason ?? "strict-exact-hero-stale-onspawn-wield") +
-                    " LocalInitialWieldApplied=" + localInitialWieldApplied +
-                    " LocalInitialWieldAlreadyApplied=" + localInitialWieldAlreadyApplied +
-                    " LocalInitialWieldAppliedForCurrentVersion=" + localInitialWieldAppliedForCurrentVersion +
-                    " LocalInitialWieldVersionKey=" + (string.IsNullOrWhiteSpace(localInitialWieldVersionKey) ? "(none)" : localInitialWieldVersionKey) +
-                    " LocalInitialWieldVersionState=" + (localInitialWieldVersionStateSummary ?? "(none)") +
-                    " LocalInitialWieldResult=" + (localInitialWieldResult ?? "(none)") +
-                    " LocalInitialWieldIssue=" + (localInitialWieldIssue ?? "(none)") +
-                    " AllowVanillaReason=" + (allowVanillaOnSpawnWieldFallbackReason ?? "(none)"));
-                return false;
-            }
-
-            string payloadSummary =
-                "PayloadWieldedItemIndex=" + setWieldedItemIndex.WieldedItemIndex +
-                " PayloadIsLeftHand=" + setWieldedItemIndex.IsLeftHand +
-                " PayloadIsWieldedInstantly=" + setWieldedItemIndex.IsWieldedInstantly +
-                " PayloadIsWieldedOnSpawn=" + setWieldedItemIndex.IsWieldedOnSpawn +
-                " PayloadMainHandUsageIndex=" + setWieldedItemIndex.MainHandCurrentUsageIndex +
-                " SuppressedReason=" + (suppressReason ?? "strict-exact-hero-stale-onspawn-wield") +
-                " LocalInitialWieldApplied=" + localInitialWieldApplied +
-                " LocalInitialWieldAlreadyApplied=" + localInitialWieldAlreadyApplied +
-                " LocalInitialWieldAppliedForCurrentVersion=" + localInitialWieldAppliedForCurrentVersion +
-                " RetryLocalInitialWieldDueToCurrentNone=" + retryLocalInitialWieldDueToCurrentNone +
-                " LocalInitialWieldVersionKey=" + (string.IsNullOrWhiteSpace(localInitialWieldVersionKey) ? "(none)" : localInitialWieldVersionKey) +
-                " LocalInitialWieldVersionState=" + (localInitialWieldVersionStateSummary ?? "(none)") +
-                " LocalInitialWieldResult=" + (localInitialWieldResult ?? "(none)") +
-                " LocalInitialWieldIssue=" + (localInitialWieldIssue ?? "(none)");
-
-            ModLogger.Info(
-                "BattleMapSpawnHandoffPatch: suppressed stale strict exact-hero on-spawn SetWieldedItemIndex after contract adapter materialization. " +
-                "AgentIndex=" + agent.Index +
-                " EntryId=" + (entryId ?? "null") +
-                " TeamSide=" + agent.Team?.Side +
-                " " + payloadSummary);
-            ExactCreateAgentCorridorDiagnostics.ObserveClientSetWieldedItemIndex(
-                setWieldedItemIndex,
-                agent,
-                suppressed: true,
-                source: "battle-map handoff SetWieldedItemIndex strict exact hero guard");
-            CoopMissionSpawnLogic.ObserveClientSetWieldedItemIndex(
-                setWieldedItemIndex.AgentIndex,
-                setWieldedItemIndex.IsWieldedOnSpawn,
-                "battle-map handoff SetWieldedItemIndex strict exact hero guard");
-            CoopMissionSpawnLogic.TraceClientMountedHeroNetworkContract(
-                agent,
-                "client-set-wielded-item-index-suppressed",
-                "battle-map handoff SetWieldedItemIndex strict exact hero guard",
-                payloadSummary);
             return true;
         }
 

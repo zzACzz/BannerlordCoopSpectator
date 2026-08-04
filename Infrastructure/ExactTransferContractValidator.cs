@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using TaleWorlds.Core;
 
 namespace CoopSpectator.Infrastructure
 {
@@ -107,7 +108,37 @@ namespace CoopSpectator.Infrastructure
                 {
                     result.Errors.Add("required pre-spawn slot is empty: " + (slot.SlotLabel ?? slot.Slot.ToString()));
                 }
+
+                if (slot.IsEmpty || contract.Equipment.SpawnEquipment == null)
+                    continue;
+
+                ItemObject materializedItem = contract.Equipment.SpawnEquipment[slot.Slot].Item;
+                if (materializedItem == null)
+                {
+                    if (slot.MustExistAtCreateAgentTime)
+                    {
+                        result.Errors.Add(
+                            "required pre-spawn slot has no materialized item: " +
+                            (slot.SlotLabel ?? slot.Slot.ToString()));
+                    }
+
+                    continue;
+                }
+
+                if (!materializedItem.MultiplayerItem)
+                {
+                    result.Errors.Add(
+                        "pre-spawn slot resolved to a non-multiplayer item: " +
+                        (slot.SlotLabel ?? slot.Slot.ToString()) + "=" +
+                        (materializedItem.StringId ?? "null"));
+                }
             }
+
+            if (!contract.Equipment.WeaponSlotsPreserved)
+                result.Errors.Add("exact equipment contract must preserve original multiplayer mirror weapon slots");
+
+            if (!contract.Equipment.AmmoLayoutValid)
+                result.Warnings.Add("selected ranged usage has no compatible ammunition class in weapon slots");
         }
 
         private static void ValidateMount(ExactTransferSpawnContract contract, ExactTransferValidationResult result)
@@ -169,12 +200,38 @@ namespace CoopSpectator.Infrastructure
                 return;
             }
 
-            if (contract.InitialWield.HasWeapon2Risk &&
-                contract.SpawnPolicy != null &&
-                contract.SpawnPolicy.UseStrictExactHeroPath)
+            bool hasWeaponItems = contract.Equipment?.Slots?.Any(slot =>
+                slot != null &&
+                !slot.IsEmpty &&
+                slot.Slot >= EquipmentIndex.Weapon0 &&
+                slot.Slot <= EquipmentIndex.Weapon3) == true;
+            if (!hasWeaponItems)
+                return;
+
+            if (!contract.InitialWield.InitialWieldResolved)
             {
-                result.Errors.Add("strict hero path still has live weapon2 risk");
+                result.Errors.Add("weapon slots contain items but no semantic initial wield could be resolved");
+                return;
             }
+
+            bool hasMainHand = contract.InitialWield.PreferredMainHandSlotIndex.HasValue;
+            bool hasOffHand = contract.InitialWield.PreferredOffHandSlotIndex.HasValue;
+            if (!hasMainHand && !hasOffHand)
+                result.Errors.Add("semantic initial wield resolved neither a main-hand nor an off-hand slot");
+
+            if (hasMainHand &&
+                (contract.InitialWield.PreferredMainHandSlotIndex.Value < (int)EquipmentIndex.Weapon0 ||
+                 contract.InitialWield.PreferredMainHandSlotIndex.Value > (int)EquipmentIndex.Weapon3))
+                result.Errors.Add("semantic initial wield main-hand slot is outside Weapon0..Weapon3");
+
+            if (hasMainHand &&
+                (!contract.InitialWield.PreferredMainHandUsageIndex.HasValue ||
+                 contract.InitialWield.PreferredMainHandUsageIndex.Value < 0))
+                result.Errors.Add("semantic initial wield usage index is missing");
+
+            if (contract.InitialWield.MainHandNotUsableWithOneHand &&
+                contract.InitialWield.PreferredOffHandSlotIndex.HasValue)
+                result.Errors.Add("two-handed initial usage cannot materialize a shield in off hand");
         }
 
         private static void ValidateControl(ExactTransferSpawnContract contract, ExactTransferValidationResult result)

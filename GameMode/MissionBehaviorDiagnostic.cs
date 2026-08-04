@@ -89,6 +89,9 @@ namespace CoopSpectator.GameMode
                     "MissionBehaviorDiagnostic: running battle-map client exact visual observer fallback because CoopMissionClientLogic is not injected in crash-isolation stack.");
             }
 
+            ExactCreateAgentCorridorDiagnostics.TrySampleClientAgentAndPreviewVisualPositions(
+                mission,
+                "MissionBehaviorDiagnostic.OnMissionTick");
             CoopMissionSpawnLogic.TryRunClientExactCampaignVisualObserver(mission);
             CoopMissionSpawnLogic.TryRunClientGlobalCaptainAgentStatRefresh(mission);
         }

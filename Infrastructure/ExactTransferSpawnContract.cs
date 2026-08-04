@@ -73,6 +73,9 @@ namespace CoopSpectator.Infrastructure
         public bool IncludeArmorVisualsInPreSpawn { get; set; }
         public bool IncludeCapeInPreSpawn { get; set; }
         public bool IncludeMountVisualsInPreSpawn { get; set; }
+        public bool WeaponSlotsPreserved { get; set; }
+        public bool AmmoLayoutValid { get; set; }
+        public string WeaponSlotPolicySummary { get; set; }
         public bool MountedWeaponLayoutNormalized { get; set; }
         public string MountedWeaponLayoutSummary { get; set; }
     }
@@ -114,6 +117,12 @@ namespace CoopSpectator.Infrastructure
     {
         public int? PreferredMainHandSlotIndex { get; set; }
         public int? PreferredOffHandSlotIndex { get; set; }
+        public int? PreferredMainHandUsageIndex { get; set; }
+        public bool InitialWieldResolved { get; set; }
+        public bool MainHandNotUsableWithOneHand { get; set; }
+        public bool MainHandRequiresAmmo { get; set; }
+        public bool MainHandHasCompatibleAmmo { get; set; }
+        public string InitialWieldResolutionSummary { get; set; }
         public bool RequireImmediateWieldOnSpawn { get; set; }
         public bool AllowDeferredWieldAfterEquipmentSync { get; set; }
         public bool HasWeapon2Risk { get; set; }

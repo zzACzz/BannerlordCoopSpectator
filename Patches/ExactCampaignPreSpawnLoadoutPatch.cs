@@ -126,19 +126,32 @@ namespace CoopSpectator.Patches
                     EntryId = exactOrigin.EntryId
                 };
             PayloadDiagnosticByEntryId[exactOrigin.EntryId] = payloadDiagnostic;
-            bool injectEquipment = resolvedContract?.InjectEquipment == true;
+            bool injectEquipment =
+                resolvedContract?.InjectEquipment == true &&
+                exactTransferValidation?.IsValid == true;
             Equipment exactEquipment = injectEquipment
                 ? BuildPreSpawnEquipment(
                     agentBuildData,
-                    entryState,
+                    exactTransferContract,
                     includeWeapons,
                     includeArmorVisuals,
                     includeCape,
                     includeMountVisuals)
                 : null;
             EquipmentInjectedByEntryId[exactOrigin.EntryId] = injectEquipment && exactEquipment != null;
+            string preSpawnUsageSummary = "not-applied";
             if (exactEquipment != null)
+            {
                 agentBuildData.Equipment(exactEquipment);
+                if (includeWeapons)
+                {
+                    TryApplySlotPreservingPreSpawnMissionEquipment(
+                        agentBuildData,
+                        exactEquipment,
+                        entryState,
+                        out preSpawnUsageSummary);
+                }
+            }
 
             ExactCreateAgentCorridorDiagnostics.ObserveServerPreSpawnPayload(
                 exactOrigin,
@@ -146,6 +159,7 @@ namespace CoopSpectator.Patches
                 exactTransferContract,
                 payloadDiagnostic,
                 exactEquipment,
+                agentBuildData,
                 injectEquipment,
                 spawnFromAgentVisuals);
 
@@ -209,6 +223,7 @@ namespace CoopSpectator.Patches
                 " " + exactEntryCompatibilitySummary +
                 " SpawnFromAgentVisuals=" + spawnFromAgentVisuals +
                 " Equipment=" + (exactEquipment != null ? SummarizeEquipment(exactEquipment) : "(native-template)") +
+                " InitialWield=" + preSpawnUsageSummary +
                 " Body=" + (!bodyProperties.Equals(default(BodyProperties))));
         }
 
@@ -244,6 +259,7 @@ namespace CoopSpectator.Patches
             ExactCreateAgentCorridorDiagnostics.ObserveServerSpawnResult(
                 exactOrigin,
                 payloadDiagnostic,
+                agentBuildData,
                 __result,
                 spawnFromAgentVisuals,
                 WasEquipmentInjectedForEntry(exactOrigin.EntryId));
@@ -380,7 +396,7 @@ namespace CoopSpectator.Patches
 
         private static Equipment BuildPreSpawnEquipment(
             AgentBuildData agentBuildData,
-            RosterEntryState entryState,
+            ExactTransferSpawnContract exactTransferContract,
             bool includeWeapons,
             bool includeArmorVisuals,
             bool includeCape,
@@ -392,16 +408,19 @@ namespace CoopSpectator.Patches
                 !includeCape &&
                 includeMountVisuals;
             if (mountOnlyHybrid)
-                return BuildMountOnlyHybridPreSpawnEquipment(agentBuildData, entryState);
+                return BuildMountOnlyHybridPreSpawnEquipment(agentBuildData, exactTransferContract);
 
-            Equipment equipment = CoopMissionSpawnLogic.BuildSnapshotEquipmentForExactRuntime(
-                entryState,
-                includeWeapons: includeWeapons,
-                honorExactVisualContracts: false,
-                includeArmorVisuals: includeArmorVisuals || includeCape,
-                includeMountVisuals: includeMountVisuals);
+            Equipment equipment = exactTransferContract?.Equipment?.SpawnEquipment?.Clone(false);
             if (equipment == null)
                 return null;
+
+            if (!includeWeapons)
+            {
+                equipment[EquipmentIndex.Weapon0] = default(EquipmentElement);
+                equipment[EquipmentIndex.Weapon1] = default(EquipmentElement);
+                equipment[EquipmentIndex.Weapon2] = default(EquipmentElement);
+                equipment[EquipmentIndex.Weapon3] = default(EquipmentElement);
+            }
 
             if (!includeArmorVisuals)
             {
@@ -423,20 +442,58 @@ namespace CoopSpectator.Patches
             return equipment;
         }
 
+        private static bool TryApplySlotPreservingPreSpawnMissionEquipment(
+            AgentBuildData agentBuildData,
+            Equipment equipment,
+            RosterEntryState entryState,
+            out string summary)
+        {
+            summary = "semantic-initial-wield-unresolved";
+            if (agentBuildData == null || equipment == null || entryState == null)
+                return false;
+
+            try
+            {
+                if (!ExactWeaponSlotMaterializationPolicy.TryResolveInitialWield(
+                        equipment,
+                        entryState,
+                        out ExactWeaponSlotResolution resolution))
+                {
+                    return false;
+                }
+
+                MissionEquipment missionEquipment = new MissionEquipment(
+                    equipment,
+                    agentBuildData.AgentBanner);
+                if (!ExactWeaponSlotMaterializationPolicy.TryApplyPreSpawnUsage(
+                        missionEquipment,
+                        resolution,
+                        out string usageSummary))
+                {
+                    summary = usageSummary;
+                    return false;
+                }
+
+                agentBuildData.MissionEquipment(missionEquipment);
+                summary = resolution.Summary;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                summary = "pre-spawn-mission-equipment-failed:" + ex.GetType().Name;
+                return false;
+            }
+        }
+
         private static Equipment BuildMountOnlyHybridPreSpawnEquipment(
             AgentBuildData agentBuildData,
-            RosterEntryState entryState)
+            ExactTransferSpawnContract exactTransferContract)
         {
             Equipment baseEquipment = CloneNativePreSpawnEquipment(agentBuildData);
             if (baseEquipment == null)
                 return null;
 
-            Equipment exactMountEquipment = CoopMissionSpawnLogic.BuildSnapshotEquipmentForExactRuntime(
-                entryState,
-                includeWeapons: false,
-                honorExactVisualContracts: false,
-                includeArmorVisuals: false,
-                includeMountVisuals: true);
+            Equipment exactMountEquipment = exactTransferContract?.Equipment?.SpawnEquipment;
             if (exactMountEquipment == null)
                 return null;
 

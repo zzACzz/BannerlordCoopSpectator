@@ -5105,7 +5105,7 @@
 		</ItemComponent>
 		<Flags Civilian="true" />
 	</Item>
-	<CraftedItem id="cs_mirror_execution_axe_df6a477e" name="{=ItUyYjdd}Execution Axe" is_merchandise="false" crafting_template="TwoHandedAxe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_execution_axe_df6a477e" name="{=ItUyYjdd}Execution Axe" is_merchandise="false" crafting_template="TwoHandedAxe">
 		<Pieces>
 			<Piece id="axe_craft_7_head" Type="Blade" scale_factor="90" />
 			<Piece id="axe_craft_6_handle" Type="Handle" scale_factor="110" />
@@ -6490,7 +6490,7 @@
 		</ItemComponent>
 		<Flags Civilian="true" Stealth="true" />
 	</Item>
-	<CraftedItem id="cs_mirror_aserai_sword_1_t2_blunt_ee9efe29" name="{=cG1g4T3t}Sparring Flyssa" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.aserai" has_modifier="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_aserai_sword_1_t2_blunt_ee9efe29" name="{=cG1g4T3t}Sparring Flyssa" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.aserai" has_modifier="false">
 		<Pieces>
 			<Piece id="aserai_blade_4_blunt" Type="Blade" scale_factor="100" />
 			<Piece id="aserai_guard_1" Type="Guard" scale_factor="100" />
@@ -6505,7 +6505,7 @@
 			</Weapon>
 		</ItemComponent>
 	</Item>
-	<CraftedItem id="cs_mirror_aserai_sword_2_t2_blunt_f3b541de" name="{=Kba6rxWK}Sparring Scimitar" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.aserai" has_modifier="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_aserai_sword_2_t2_blunt_f3b541de" name="{=Kba6rxWK}Sparring Scimitar" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.aserai" has_modifier="false">
 		<Pieces>
 			<Piece id="aserai_blade_3_blunt" Type="Blade" scale_factor="100" />
 			<Piece id="aserai_guard_6" Type="Guard" scale_factor="100" />
@@ -6513,7 +6513,7 @@
 			<Piece id="aserai_pommel_1" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_seax_blunt_a3267264" name="{=YmoddWwb}Sparring Seax" crafting_template="Dagger" is_merchandise="false" culture="Culture.sturgia" has_modifier="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_seax_blunt_a3267264" name="{=YmoddWwb}Sparring Seax" crafting_template="Dagger" is_merchandise="false" culture="Culture.sturgia" has_modifier="false">
 		<Pieces>
 			<Piece id="dagger_blade_3_blunt" Type="Blade" scale_factor="93" />
 			<Piece id="sturgian_dagger_guard_8" Type="Guard" scale_factor="90" />
@@ -6522,13 +6522,13 @@
 		</Pieces>
 		<!-- Length: 61 Weight: 0.52 SwingSpeed: 135 ThrustSpeed: 112 SwingDamage: 4B, 18S ThrustDamage: 11B, 33S -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_eastern_spear_1_t2_blunt_e5905820" name="{=BACi0kaM}Sparring Jagged Spear" crafting_template="TwoHandedPolearm" is_merchandise="false" culture="Culture.aserai" has_modifier="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_eastern_spear_1_t2_blunt_e5905820" name="{=BACi0kaM}Sparring Jagged Spear" crafting_template="TwoHandedPolearm" is_merchandise="false" culture="Culture.aserai" has_modifier="false">
 		<Pieces>
 			<Piece id="spear_blade_35_blunt" Type="Blade" scale_factor="95" />
 			<Piece id="spear_handle_3" Type="Handle" scale_factor="95" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_khuzait_polearm_1_t4_blunt_7acfe5ff" name="{=YQ9ybgmj}Sparring Glaive" crafting_template="TwoHandedPolearm" is_merchandise="false" culture="Culture.khuzait">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_khuzait_polearm_1_t4_blunt_7acfe5ff" name="{=YQ9ybgmj}Sparring Glaive" crafting_template="TwoHandedPolearm" is_merchandise="false" culture="Culture.khuzait">
 		<Pieces>
 			<Piece id="spear_blade_19_blunt" Type="Blade" scale_factor="110" />
 			<Piece id="default_polearm_guard" Type="Guard" />
@@ -6536,7 +6536,7 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_desert_throwing_knife_blunt_b4269a33" name="{=es77bJBa}Sparring Throwing Dagger" crafting_template="ThrowingKnife" is_merchandise="false" culture="Culture.aserai" has_modifier="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_desert_throwing_knife_blunt_b4269a33" name="{=es77bJBa}Sparring Throwing Dagger" crafting_template="ThrowingKnife" is_merchandise="false" culture="Culture.aserai" has_modifier="false">
 		<Pieces>
 			<Piece id="dagger_blade_13_blunt" Type="Blade" scale_factor="110" />
 			<Piece id="aserai_dagger_guard_4" Type="Guard" />
@@ -6545,7 +6545,7 @@
 		</Pieces>
 		<!-- Length: 69 Weight: 0.76 SwingSpeed: 113 ThrustSpeed: 108 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_eastern_javelin_1_t2_blunt_b1c2e5ca" name="{=B0E6Zfyk}Sparring Javelin" crafting_template="Javelin" is_merchandise="false" culture="Culture.khuzait" has_modifier="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_eastern_javelin_1_t2_blunt_b1c2e5ca" name="{=B0E6Zfyk}Sparring Javelin" crafting_template="Javelin" is_merchandise="false" culture="Culture.khuzait" has_modifier="false">
 		<Pieces>
 			<Piece id="spear_blade_35_blunt" Type="Blade" scale_factor="100" />
 			<Piece id="default_polearm_guard" Type="Guard" scale_factor="100" />
@@ -6553,19 +6553,19 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_aserai_axe_2_t2_blunt_2e7535b5" name="{=8WlRREMh}Sparring Bamboo Handled Axe" crafting_template="OneHandedAxe" is_merchandise="false" culture="Culture.aserai" has_modifier="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_aserai_axe_2_t2_blunt_2e7535b5" name="{=8WlRREMh}Sparring Bamboo Handled Axe" crafting_template="OneHandedAxe" is_merchandise="false" culture="Culture.aserai" has_modifier="false">
 		<Pieces>
 			<Piece id="axe_craft_30_head_blunt" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_15_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_battania_2haxe_1_t2_blunt_0a25553b" name="{=APO9YcBv}Sparring Two Handed Axe" crafting_template="TwoHandedAxe" is_merchandise="false" culture="Culture.battania" has_modifier="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_battania_2haxe_1_t2_blunt_0a25553b" name="{=APO9YcBv}Sparring Two Handed Axe" crafting_template="TwoHandedAxe" is_merchandise="false" culture="Culture.battania" has_modifier="false">
 		<Pieces>
 			<Piece id="axe_craft_14_head_blunt" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_30_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_battania_2hsword_1_t2_blunt_f9b39164" name="{=lGHrlYqQ}Sparring Twohander" crafting_template="TwoHandedSword" is_merchandise="false" culture="Culture.battania" has_modifier="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_battania_2hsword_1_t2_blunt_f9b39164" name="{=lGHrlYqQ}Sparring Twohander" crafting_template="TwoHandedSword" is_merchandise="false" culture="Culture.battania" has_modifier="false">
 		<Pieces>
 			<Piece id="battania_blade_3_iron_blunt" Type="Blade" scale_factor="110" />
 			<Piece id="battania_guard_8" Type="Guard" scale_factor="100" />
@@ -6573,7 +6573,7 @@
 			<Piece id="sturgian_pommel_4" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_battania_sword_1_t2_blunt_f170c7c6" name="{=D1webCRZ}Sparring Broadsword" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.battania">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_battania_sword_1_t2_blunt_f170c7c6" name="{=D1webCRZ}Sparring Broadsword" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.battania">
 		<Pieces>
 			<Piece id="battania_blade_3_blunt" Type="Blade" scale_factor="100" />
 			<Piece id="battania_guard_7" Type="Guard" scale_factor="100" />
@@ -6581,7 +6581,7 @@
 			<Piece id="battania_pommel_1" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_empire_sword_1_t2_blunt_8d799ace" name="{=2Igdc86g}Sparing Spatha" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.empire" has_modifier="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_empire_sword_1_t2_blunt_8d799ace" name="{=2Igdc86g}Sparing Spatha" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.empire" has_modifier="false">
 		<Pieces>
 			<Piece id="empire_blade_4_blunt" Type="Blade" scale_factor="100" />
 			<Piece id="cleaver_guard_4" Type="Guard" scale_factor="100" />
@@ -6589,7 +6589,7 @@
 			<Piece id="empire_pommel_1" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_western_javelin_1_t2_blunt_f7f05dc4" name="{=tcN9Vyn7}Sparring Blunt Javelin" is_merchandise="false" crafting_template="Javelin" has_modifier="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_western_javelin_1_t2_blunt_f7f05dc4" name="{=tcN9Vyn7}Sparring Blunt Javelin" is_merchandise="false" crafting_template="Javelin" has_modifier="false">
 		<Pieces>
 			<Piece id="spear_blade_15_blunt" Type="Blade" scale_factor="100" />
 			<Piece id="default_polearm_guard" Type="Guard" scale_factor="100" />
@@ -6597,7 +6597,7 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_empire_lance_1_t3_blunt_af298357" name="{=XU0b0yiW}Sparring Lance" crafting_template="TwoHandedPolearm" is_merchandise="false" culture="Culture.empire" has_modifier="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_empire_lance_1_t3_blunt_af298357" name="{=XU0b0yiW}Sparring Lance" crafting_template="TwoHandedPolearm" is_merchandise="false" culture="Culture.empire" has_modifier="false">
 		<Pieces>
 			<Piece id="spear_blade_23_blunt" Type="Blade" scale_factor="101" />
 			<Piece id="default_polearm_guard" Type="Guard" />
@@ -6605,7 +6605,7 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_empire_menavlion_1_t3_blunt_bcfdc145" name="{=AB2lD2JQ}Sparring Menavlion" crafting_template="TwoHandedPolearm" is_merchandise="false" culture="Culture.empire" has_modifier="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_empire_menavlion_1_t3_blunt_bcfdc145" name="{=AB2lD2JQ}Sparring Menavlion" crafting_template="TwoHandedPolearm" is_merchandise="false" culture="Culture.empire" has_modifier="false">
 		<Pieces>
 			<Piece id="spear_blade_7_blunt" Type="Blade" />
 			<Piece id="spear_banner_2" Type="Guard" />
@@ -6613,7 +6613,7 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_khuzait_sword_1_t2_blunt_c104c5fe" name="{=LpN4YWb2}Sparring Saber" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.khuzait" has_modifier="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_khuzait_sword_1_t2_blunt_c104c5fe" name="{=LpN4YWb2}Sparring Saber" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.khuzait" has_modifier="false">
 		<Pieces>
 			<Piece id="khuzait_blade_7_blunt" Type="Blade" scale_factor="100" />
 			<Piece id="khuzait_guard_4" Type="Guard" scale_factor="100" />
@@ -6621,7 +6621,7 @@
 			<Piece id="khuzait_pommel_2" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_vlandia_sword_1_t2_blunt_444c140b" name="{=LLaFEt1m}Sparring Arming Sword" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.vlandia" has_modifier="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_vlandia_sword_1_t2_blunt_444c140b" name="{=LLaFEt1m}Sparring Arming Sword" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.vlandia" has_modifier="false">
 		<Pieces>
 			<Piece id="vlandian_blade_1_blunt" Type="Blade" scale_factor="100" />
 			<Piece id="cleaver_guard_2" Type="Guard" scale_factor="100" />
@@ -6629,7 +6629,7 @@
 			<Piece id="vlandian_pommel_1" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_billhook_polearm_t2_blunt_4bc85357" name="{=EbWA5mcO}Sparring Billhook" crafting_template="TwoHandedPolearm" is_merchandise="false" culture="Culture.vlandia" has_modifier="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_billhook_polearm_t2_blunt_4bc85357" name="{=EbWA5mcO}Sparring Billhook" crafting_template="TwoHandedPolearm" is_merchandise="false" culture="Culture.vlandia" has_modifier="false">
 		<Pieces>
 			<Piece id="spear_blade_33_blunt" Type="Blade" scale_factor="100" />
 			<Piece id="default_polearm_guard" Type="Guard" scale_factor="100" />
@@ -6637,31 +6637,31 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_vlandia_lance_1_t3_blunt_431b2156" name="{=XU0b0yiW}Sparring Lance" crafting_template="TwoHandedPolearm" is_merchandise="false" culture="Culture.vlandia" has_modifier="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_vlandia_lance_1_t3_blunt_431b2156" name="{=XU0b0yiW}Sparring Lance" crafting_template="TwoHandedPolearm" is_merchandise="false" culture="Culture.vlandia" has_modifier="false">
 		<Pieces>
 			<Piece id="spear_blade_20_blunt" Type="Blade" scale_factor="100" />
 			<Piece id="spear_handle_23" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_sturgia_axe_2_t2_blunt_c949fd7d" name="{=5dQdBOTa}Sparring Galloglaich Axe" crafting_template="OneHandedAxe" is_merchandise="false" culture="Culture.sturgia" has_modifier="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_sturgia_axe_2_t2_blunt_c949fd7d" name="{=5dQdBOTa}Sparring Galloglaich Axe" crafting_template="OneHandedAxe" is_merchandise="false" culture="Culture.sturgia" has_modifier="false">
 		<Pieces>
 			<Piece id="axe_craft_20_head_blunt" Type="Blade" scale_factor="110" />
 			<Piece id="axe_craft_2_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_northern_throwing_axe_1_t1_blunt_6087c39b" name="{=M75Ybg6r}Sparring Throwing Axe" crafting_template="ThrowingAxe" is_merchandise="false" culture="Culture.sturgia">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_northern_throwing_axe_1_t1_blunt_6087c39b" name="{=M75Ybg6r}Sparring Throwing Axe" crafting_template="ThrowingAxe" is_merchandise="false" culture="Culture.sturgia">
 		<Pieces>
 			<Piece id="axe_craft_13_head_blunt" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_11_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_northern_spear_1_t2_blunt_b850a618" name="{=HIjSiX4E}Sparring Spear" crafting_template="TwoHandedPolearm" is_merchandise="false" culture="Culture.sturgia" has_modifier="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_northern_spear_1_t2_blunt_b850a618" name="{=HIjSiX4E}Sparring Spear" crafting_template="TwoHandedPolearm" is_merchandise="false" culture="Culture.sturgia" has_modifier="false">
 		<Pieces>
 			<Piece id="spear_blade_15_blunt" Type="Blade" scale_factor="100" />
 			<Piece id="spear_handle_6" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_sturgia_sword_1_t2_blunt_76d99e11" name="{=Rwp23MLA}Sparring Blade" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.sturgia" has_modifier="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_sturgia_sword_1_t2_blunt_76d99e11" name="{=Rwp23MLA}Sparring Blade" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.sturgia" has_modifier="false">
 		<Pieces>
 			<Piece id="sturgian_blade_1_blunt" Type="Blade" scale_factor="100" />
 			<Piece id="sturgian_guard_1" Type="Guard" scale_factor="100" />
@@ -6733,46 +6733,46 @@
 		</ItemComponent>
 		<Flags Stealth="true" DropOnWeaponChange="true" ForceAttachOffHandPrimaryItemBone="true" HeldInOffHand="true" HasToBeHeldUp="true" />
 	</Item>
-	<CraftedItem id="cs_mirror_peasant_maul_t1_e66cd237" name="{=l7sSXCM2}Makeshift Maul" crafting_template="TwoHandedMace" is_merchandise="false" culture="Culture.battania" modifier_group="cheap_weapon">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_peasant_maul_t1_e66cd237" name="{=l7sSXCM2}Makeshift Maul" crafting_template="TwoHandedMace" is_merchandise="false" culture="Culture.battania" modifier_group="cheap_weapon">
 		<Pieces>
 			<!-- head is wrong breaks saves if removed dont use this item -->
 			<Piece id="mace_head_24" Type="Blade" scale_factor="90" />
 			<Piece id="spear_handle_1" Type="Handle" scale_factor="110" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_peasant_maul_t1_2_45b7943e" name="{=Ae9L1a9g}Maul" crafting_template="TwoHandedMace" culture="Culture.battania" modifier_group="cheap_weapon">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_peasant_maul_t1_2_45b7943e" name="{=Ae9L1a9g}Maul" crafting_template="TwoHandedMace" culture="Culture.battania" modifier_group="cheap_weapon">
 		<Pieces>
 			<Piece id="mace_head_24" Type="Blade" scale_factor="102" />
 			<Piece id="spear_handle_1" Type="Handle" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_peasant_pickaxe_1_t1_3c19ab0f" name="{=zUFRE9y4}Pickaxe" crafting_template="OneHandedAxe" modifier_group="cheap_weapon">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_peasant_pickaxe_1_t1_3c19ab0f" name="{=zUFRE9y4}Pickaxe" crafting_template="OneHandedAxe" modifier_group="cheap_weapon">
 		<Pieces>
 			<Piece id="axe_craft_37_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_20_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_peasant_hatchet_1_t1_8d7f9357" name="{=GghHAbIT}Hatchet" crafting_template="OneHandedAxe" modifier_group="cheap_weapon">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_peasant_hatchet_1_t1_8d7f9357" name="{=GghHAbIT}Hatchet" crafting_template="OneHandedAxe" modifier_group="cheap_weapon">
 		<Pieces>
 			<Piece id="axe_craft_32_head" Type="Blade" />
 			<Piece id="axe_craft_33_handle" Type="Handle" />
 			<Piece id="default_polearm_pommel" Type="Pommel" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_peasant_sickle_1_t1_4b0eb36d" name="{=4wdgiTta}Sickle" crafting_template="OneHandedAxe" modifier_group="cheap_weapon">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_peasant_sickle_1_t1_4b0eb36d" name="{=4wdgiTta}Sickle" crafting_template="OneHandedAxe" modifier_group="cheap_weapon">
 		<Pieces>
 			<Piece id="sickle_blade_1" Type="Blade" scale_factor="98" />
 			<Piece id="axe_craft_33_handle" Type="Handle" scale_factor="90" />
 			<Piece id="default_polearm_pommel" Type="Pommel" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_peasant_hammer_1_t1_12438848" name="{=6WcZ5Tr0}Blacksmith Hammer" crafting_template="Mace" modifier_group="cheap_weapon">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_peasant_hammer_1_t1_12438848" name="{=6WcZ5Tr0}Blacksmith Hammer" crafting_template="Mace" modifier_group="cheap_weapon">
 		<Pieces>
 			<Piece id="blacksmith_hammer_tip_1" Type="Blade" scale_factor="100" />
 			<Piece id="blacksmith_hammer_handle_1" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_peasant_hammer_2_t1_c328a827" name="{=beVFwINO}Wooden Hammer" crafting_template="Mace" modifier_group="cheap_weapon">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_peasant_hammer_2_t1_c328a827" name="{=beVFwINO}Wooden Hammer" crafting_template="Mace" modifier_group="cheap_weapon">
 		<Pieces>
 			<Piece id="mace_head_24" Type="Blade" />
 			<Piece id="blacksmith_hammer_handle_1" Type="Handle" />
@@ -6780,25 +6780,25 @@
 		</Pieces>
 		<!-- Length: 45 Weight: 1.48 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_peasant_2haxe_1_t1_dec069dc" name="{=7phSQw5i}Hoe" crafting_template="TwoHandedAxe" modifier_group="cheap_weapon">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_peasant_2haxe_1_t1_dec069dc" name="{=7phSQw5i}Hoe" crafting_template="TwoHandedAxe" modifier_group="cheap_weapon">
 		<Pieces>
 			<Piece id="axe_craft_15_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_7_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_peasant_pitchfork_1_t1_2c1b9ba4" name="{=oFEzCTpW}Iron Pitchfork" crafting_template="TwoHandedPolearm" modifier_group="cheap_weapon">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_peasant_pitchfork_1_t1_2c1b9ba4" name="{=oFEzCTpW}Iron Pitchfork" crafting_template="TwoHandedPolearm" modifier_group="cheap_weapon">
 		<Pieces>
 			<Piece id="spear_blade_32" Type="Blade" scale_factor="100" />
 			<Piece id="spear_handle_1" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_peasant_pitchfork_2_t1_bf53e2b3" name="{=JBVAeXx3}Pitchfork" crafting_template="TwoHandedPolearm" modifier_group="cheap_weapon">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_peasant_pitchfork_2_t1_bf53e2b3" name="{=JBVAeXx3}Pitchfork" crafting_template="TwoHandedPolearm" modifier_group="cheap_weapon">
 		<Pieces>
 			<Piece id="spear_blade_29" Type="Blade" scale_factor="100" />
 			<Piece id="spear_handle_1" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_peasant_polearm_1_t1_dac999e2" name="{=aGbTPme1}Scythe" crafting_template="TwoHandedPolearm" modifier_group="cheap_weapon">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_peasant_polearm_1_t1_dac999e2" name="{=aGbTPme1}Scythe" crafting_template="TwoHandedPolearm" modifier_group="cheap_weapon">
 		<Pieces>
 			<Piece id="spear_blade_31" Type="Blade" scale_factor="100" />
 			<Piece id="spear_handle_1" Type="Handle" scale_factor="100" />
@@ -6820,7 +6820,7 @@
 		</ItemComponent>
 		<Flags ForceAttachOffHandPrimaryItemBone="true" />
 	</Item>
-	<CraftedItem id="cs_mirror_wooden_sword_t1_fabbf87d" name="{=1HWRwbwT}Wooden Sword" is_merchandise="false" crafting_template="OneHandedSword" has_modifier="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_wooden_sword_t1_fabbf87d" name="{=1HWRwbwT}Wooden Sword" is_merchandise="false" crafting_template="OneHandedSword" has_modifier="false">
 		<Pieces>
 			<Piece id="wood_blade_1" Type="Blade" scale_factor="110" />
 			<Piece id="wood_guard_1" Type="Guard" />
@@ -6828,7 +6828,7 @@
 			<Piece id="wood_pommel_1" Type="Pommel" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_wooden_sword_t2_f7bbf3c4" name="{=1HWRwbwT}Wooden Sword" is_merchandise="false" crafting_template="OneHandedSword" has_modifier="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_wooden_sword_t2_f7bbf3c4" name="{=1HWRwbwT}Wooden Sword" is_merchandise="false" crafting_template="OneHandedSword" has_modifier="false">
 		<Pieces>
 			<Piece id="wood_blade_2" Type="Blade" scale_factor="110" />
 			<Piece id="wood_guard_1" Type="Guard" />
@@ -6836,7 +6836,7 @@
 			<Piece id="wood_pommel_1" Type="Pommel" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_wooden_2hsword_t1_9e033033" name="{=bt0uFefo}Wooden Twohander" is_merchandise="false" crafting_template="TwoHandedSword" has_modifier="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_wooden_2hsword_t1_9e033033" name="{=bt0uFefo}Wooden Twohander" is_merchandise="false" crafting_template="TwoHandedSword" has_modifier="false">
 		<Pieces>
 			<Piece id="wood_blade_1" Type="Blade" scale_factor="105" />
 			<Piece id="wood_guard_1" Type="Guard" />
@@ -6844,7 +6844,7 @@
 			<Piece id="wood_pommel_1" Type="Pommel" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_practice_spear_t1_dd2bc884" name="{=H9hzBJz3}Practice Spear" is_merchandise="false" crafting_template="TwoHandedPolearm" has_modifier="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_practice_spear_t1_dd2bc884" name="{=H9hzBJz3}Practice Spear" is_merchandise="false" crafting_template="TwoHandedPolearm" has_modifier="false">
 		<Pieces>
 			<Piece id="spear_blade_34" Type="Blade" />
 			<Piece id="default_polearm_guard" Type="Guard" />
@@ -6868,7 +6868,7 @@
 		</ItemComponent>
 		<Flags WoodenParry="true" DropOnWeaponChange="true" DoNotScaleBodyAccordingToWeaponLength="true" QuickFadeOut="true" />
 	</Item>
-	<CraftedItem id="cs_mirror_winds_fury_sword_t3_48bd2681" name="{=vDvj5zkG}Winds Fury" crafting_template="OneHandedSword" is_merchandise="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_winds_fury_sword_t3_48bd2681" name="{=vDvj5zkG}Winds Fury" crafting_template="OneHandedSword" is_merchandise="false">
 		<Pieces>
 			<Piece id="khuzait_blade_8" Type="Blade" scale_factor="100" />
 			<Piece id="khuzait_guard_6" Type="Guard" scale_factor="100" />
@@ -6876,7 +6876,7 @@
 			<Piece id="khuzait_pommel_5" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_tyrhung_sword_t3_b11237e2" name="{=TbFLTHHm}Tyrhung" crafting_template="OneHandedSword" is_merchandise="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_tyrhung_sword_t3_b11237e2" name="{=TbFLTHHm}Tyrhung" crafting_template="OneHandedSword" is_merchandise="false">
 		<Pieces>
 			<Piece id="sturgian_blade_3" Type="Blade" scale_factor="100" />
 			<Piece id="sturgian_guard_2" Type="Guard" scale_factor="100" />
@@ -6884,7 +6884,7 @@
 			<Piece id="sturgian_pommel_9" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_the_scalpel_sword_t3_86bad22b" name="{=LzqugHen}Scalpel" crafting_template="OneHandedSword" is_merchandise="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_the_scalpel_sword_t3_86bad22b" name="{=LzqugHen}Scalpel" crafting_template="OneHandedSword" is_merchandise="false">
 		<Pieces>
 			<Piece id="aserai_blade_2" Type="Blade" scale_factor="100" />
 			<Piece id="aserai_guard_7" Type="Guard" scale_factor="100" />
@@ -6892,7 +6892,7 @@
 			<Piece id="khuzait_pommel_1" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_dawnbreaker_sword_t3_3bf76a99" name="{=J3erdO1b}Dawnbreaker" crafting_template="OneHandedSword" is_merchandise="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_dawnbreaker_sword_t3_3bf76a99" name="{=J3erdO1b}Dawnbreaker" crafting_template="OneHandedSword" is_merchandise="false">
 		<Pieces>
 			<Piece id="sturgian_blade_3" Type="Blade" scale_factor="100" />
 			<Piece id="vlandian_guard_1" Type="Guard" scale_factor="100" />
@@ -6900,7 +6900,7 @@
 			<Piece id="vlandian_pommel_9" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_ambassador_sword_t3_27a2a15a" name="{=kxtSkGju}The Ambassador" crafting_template="OneHandedSword" is_merchandise="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_ambassador_sword_t3_27a2a15a" name="{=kxtSkGju}The Ambassador" crafting_template="OneHandedSword" is_merchandise="false">
 		<Pieces>
 			<Piece id="aserai_blade_10" Type="Blade" scale_factor="100" />
 			<Piece id="vlandian_guard_6" Type="Guard" scale_factor="100" />
@@ -6908,7 +6908,7 @@
 			<Piece id="cleaver_pommel_2" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_early_retirement_2hsword_t3_8277dada" name="{=x0x1gIbT}Early Retirement" crafting_template="TwoHandedSword" is_merchandise="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_early_retirement_2hsword_t3_8277dada" name="{=x0x1gIbT}Early Retirement" crafting_template="TwoHandedSword" is_merchandise="false">
 		<Pieces>
 			<Piece id="battania_blade_1" Type="Blade" scale_factor="100" />
 			<Piece id="battania_guard_9" Type="Guard" scale_factor="100" />
@@ -6916,7 +6916,7 @@
 			<Piece id="battania_pommel_9" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_bone_crusher_mace_t3_01fd9b89" name="{=mzvtFPPi}Bone Crusher" crafting_template="Mace" is_merchandise="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_bone_crusher_mace_t3_01fd9b89" name="{=mzvtFPPi}Bone Crusher" crafting_template="Mace" is_merchandise="false">
 		<Pieces>
 			<Piece id="mace_head_26" Type="Blade" />
 			<Piece id="mace_handle_1" Type="Handle" />
@@ -6924,7 +6924,7 @@
 		</Pieces>
 		<!-- Length: 71 Weight: 1.49 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_pernach_mace_t3_86d61d4b" name="{=WASZXuec}Militia Pernach" crafting_template="Mace" is_merchandise="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_pernach_mace_t3_86d61d4b" name="{=WASZXuec}Militia Pernach" crafting_template="Mace" is_merchandise="false">
 		<Pieces>
 			<Piece id="mace_head_2" Type="Blade" scale_factor="90" />
 			<Piece id="mace_handle_14" Type="Handle" />
@@ -6932,7 +6932,7 @@
 		</Pieces>
 		<!-- Length: 52 Weight: 2 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_knights_fall_mace_t3_c275b54a" name="{=BYPhysbH}Knight's Fall" crafting_template="Mace" is_merchandise="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_knights_fall_mace_t3_c275b54a" name="{=BYPhysbH}Knight's Fall" crafting_template="Mace" is_merchandise="false">
 		<Pieces>
 			<Piece id="mace_head_19" Type="Blade" />
 			<Piece id="mace_handle_12" Type="Handle" />
@@ -6940,19 +6940,19 @@
 		</Pieces>
 		<!-- Length: 50 Weight: 1.9 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_judgement_mace_t3_21b889e5" name="{=KRuZuMFI}Judgement" crafting_template="Mace" is_merchandise="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_judgement_mace_t3_21b889e5" name="{=KRuZuMFI}Judgement" crafting_template="Mace" is_merchandise="false">
 		<Pieces>
 			<Piece id="mace_head_20" Type="Blade" scale_factor="100" />
 			<Piece id="mace_handle_4" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_black_heart_2haxe_t3_3aeda4ae" name="{=2dJ5HB8a}Black Heart" crafting_template="TwoHandedAxe" is_merchandise="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_black_heart_2haxe_t3_3aeda4ae" name="{=2dJ5HB8a}Black Heart" crafting_template="TwoHandedAxe" is_merchandise="false">
 		<Pieces>
 			<Piece id="axe_craft_34_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_6_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_reaper_falx_41d8f042" name="{=oXrbTRJo}Reaper" crafting_template="TwoHandedSword" is_merchandise="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_reaper_falx_41d8f042" name="{=oXrbTRJo}Reaper" crafting_template="TwoHandedSword" is_merchandise="false">
 		<Pieces>
 			<Piece id="battania_blade_6" Type="Blade" scale_factor="104" />
 			<Piece id="cleaver_guard_3" Type="Guard" scale_factor="108" />
@@ -6961,7 +6961,7 @@
 		</Pieces>
 		<!-- Length: 111 Weight: 1.64 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_justicier_2hsword_85534011" name="{=a47UTuL6}Justicier" crafting_template="TwoHandedSword" is_merchandise="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_justicier_2hsword_85534011" name="{=a47UTuL6}Justicier" crafting_template="TwoHandedSword" is_merchandise="false">
 		<Pieces>
 			<Piece id="empire_blade_1" Type="Blade" scale_factor="99" />
 			<Piece id="vlandian_guard_4" Type="Guard" />
@@ -6970,14 +6970,14 @@
 		</Pieces>
 		<!-- Length: 105 Weight: 1.41 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_avalanche_2haxe_91c768b3" name="{=IClH3Pus}Avalanche" crafting_template="TwoHandedAxe" is_merchandise="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_avalanche_2haxe_91c768b3" name="{=IClH3Pus}Avalanche" crafting_template="TwoHandedAxe" is_merchandise="false">
 		<Pieces>
 			<Piece id="axe_craft_7_head" Type="Blade" />
 			<Piece id="axe_craft_4_handle" Type="Handle" scale_factor="93" />
 		</Pieces>
 		<!-- Length: 117 Weight: 1.36 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_sentinel_2hsword_9eec56d5" name="{=XIRtmaQt}Sentinel" crafting_template="TwoHandedSword" is_merchandise="false">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_sentinel_2hsword_9eec56d5" name="{=XIRtmaQt}Sentinel" crafting_template="TwoHandedSword" is_merchandise="false">
 		<Pieces>
 			<Piece id="vlandian_blade_7" Type="Blade" />
 			<Piece id="vlandian_guard_7" Type="Guard" />
@@ -6986,145 +6986,145 @@
 		</Pieces>
 		<!-- Length: 99 Weight: 1.44 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_aserai_axe_1_t2_1b5388d6" name="{=bcjcw1o9}Wood Splitter Axe" crafting_template="OneHandedAxe" culture="Culture.aserai" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_aserai_axe_1_t2_1b5388d6" name="{=bcjcw1o9}Wood Splitter Axe" crafting_template="OneHandedAxe" culture="Culture.aserai" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_33_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_25_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_aserai_axe_2_t2_c50615ad" name="{=89OWzLBb}Bamboo Handled Ascia Axe" crafting_template="OneHandedAxe" culture="Culture.aserai" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_aserai_axe_2_t2_c50615ad" name="{=89OWzLBb}Bamboo Handled Ascia Axe" crafting_template="OneHandedAxe" culture="Culture.aserai" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_30_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_15_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_sturgia_axe_2_t2_ba32cd65" name="{=hQrLHkaU}Galloglaich Axe" crafting_template="OneHandedAxe" culture="Culture.sturgia" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_sturgia_axe_2_t2_ba32cd65" name="{=hQrLHkaU}Galloglaich Axe" crafting_template="OneHandedAxe" culture="Culture.sturgia" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_20_head" Type="Blade" scale_factor="110" />
 			<Piece id="axe_craft_2_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_battania_axe_1_t2_3ab75b55" name="{=HKxoO15a}Highland Hatchet" crafting_template="OneHandedAxe" culture="Culture.battania" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_battania_axe_1_t2_3ab75b55" name="{=HKxoO15a}Highland Hatchet" crafting_template="OneHandedAxe" culture="Culture.battania" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_2_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_2_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_small_spurred_axe_t2_3a8f6622" name="{=dRWKmbaa}Small Spurred Axe" crafting_template="OneHandedAxe" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_small_spurred_axe_t2_3a8f6622" name="{=dRWKmbaa}Small Spurred Axe" crafting_template="OneHandedAxe" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_24_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_2_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_southern_small_axe_t2_788d8939" name="{=bdTQG99v}Bamboo Handled Axe" crafting_template="OneHandedAxe" culture="Culture.aserai" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_southern_small_axe_t2_788d8939" name="{=bdTQG99v}Bamboo Handled Axe" crafting_template="OneHandedAxe" culture="Culture.aserai" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_27_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_15_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_small_bit_axe_t2_7d21bbd2" name="{=XRaPBg6d}Small Bit Axe" crafting_template="OneHandedAxe" culture="Culture.aserai" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_small_bit_axe_t2_7d21bbd2" name="{=XRaPBg6d}Small Bit Axe" crafting_template="OneHandedAxe" culture="Culture.aserai" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_35_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_25_handle" Type="Handle" scale_factor="95" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_northern_battle_axe_t3_2bbd5dcb" name="{=DFcMeRdB}Simple Raider Battle Axe" crafting_template="OneHandedAxe" culture="Culture.sturgia" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_northern_battle_axe_t3_2bbd5dcb" name="{=DFcMeRdB}Simple Raider Battle Axe" crafting_template="OneHandedAxe" culture="Culture.sturgia" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_36_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_26_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_vlandia_axe_1_t3_70710b5f" name="{=KanKBHcS}Infantry Axe" crafting_template="OneHandedAxe" culture="Culture.vlandia" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_vlandia_axe_1_t3_70710b5f" name="{=KanKBHcS}Infantry Axe" crafting_template="OneHandedAxe" culture="Culture.vlandia" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_20_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_23_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_sturgia_axe_3_t3_8bbaf25b" name="{=xgOuAWEE}Commoner Axe" crafting_template="OneHandedAxe" culture="Culture.sturgia" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_sturgia_axe_3_t3_8bbaf25b" name="{=xgOuAWEE}Commoner Axe" crafting_template="OneHandedAxe" culture="Culture.sturgia" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_21_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_5_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_imperial_axe_t3_2a45d62d" name="{=tsaSBPKu}Tzikourion" crafting_template="OneHandedAxe" culture="Culture.empire" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_imperial_axe_t3_2a45d62d" name="{=tsaSBPKu}Tzikourion" crafting_template="OneHandedAxe" culture="Culture.empire" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_29_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_18_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_woodland_axe_t3_0993afba" name="{=6q0nmVtg}Woodland Axe" crafting_template="OneHandedAxe" culture="Culture.battania" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_woodland_axe_t3_0993afba" name="{=6q0nmVtg}Woodland Axe" crafting_template="OneHandedAxe" culture="Culture.battania" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_28_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_19_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_tzkurion_axe_t3_1d2d8738" name="{=POhLMyat}Broad Tzikourion" crafting_template="OneHandedAxe" culture="Culture.empire" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_tzkurion_axe_t3_1d2d8738" name="{=POhLMyat}Broad Tzikourion" crafting_template="OneHandedAxe" culture="Culture.empire" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_26_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_26_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_large_franziskaa_axe_t3_f38ed854" name="{=KRhIG1cw}Large Franziska Axe" crafting_template="OneHandedAxe" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_large_franziskaa_axe_t3_f38ed854" name="{=KRhIG1cw}Large Franziska Axe" crafting_template="OneHandedAxe" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_12_head" Type="Blade" scale_factor="110" />
 			<Piece id="axe_craft_27_handle" Type="Handle" scale_factor="90" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_vlandia_axe_2_t4_160f53c1" name="{=SDBvC0ON}Spiked Battle Axe" crafting_template="OneHandedAxe" culture="Culture.vlandia" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_vlandia_axe_2_t4_160f53c1" name="{=SDBvC0ON}Spiked Battle Axe" crafting_template="OneHandedAxe" culture="Culture.vlandia" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_25_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_13_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_sturgia_axe_4_t4_220a27b1" name="{=Qpl5aCb0}Veteran Warrior Axe" crafting_template="OneHandedAxe" culture="Culture.sturgia" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_sturgia_axe_4_t4_220a27b1" name="{=Qpl5aCb0}Veteran Warrior Axe" crafting_template="OneHandedAxe" culture="Culture.sturgia" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_11_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_3_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_battania_axe_2_t4_3353ec64" name="{=pjvwuVuc}One Handed Bearded Axe" crafting_template="OneHandedAxe" culture="Culture.battania" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_battania_axe_2_t4_3353ec64" name="{=pjvwuVuc}One Handed Bearded Axe" crafting_template="OneHandedAxe" culture="Culture.battania" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_23_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_21_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_bamboo_axe_t4_6709fbef" name="{=FAzGPJn6}Bamboo Axe" crafting_template="OneHandedAxe" culture="Culture.aserai" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_bamboo_axe_t4_6709fbef" name="{=FAzGPJn6}Bamboo Axe" crafting_template="OneHandedAxe" culture="Culture.aserai" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_19_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_17_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_battle_axe_t4_78293db1" name="{=xWFW8jXw}Battle Axe" crafting_template="OneHandedAxe" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_battle_axe_t4_78293db1" name="{=xWFW8jXw}Battle Axe" crafting_template="OneHandedAxe" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_18_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_22_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_sturgia_axe_5_t5_4aebc613" name="{=uSBxV2Ob}Rectangular Bitted Axe" crafting_template="OneHandedAxe" culture="Culture.sturgia" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_sturgia_axe_5_t5_4aebc613" name="{=uSBxV2Ob}Rectangular Bitted Axe" crafting_template="OneHandedAxe" culture="Culture.sturgia" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_8_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_24_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_battania_axe_3_t5_5dcbc122" name="{=pP0GacSW}Round Bitted Fine Steel Hatchet" crafting_template="OneHandedAxe" culture="Culture.battania" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_battania_axe_3_t5_5dcbc122" name="{=pP0GacSW}Round Bitted Fine Steel Hatchet" crafting_template="OneHandedAxe" culture="Culture.battania" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_9_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_16_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_battania_2haxe_1_t2_4bf9fa5f" name="{=bNABNs8O}Square Bit Two Handed Axe" crafting_template="TwoHandedAxe" culture="Culture.battania" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_battania_2haxe_1_t2_4bf9fa5f" name="{=bNABNs8O}Square Bit Two Handed Axe" crafting_template="TwoHandedAxe" culture="Culture.battania" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_14_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_30_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_simple_sparth_axe_t2_f0b82ece" name="{=gJPogg0J}Simple Sparth Axe" crafting_template="TwoHandedAxe" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_simple_sparth_axe_t2_f0b82ece" name="{=gJPogg0J}Simple Sparth Axe" crafting_template="TwoHandedAxe" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_5_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_14_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_aserai_2haxe_2_t3_b5d305d4" name="{=B8p6E8GJ}Tabar" crafting_template="TwoHandedAxe" culture="Culture.aserai" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_aserai_2haxe_2_t3_b5d305d4" name="{=B8p6E8GJ}Tabar" crafting_template="TwoHandedAxe" culture="Culture.aserai" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_16_head" Type="Blade" />
 			<Piece id="axe_craft_6_handle" Type="Handle" />
@@ -7132,125 +7132,125 @@
 		</Pieces>
 		<!-- Length: 137 Weight: 2 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_aserai_2haxe_1_t3_0f34bbdf" name="{=2YYHjytM}Short Handled Tabar" crafting_template="TwoHandedAxe" culture="Culture.aserai" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_aserai_2haxe_1_t3_0f34bbdf" name="{=2YYHjytM}Short Handled Tabar" crafting_template="TwoHandedAxe" culture="Culture.aserai" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_16_head" Type="Blade" scale_factor="90" />
 			<Piece id="axe_craft_8_handle" Type="Handle" scale_factor="103" />
 			<Piece id="default_polearm_pommel" Type="Pommel" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_bearded_axe_t3_5ee2f50d" name="{=Mb0CuONB}Bearded Axe" crafting_template="TwoHandedAxe" culture="Culture.sturgia" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_bearded_axe_t3_5ee2f50d" name="{=Mb0CuONB}Bearded Axe" crafting_template="TwoHandedAxe" culture="Culture.sturgia" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_3_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_29_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_northern_axe_t3_5f6b6194" name="{=QnyD1yWB}Northlander Broad Axe" crafting_template="TwoHandedAxe" culture="Culture.sturgia" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_northern_axe_t3_5f6b6194" name="{=QnyD1yWB}Northlander Broad Axe" crafting_template="TwoHandedAxe" culture="Culture.sturgia" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_7_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_29_handle" Type="Handle" scale_factor="110" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_vlandia_2haxe_1_t4_8054ca3c" name="{=K2Xtca1a}Short Bill" crafting_template="TwoHandedAxe" culture="Culture.vlandia" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_vlandia_2haxe_1_t4_8054ca3c" name="{=K2Xtca1a}Short Bill" crafting_template="TwoHandedAxe" culture="Culture.vlandia" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_17_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_1_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_aserai_2haxe_2_t4_b4d30441" name="{=BAsjzOiH}Executioner Axe" crafting_template="TwoHandedAxe" culture="Culture.aserai" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_aserai_2haxe_2_t4_b4d30441" name="{=BAsjzOiH}Executioner Axe" crafting_template="TwoHandedAxe" culture="Culture.aserai" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_16_head" Type="Blade" scale_factor="90" />
 			<Piece id="axe_craft_10_handle" Type="Handle" scale_factor="98" />
 			<Piece id="default_polearm_pommel" Type="Pommel" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_sturgia_2haxe_1_t4_702704ae" name="{=jhFSLdve}Drilled Two Handed Axe" crafting_template="TwoHandedAxe" culture="Culture.sturgia" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_sturgia_2haxe_1_t4_702704ae" name="{=jhFSLdve}Drilled Two Handed Axe" crafting_template="TwoHandedAxe" culture="Culture.sturgia" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_1_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_6_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_hooked_axe_t4_1387fcc5" name="{=P9PcIk4q}Hooked Cavalry Axe" crafting_template="TwoHandedAxe" culture="Culture.vlandia" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_hooked_axe_t4_1387fcc5" name="{=P9PcIk4q}Hooked Cavalry Axe" crafting_template="TwoHandedAxe" culture="Culture.vlandia" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_34_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_31_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_aserai_2haxe_3_t5_2f71bf63" name="{=hTPJXK1w}Heavy Executioner Axe" crafting_template="TwoHandedAxe" culture="Culture.aserai" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_aserai_2haxe_3_t5_2f71bf63" name="{=hTPJXK1w}Heavy Executioner Axe" crafting_template="TwoHandedAxe" culture="Culture.aserai" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_38_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_1_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_sturgia_2haxe_2_t5_b2af2516" name="{=cKtkyroA}Northlander Decorated Two Handed Axe" crafting_template="TwoHandedAxe" culture="Culture.sturgia" modifier_group="axe">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_sturgia_2haxe_2_t5_b2af2516" name="{=cKtkyroA}Northlander Decorated Two Handed Axe" crafting_template="TwoHandedAxe" culture="Culture.sturgia" modifier_group="axe">
 		<Pieces>
 			<Piece id="axe_craft_22_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_4_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_western_spear_1_t2_7cf4a0ba" name="{=hyq1zBg5}Simple Commoner Spear" crafting_template="TwoHandedPolearm" culture="Culture.vlandia" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_western_spear_1_t2_7cf4a0ba" name="{=hyq1zBg5}Simple Commoner Spear" crafting_template="TwoHandedPolearm" culture="Culture.vlandia" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_1" Type="Blade" scale_factor="90" />
 			<Piece id="spear_handle_5" Type="Handle" scale_factor="90" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_western_spear_2_t2_ce0f8401" name="{=bue69aD4}Simple Short Spear" crafting_template="TwoHandedPolearm" culture="Culture.vlandia" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_western_spear_2_t2_ce0f8401" name="{=bue69aD4}Simple Short Spear" crafting_template="TwoHandedPolearm" culture="Culture.vlandia" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_9" Type="Blade" scale_factor="90" />
 			<Piece id="spear_handle_6" Type="Handle" scale_factor="90" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_eastern_spear_1_t2_68db24f0" name="{=yCvBx27Z}Jagged Spear" crafting_template="TwoHandedPolearm" culture="Culture.aserai" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_eastern_spear_1_t2_68db24f0" name="{=yCvBx27Z}Jagged Spear" crafting_template="TwoHandedPolearm" culture="Culture.aserai" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_35" Type="Blade" scale_factor="95" />
 			<Piece id="spear_handle_3" Type="Handle" scale_factor="95" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_northern_spear_1_t2_97a05398" name="{=RzLZHrYT}Short Simple Raider Spear" crafting_template="TwoHandedPolearm" culture="Culture.sturgia" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_northern_spear_1_t2_97a05398" name="{=RzLZHrYT}Short Simple Raider Spear" crafting_template="TwoHandedPolearm" culture="Culture.sturgia" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_15" Type="Blade" scale_factor="100" />
 			<Piece id="spear_handle_6" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_imperial_spear_t2_2cef7b71" name="{=Vyw5KNxR}Short Militia Spear" crafting_template="TwoHandedPolearm" culture="Culture.empire" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_imperial_spear_t2_2cef7b71" name="{=Vyw5KNxR}Short Militia Spear" crafting_template="TwoHandedPolearm" culture="Culture.empire" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_3" Type="Blade" scale_factor="90" />
 			<Piece id="spear_handle_5" Type="Handle" scale_factor="90" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_highland_spear_t2_bd81b6f9" name="{=rhWOdhjr}Highland War Spear" crafting_template="TwoHandedPolearm" culture="Culture.battania" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_highland_spear_t2_bd81b6f9" name="{=rhWOdhjr}Highland War Spear" crafting_template="TwoHandedPolearm" culture="Culture.battania" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_13" Type="Blade" scale_factor="90" />
 			<Piece id="spear_guard_3" Type="Guard" scale_factor="90" />
 			<Piece id="spear_handle_5" Type="Handle" scale_factor="90" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_military_fork_t2_858edb8a" name="{=FbG3CW5p}Military Fork" crafting_template="TwoHandedPolearm" culture="Culture.sturgia" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_military_fork_t2_858edb8a" name="{=FbG3CW5p}Military Fork" crafting_template="TwoHandedPolearm" culture="Culture.sturgia" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_26" Type="Blade" scale_factor="100" />
 			<Piece id="spear_handle_6" Type="Handle" scale_factor="90" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_western_spear_3_t3_e4ada1b7" name="{=WQksMqMR}Tall Tipped Long Spear" crafting_template="TwoHandedPolearm" culture="Culture.vlandia" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_western_spear_3_t3_e4ada1b7" name="{=WQksMqMR}Tall Tipped Long Spear" crafting_template="TwoHandedPolearm" culture="Culture.vlandia" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_8" Type="Blade" scale_factor="90" />
 			<Piece id="spear_banner_12" Type="Guard" scale_factor="90" />
 			<Piece id="spear_handle_25" Type="Handle" scale_factor="90" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_western_spear_4_t3_071a1768" name="{=NFT4sLva}Tall Tipped Spear" crafting_template="TwoHandedPolearm" culture="Culture.vlandia" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_western_spear_4_t3_071a1768" name="{=NFT4sLva}Tall Tipped Spear" crafting_template="TwoHandedPolearm" culture="Culture.vlandia" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_8" Type="Blade" scale_factor="94" />
 			<Piece id="spear_handle_25" Type="Handle" scale_factor="90" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_eastern_spear_2_t3_4910e7a8" name="{=G7EbBKuA}Narrow Long Headed Spear" crafting_template="TwoHandedPolearm" culture="Culture.khuzait" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_eastern_spear_2_t3_4910e7a8" name="{=G7EbBKuA}Narrow Long Headed Spear" crafting_template="TwoHandedPolearm" culture="Culture.khuzait" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_14" Type="Blade" scale_factor="110" />
 			<Piece id="spear_handle_18" Type="Handle" scale_factor="110" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_eastern_spear_3_t3_834a0009" name="{=YGndAhTr}Weighted Steppe Spear" crafting_template="TwoHandedPolearm" culture="Culture.khuzait" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_eastern_spear_3_t3_834a0009" name="{=YGndAhTr}Weighted Steppe Spear" crafting_template="TwoHandedPolearm" culture="Culture.khuzait" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_35" Type="Blade" scale_factor="95" />
 			<Piece id="default_polearm_guard" Type="Guard" />
@@ -7258,13 +7258,13 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_highland_spear_3_t3_95160b14" name="{=HVcwvRMF}Reinforced Highland Spear" crafting_template="TwoHandedPolearm" culture="Culture.battania" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_highland_spear_3_t3_95160b14" name="{=HVcwvRMF}Reinforced Highland Spear" crafting_template="TwoHandedPolearm" culture="Culture.battania" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_8" Type="Blade" scale_factor="100" />
 			<Piece id="spear_handle_23" Type="Handle" scale_factor="110" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_southern_spear_3_t3_7fdac27b" name="{=zH0QF7mE}Knob Headed Spear with Frills" crafting_template="TwoHandedPolearm" culture="Culture.aserai" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_southern_spear_3_t3_7fdac27b" name="{=zH0QF7mE}Knob Headed Spear with Frills" crafting_template="TwoHandedPolearm" culture="Culture.aserai" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_14" Type="Blade" scale_factor="90" />
 			<Piece id="spear_banner_16" Type="Guard" scale_factor="90" />
@@ -7272,28 +7272,28 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_southern_spear_4_t3_97292fe4" name="{=IDfl59yt}Knob Headed Spear" crafting_template="TwoHandedPolearm" culture="Culture.aserai" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_southern_spear_4_t3_97292fe4" name="{=IDfl59yt}Knob Headed Spear" crafting_template="TwoHandedPolearm" culture="Culture.aserai" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_14" Type="Blade" scale_factor="100" />
 			<Piece id="default_polearm_guard" Type="Guard" scale_factor="100" />
 			<Piece id="spear_handle_21" Type="Handle" scale_factor="90" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_northern_spear_2_t3_da016490" name="{=xTyib5ms}Broad Leaf Shaped Spear" crafting_template="TwoHandedPolearm" culture="Culture.battania" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_northern_spear_2_t3_da016490" name="{=xTyib5ms}Broad Leaf Shaped Spear" crafting_template="TwoHandedPolearm" culture="Culture.battania" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_40" Type="Blade" scale_factor="90" />
 			<Piece id="spear_banner_10" Type="Guard" scale_factor="90" />
 			<Piece id="spear_handle_21" Type="Handle" scale_factor="90" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_northern_spear_4_t4_a346862f" name="{=9UB0LF8Z}Northern Cavalry Spear" crafting_template="TwoHandedPolearm" culture="Culture.battania" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_northern_spear_4_t4_a346862f" name="{=9UB0LF8Z}Northern Cavalry Spear" crafting_template="TwoHandedPolearm" culture="Culture.battania" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_36" Type="Blade" scale_factor="90" />
 			<Piece id="spear_banner_10" Type="Guard" scale_factor="90" />
 			<Piece id="spear_handle_21" Type="Handle" scale_factor="90" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_eastern_throwing_spear_1_t3_7dad0dc2" name="{=EgrNdBct}Jagged Throwing Spear" crafting_template="TwoHandedPolearm" culture="Culture.khuzait" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_eastern_throwing_spear_1_t3_7dad0dc2" name="{=EgrNdBct}Jagged Throwing Spear" crafting_template="TwoHandedPolearm" culture="Culture.khuzait" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_35" Type="Blade" scale_factor="90" />
 			<Piece id="spear_banner_16" Type="Guard" scale_factor="90" />
@@ -7301,13 +7301,13 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_triangluar_spear_t3_67b328d4" name="{=Jkd2gmyj}Triangular Headed Spear" crafting_template="TwoHandedPolearm" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_triangluar_spear_t3_67b328d4" name="{=Jkd2gmyj}Triangular Headed Spear" crafting_template="TwoHandedPolearm" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_2" Type="Blade" scale_factor="100" />
 			<Piece id="spear_handle_25" Type="Handle" scale_factor="90" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_western_spear_4_t4_0e1a226d" name="{=t28VYqjP}Long Fine Steel Spear" crafting_template="TwoHandedPolearm" culture="Culture.empire" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_western_spear_4_t4_0e1a226d" name="{=t28VYqjP}Long Fine Steel Spear" crafting_template="TwoHandedPolearm" culture="Culture.empire" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_4" Type="Blade" scale_factor="100" />
 			<Piece id="spear_banner_10" Type="Guard" scale_factor="100" />
@@ -7315,7 +7315,7 @@
 			<Piece id="spear_pommel_4" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_western_spear_5_t4_3fd8c85c" name="{=jcOJqWGA}Fine Steel Spear" crafting_template="TwoHandedPolearm" culture="Culture.empire" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_western_spear_5_t4_3fd8c85c" name="{=jcOJqWGA}Fine Steel Spear" crafting_template="TwoHandedPolearm" culture="Culture.empire" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_4" Type="Blade" scale_factor="90" />
 			<Piece id="spear_guard_3" Type="Guard" scale_factor="100" />
@@ -7323,7 +7323,7 @@
 			<Piece id="spear_pommel_4" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_eastern_spear_4_t4_12065767" name="{=bwXACVOb}Fine Steel Leaf Spear" crafting_template="TwoHandedPolearm" culture="Culture.aserai" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_eastern_spear_4_t4_12065767" name="{=bwXACVOb}Fine Steel Leaf Spear" crafting_template="TwoHandedPolearm" culture="Culture.aserai" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_42" Type="Blade" scale_factor="100" />
 			<Piece id="spear_guard_3" Type="Guard" scale_factor="100" />
@@ -7331,7 +7331,7 @@
 			<Piece id="spear_pommel_11" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_highland_spear_4_t4_bb367a4a" name="{=duIWCjdD}Steel Tipped Hooked Spear" crafting_template="TwoHandedPolearm" culture="Culture.battania" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_highland_spear_4_t4_bb367a4a" name="{=duIWCjdD}Steel Tipped Hooked Spear" crafting_template="TwoHandedPolearm" culture="Culture.battania" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_36" Type="Blade" scale_factor="100" />
 			<Piece id="spear_guard_5" Type="Guard" scale_factor="100" />
@@ -7339,7 +7339,7 @@
 			<Piece id="spear_pommel_1" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_northern_spear_3_t4_3fb58ac4" name="{=ZLpYFYXo}Jagged Fine Steel Spear" crafting_template="TwoHandedPolearm" culture="Culture.sturgia" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_northern_spear_3_t4_3fb58ac4" name="{=ZLpYFYXo}Jagged Fine Steel Spear" crafting_template="TwoHandedPolearm" culture="Culture.sturgia" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_36" Type="Blade" scale_factor="100" />
 			<Piece id="spear_guard_2" Type="Guard" scale_factor="100" />
@@ -7347,7 +7347,7 @@
 			<Piece id="spear_pommel_5" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_southern_spear_3_t4_84daca5a" name="{=vXYlLH6L}Long Thamaskene Tipped Spear" crafting_template="TwoHandedPolearm" culture="Culture.aserai" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_southern_spear_3_t4_84daca5a" name="{=vXYlLH6L}Long Thamaskene Tipped Spear" crafting_template="TwoHandedPolearm" culture="Culture.aserai" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_11" Type="Blade" scale_factor="100" />
 			<Piece id="spear_guard_7" Type="Guard" scale_factor="100" />
@@ -7355,7 +7355,7 @@
 			<Piece id="spear_pommel_11" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_eastern_throwing_spear_2_t4_7749a064" name="{=kJzIZMBR}Triangular Throwing Spear" crafting_template="TwoHandedPolearm" culture="Culture.khuzait" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_eastern_throwing_spear_2_t4_7749a064" name="{=kJzIZMBR}Triangular Throwing Spear" crafting_template="TwoHandedPolearm" culture="Culture.khuzait" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_13" Type="Blade" scale_factor="90" />
 			<Piece id="spear_guard_7" Type="Guard" scale_factor="90" />
@@ -7363,7 +7363,7 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_imperial_throwing_spear_1_t4_11307d28" name="{=rkqaCud5}Pilum" crafting_template="TwoHandedPolearm" culture="Culture.empire" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_imperial_throwing_spear_1_t4_11307d28" name="{=rkqaCud5}Pilum" crafting_template="TwoHandedPolearm" culture="Culture.empire" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_38" Type="Blade" scale_factor="90" />
 			<Piece id="default_polearm_guard" Type="Guard" scale_factor="100" />
@@ -7371,7 +7371,7 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_imperial_throwing_spear_1_t4_2_df9c4825" name="{=rkqaCud5}Pilum" is_merchandise="false" culture="Culture.empire" crafting_template="TwoHandedPolearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_imperial_throwing_spear_1_t4_2_df9c4825" name="{=rkqaCud5}Pilum" is_merchandise="false" culture="Culture.empire" crafting_template="TwoHandedPolearm">
 		<Pieces>
 			<Piece id="spear_blade_38" Type="Blade" />
 			<Piece id="default_polearm_guard" Type="Guard" />
@@ -7379,14 +7379,14 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_wide_leaf_spear_t4_8989b18e" name="{=hz87PBsa}Wide Leaf Spear" crafting_template="TwoHandedPolearm" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_wide_leaf_spear_t4_8989b18e" name="{=hz87PBsa}Wide Leaf Spear" crafting_template="TwoHandedPolearm" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_39" Type="Blade" scale_factor="100" />
 			<Piece id="spear_handle_27" Type="Handle" scale_factor="100" />
 			<Piece id="spear_pommel_9" Type="Pommel" scale_factor="90" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_eastern_spear_5_t5_24a46ed1" name="{=mWxNSjSP}Thin Fine Steel Hewing Spear" crafting_template="TwoHandedPolearm" culture="Culture.khuzait" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_eastern_spear_5_t5_24a46ed1" name="{=mWxNSjSP}Thin Fine Steel Hewing Spear" crafting_template="TwoHandedPolearm" culture="Culture.khuzait" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_27" Type="Blade" scale_factor="100" />
 			<Piece id="spear_guard_2" Type="Guard" scale_factor="100" />
@@ -7394,7 +7394,7 @@
 			<Piece id="spear_pommel_12" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_northern_spear_4_t5_a246849c" name="{=N28bDEhh}Fine Steel Hewing Spear" crafting_template="TwoHandedPolearm" culture="Culture.sturgia" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_northern_spear_4_t5_a246849c" name="{=N28bDEhh}Fine Steel Hewing Spear" crafting_template="TwoHandedPolearm" culture="Culture.sturgia" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_13" Type="Blade" scale_factor="90" />
 			<Piece id="spear_guard_7" Type="Guard" scale_factor="100" />
@@ -7402,37 +7402,37 @@
 			<Piece id="spear_pommel_9" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_simple_pike_t2_18e42e7a" name="{=GKzw7E8a}Simple Pike" crafting_template="Pike" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_simple_pike_t2_18e42e7a" name="{=GKzw7E8a}Simple Pike" crafting_template="Pike" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_9" Type="Blade" scale_factor="90" />
 			<Piece id="spear_handle_27" Type="Handle" scale_factor="90" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_military_fork_pike_t3_392290cd" name="{=kR1blV2k}Notched Military Fork" crafting_template="Pike" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_military_fork_pike_t3_392290cd" name="{=kR1blV2k}Notched Military Fork" crafting_template="Pike" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_25" Type="Blade" scale_factor="100" />
 			<Piece id="spear_handle_27" Type="Handle" scale_factor="90" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_thamaskene_pike_t4_88a4c52d" name="{=RwpJFXxc}Thamaskene Pike" crafting_template="Pike" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_thamaskene_pike_t4_88a4c52d" name="{=RwpJFXxc}Thamaskene Pike" crafting_template="Pike" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_41" Type="Blade" scale_factor="100" />
 			<Piece id="spear_handle_7" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_fine_pike_t4_4df76d7a" name="{=dkuzrKJF}Fine Pike" crafting_template="Pike" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_fine_pike_t4_4df76d7a" name="{=dkuzrKJF}Fine Pike" crafting_template="Pike" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_11" Type="Blade" scale_factor="100" />
 			<Piece id="spear_handle_7" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_vlandia_pike_1_t5_501fc43a" name="{=h60wQVVX}Pike" crafting_template="Pike" culture="Culture.vlandia" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_vlandia_pike_1_t5_501fc43a" name="{=h60wQVVX}Pike" crafting_template="Pike" culture="Culture.vlandia" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_6" Type="Blade" scale_factor="110" />
 			<Piece id="spear_handle_7" Type="Handle" scale_factor="110" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_billhook_polearm_t2_61f42303" name="{=Dj64aJKQ}Billhook" crafting_template="TwoHandedPolearm" culture="Culture.vlandia" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_billhook_polearm_t2_61f42303" name="{=Dj64aJKQ}Billhook" crafting_template="TwoHandedPolearm" culture="Culture.vlandia" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_33" Type="Blade" scale_factor="100" />
 			<Piece id="default_polearm_guard" Type="Guard" scale_factor="100" />
@@ -7440,7 +7440,7 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_sturgia_polearm_1_t5_f53c2e07" name="{=bwHoKxPu}Berdysh" crafting_template="TwoHandedPolearm" culture="Culture.sturgia" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_sturgia_polearm_1_t5_f53c2e07" name="{=bwHoKxPu}Berdysh" crafting_template="TwoHandedPolearm" culture="Culture.sturgia" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_43" Type="Blade" scale_factor="90" />
 			<Piece id="default_polearm_guard" Type="Guard" scale_factor="100" />
@@ -7448,7 +7448,7 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_empire_polearm_1_t4_b137318b" name="{=7LmUe8fQ}Menavlion" crafting_template="TwoHandedPolearm" culture="Culture.empire" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_empire_polearm_1_t4_b137318b" name="{=7LmUe8fQ}Menavlion" crafting_template="TwoHandedPolearm" culture="Culture.empire" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_7" Type="Blade" scale_factor="100" />
 			<Piece id="spear_banner_2" Type="Guard" scale_factor="100" />
@@ -7456,7 +7456,7 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_khuzait_polearm_1_t4_77b9a4bb" name="{=6hwZwODh}Glaive" crafting_template="TwoHandedPolearm" culture="Culture.khuzait" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_khuzait_polearm_1_t4_77b9a4bb" name="{=6hwZwODh}Glaive" crafting_template="TwoHandedPolearm" culture="Culture.khuzait" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_19" Type="Blade" scale_factor="106" />
 			<Piece id="spear_banner_16" Type="Guard" scale_factor="90" />
@@ -7464,7 +7464,7 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_easter_polesword_t4_81052d3c" name="{=1mCmYNl6}Polesword" crafting_template="TwoHandedPolearm" culture="Culture.aserai" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_easter_polesword_t4_81052d3c" name="{=1mCmYNl6}Polesword" crafting_template="TwoHandedPolearm" culture="Culture.aserai" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_22" Type="Blade" scale_factor="100" />
 			<Piece id="default_polearm_guard" Type="Guard" scale_factor="100" />
@@ -7472,7 +7472,7 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_battania_polearm_1_t5_abd01bc0" name="{=V4b2ZRTH}Rhomphaia" crafting_template="TwoHandedPolearm" culture="Culture.battania" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_battania_polearm_1_t5_abd01bc0" name="{=V4b2ZRTH}Rhomphaia" crafting_template="TwoHandedPolearm" culture="Culture.battania" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_44" Type="Blade" scale_factor="90" />
 			<Piece id="spear_guard_7" Type="Guard" scale_factor="90" />
@@ -7480,7 +7480,7 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_vlandia_polearm_1_t5_ce5c85a9" name="{=zbsajPMp}Voulge" crafting_template="TwoHandedPolearm" culture="Culture.vlandia" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_vlandia_polearm_1_t5_ce5c85a9" name="{=zbsajPMp}Voulge" crafting_template="TwoHandedPolearm" culture="Culture.vlandia" modifier_group="polearm">
 		<Pieces>
 			<Piece id="axe_craft_10_head" Type="Blade" scale_factor="93" />
 			<Piece id="default_polearm_guard" Type="Guard" />
@@ -7488,7 +7488,7 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_empire_polearm_2_t5_5815149f" name="{=UunjXpgb}Fine Steel Menavlion" crafting_template="TwoHandedPolearm" culture="Culture.empire" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_empire_polearm_2_t5_5815149f" name="{=UunjXpgb}Fine Steel Menavlion" crafting_template="TwoHandedPolearm" culture="Culture.empire" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_18" Type="Blade" scale_factor="100" />
 			<Piece id="default_polearm_guard" Type="Guard" scale_factor="100" />
@@ -7496,7 +7496,7 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_khuzait_polearm_2_t5_d707260f" name="{=JxV66l02}Long Glaive" crafting_template="TwoHandedPolearm" culture="Culture.khuzait" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_khuzait_polearm_2_t5_d707260f" name="{=JxV66l02}Long Glaive" crafting_template="TwoHandedPolearm" culture="Culture.khuzait" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_24" Type="Blade" scale_factor="100" />
 			<Piece id="default_polearm_guard" Type="Guard" scale_factor="100" />
@@ -7504,13 +7504,13 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_vlandia_lance_1_t3_00ec477a" name="{=j4XraSN6}Light Lance" crafting_template="TwoHandedPolearm" culture="Culture.vlandia" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_vlandia_lance_1_t3_00ec477a" name="{=j4XraSN6}Light Lance" crafting_template="TwoHandedPolearm" culture="Culture.vlandia" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_20" Type="Blade" scale_factor="100" />
 			<Piece id="spear_handle_23" Type="Handle" scale_factor="110" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_empire_lance_1_t3_878ad303" name="{=TQ1MVhIX}Light Cavalry Lance" crafting_template="TwoHandedPolearm" culture="Culture.empire" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_empire_lance_1_t3_878ad303" name="{=TQ1MVhIX}Light Cavalry Lance" crafting_template="TwoHandedPolearm" culture="Culture.empire" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_23" Type="Blade" scale_factor="101" />
 			<Piece id="default_polearm_guard" Type="Guard" />
@@ -7518,62 +7518,62 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_khuzait_lance_1_t3_b5692ab3" name="{=UWvOndG0}Light Steppe Rider Lance" crafting_template="TwoHandedPolearm" culture="Culture.khuzait" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_khuzait_lance_1_t3_b5692ab3" name="{=UWvOndG0}Light Steppe Rider Lance" crafting_template="TwoHandedPolearm" culture="Culture.khuzait" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_35" Type="Blade" scale_factor="100" />
 			<Piece id="spear_banner_17" Type="Guard" scale_factor="100" />
 			<Piece id="spear_handle_23" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_aserai_lance_1_t5_157bbc86" name="{=hsRwbHSk}Mamluke Lance" crafting_template="TwoHandedPolearm" culture="Culture.aserai" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_aserai_lance_1_t5_157bbc86" name="{=hsRwbHSk}Mamluke Lance" crafting_template="TwoHandedPolearm" culture="Culture.aserai" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_42" Type="Blade" scale_factor="100" />
 			<Piece id="spear_handle_19" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_vlandia_lance_2_t4_d7c01fdc" name="{=o5kKAbRu}Knight Lance" crafting_template="TwoHandedPolearm" culture="Culture.vlandia" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_vlandia_lance_2_t4_d7c01fdc" name="{=o5kKAbRu}Knight Lance" crafting_template="TwoHandedPolearm" culture="Culture.vlandia" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_11" Type="Blade" scale_factor="110" />
 			<Piece id="spear_handle_20" Type="Handle" scale_factor="110" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_empire_lance_2_t4_6dc09f2d" name="{=VP74qdJ3}Courser Lance" crafting_template="TwoHandedPolearm" culture="Culture.empire" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_empire_lance_2_t4_6dc09f2d" name="{=VP74qdJ3}Courser Lance" crafting_template="TwoHandedPolearm" culture="Culture.empire" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_4" Type="Blade" scale_factor="100" />
 			<Piece id="spear_handle_24" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_sturgia_lance_1_t4_adbb4881" name="{=3yh33obu}Druzhinnik Lance" crafting_template="TwoHandedPolearm" culture="Culture.sturgia" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_sturgia_lance_1_t4_adbb4881" name="{=3yh33obu}Druzhinnik Lance" crafting_template="TwoHandedPolearm" culture="Culture.sturgia" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_41" Type="Blade" scale_factor="100" />
 			<Piece id="spear_handle_17" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_khuzait_lance_2_t4_632e8f1d" name="{=k9bmPuTB}Heavy Cavalry Lance" crafting_template="TwoHandedPolearm" culture="Culture.khuzait" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_khuzait_lance_2_t4_632e8f1d" name="{=k9bmPuTB}Heavy Cavalry Lance" crafting_template="TwoHandedPolearm" culture="Culture.khuzait" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_36" Type="Blade" scale_factor="110" />
 			<Piece id="spear_handle_20" Type="Handle" scale_factor="110" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_vlandia_lance_3_t5_a501785a" name="{=sWUbsPty}Heavy Knight Lance" crafting_template="TwoHandedPolearm" culture="Culture.vlandia" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_vlandia_lance_3_t5_a501785a" name="{=sWUbsPty}Heavy Knight Lance" crafting_template="TwoHandedPolearm" culture="Culture.vlandia" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_5" Type="Blade" scale_factor="110" />
 			<Piece id="spear_handle_19" Type="Handle" scale_factor="110" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_sturgia_lance_2_t5_061cfcf9" name="{=tzoARfAm}Heavy Druzhinnik Lance" crafting_template="TwoHandedPolearm" culture="Culture.sturgia" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_sturgia_lance_2_t5_061cfcf9" name="{=tzoARfAm}Heavy Druzhinnik Lance" crafting_template="TwoHandedPolearm" culture="Culture.sturgia" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_13" Type="Blade" scale_factor="110" />
 			<Piece id="spear_handle_19" Type="Handle" scale_factor="110" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_empire_lance_3_t5_a2f9afaf" name="{=eND6ECxg}Cataphract Lance" crafting_template="TwoHandedPolearm" culture="Culture.empire" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_empire_lance_3_t5_a2f9afaf" name="{=eND6ECxg}Cataphract Lance" crafting_template="TwoHandedPolearm" culture="Culture.empire" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_6" Type="Blade" scale_factor="110" />
 			<Piece id="spear_handle_24" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_khuzait_lance_3_t5_dd7d985f" name="{=EBRG6qbv}Noble Cavalry Lance" crafting_template="TwoHandedPolearm" culture="Culture.khuzait" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_khuzait_lance_3_t5_dd7d985f" name="{=EBRG6qbv}Noble Cavalry Lance" crafting_template="TwoHandedPolearm" culture="Culture.khuzait" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_13" Type="Blade" scale_factor="110" />
 			<Piece id="spear_guard_13" Type="Guard" scale_factor="100" />
@@ -7581,7 +7581,7 @@
 			<Piece id="spear_pommel_9" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_vlandia_sword_1_t2_5139164f" name="{=w9RLq82l}Iron Arming Sword" crafting_template="OneHandedSword" culture="Culture.vlandia" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_vlandia_sword_1_t2_5139164f" name="{=w9RLq82l}Iron Arming Sword" crafting_template="OneHandedSword" culture="Culture.vlandia" modifier_group="sword">
 		<Pieces>
 			<Piece id="vlandian_blade_1" Type="Blade" scale_factor="100" />
 			<Piece id="cleaver_guard_2" Type="Guard" scale_factor="100" />
@@ -7589,7 +7589,7 @@
 			<Piece id="vlandian_pommel_1" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_empire_sword_1_t2_2a486f22" name="{=Ml8B2sfb}Footman's Spatha" crafting_template="OneHandedSword" culture="Culture.empire" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_empire_sword_1_t2_2a486f22" name="{=Ml8B2sfb}Footman's Spatha" crafting_template="OneHandedSword" culture="Culture.empire" modifier_group="sword">
 		<Pieces>
 			<Piece id="empire_blade_4" Type="Blade" scale_factor="100" />
 			<Piece id="cleaver_guard_4" Type="Guard" scale_factor="100" />
@@ -7597,7 +7597,7 @@
 			<Piece id="empire_pommel_1" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_aserai_sword_1_t2_8983f259" name="{=fHj6NbWy}Iron Flyssa" crafting_template="OneHandedSword" culture="Culture.aserai" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_aserai_sword_1_t2_8983f259" name="{=fHj6NbWy}Iron Flyssa" crafting_template="OneHandedSword" culture="Culture.aserai" modifier_group="sword">
 		<Pieces>
 			<Piece id="aserai_blade_4" Type="Blade" scale_factor="100" />
 			<Piece id="aserai_guard_1" Type="Guard" scale_factor="100" />
@@ -7605,7 +7605,7 @@
 			<Piece id="aserai_pommel_1" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_aserai_sword_2_t2_7ff970d2" name="{=JPByibJQ}Iron Scimitar" crafting_template="OneHandedSword" culture="Culture.aserai" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_aserai_sword_2_t2_7ff970d2" name="{=JPByibJQ}Iron Scimitar" crafting_template="OneHandedSword" culture="Culture.aserai" modifier_group="sword">
 		<Pieces>
 			<Piece id="aserai_blade_3" Type="Blade" scale_factor="100" />
 			<Piece id="aserai_guard_6" Type="Guard" scale_factor="100" />
@@ -7613,7 +7613,7 @@
 			<Piece id="aserai_pommel_1" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_khuzait_sword_1_t2_1ed7af32" name="{=QjdyYS0m}Iron Saber" crafting_template="OneHandedSword" culture="Culture.khuzait" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_khuzait_sword_1_t2_1ed7af32" name="{=QjdyYS0m}Iron Saber" crafting_template="OneHandedSword" culture="Culture.khuzait" modifier_group="sword">
 		<Pieces>
 			<Piece id="khuzait_blade_7" Type="Blade" scale_factor="100" />
 			<Piece id="khuzait_guard_4" Type="Guard" scale_factor="100" />
@@ -7621,7 +7621,7 @@
 			<Piece id="khuzait_pommel_2" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_sturgia_sword_1_t2_73909171" name="{=Ag6dujzl}Tapered Blade" crafting_template="OneHandedSword" culture="Culture.sturgia" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_sturgia_sword_1_t2_73909171" name="{=Ag6dujzl}Tapered Blade" crafting_template="OneHandedSword" culture="Culture.sturgia" modifier_group="sword">
 		<Pieces>
 			<Piece id="sturgian_blade_1" Type="Blade" scale_factor="100" />
 			<Piece id="sturgian_guard_1" Type="Guard" scale_factor="100" />
@@ -7629,7 +7629,7 @@
 			<Piece id="sturgian_pommel_7" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_battania_sword_1_t2_d2f29bca" name="{=habJjtmv}Ridged Iron Broadsword" crafting_template="OneHandedSword" culture="Culture.battania" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_battania_sword_1_t2_d2f29bca" name="{=habJjtmv}Ridged Iron Broadsword" crafting_template="OneHandedSword" culture="Culture.battania" modifier_group="sword">
 		<Pieces>
 			<Piece id="battania_blade_3_iron" Type="Blade" scale_factor="100" />
 			<Piece id="battania_guard_7" Type="Guard" scale_factor="100" />
@@ -7637,7 +7637,7 @@
 			<Piece id="battania_pommel_1" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_falchion_sword_t2_aaf80b34" name="{=IM2SamZ8}Falchion" crafting_template="OneHandedSword" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_falchion_sword_t2_aaf80b34" name="{=IM2SamZ8}Falchion" crafting_template="OneHandedSword" modifier_group="sword">
 		<Pieces>
 			<Piece id="vlandian_blade_9" Type="Blade" scale_factor="100" />
 			<Piece id="khuzait_guard_2" Type="Guard" scale_factor="90" />
@@ -7645,7 +7645,7 @@
 			<Piece id="vlandian_pommel_10" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_simple_sabre_sword_t2_fec66a6c" name="{=oQmUlQWp}Simple Saber " crafting_template="OneHandedSword" culture="Culture.khuzait" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_simple_sabre_sword_t2_fec66a6c" name="{=oQmUlQWp}Simple Saber " crafting_template="OneHandedSword" culture="Culture.khuzait" modifier_group="sword">
 		<Pieces>
 			<Piece id="khuzait_blade_6" Type="Blade" scale_factor="100" />
 			<Piece id="khuzait_guard_3" Type="Guard" scale_factor="100" />
@@ -7653,7 +7653,7 @@
 			<Piece id="aserai_pommel_2" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_simple_back_sword_t2_dc848924" name="{=IK2Z9zWk}Simple Scimitar" crafting_template="OneHandedSword" culture="Culture.khuzait" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_simple_back_sword_t2_dc848924" name="{=IK2Z9zWk}Simple Scimitar" crafting_template="OneHandedSword" culture="Culture.khuzait" modifier_group="sword">
 		<Pieces>
 			<Piece id="khuzait_blade_7" Type="Blade" scale_factor="90" />
 			<Piece id="sturgian_guard_7" Type="Guard" scale_factor="100" />
@@ -7661,7 +7661,7 @@
 			<Piece id="cleaver_pommel_1" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_iron_spatha_sword_t2_3ee00356" name="{=1CamO1P3}Iron Spatha" crafting_template="OneHandedSword" culture="Culture.empire" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_iron_spatha_sword_t2_3ee00356" name="{=1CamO1P3}Iron Spatha" crafting_template="OneHandedSword" culture="Culture.empire" modifier_group="sword">
 		<Pieces>
 			<Piece id="empire_blade_2" Type="Blade" scale_factor="90" />
 			<Piece id="cleaver_guard_3" Type="Guard" scale_factor="100" />
@@ -7669,7 +7669,7 @@
 			<Piece id="empire_pommel_2" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_vlandia_sword_2_t3_0eb0f5e7" name="{=ha3rVEzP}Ridged Tipped Arming Sword" crafting_template="OneHandedSword" culture="Culture.vlandia" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_vlandia_sword_2_t3_0eb0f5e7" name="{=ha3rVEzP}Ridged Tipped Arming Sword" crafting_template="OneHandedSword" culture="Culture.vlandia" modifier_group="sword">
 		<Pieces>
 			<Piece id="vlandian_blade_4" Type="Blade" scale_factor="100" />
 			<Piece id="vlandian_guard_2" Type="Guard" scale_factor="100" />
@@ -7677,7 +7677,7 @@
 			<Piece id="vlandian_pommel_6" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_empire_sword_2_t3_7a6350d6" name="{=4OaVIYuD}Spatha With Narrow Fuller" crafting_template="OneHandedSword" culture="Culture.empire" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_empire_sword_2_t3_7a6350d6" name="{=4OaVIYuD}Spatha With Narrow Fuller" crafting_template="OneHandedSword" culture="Culture.empire" modifier_group="sword">
 		<Pieces>
 			<Piece id="empire_blade_1" Type="Blade" scale_factor="100" />
 			<Piece id="empire_guard_3" Type="Guard" scale_factor="100" />
@@ -7685,7 +7685,7 @@
 			<Piece id="empire_pommel_4" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_empire_sword_3_t3_11b287bf" name="{=M2wvaObX}Spatha" crafting_template="OneHandedSword" culture="Culture.empire" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_empire_sword_3_t3_11b287bf" name="{=M2wvaObX}Spatha" crafting_template="OneHandedSword" culture="Culture.empire" modifier_group="sword">
 		<Pieces>
 			<Piece id="empire_blade_1" Type="Blade" scale_factor="100" />
 			<Piece id="empire_guard_6" Type="Guard" scale_factor="100" />
@@ -7693,7 +7693,7 @@
 			<Piece id="empire_pommel_4" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_aserai_sword_3_t3_48eb1124" name="{=bANXyotg}Slightly Ridged Flyssa" crafting_template="OneHandedSword" culture="Culture.aserai" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_aserai_sword_3_t3_48eb1124" name="{=bANXyotg}Slightly Ridged Flyssa" crafting_template="OneHandedSword" culture="Culture.aserai" modifier_group="sword">
 		<Pieces>
 			<Piece id="aserai_blade_2" Type="Blade" scale_factor="100" />
 			<Piece id="aserai_guard_7" Type="Guard" scale_factor="100" />
@@ -7701,7 +7701,7 @@
 			<Piece id="aserai_pommel_3" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_khuzait_sword_2_t3_27622f26" name="{=jSspzlmR}Straight Saber" crafting_template="OneHandedSword" culture="Culture.khuzait" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_khuzait_sword_2_t3_27622f26" name="{=jSspzlmR}Straight Saber" crafting_template="OneHandedSword" culture="Culture.khuzait" modifier_group="sword">
 		<Pieces>
 			<Piece id="khuzait_blade_5" Type="Blade" scale_factor="100" />
 			<Piece id="khuzait_guard_6" Type="Guard" scale_factor="100" />
@@ -7709,7 +7709,7 @@
 			<Piece id="khuzait_pommel_3" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_khuzait_sword_3_t3_799b6d4f" name="{=eaALL6uO}Long Saber" crafting_template="OneHandedSword" culture="Culture.khuzait" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_khuzait_sword_3_t3_799b6d4f" name="{=eaALL6uO}Long Saber" crafting_template="OneHandedSword" culture="Culture.khuzait" modifier_group="sword">
 		<Pieces>
 			<Piece id="khuzait_blade_5" Type="Blade" scale_factor="100" />
 			<Piece id="khuzait_guard_5" Type="Guard" scale_factor="100" />
@@ -7717,7 +7717,7 @@
 			<Piece id="khuzait_pommel_3" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_sturgia_sword_2_t3_b01c0a3d" name="{=FQHaFsyQ}Backsword" crafting_template="OneHandedSword" culture="Culture.sturgia" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_sturgia_sword_2_t3_b01c0a3d" name="{=FQHaFsyQ}Backsword" crafting_template="OneHandedSword" culture="Culture.sturgia" modifier_group="sword">
 		<Pieces>
 			<Piece id="sturgian_blade_5" Type="Blade" scale_factor="100" />
 			<Piece id="sturgian_guard_2" Type="Guard" scale_factor="100" />
@@ -7725,7 +7725,7 @@
 			<Piece id="sturgian_pommel_3" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_sturgia_sword_3_t3_10ccc6bc" name="{=MRIdGqhA}Pointy Warsword" crafting_template="OneHandedSword" culture="Culture.sturgia" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_sturgia_sword_3_t3_10ccc6bc" name="{=MRIdGqhA}Pointy Warsword" crafting_template="OneHandedSword" culture="Culture.sturgia" modifier_group="sword">
 		<Pieces>
 			<Piece id="sturgian_blade_7" Type="Blade" scale_factor="100" />
 			<Piece id="sturgian_guard_5" Type="Guard" scale_factor="100" />
@@ -7733,7 +7733,7 @@
 			<Piece id="sturgian_pommel_3" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_battania_sword_2_t3_09c0c87e" name="{=HwO0AYul}Broad Ridged Shortsword" crafting_template="OneHandedSword" culture="Culture.battania" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_battania_sword_2_t3_09c0c87e" name="{=HwO0AYul}Broad Ridged Shortsword" crafting_template="OneHandedSword" culture="Culture.battania" modifier_group="sword">
 		<Pieces>
 			<Piece id="battania_blade_4" Type="Blade" scale_factor="100" />
 			<Piece id="battania_guard_6" Type="Guard" scale_factor="100" />
@@ -7741,7 +7741,7 @@
 			<Piece id="battania_pommel_3" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_battania_sword_3_t3_5c49b887" name="{=8jEDX9J4}Broadsword" crafting_template="OneHandedSword" culture="Culture.battania" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_battania_sword_3_t3_5c49b887" name="{=8jEDX9J4}Broadsword" crafting_template="OneHandedSword" culture="Culture.battania" modifier_group="sword">
 		<Pieces>
 			<Piece id="battania_blade_3" Type="Blade" scale_factor="100" />
 			<Piece id="battania_guard_8" Type="Guard" scale_factor="100" />
@@ -7749,7 +7749,7 @@
 			<Piece id="battania_pommel_3" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_star_falchion_sword_t3_42f94786" name="{=qZOpdQVx}Star Falchion" crafting_template="OneHandedSword" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_star_falchion_sword_t3_42f94786" name="{=qZOpdQVx}Star Falchion" crafting_template="OneHandedSword" modifier_group="sword">
 		<Pieces>
 			<Piece id="cleaver_blade_4" Type="Blade" scale_factor="100" />
 			<Piece id="sturgian_guard_3" Type="Guard" scale_factor="100" />
@@ -7757,7 +7757,7 @@
 			<Piece id="cleaver_pommel_2" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_broad_falchion_sword_t3_b6a97e18" name="{=ktJ6crBs}Broad Falchion" crafting_template="OneHandedSword" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_broad_falchion_sword_t3_b6a97e18" name="{=ktJ6crBs}Broad Falchion" crafting_template="OneHandedSword" modifier_group="sword">
 		<Pieces>
 			<Piece id="cleaver_blade_2" Type="Blade" scale_factor="100" />
 			<Piece id="vlandian_guard_1" Type="Guard" scale_factor="100" />
@@ -7765,7 +7765,7 @@
 			<Piece id="cleaver_pommel_2" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_broad_ild_sword_t3_7857d0eb" name="{=e8amL6a1}Broad Ild" crafting_template="OneHandedSword" culture="Culture.khuzait" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_broad_ild_sword_t3_7857d0eb" name="{=e8amL6a1}Broad Ild" crafting_template="OneHandedSword" culture="Culture.khuzait" modifier_group="sword">
 		<Pieces>
 			<Piece id="khuzait_blade_5" Type="Blade" scale_factor="100" />
 			<Piece id="khuzait_guard_1" Type="Guard" scale_factor="100" />
@@ -7773,7 +7773,7 @@
 			<Piece id="khuzait_pommel_6" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_short_sword_t3_e52f3461" name="{=cRCkC36E}Short Sword" crafting_template="OneHandedSword" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_short_sword_t3_e52f3461" name="{=cRCkC36E}Short Sword" crafting_template="OneHandedSword" modifier_group="sword">
 		<Pieces>
 			<Piece id="sturgian_blade_9" Type="Blade" scale_factor="100" />
 			<Piece id="vlandian_guard_2" Type="Guard" scale_factor="100" />
@@ -7781,7 +7781,7 @@
 			<Piece id="vlandian_pommel_8" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_narrow_sword_t3_a854b49c" name="{=3YhwjpQ0}Narrow Sword" crafting_template="OneHandedSword" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_narrow_sword_t3_a854b49c" name="{=3YhwjpQ0}Narrow Sword" crafting_template="OneHandedSword" modifier_group="sword">
 		<Pieces>
 			<Piece id="vlandian_blade_8" Type="Blade" scale_factor="100" />
 			<Piece id="cleaver_guard_5" Type="Guard" scale_factor="100" />
@@ -7789,7 +7789,7 @@
 			<Piece id="vlandian_pommel_6" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_cleaver_sword_t3_a5e168d5" name="{=mfeM775z}Cleaver" crafting_template="OneHandedSword" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_cleaver_sword_t3_a5e168d5" name="{=mfeM775z}Cleaver" crafting_template="OneHandedSword" modifier_group="sword">
 		<Pieces>
 			<Piece id="cleaver_blade_1" Type="Blade" scale_factor="100" />
 			<Piece id="cleaver_guard_1" Type="Guard" scale_factor="100" />
@@ -7797,7 +7797,7 @@
 			<Piece id="sturgian_pommel_1" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_vlandia_sword_3_t4_b4fce297" name="{=8mpp8ZCL}Knightly Arming Sword" crafting_template="OneHandedSword" culture="Culture.vlandia" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_vlandia_sword_3_t4_b4fce297" name="{=8mpp8ZCL}Knightly Arming Sword" crafting_template="OneHandedSword" culture="Culture.vlandia" modifier_group="sword">
 		<Pieces>
 			<Piece id="vlandian_blade_7" Type="Blade" scale_factor="110" />
 			<Piece id="vlandian_guard_5" Type="Guard" scale_factor="100" />
@@ -7805,7 +7805,7 @@
 			<Piece id="vlandian_pommel_7" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_vlandia_sword_4_t4_316bb4cc" name="{=ksxylfU4}Ridged Arming Sword" crafting_template="OneHandedSword" culture="Culture.vlandia" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_vlandia_sword_4_t4_316bb4cc" name="{=ksxylfU4}Ridged Arming Sword" crafting_template="OneHandedSword" culture="Culture.vlandia" modifier_group="sword">
 		<Pieces>
 			<Piece id="vlandian_blade_5" Type="Blade" scale_factor="105" />
 			<Piece id="vlandian_guard_4" Type="Guard" scale_factor="100" />
@@ -7813,7 +7813,7 @@
 			<Piece id="vlandian_pommel_7" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_empire_sword_4_t4_bb1e3ef5" name="{=AMIdBVZb}Fine Steel Spatha" crafting_template="OneHandedSword" culture="Culture.empire" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_empire_sword_4_t4_bb1e3ef5" name="{=AMIdBVZb}Fine Steel Spatha" crafting_template="OneHandedSword" culture="Culture.empire" modifier_group="sword">
 		<Pieces>
 			<Piece id="empire_blade_6" Type="Blade" scale_factor="105" />
 			<Piece id="empire_guard_2" Type="Guard" scale_factor="100" />
@@ -7821,7 +7821,7 @@
 			<Piece id="empire_pommel_5" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_empire_sword_5_t4_8d2bffa4" name="{=OLTUHPaD}Fine Steel Paramerion" crafting_template="OneHandedSword" culture="Culture.empire" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_empire_sword_5_t4_8d2bffa4" name="{=OLTUHPaD}Fine Steel Paramerion" crafting_template="OneHandedSword" culture="Culture.empire" modifier_group="sword">
 		<Pieces>
 			<Piece id="empire_blade_5" Type="Blade" scale_factor="105" />
 			<Piece id="empire_guard_4" Type="Guard" scale_factor="100" />
@@ -7829,7 +7829,7 @@
 			<Piece id="empire_pommel_5" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_aserai_sword_4_t4_3422429a" name="{=dCbrowBV}Fine Steel Long Kaskara" crafting_template="OneHandedSword" culture="Culture.aserai" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_aserai_sword_4_t4_3422429a" name="{=dCbrowBV}Fine Steel Long Kaskara" crafting_template="OneHandedSword" culture="Culture.aserai" modifier_group="sword">
 		<Pieces>
 			<Piece id="aserai_blade_10" Type="Blade" scale_factor="105" />
 			<Piece id="aserai_guard_9" Type="Guard" scale_factor="100" />
@@ -7837,7 +7837,7 @@
 			<Piece id="aserai_pommel_5" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_aserai_sword_5_t4_66ba0653" name="{=fuyj7s3F}Long Fine Steel Scimitar" crafting_template="OneHandedSword" culture="Culture.aserai" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_aserai_sword_5_t4_66ba0653" name="{=fuyj7s3F}Long Fine Steel Scimitar" crafting_template="OneHandedSword" culture="Culture.aserai" modifier_group="sword">
 		<Pieces>
 			<Piece id="aserai_blade_8" Type="Blade" scale_factor="110" />
 			<Piece id="aserai_guard_8" Type="Guard" scale_factor="100" />
@@ -7845,7 +7845,7 @@
 			<Piece id="aserai_pommel_5" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_aserai_sword_6_t4_2a6d6314" name="{=Yd4lmlQp}Narrow Fine Steel Kaskara" crafting_template="OneHandedSword" culture="Culture.aserai" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_aserai_sword_6_t4_2a6d6314" name="{=Yd4lmlQp}Narrow Fine Steel Kaskara" crafting_template="OneHandedSword" culture="Culture.aserai" modifier_group="sword">
 		<Pieces>
 			<Piece id="aserai_blade_1" Type="Blade" scale_factor="105" />
 			<Piece id="aserai_guard_3" Type="Guard" scale_factor="100" />
@@ -7853,7 +7853,7 @@
 			<Piece id="aserai_pommel_5" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_khuzait_sword_4_t4_23072485" name="{=gadEbFyj}Fine Steel Saber" crafting_template="OneHandedSword" culture="Culture.khuzait" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_khuzait_sword_4_t4_23072485" name="{=gadEbFyj}Fine Steel Saber" crafting_template="OneHandedSword" culture="Culture.khuzait" modifier_group="sword">
 		<Pieces>
 			<Piece id="khuzait_blade_1" Type="Blade" scale_factor="105" />
 			<Piece id="khuzait_guard_9" Type="Guard" scale_factor="100" />
@@ -7861,7 +7861,7 @@
 			<Piece id="khuzait_pommel_4" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_khuzait_sword_5_t4_bca61074" name="{=4YTJJaTG}Heavy Sabre" crafting_template="OneHandedSword" culture="Culture.khuzait" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_khuzait_sword_5_t4_bca61074" name="{=4YTJJaTG}Heavy Sabre" crafting_template="OneHandedSword" culture="Culture.khuzait" modifier_group="sword">
 		<Pieces>
 			<Piece id="khuzait_blade_2" Type="Blade" scale_factor="110" />
 			<Piece id="khuzait_guard_7" Type="Guard" scale_factor="100" />
@@ -7869,7 +7869,7 @@
 			<Piece id="khuzait_pommel_4" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_sturgia_sword_4_t4_cfeb0292" name="{=EadnjRjs}Long Warsword" crafting_template="OneHandedSword" culture="Culture.sturgia" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_sturgia_sword_4_t4_cfeb0292" name="{=EadnjRjs}Long Warsword" crafting_template="OneHandedSword" culture="Culture.sturgia" modifier_group="sword">
 		<Pieces>
 			<Piece id="sturgian_blade_2" Type="Blade" scale_factor="105" />
 			<Piece id="sturgian_guard_2" Type="Guard" scale_factor="100" />
@@ -7877,7 +7877,7 @@
 			<Piece id="sturgian_pommel_8" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_sturgia_sword_5_t4_4e9bee4b" name="{=SGdY9jmK}Fullered Narrow Warsword" crafting_template="OneHandedSword" culture="Culture.sturgia" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_sturgia_sword_5_t4_4e9bee4b" name="{=SGdY9jmK}Fullered Narrow Warsword" crafting_template="OneHandedSword" culture="Culture.sturgia" modifier_group="sword">
 		<Pieces>
 			<Piece id="sturgian_blade_6" Type="Blade" scale_factor="110" />
 			<Piece id="sturgian_guard_5" Type="Guard" scale_factor="100" />
@@ -7885,7 +7885,7 @@
 			<Piece id="sturgian_pommel_8" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_battania_sword_4_t4_033b06bd" name="{=57jpWo7g}Fine Steel Cavalry Broadsword" crafting_template="OneHandedSword" culture="Culture.battania" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_battania_sword_4_t4_033b06bd" name="{=57jpWo7g}Fine Steel Cavalry Broadsword" crafting_template="OneHandedSword" culture="Culture.battania" modifier_group="sword">
 		<Pieces>
 			<Piece id="battania_blade_1" Type="Blade" scale_factor="110" />
 			<Piece id="battania_guard_3" Type="Guard" scale_factor="100" />
@@ -7893,7 +7893,7 @@
 			<Piece id="battania_pommel_4" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_pointed_falchion_sword_t4_8b07f7de" name="{=tQw4Zfwu}Pointed Falchion" crafting_template="OneHandedSword" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_pointed_falchion_sword_t4_8b07f7de" name="{=tQw4Zfwu}Pointed Falchion" crafting_template="OneHandedSword" modifier_group="sword">
 		<Pieces>
 			<Piece id="cleaver_blade_3" Type="Blade" scale_factor="100" />
 			<Piece id="cleaver_guard_1" Type="Guard" scale_factor="100" />
@@ -7901,7 +7901,7 @@
 			<Piece id="empire_pommel_1" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_ridged_sabre_sword_t4_cb317feb" name="{=k5Ne9pqd}Ridged Scimitar" crafting_template="OneHandedSword" culture="Culture.aserai" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_ridged_sabre_sword_t4_cb317feb" name="{=k5Ne9pqd}Ridged Scimitar" crafting_template="OneHandedSword" culture="Culture.aserai" modifier_group="sword">
 		<Pieces>
 			<Piece id="khuzait_blade_8" Type="Blade" scale_factor="90" />
 			<Piece id="empire_guard_1" Type="Guard" scale_factor="100" />
@@ -7909,7 +7909,7 @@
 			<Piece id="khuzait_noble_pommel_4" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_broad_arming_sword_t4_185b7129" name="{=b8AgXwbL}Broad Arming Sword" crafting_template="OneHandedSword" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_broad_arming_sword_t4_185b7129" name="{=b8AgXwbL}Broad Arming Sword" crafting_template="OneHandedSword" modifier_group="sword">
 		<Pieces>
 			<Piece id="vlandian_blade_2" Type="Blade" scale_factor="100" />
 			<Piece id="vlandian_guard_4" Type="Guard" scale_factor="100" />
@@ -7917,7 +7917,7 @@
 			<Piece id="vlandian_pommel_7" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_desert_long_sword_t4_5dd402aa" name="{=gsGjXj8J}Desert Long Sword" crafting_template="OneHandedSword" culture="Culture.aserai" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_desert_long_sword_t4_5dd402aa" name="{=gsGjXj8J}Desert Long Sword" crafting_template="OneHandedSword" culture="Culture.aserai" modifier_group="sword">
 		<Pieces>
 			<Piece id="aserai_blade_7" Type="Blade" scale_factor="100" />
 			<Piece id="aserai_guard_9" Type="Guard" scale_factor="100" />
@@ -7925,7 +7925,7 @@
 			<Piece id="aserai_noble_pommel_1" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_vlandia_sword_5_t5_b71cab8a" name="{=VAcSEseI}Wide Fullered Broad Arming Sword" crafting_template="OneHandedSword" culture="Culture.vlandia" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_vlandia_sword_5_t5_b71cab8a" name="{=VAcSEseI}Wide Fullered Broad Arming Sword" crafting_template="OneHandedSword" culture="Culture.vlandia" modifier_group="sword">
 		<Pieces>
 			<Piece id="vlandian_blade_3" Type="Blade" scale_factor="100" />
 			<Piece id="vlandian_guard_8" Type="Guard" scale_factor="100" />
@@ -7933,7 +7933,7 @@
 			<Piece id="vlandian_pommel_9" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_empire_sword_6_t5_8d8f6390" name="{=1bc4kTaz}Thamaskene Steel Spathion" crafting_template="OneHandedSword" culture="Culture.empire" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_empire_sword_6_t5_8d8f6390" name="{=1bc4kTaz}Thamaskene Steel Spathion" crafting_template="OneHandedSword" culture="Culture.empire" modifier_group="sword">
 		<Pieces>
 			<Piece id="empire_blade_7" Type="Blade" scale_factor="100" />
 			<Piece id="empire_guard_5" Type="Guard" scale_factor="100" />
@@ -7941,7 +7941,7 @@
 			<Piece id="empire_pommel_3" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_empire_sword_7_t2_d8713778" name="{=lwxOPEPx}Gladius" crafting_template="OneHandedSword" culture="Culture.empire" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_empire_sword_7_t2_d8713778" name="{=lwxOPEPx}Gladius" crafting_template="OneHandedSword" culture="Culture.empire" modifier_group="sword">
 		<Pieces>
 			<Piece id="battania_blade_3_iron" Type="Blade" scale_factor="98" />
 			<Piece id="battania_guard_6" Type="Guard" />
@@ -7950,7 +7950,7 @@
 		</Pieces>
 		<!-- Length: 90 Weight: 1.96 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_aserai_sword_7_t5_0fcf3f12" name="{=zBUT90xQ}Thamaskene Steel Kaskara" crafting_template="OneHandedSword" culture="Culture.aserai" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_aserai_sword_7_t5_0fcf3f12" name="{=zBUT90xQ}Thamaskene Steel Kaskara" crafting_template="OneHandedSword" culture="Culture.aserai" modifier_group="sword">
 		<Pieces>
 			<Piece id="aserai_blade_11" Type="Blade" scale_factor="100" />
 			<Piece id="aserai_guard_2" Type="Guard" scale_factor="100" />
@@ -7958,7 +7958,7 @@
 			<Piece id="aserai_pommel_8" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_sturgia_sword_5_t5_4d9becb8" name="{=jfWzICId}Fullered Long Warsword" crafting_template="OneHandedSword" culture="Culture.sturgia" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_sturgia_sword_5_t5_4d9becb8" name="{=jfWzICId}Fullered Long Warsword" crafting_template="OneHandedSword" culture="Culture.sturgia" modifier_group="sword">
 		<Pieces>
 			<Piece id="sturgian_blade_8" Type="Blade" scale_factor="100" />
 			<Piece id="sturgian_guard_4" Type="Guard" scale_factor="100" />
@@ -7966,7 +7966,7 @@
 			<Piece id="sturgian_pommel_12" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_battania_sword_5_t5_800478ff" name="{=l9kAJ1Xh}Highland Broad Blade" crafting_template="OneHandedSword" culture="Culture.battania" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_battania_sword_5_t5_800478ff" name="{=l9kAJ1Xh}Highland Broad Blade" crafting_template="OneHandedSword" culture="Culture.battania" modifier_group="sword">
 		<Pieces>
 			<Piece id="battania_blade_5" Type="Blade" scale_factor="100" />
 			<Piece id="battania_guard_9" Type="Guard" scale_factor="100" />
@@ -7974,7 +7974,7 @@
 			<Piece id="battania_pommel_8" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_vlandia_noble_sword_1_t5_ba520cc7" name="{=Zcaucj4W}Decorated Arming Sword" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.vlandia" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_vlandia_noble_sword_1_t5_ba520cc7" name="{=Zcaucj4W}Decorated Arming Sword" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.vlandia" modifier_group="sword">
 		<Pieces>
 			<Piece id="vlandian_noble_blade_4" Type="Blade" scale_factor="105" />
 			<Piece id="vlandian_noble_guard_3" Type="Guard" scale_factor="100" />
@@ -7982,7 +7982,7 @@
 			<Piece id="vlandian_noble_pommel_4" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_vlandia_noble_sword_2_t5_81450760" name="{=ZsaukY0N}Arming Sword with Circle" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.vlandia" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_vlandia_noble_sword_2_t5_81450760" name="{=ZsaukY0N}Arming Sword with Circle" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.vlandia" modifier_group="sword">
 		<Pieces>
 			<Piece id="vlandian_noble_blade_1" Type="Blade" scale_factor="100" />
 			<Piece id="vlandian_noble_guard_1" Type="Guard" scale_factor="100" />
@@ -7990,7 +7990,7 @@
 			<Piece id="vlandian_noble_pommel_1" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_vlandia_noble_sword_3_t5_5fcd40cd" name="{=P9FUrH8a}Gold Engraved Arming Sword" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.vlandia" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_vlandia_noble_sword_3_t5_5fcd40cd" name="{=P9FUrH8a}Gold Engraved Arming Sword" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.vlandia" modifier_group="sword">
 		<Pieces>
 			<Piece id="vlandian_noble_blade_2" Type="Blade" scale_factor="105" />
 			<Piece id="vlandian_noble_guard_3" Type="Guard" scale_factor="100" />
@@ -7998,7 +7998,7 @@
 			<Piece id="vlandian_noble_pommel_3" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_vlandia_noble_sword_4_t5_ef1c6b1e" name="{=4q69NwNy}Crescent Guarded Arming Sword" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.vlandia" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_vlandia_noble_sword_4_t5_ef1c6b1e" name="{=4q69NwNy}Crescent Guarded Arming Sword" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.vlandia" modifier_group="sword">
 		<Pieces>
 			<Piece id="vlandian_noble_blade_3" Type="Blade" />
 			<Piece id="vlandian_noble_guard_4" Type="Guard" />
@@ -8006,7 +8006,7 @@
 			<Piece id="vlandian_noble_pommel_2" Type="Pommel" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_empire_noble_sword_1_t5_f51d246a" name="{=GyYsQlVd}Decorated Short Spatha" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.empire" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_empire_noble_sword_1_t5_f51d246a" name="{=GyYsQlVd}Decorated Short Spatha" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.empire" modifier_group="sword">
 		<Pieces>
 			<Piece id="empire_noble_blade_1" Type="Blade" scale_factor="100" />
 			<Piece id="empire_noble_guard_1" Type="Guard" scale_factor="100" />
@@ -8014,7 +8014,7 @@
 			<Piece id="empire_noble_pommel_3" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_empire_noble_sword_2_t5_41b0a705" name="{=Rcc0JW6H}Thamaskene Steel Spatha" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.empire" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_empire_noble_sword_2_t5_41b0a705" name="{=Rcc0JW6H}Thamaskene Steel Spatha" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.empire" modifier_group="sword">
 		<Pieces>
 			<Piece id="empire_blade_7" Type="Blade" scale_factor="100" />
 			<Piece id="empire_noble_guard_4" Type="Guard" scale_factor="100" />
@@ -8022,7 +8022,7 @@
 			<Piece id="empire_noble_pommel_4" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_empire_noble_sword_3_t5_be618f98" name="{=HpdJJO9g}Spatha Blade with Ring Pommel" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.empire" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_empire_noble_sword_3_t5_be618f98" name="{=HpdJJO9g}Spatha Blade with Ring Pommel" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.empire" modifier_group="sword">
 		<Pieces>
 			<Piece id="empire_noble_blade_4" Type="Blade" scale_factor="90" />
 			<Piece id="empire_noble_guard_3" Type="Guard" scale_factor="90" />
@@ -8030,7 +8030,7 @@
 			<Piece id="empire_noble_pommel_2" Type="Pommel" scale_factor="90" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_aserai_noble_sword_1_t5_e39a340d" name="{=iEbP2INp}Decorated Kaskara" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.aserai" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_aserai_noble_sword_1_t5_e39a340d" name="{=iEbP2INp}Decorated Kaskara" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.aserai" modifier_group="sword">
 		<Pieces>
 			<Piece id="aserai_noble_blade_2" Type="Blade" scale_factor="100" />
 			<Piece id="aserai_noble_guard_2" Type="Guard" scale_factor="100" />
@@ -8038,7 +8038,7 @@
 			<Piece id="aserai_noble_pommel_2" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_aserai_noble_sword_2_t5_be472ef2" name="{=93OHSnEV}Decorated Long Scimitar" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.aserai" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_aserai_noble_sword_2_t5_be472ef2" name="{=93OHSnEV}Decorated Long Scimitar" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.aserai" modifier_group="sword">
 		<Pieces>
 			<Piece id="aserai_noble_blade_1" Type="Blade" scale_factor="100" />
 			<Piece id="aserai_noble_guard_4" Type="Guard" scale_factor="100" />
@@ -8046,7 +8046,7 @@
 			<Piece id="aserai_noble_pommel_4" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_aserai_noble_sword_3_t5_59e61e07" name="{=bohbzGjg}Decorated Scimitar with Wide Grip" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.aserai" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_aserai_noble_sword_3_t5_59e61e07" name="{=bohbzGjg}Decorated Scimitar with Wide Grip" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.aserai" modifier_group="sword">
 		<Pieces>
 			<Piece id="aserai_noble_blade_4" Type="Blade" scale_factor="100" />
 			<Piece id="aserai_noble_guard_3" Type="Guard" scale_factor="100" />
@@ -8054,7 +8054,7 @@
 			<Piece id="aserai_noble_pommel_3" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_aserai_noble_sword_4_t5_c5a23e4c" name="{=0lNp3f76}Engraved Angular Kaskara" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.aserai" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_aserai_noble_sword_4_t5_c5a23e4c" name="{=0lNp3f76}Engraved Angular Kaskara" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.aserai" modifier_group="sword">
 		<Pieces>
 			<Piece id="aserai_noble_blade_3" Type="Blade" scale_factor="100" />
 			<Piece id="aserai_noble_guard_1" Type="Guard" scale_factor="100" />
@@ -8062,7 +8062,7 @@
 			<Piece id="aserai_noble_pommel_1" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_khuzait_noble_sword_1_t5_3c21705a" name="{=v7WQhge3}Decorated Saber" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.khuzait" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_khuzait_noble_sword_1_t5_3c21705a" name="{=v7WQhge3}Decorated Saber" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.khuzait" modifier_group="sword">
 		<Pieces>
 			<Piece id="khuzait_noble_blade_2" Type="Blade" scale_factor="100" />
 			<Piece id="khuzait_noble_guard_1" Type="Guard" scale_factor="100" />
@@ -8070,7 +8070,7 @@
 			<Piece id="khuzait_noble_pommel_1" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_khuzait_noble_sword_2_t5_41249135" name="{=a10taTGb}Lion Imprinted Saber" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.khuzait" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_khuzait_noble_sword_2_t5_41249135" name="{=a10taTGb}Lion Imprinted Saber" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.khuzait" modifier_group="sword">
 		<Pieces>
 			<Piece id="khuzait_noble_blade_1" Type="Blade" scale_factor="100" />
 			<Piece id="khuzait_noble_guard_2" Type="Guard" scale_factor="100" />
@@ -8078,7 +8078,7 @@
 			<Piece id="khuzait_noble_pommel_2" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_khuzait_noble_sword_3_t5_920c3608" name="{=tpUzcdY6}Tall Gripped Ild Sword" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.khuzait" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_khuzait_noble_sword_3_t5_920c3608" name="{=tpUzcdY6}Tall Gripped Ild Sword" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.khuzait" modifier_group="sword">
 		<Pieces>
 			<Piece id="khuzait_noble_blade_2" Type="Blade" scale_factor="100" />
 			<Piece id="khuzait_noble_guard_3" Type="Guard" scale_factor="100" />
@@ -8086,7 +8086,7 @@
 			<Piece id="khuzait_noble_pommel_3" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_sturgia_noble_sword_1_t5_3abfd4a5" name="{=lXwaLAYP}Thamaskene Steel Warsword" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.sturgia" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_sturgia_noble_sword_1_t5_3abfd4a5" name="{=lXwaLAYP}Thamaskene Steel Warsword" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.sturgia" modifier_group="sword">
 		<Pieces>
 			<Piece id="sturgian_noble_blade_2" Type="Blade" scale_factor="100" />
 			<Piece id="sturgian_noble_guard_2" Type="Guard" scale_factor="100" />
@@ -8094,7 +8094,7 @@
 			<Piece id="sturgian_noble_pommel_3" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_sturgia_noble_sword_2_t5_e1852e0a" name="{=4wQRk3f5}Decorated Long Warsword" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.sturgia" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_sturgia_noble_sword_2_t5_e1852e0a" name="{=4wQRk3f5}Decorated Long Warsword" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.sturgia" modifier_group="sword">
 		<Pieces>
 			<Piece id="sturgian_noble_blade_3" Type="Blade" scale_factor="100" />
 			<Piece id="sturgian_noble_guard_1" Type="Guard" scale_factor="100" />
@@ -8102,7 +8102,7 @@
 			<Piece id="sturgian_noble_pommel_4" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_sturgia_noble_sword_3_t5_5cd438df" name="{=QA5zGCKf}Decorated Fullered Sword" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.sturgia" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_sturgia_noble_sword_3_t5_5cd438df" name="{=QA5zGCKf}Decorated Fullered Sword" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.sturgia" modifier_group="sword">
 		<Pieces>
 			<Piece id="sturgian_noble_blade_1" Type="Blade" scale_factor="100" />
 			<Piece id="sturgian_noble_guard_3" Type="Guard" scale_factor="100" />
@@ -8110,7 +8110,7 @@
 			<Piece id="sturgian_noble_pommel_2" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_sturgia_noble_sword_4_t5_de656384" name="{=06Qoh8AO}Gold Bound Short Warsword" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.sturgia" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_sturgia_noble_sword_4_t5_de656384" name="{=06Qoh8AO}Gold Bound Short Warsword" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.sturgia" modifier_group="sword">
 		<Pieces>
 			<Piece id="sturgian_noble_blade_4" Type="Blade" scale_factor="100" />
 			<Piece id="sturgian_noble_guard_4" Type="Guard" scale_factor="100" />
@@ -8118,7 +8118,7 @@
 			<Piece id="sturgian_noble_pommel_1" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_battania_noble_sword_1_t5_f8110512" name="{=VucrovFw}Engraved Backsword" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.battania" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_battania_noble_sword_1_t5_f8110512" name="{=VucrovFw}Engraved Backsword" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.battania" modifier_group="sword">
 		<Pieces>
 			<Piece id="battania_noble_blade_1" Type="Blade" scale_factor="100" />
 			<Piece id="battania_noble_guard_1" Type="Guard" scale_factor="100" />
@@ -8126,7 +8126,7 @@
 			<Piece id="battania_pommel_5" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_battania_noble_sword_2_t5_1d640a2d" name="{=finesteelbladeweapon}Highland Fine Steel Blade" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.battania" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_battania_noble_sword_2_t5_1d640a2d" name="{=finesteelbladeweapon}Highland Fine Steel Blade" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.battania" modifier_group="sword">
 		<Pieces>
 			<Piece id="battania_blade_3_fine_steel" Type="Blade" scale_factor="100" />
 			<Piece id="battania_guard_5" Type="Guard" scale_factor="100" />
@@ -8134,7 +8134,7 @@
 			<Piece id="battania_pommel_8" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_battania_noble_sword_3_t5_4dfbcac0" name="{=Cr5ak47X}Decorated Broadsword" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.battania" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_battania_noble_sword_3_t5_4dfbcac0" name="{=Cr5ak47X}Decorated Broadsword" crafting_template="OneHandedSword" is_merchandise="false" culture="Culture.battania" modifier_group="sword">
 		<Pieces>
 			<Piece id="battania_noble_blade_2" Type="Blade" scale_factor="90" />
 			<Piece id="battania_noble_guard_1" Type="Guard" scale_factor="90" />
@@ -8142,7 +8142,7 @@
 			<Piece id="battania_noble_pommel_1" Type="Pommel" scale_factor="90" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_battania_2hsword_1_t2_1ab44d1c" name="{=DQaV0i5W}Iron Broadsword" crafting_template="TwoHandedSword" culture="Culture.battania" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_battania_2hsword_1_t2_1ab44d1c" name="{=DQaV0i5W}Iron Broadsword" crafting_template="TwoHandedSword" culture="Culture.battania" modifier_group="sword">
 		<Pieces>
 			<Piece id="battania_blade_3_iron" Type="Blade" scale_factor="110" />
 			<Piece id="battania_guard_8" Type="Guard" scale_factor="100" />
@@ -8150,7 +8150,7 @@
 			<Piece id="sturgian_pommel_4" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_bastard_sword_t2_2aac9b05" name="{=arBdK7st}Simple Bastard Sword" crafting_template="OneHandedSword" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_bastard_sword_t2_2aac9b05" name="{=arBdK7st}Simple Bastard Sword" crafting_template="OneHandedSword" modifier_group="sword">
 		<Pieces>
 			<Piece id="empire_blade_4" Type="Blade" />
 			<Piece id="cleaver_guard_2" Type="Guard" />
@@ -8158,7 +8158,7 @@
 			<Piece id="sturgian_pommel_7" Type="Pommel" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_battania_2hsword_2_t3_140e2264" name="{=YrAVxmFn}Highland Broadsword" crafting_template="TwoHandedSword" culture="Culture.battania" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_battania_2hsword_2_t3_140e2264" name="{=YrAVxmFn}Highland Broadsword" crafting_template="TwoHandedSword" culture="Culture.battania" modifier_group="sword">
 		<Pieces>
 			<Piece id="battania_blade_3" Type="Blade" scale_factor="110" />
 			<Piece id="battania_guard_3" Type="Guard" scale_factor="100" />
@@ -8166,7 +8166,7 @@
 			<Piece id="empire_pommel_4" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_battania_2hsword_3_t3_4e96eca5" name="{=NaaM2O2g}Northlander Wide Fullered Greatsword" crafting_template="TwoHandedSword" culture="Culture.battania" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_battania_2hsword_3_t3_4e96eca5" name="{=NaaM2O2g}Northlander Wide Fullered Greatsword" crafting_template="TwoHandedSword" culture="Culture.battania" modifier_group="sword">
 		<Pieces>
 			<Piece id="sturgian_blade_3" Type="Blade" scale_factor="110" />
 			<Piece id="sturgian_guard_10" Type="Guard" scale_factor="100" />
@@ -8174,7 +8174,7 @@
 			<Piece id="empire_pommel_4" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_cleaver_2hsword_t3_02b20663" name="{=XTGdfqVV}Two Handed Cleaver" crafting_template="TwoHandedSword" culture="Culture.vlandia" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_cleaver_2hsword_t3_02b20663" name="{=XTGdfqVV}Two Handed Cleaver" crafting_template="TwoHandedSword" culture="Culture.vlandia" modifier_group="sword">
 		<Pieces>
 			<Piece id="cleaver_blade_4" Type="Blade" scale_factor="110" />
 			<Piece id="cleaver_guard_1" Type="Guard" scale_factor="100" />
@@ -8182,7 +8182,7 @@
 			<Piece id="cleaver_pommel_2" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_western_2hsword_t3_1af3198f" name="{=ekUvh8Em}Tapered Two-Hander" crafting_template="TwoHandedSword" culture="Culture.vlandia" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_western_2hsword_t3_1af3198f" name="{=ekUvh8Em}Tapered Two-Hander" crafting_template="TwoHandedSword" culture="Culture.vlandia" modifier_group="sword">
 		<Pieces>
 			<Piece id="vlandian_blade_8" Type="Blade" scale_factor="100" />
 			<Piece id="vlandian_guard_1" Type="Guard" scale_factor="100" />
@@ -8190,7 +8190,7 @@
 			<Piece id="vlandian_pommel_4" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_kaskara_2hsword_t3_259bbbd1" name="{=24MA4JLX}Ridged Long Kaskara" crafting_template="TwoHandedSword" culture="Culture.aserai" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_kaskara_2hsword_t3_259bbbd1" name="{=24MA4JLX}Ridged Long Kaskara" crafting_template="TwoHandedSword" culture="Culture.aserai" modifier_group="sword">
 		<Pieces>
 			<Piece id="vlandian_blade_8" Type="Blade" scale_factor="100" />
 			<Piece id="aserai_guard_5" Type="Guard" scale_factor="100" />
@@ -8198,7 +8198,7 @@
 			<Piece id="aserai_pommel_9" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_battania_2hsword_4_t4_18906293" name="{=J4YgK18g}Long Falx" crafting_template="TwoHandedSword" culture="Culture.battania" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_battania_2hsword_4_t4_18906293" name="{=J4YgK18g}Long Falx" crafting_template="TwoHandedSword" culture="Culture.battania" modifier_group="sword">
 		<Pieces>
 			<Piece id="battania_blade_6" Type="Blade" scale_factor="110" />
 			<Piece id="sturgian_guard_6" Type="Guard" scale_factor="100" />
@@ -8206,7 +8206,7 @@
 			<Piece id="battania_pommel_9" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_battania_2hsword_6_a2af8388" name="{=QLcP8bIs}Falx" crafting_template="TwoHandedSword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_battania_2hsword_6_a2af8388" name="{=QLcP8bIs}Falx" crafting_template="TwoHandedSword">
 		<Pieces>
 			<Piece id="battania_blade_7" Type="Blade" scale_factor="110" />
 			<Piece id="sturgian_guard_6" Type="Guard" scale_factor="100" />
@@ -8215,7 +8215,7 @@
 		</Pieces>
 		<!-- Length: 91 Weight: 1.13 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_northern_2hsword_t4_4311ba68" name="{=1WxLaeQE}Fine Steel Two Handed Sword" crafting_template="TwoHandedSword" culture="Culture.sturgia" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_northern_2hsword_t4_4311ba68" name="{=1WxLaeQE}Fine Steel Two Handed Sword" crafting_template="TwoHandedSword" culture="Culture.sturgia" modifier_group="sword">
 		<Pieces>
 			<Piece id="sturgian_blade_4" Type="Blade" scale_factor="100" />
 			<Piece id="sturgian_guard_12" Type="Guard" scale_factor="100" />
@@ -8223,7 +8223,7 @@
 			<Piece id="sturgian_pommel_10" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_battania_2hsword_5_t4_01bfbcda" name="{=WUasz2kP}Highland Fine Two Handed Sword" crafting_template="TwoHandedSword" culture="Culture.battania" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_battania_2hsword_5_t4_01bfbcda" name="{=WUasz2kP}Highland Fine Two Handed Sword" crafting_template="TwoHandedSword" culture="Culture.battania" modifier_group="sword">
 		<Pieces>
 			<Piece id="empire_blade_6" Type="Blade" scale_factor="100" />
 			<Piece id="battania_guard_6" Type="Guard" scale_factor="100" />
@@ -8231,7 +8231,7 @@
 			<Piece id="battania_pommel_4" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_western_2hsword_t4_17f314d6" name="{=rtRGq1uU}Broad Two Hander" crafting_template="TwoHandedSword" culture="Culture.vlandia" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_western_2hsword_t4_17f314d6" name="{=rtRGq1uU}Broad Two Hander" crafting_template="TwoHandedSword" culture="Culture.vlandia" modifier_group="sword">
 		<Pieces>
 			<Piece id="vlandian_blade_2" Type="Blade" scale_factor="100" />
 			<Piece id="vlandian_guard_5" Type="Guard" scale_factor="100" />
@@ -8239,7 +8239,7 @@
 			<Piece id="vlandian_pommel_7" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_ridged_2hsword_t4_28060415" name="{=mMtKWolp}Ridged Great Saber" crafting_template="TwoHandedSword" culture="Culture.khuzait" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_ridged_2hsword_t4_28060415" name="{=mMtKWolp}Ridged Great Saber" crafting_template="TwoHandedSword" culture="Culture.khuzait" modifier_group="sword">
 		<Pieces>
 			<Piece id="khuzait_blade_8" Type="Blade" scale_factor="110" />
 			<Piece id="khuzait_guard_9" Type="Guard" scale_factor="100" />
@@ -8247,7 +8247,7 @@
 			<Piece id="khuzait_pommel_4" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_war_razor_2hsword_t4_56a37a2f" name="{=4RTsybkx}War Razor" crafting_template="TwoHandedSword" culture="Culture.vlandia" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_war_razor_2hsword_t4_56a37a2f" name="{=4RTsybkx}War Razor" crafting_template="TwoHandedSword" culture="Culture.vlandia" modifier_group="sword">
 		<Pieces>
 			<Piece id="cleaver_blade_5" Type="Blade" scale_factor="100" />
 			<Piece id="cleaver_guard_5" Type="Guard" scale_factor="100" />
@@ -8255,7 +8255,7 @@
 			<Piece id="cleaver_pommel_2" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_southern_broad_2hsword_t4_05c70d17" name="{=LVQworUy}Broad Kaskara" crafting_template="TwoHandedSword" culture="Culture.aserai" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_southern_broad_2hsword_t4_05c70d17" name="{=LVQworUy}Broad Kaskara" crafting_template="TwoHandedSword" culture="Culture.aserai" modifier_group="sword">
 		<Pieces>
 			<Piece id="aserai_blade_5" Type="Blade" scale_factor="100" />
 			<Piece id="aserai_guard_8" Type="Guard" scale_factor="100" />
@@ -8263,7 +8263,7 @@
 			<Piece id="cleaver_pommel_2" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_battania_2hsword_5_t5_02bfbe6d" name="{=62nIvqbA}Battanian Mountain Blade" crafting_template="TwoHandedSword" culture="Culture.battania" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_battania_2hsword_5_t5_02bfbe6d" name="{=62nIvqbA}Battanian Mountain Blade" crafting_template="TwoHandedSword" culture="Culture.battania" modifier_group="sword">
 		<Pieces>
 			<Piece id="battania_blade_5" Type="Blade" scale_factor="110" />
 			<Piece id="battania_guard_9" Type="Guard" scale_factor="100" />
@@ -8271,7 +8271,7 @@
 			<Piece id="battania_pommel_9" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_vlandia_2hsword_1_t5_e14d4f2c" name="{=9ZiUK3JJ}Wide Fullered Broad Two Hander" crafting_template="TwoHandedSword" culture="Culture.vlandia" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_vlandia_2hsword_1_t5_e14d4f2c" name="{=9ZiUK3JJ}Wide Fullered Broad Two Hander" crafting_template="TwoHandedSword" culture="Culture.vlandia" modifier_group="sword">
 		<Pieces>
 			<Piece id="vlandian_blade_3" Type="Blade" scale_factor="100" />
 			<Piece id="vlandian_guard_7" Type="Guard" scale_factor="100" />
@@ -8279,7 +8279,7 @@
 			<Piece id="vlandian_pommel_4" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_vlandia_2hsword_2_t5_d1c2c433" name="{=VAO11FSu}Thamaskene Steel Two Hander" crafting_template="TwoHandedSword" culture="Culture.vlandia" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_vlandia_2hsword_2_t5_d1c2c433" name="{=VAO11FSu}Thamaskene Steel Two Hander" crafting_template="TwoHandedSword" culture="Culture.vlandia" modifier_group="sword">
 		<Pieces>
 			<Piece id="vlandian_blade_3" Type="Blade" scale_factor="110" />
 			<Piece id="vlandian_guard_8" Type="Guard" scale_factor="100" />
@@ -8287,7 +8287,7 @@
 			<Piece id="vlandian_pommel_9" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_seax_6c50761c" name="{=3Pv0SlYj}Seax" crafting_template="Dagger" culture="Culture.sturgia" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_seax_6c50761c" name="{=3Pv0SlYj}Seax" crafting_template="Dagger" culture="Culture.sturgia" modifier_group="sword">
 		<Pieces>
 			<Piece id="dagger_blade_3" Type="Blade" scale_factor="93" />
 			<Piece id="sturgian_dagger_guard_8" Type="Guard" scale_factor="90" />
@@ -8296,7 +8296,7 @@
 		</Pieces>
 		<!-- Length: 61 Weight: 0.52 SwingSpeed: 135 ThrustSpeed: 112 SwingDamage: 4B, 18S ThrustDamage: 11B, 33S -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_celtic_dagger_0b56e520" name="{=vPXWpJTP}Highland Dagger" crafting_template="Dagger" culture="Culture.battania" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_celtic_dagger_0b56e520" name="{=vPXWpJTP}Highland Dagger" crafting_template="Dagger" culture="Culture.battania" modifier_group="sword">
 		<Pieces>
 			<Piece id="dagger_blade_6" Type="Blade" scale_factor="110" />
 			<Piece id="battania_dagger_guard_9" Type="Guard" />
@@ -8305,7 +8305,7 @@
 		</Pieces>
 		<!-- Length: 58 Weight: 0.63 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_broad_skaen_0b8a539e" name="{=VxRYaOc2}Broad Skaen" crafting_template="Dagger" culture="Culture.battania" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_broad_skaen_0b8a539e" name="{=VxRYaOc2}Broad Skaen" crafting_template="Dagger" culture="Culture.battania" modifier_group="sword">
 		<Pieces>
 			<Piece id="dagger_blade_7" Type="Blade" scale_factor="110" />
 			<Piece id="battania_dagger_guard_1" Type="Guard" scale_factor="90" />
@@ -8314,7 +8314,7 @@
 		</Pieces>
 		<!-- Length: 57 Weight: 0.87 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_pugio_451f13ab" name="{=bVzkrtUc}Pugio" crafting_template="Dagger" culture="Culture.empire" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_pugio_451f13ab" name="{=bVzkrtUc}Pugio" crafting_template="Dagger" culture="Culture.empire" modifier_group="sword">
 		<Pieces>
 			<Piece id="dagger_blade_1" Type="Blade" scale_factor="110" />
 			<Piece id="empire_dagger_guard_3" Type="Guard" />
@@ -8323,7 +8323,7 @@
 		</Pieces>
 		<!-- Length: 54 Weight: 0.7 SwingSpeed: 131 ThrustSpeed: 109 SwingDamage: 6B, 25S ThrustDamage: 11B, 32S -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_hooked_cleaver_85d5867e" name="{=lbkaoPk6}Sica" crafting_template="Dagger" culture="Culture.battania" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_hooked_cleaver_85d5867e" name="{=lbkaoPk6}Sica" crafting_template="Dagger" culture="Culture.battania" modifier_group="sword">
 		<Pieces>
 			<Piece id="dagger_blade_9" Type="Blade" scale_factor="106" />
 			<Piece id="sturgian_dagger_guard_1" Type="Guard" />
@@ -8332,7 +8332,7 @@
 		</Pieces>
 		<!-- Length: 65 Weight: 0.92 SwingSpeed: 120 ThrustSpeed: 104 SwingDamage: 8B, 35S ThrustDamage: 10B, 31S -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_gladius_b_b1058e13" name="{=bhiVBSge}Knife" crafting_template="Dagger" culture="Culture.empire" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_gladius_b_b1058e13" name="{=bhiVBSge}Knife" crafting_template="Dagger" culture="Culture.empire" modifier_group="sword">
 		<Pieces>
 			<Piece id="dagger_blade_1" Type="Blade" scale_factor="110" />
 			<Piece id="khuzait_dagger_guard_6" Type="Guard" />
@@ -8341,31 +8341,31 @@
 		</Pieces>
 		<!-- Length: 41 Weight: 0.83 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_vlandia_mace_1_t2_4fd0a978" name="{=7jH0kuof}Spiked Mace" crafting_template="Mace" culture="Culture.vlandia" modifier_group="mace">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_vlandia_mace_1_t2_4fd0a978" name="{=7jH0kuof}Spiked Mace" crafting_template="Mace" culture="Culture.vlandia" modifier_group="mace">
 		<Pieces>
 			<Piece id="mace_head_22" Type="Blade" scale_factor="110" />
 			<Piece id="mace_handle_6" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_empire_mace_1_t2_cbd63a43" name="{=HaK3y9yi}Spiked Club" crafting_template="Mace" culture="Culture.empire" modifier_group="mace">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_empire_mace_1_t2_cbd63a43" name="{=HaK3y9yi}Spiked Club" crafting_template="Mace" culture="Culture.empire" modifier_group="mace">
 		<Pieces>
 			<Piece id="mace_head_23" Type="Blade" scale_factor="100" />
 			<Piece id="mace_handle_3" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_aserai_mace_1_t2_84302232" name="{=wxL5TdDv}Militia Mace" crafting_template="Mace" culture="Culture.aserai" modifier_group="mace">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_aserai_mace_1_t2_84302232" name="{=wxL5TdDv}Militia Mace" crafting_template="Mace" culture="Culture.aserai" modifier_group="mace">
 		<Pieces>
 			<Piece id="mace_head_17" Type="Blade" scale_factor="110" />
 			<Piece id="mace_handle_6" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_aserai_mace_2_t2_8dbaa3b9" name="{=6QI8X6CY}Fullered Light Mace" crafting_template="Mace" culture="Culture.aserai" modifier_group="mace">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_aserai_mace_2_t2_8dbaa3b9" name="{=6QI8X6CY}Fullered Light Mace" crafting_template="Mace" culture="Culture.aserai" modifier_group="mace">
 		<Pieces>
 			<Piece id="mace_head_1" Type="Blade" scale_factor="100" />
 			<Piece id="mace_handle_6" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_khuzait_mace_1_t2_d3427ed3" name="{=N8VJWdVY}Steppe Light Mace" crafting_template="Mace" culture="Culture.khuzait" modifier_group="mace">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_khuzait_mace_1_t2_d3427ed3" name="{=N8VJWdVY}Steppe Light Mace" crafting_template="Mace" culture="Culture.khuzait" modifier_group="mace">
 		<Pieces>
 			<Piece id="mace_head_14" Type="Blade" />
 			<Piece id="mace_handle_8" Type="Handle" />
@@ -8373,25 +8373,25 @@
 		</Pieces>
 		<!-- Length: 72 Weight: 1.85 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_battania_mace_1_t2_54db66db" name="{=knobbedclubweapon}Knobbed Club" crafting_template="Mace" culture="Culture.battania" modifier_group="mace">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_battania_mace_1_t2_54db66db" name="{=knobbedclubweapon}Knobbed Club" crafting_template="Mace" culture="Culture.battania" modifier_group="mace">
 		<Pieces>
 			<Piece id="mace_head_6" Type="Blade" scale_factor="100" />
 			<Piece id="mace_handle_3" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_battania_mace_2_t2_da59b710" name="{=0SpLcthg}Highland Spiked Club" crafting_template="Mace" culture="Culture.battania" modifier_group="mace">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_battania_mace_2_t2_da59b710" name="{=0SpLcthg}Highland Spiked Club" crafting_template="Mace" culture="Culture.battania" modifier_group="mace">
 		<Pieces>
 			<Piece id="mace_head_5" Type="Blade" scale_factor="100" />
 			<Piece id="mace_handle_6" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_aserai_mace_3_t3_def3e04f" name="{=FJDCc3Y2}Heavy Horsemans Mace" crafting_template="Mace" culture="Culture.aserai" modifier_group="mace">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_aserai_mace_3_t3_def3e04f" name="{=FJDCc3Y2}Heavy Horsemans Mace" crafting_template="Mace" culture="Culture.aserai" modifier_group="mace">
 		<Pieces>
 			<Piece id="mace_head_19" Type="Blade" scale_factor="110" />
 			<Piece id="mace_handle_7" Type="Handle" scale_factor="110" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_battania_mace_1_t3_53db6548" name="{=9pD32UdV}Highland Mace" crafting_template="Mace" culture="Culture.battania" modifier_group="mace">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_battania_mace_1_t3_53db6548" name="{=9pD32UdV}Highland Mace" crafting_template="Mace" culture="Culture.battania" modifier_group="mace">
 		<Pieces>
 			<Piece id="mace_head_9" Type="Blade" />
 			<Piece id="mace_handle_7" Type="Handle" />
@@ -8399,7 +8399,7 @@
 		</Pieces>
 		<!-- Length: 65 Weight: 2.29 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_light_mace_t3_fadf3d9e" name="{=PBLsXDgP}Light Mace" crafting_template="Mace" modifier_group="mace">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_light_mace_t3_fadf3d9e" name="{=PBLsXDgP}Light Mace" crafting_template="Mace" modifier_group="mace">
 		<Pieces>
 			<Piece id="mace_head_20" Type="Blade" />
 			<Piece id="mace_handle_12" Type="Handle" />
@@ -8407,13 +8407,13 @@
 		</Pieces>
 		<!-- Length: 45 Weight: 1.8 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_steel_mace_t3_0add5209" name="{=8pnCvnFR}Steel Shestopyor" crafting_template="Mace" modifier_group="mace">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_steel_mace_t3_0add5209" name="{=8pnCvnFR}Steel Shestopyor" crafting_template="Mace" modifier_group="mace">
 		<Pieces>
 			<Piece id="mace_head_4" Type="Blade" scale_factor="100" />
 			<Piece id="mace_handle_4" Type="Handle" scale_factor="110" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_morningstar_mace_t3_ca7b6d0a" name="{=6EWm09LY}Morningstar" crafting_template="Mace" modifier_group="mace">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_morningstar_mace_t3_ca7b6d0a" name="{=6EWm09LY}Morningstar" crafting_template="Mace" modifier_group="mace">
 		<Pieces>
 			<Piece id="mace_head_9" Type="Blade" />
 			<Piece id="mace_handle_1" Type="Handle" />
@@ -8421,7 +8421,7 @@
 		</Pieces>
 		<!-- Length: 66 Weight: 2.32 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_vlandia_mace_2_t4_327db0f5" name="{=dSTxsYsh}Fullered Cavalry Mace" crafting_template="Mace" culture="Culture.vlandia" modifier_group="mace">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_vlandia_mace_2_t4_327db0f5" name="{=dSTxsYsh}Fullered Cavalry Mace" crafting_template="Mace" culture="Culture.vlandia" modifier_group="mace">
 		<Pieces>
 			<Piece id="mace_head_16" Type="Blade" />
 			<Piece id="mace_handle_10" Type="Handle" />
@@ -8429,7 +8429,7 @@
 		</Pieces>
 		<!-- Length: 56 Weight: 2.1 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_empire_mace_2_t4_10f063aa" name="{=4cMV1pY3}Imperial Light Mace" crafting_template="Mace" culture="Culture.empire" modifier_group="mace">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_empire_mace_2_t4_10f063aa" name="{=4cMV1pY3}Imperial Light Mace" crafting_template="Mace" culture="Culture.empire" modifier_group="mace">
 		<Pieces>
 			<Piece id="mace_head_3" Type="Blade" />
 			<Piece id="mace_handle_9" Type="Handle" />
@@ -8437,7 +8437,7 @@
 		</Pieces>
 		<!-- Length: 70 Weight: 1.9 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_empire_mace_3_t4_a7c1d2e3" name="{=YLplNGxb}Calradic Mace" crafting_template="Mace" culture="Culture.empire" modifier_group="mace">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_empire_mace_3_t4_a7c1d2e3" name="{=YLplNGxb}Calradic Mace" crafting_template="Mace" culture="Culture.empire" modifier_group="mace">
 		<Pieces>
 			<Piece id="mace_head_8" Type="Blade" />
 			<Piece id="mace_handle_10" Type="Handle" />
@@ -8445,25 +8445,25 @@
 		</Pieces>
 		<!-- Length: 47 Weight: 1.8 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_aserai_mace_4_t4_885f9785" name="{=JM8Mjfa0}Spiralled Mace" crafting_template="Mace" culture="Culture.aserai" modifier_group="mace">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_aserai_mace_4_t4_885f9785" name="{=JM8Mjfa0}Spiralled Mace" crafting_template="Mace" culture="Culture.aserai" modifier_group="mace">
 		<Pieces>
 			<Piece id="mace_head_15" Type="Blade" scale_factor="100" />
 			<Piece id="mace_handle_5" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_khuzait_mace_2_t4_185ca83a" name="{=fcgDtZy7}Eastern Heavy Mace" crafting_template="Mace" culture="Culture.khuzait" modifier_group="mace">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_khuzait_mace_2_t4_185ca83a" name="{=fcgDtZy7}Eastern Heavy Mace" crafting_template="Mace" culture="Culture.khuzait" modifier_group="mace">
 		<Pieces>
 			<Piece id="mace_head_11" Type="Blade" scale_factor="100" />
 			<Piece id="mace_handle_5" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_khuzait_mace_3_t4_3bd471f3" name="{=b88lWWOo}Fine Steel Mace" crafting_template="Mace" culture="Culture.khuzait" modifier_group="mace">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_khuzait_mace_3_t4_3bd471f3" name="{=b88lWWOo}Fine Steel Mace" crafting_template="Mace" culture="Culture.khuzait" modifier_group="mace">
 		<Pieces>
 			<Piece id="mace_head_10" Type="Blade" scale_factor="100" />
 			<Piece id="mace_handle_4" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_shishpar_mace_t4_3cfcefed" name="{=9EWN9SiT}Light Shishpar Mace" crafting_template="Mace" culture="Culture.aserai" modifier_group="mace">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_shishpar_mace_t4_3cfcefed" name="{=9EWN9SiT}Light Shishpar Mace" crafting_template="Mace" culture="Culture.aserai" modifier_group="mace">
 		<Pieces>
 			<Piece id="mace_head_21" Type="Blade" />
 			<Piece id="mace_handle_10" Type="Handle" />
@@ -8471,7 +8471,7 @@
 		</Pieces>
 		<!-- Length: 46 Weight: 1.67 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_eastern_steel_mace_t4_5599f9b7" name="{=xYk4953c}Steel Mace" crafting_template="Mace" culture="Culture.khuzait" modifier_group="mace">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_eastern_steel_mace_t4_5599f9b7" name="{=xYk4953c}Steel Mace" crafting_template="Mace" culture="Culture.khuzait" modifier_group="mace">
 		<Pieces>
 			<Piece id="mace_head_26" Type="Blade" />
 			<Piece id="mace_handle_11" Type="Handle" />
@@ -8479,7 +8479,7 @@
 		</Pieces>
 		<!-- Length: 60 Weight: 1.88 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_vlandia_mace_3_t5_058b7337" name="{=rnzpyc0N}Pernach" crafting_template="Mace" culture="Culture.vlandia" modifier_group="mace">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_vlandia_mace_3_t5_058b7337" name="{=rnzpyc0N}Pernach" crafting_template="Mace" culture="Culture.vlandia" modifier_group="mace">
 		<Pieces>
 			<Piece id="mace_head_2" Type="Blade" />
 			<Piece id="mace_handle_9" Type="Handle" />
@@ -8487,7 +8487,7 @@
 		</Pieces>
 		<!-- Length: 69 Weight: 1.92 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_empire_mace_4_t5_554d2103" name="{=UMX05EQF}Light Royal Mace" crafting_template="Mace" culture="Culture.empire" modifier_group="mace">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_empire_mace_4_t5_554d2103" name="{=UMX05EQF}Light Royal Mace" crafting_template="Mace" culture="Culture.empire" modifier_group="mace">
 		<Pieces>
 			<Piece id="mace_head_13" Type="Blade" />
 			<Piece id="mace_handle_13" Type="Handle" />
@@ -8495,13 +8495,13 @@
 		</Pieces>
 		<!-- Length: 55 Weight: 2.3 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_empire_mace_5_t5_59af2dce" name="{=Kv4zAMIh}Cataphract Mace" crafting_template="Mace" culture="Culture.empire" modifier_group="mace">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_empire_mace_5_t5_59af2dce" name="{=Kv4zAMIh}Cataphract Mace" crafting_template="Mace" culture="Culture.empire" modifier_group="mace">
 		<Pieces>
 			<Piece id="mace_head_7" Type="Blade" scale_factor="100" />
 			<Piece id="mace_handle_5" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_khuzait_mace_4_t5_d28d7413" name="{=fz23ajFz}Heavy Flanged Mace" crafting_template="Mace" culture="Culture.khuzait" modifier_group="mace">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_khuzait_mace_4_t5_d28d7413" name="{=fz23ajFz}Heavy Flanged Mace" crafting_template="Mace" culture="Culture.khuzait" modifier_group="mace">
 		<Pieces>
 			<Piece id="mace_head_12" Type="Blade" />
 			<Piece id="mace_handle_15" Type="Handle" />
@@ -8509,7 +8509,7 @@
 		</Pieces>
 		<!-- Length: 74 Weight: 2.29 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_aserai_mace_5_t4_21fe8374" name="{=Xv95gei9}Southern Two Handed Mace" crafting_template="TwoHandedMace" culture="Culture.aserai" modifier_group="mace">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_aserai_mace_5_t4_21fe8374" name="{=Xv95gei9}Southern Two Handed Mace" crafting_template="TwoHandedMace" culture="Culture.aserai" modifier_group="mace">
 		<Pieces>
 			<Piece id="mace_head_34" Type="Blade" scale_factor="110" />
 			<Piece id="axe_craft_1_handle" Type="Handle" />
@@ -8517,7 +8517,7 @@
 		</Pieces>
 		<!-- Length: 131 Weight: 2.07 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_sturgia_mace_2_t4_a3c2fb87" name="{=Urv6mKxq}Northern Reinforced Two Handed Mace" crafting_template="TwoHandedMace" culture="Culture.sturgia" modifier_group="mace">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_sturgia_mace_2_t4_a3c2fb87" name="{=Urv6mKxq}Northern Reinforced Two Handed Mace" crafting_template="TwoHandedMace" culture="Culture.sturgia" modifier_group="mace">
 		<Pieces>
 			<Piece id="mace_head_37" Type="Blade" scale_factor="110" />
 			<Piece id="mace_handle_20" Type="Handle" />
@@ -8525,7 +8525,7 @@
 		</Pieces>
 		<!-- Length: 109 Weight: 1.79 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_sturgia_mace_1_t3_de4e712d" name="{=g6IpxVat}Northern Two Handed Mace" crafting_template="TwoHandedMace" culture="Culture.sturgia" modifier_group="mace">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_sturgia_mace_1_t3_de4e712d" name="{=g6IpxVat}Northern Two Handed Mace" crafting_template="TwoHandedMace" culture="Culture.sturgia" modifier_group="mace">
 		<Pieces>
 			<Piece id="mace_head_38" Type="Blade" scale_factor="110" />
 			<Piece id="mace_handle_20" Type="Handle" />
@@ -8754,7 +8754,7 @@
 		</ItemComponent>
 		<Flags />
 	</Item>
-	<CraftedItem id="cs_mirror_western_javelin_1_t2_c5b5a3bc" name="{=0NLJnGfF}Simple Javelin" crafting_template="Javelin" modifier_group="spear_dart_throwing">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_western_javelin_1_t2_c5b5a3bc" name="{=0NLJnGfF}Simple Javelin" crafting_template="Javelin" modifier_group="spear_dart_throwing">
 		<Pieces>
 			<Piece id="spear_blade_15" Type="Blade" scale_factor="100" />
 			<Piece id="default_polearm_guard" Type="Guard" scale_factor="100" />
@@ -8762,7 +8762,7 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_northern_javelin_1_t2_d260a17e" name="{=1oQWbXJw}Fish Harpoon" crafting_template="Javelin" culture="Culture.sturgia" modifier_group="spear_dart_throwing">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_northern_javelin_1_t2_d260a17e" name="{=1oQWbXJw}Fish Harpoon" crafting_template="Javelin" culture="Culture.sturgia" modifier_group="spear_dart_throwing">
 		<Pieces>
 			<Piece id="spear_blade_16" Type="Blade" scale_factor="90" />
 			<Piece id="spear_guard_15" Type="Guard" scale_factor="90" />
@@ -8770,7 +8770,7 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_eastern_javelin_1_t2_f673ff36" name="{=N0ErUFHS}Jagged Javelin" crafting_template="Javelin" culture="Culture.khuzait" modifier_group="spear_dart_throwing">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_eastern_javelin_1_t2_f673ff36" name="{=N0ErUFHS}Jagged Javelin" crafting_template="Javelin" culture="Culture.khuzait" modifier_group="spear_dart_throwing">
 		<Pieces>
 			<Piece id="spear_blade_35" Type="Blade" scale_factor="100" />
 			<Piece id="default_polearm_guard" Type="Guard" scale_factor="100" />
@@ -8778,7 +8778,7 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_western_javelin_2_t3_25c38d84" name="{=oV5AhcDl}Lowland Javelin" crafting_template="Javelin" culture="Culture.vlandia" modifier_group="spear_dart_throwing">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_western_javelin_2_t3_25c38d84" name="{=oV5AhcDl}Lowland Javelin" crafting_template="Javelin" culture="Culture.vlandia" modifier_group="spear_dart_throwing">
 		<Pieces>
 			<Piece id="spear_blade_1" Type="Blade" scale_factor="100" />
 			<Piece id="default_polearm_guard" Type="Guard" scale_factor="100" />
@@ -8786,7 +8786,7 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_generic_javelin_1_t3_46decfd2" name="{=YPUDAJDH}Harpoon" crafting_template="Javelin" culture="Culture.sturgia" modifier_group="spear_dart_throwing">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_generic_javelin_1_t3_46decfd2" name="{=YPUDAJDH}Harpoon" crafting_template="Javelin" culture="Culture.sturgia" modifier_group="spear_dart_throwing">
 		<Pieces>
 			<Piece id="spear_blade_10" Type="Blade" scale_factor="90" />
 			<Piece id="spear_guard_15" Type="Guard" scale_factor="90" />
@@ -8794,7 +8794,7 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_northern_javelin_2_t3_dac41202" name="{=ObGN145P}Woodland Javelin" crafting_template="Javelin" culture="Culture.battania" modifier_group="spear_dart_throwing">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_northern_javelin_2_t3_dac41202" name="{=ObGN145P}Woodland Javelin" crafting_template="Javelin" culture="Culture.battania" modifier_group="spear_dart_throwing">
 		<Pieces>
 			<Piece id="spear_blade_14" Type="Blade" scale_factor="100" />
 			<Piece id="default_polearm_guard" Type="Guard" scale_factor="100" />
@@ -8802,7 +8802,7 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_eastern_javelin_2_t3_21a029fa" name="{=Th4E7v2h}Horseman Javelin" crafting_template="Javelin" culture="Culture.khuzait" modifier_group="spear_dart_throwing">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_eastern_javelin_2_t3_21a029fa" name="{=Th4E7v2h}Horseman Javelin" crafting_template="Javelin" culture="Culture.khuzait" modifier_group="spear_dart_throwing">
 		<Pieces>
 			<Piece id="spear_blade_37" Type="Blade" scale_factor="100" />
 			<Piece id="default_polearm_guard" Type="Guard" scale_factor="100" />
@@ -8810,7 +8810,7 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_western_javelin_3_t4_65f1ddc0" name="{=vmz4vfu5}Hooked Javelin" crafting_template="Javelin" culture="Culture.vlandia" modifier_group="spear_dart_throwing">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_western_javelin_3_t4_65f1ddc0" name="{=vmz4vfu5}Hooked Javelin" crafting_template="Javelin" culture="Culture.vlandia" modifier_group="spear_dart_throwing">
 		<Pieces>
 			<Piece id="spear_blade_10" Type="Blade" scale_factor="100" />
 			<Piece id="default_polearm_guard" Type="Guard" scale_factor="100" />
@@ -8818,7 +8818,7 @@
 			<Piece id="spear_pommel_5" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_northern_javelin_3_t4_25a5e5ea" name="{=ppiy9Cwl}Broad Blade Javelin" crafting_template="Javelin" culture="Culture.sturgia" modifier_group="spear_dart_throwing">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_northern_javelin_3_t4_25a5e5ea" name="{=ppiy9Cwl}Broad Blade Javelin" crafting_template="Javelin" culture="Culture.sturgia" modifier_group="spear_dart_throwing">
 		<Pieces>
 			<Piece id="spear_blade_42" Type="Blade" scale_factor="100" />
 			<Piece id="default_polearm_guard" Type="Guard" scale_factor="100" />
@@ -8826,7 +8826,7 @@
 			<Piece id="spear_pommel_5" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_eastern_javelin_3_t4_c9b87a22" name="{=Z6Ak3H6G}Jereed" crafting_template="Javelin" culture="Culture.aserai" modifier_group="spear_dart_throwing">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_eastern_javelin_3_t4_c9b87a22" name="{=Z6Ak3H6G}Jereed" crafting_template="Javelin" culture="Culture.aserai" modifier_group="spear_dart_throwing">
 		<Pieces>
 			<Piece id="spear_blade_27" Type="Blade" scale_factor="100" />
 			<Piece id="default_polearm_guard" Type="Guard" scale_factor="100" />
@@ -8834,37 +8834,37 @@
 			<Piece id="spear_pommel_12" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_highland_throwing_axe_1_t2_a460cde5" name="{=GrfnpDxu}Highland Throwing Axe" crafting_template="ThrowingAxe" culture="Culture.battania">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_highland_throwing_axe_1_t2_a460cde5" name="{=GrfnpDxu}Highland Throwing Axe" crafting_template="ThrowingAxe" culture="Culture.battania">
 		<Pieces>
 			<Piece id="axe_craft_4_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_12_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_southern_throwing_axe_1_t4_907545fe" name="{=X31qND4N}Tribesman Throwing Axe" crafting_template="ThrowingAxe" culture="Culture.aserai" modifier_group="axe_throwing">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_southern_throwing_axe_1_t4_907545fe" name="{=X31qND4N}Tribesman Throwing Axe" crafting_template="ThrowingAxe" culture="Culture.aserai" modifier_group="axe_throwing">
 		<Pieces>
 			<Piece id="axe_craft_4_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_12_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_northern_throwing_axe_1_t1_47b944ff" name="{=WWRKeqwD}Raider Throwing Axe" crafting_template="ThrowingAxe" culture="Culture.sturgia" modifier_group="axe_throwing">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_northern_throwing_axe_1_t1_47b944ff" name="{=WWRKeqwD}Raider Throwing Axe" crafting_template="ThrowingAxe" culture="Culture.sturgia" modifier_group="axe_throwing">
 		<Pieces>
 			<Piece id="axe_craft_13_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_11_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_woodland_throwing_axe_1_t1_febacab9" name="{=U4p8PZrC}Woodland Throwing Axe" crafting_template="ThrowingAxe" culture="Culture.battania" modifier_group="axe_throwing">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_woodland_throwing_axe_1_t1_febacab9" name="{=U4p8PZrC}Woodland Throwing Axe" crafting_template="ThrowingAxe" culture="Culture.battania" modifier_group="axe_throwing">
 		<Pieces>
 			<Piece id="axe_craft_13_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_28_handle" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_western_throwing_axe_1_t1_005e9d31" name="{=F4xD8gjJ}Francesca" crafting_template="ThrowingAxe" culture="Culture.vlandia" modifier_group="axe_throwing">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_western_throwing_axe_1_t1_005e9d31" name="{=F4xD8gjJ}Francesca" crafting_template="ThrowingAxe" culture="Culture.vlandia" modifier_group="axe_throwing">
 		<Pieces>
 			<Piece id="axe_craft_4_head" Type="Blade" />
 			<Piece id="axe_craft_11_handle" Type="Handle" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_lowland_throwing_knife_2a29e793" name="{=zvIax8Kt}Lowland Throwing Knife" culture="Culture.battania" crafting_template="ThrowingKnife" modifier_group="knife_throwing">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_lowland_throwing_knife_2a29e793" name="{=zvIax8Kt}Lowland Throwing Knife" culture="Culture.battania" crafting_template="ThrowingKnife" modifier_group="knife_throwing">
 		<Pieces>
 			<Piece id="dagger_blade_11" Type="Blade" />
 			<Piece id="aserai_dagger_guard_4" Type="Guard" />
@@ -8872,7 +8872,7 @@
 			<Piece id="khuzait_pommel_1" Type="Pommel" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_leafblade_throwing_knife_04f62b68" name="{=te48yHa8}Leafblade Throwing Knife" culture="Culture.battania" crafting_template="ThrowingKnife" modifier_group="knife_throwing">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_leafblade_throwing_knife_04f62b68" name="{=te48yHa8}Leafblade Throwing Knife" culture="Culture.battania" crafting_template="ThrowingKnife" modifier_group="knife_throwing">
 		<Pieces>
 			<Piece id="dagger_blade_11" Type="Blade" scale_factor="90" />
 			<Piece id="sturgian_dagger_guard_5" Type="Guard" scale_factor="110" />
@@ -8880,7 +8880,7 @@
 			<Piece id="vlandian_pommel_1" Type="Pommel" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_desert_throwing_knife_98a17aa7" name="{=JXSZelwE}Tribesman Throwing Daggers" crafting_template="ThrowingKnife" culture="Culture.aserai" modifier_group="knife_throwing">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_desert_throwing_knife_98a17aa7" name="{=JXSZelwE}Tribesman Throwing Daggers" crafting_template="ThrowingKnife" culture="Culture.aserai" modifier_group="knife_throwing">
 		<Pieces>
 			<Piece id="dagger_blade_13" Type="Blade" scale_factor="110" />
 			<Piece id="aserai_dagger_guard_4" Type="Guard" />
@@ -8889,7 +8889,7 @@
 		</Pieces>
 		<!-- Length: 69 Weight: 0.76 SwingSpeed: 113 ThrustSpeed: 108 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_celtic_throwing_dagger_d9d91911" name="{=koOrDa9q}Highland Throwing Dagger" crafting_template="ThrowingKnife" culture="Culture.battania" modifier_group="knife_throwing">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_celtic_throwing_dagger_d9d91911" name="{=koOrDa9q}Highland Throwing Dagger" crafting_template="ThrowingKnife" culture="Culture.battania" modifier_group="knife_throwing">
 		<Pieces>
 			<Piece id="dagger_blade_10" Type="Blade" scale_factor="90" />
 			<Piece id="battania_dagger_guard_8" Type="Guard" />
@@ -8897,7 +8897,7 @@
 			<Piece id="cleaver_pommel_4" Type="Pommel" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_empire_throwingknife_t5_81c16667" name="{=QA3k2I4A}Broad Bladed Throwing Knives" crafting_template="ThrowingKnife" culture="Culture.empire" modifier_group="knife_throwing">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_empire_throwingknife_t5_81c16667" name="{=QA3k2I4A}Broad Bladed Throwing Knives" crafting_template="ThrowingKnife" culture="Culture.empire" modifier_group="knife_throwing">
 		<Pieces>
 			<Piece id="dagger_blade_12" Type="Blade" scale_factor="110" />
 			<Piece id="empire_dagger_guard_3" Type="Guard" scale_factor="110" />
@@ -9257,7 +9257,7 @@
 		</ItemComponent>
 		<Flags WoodenParry="true" HeldInOffHand="true" ForceAttachOffHandSecondaryItemBone="true" />
 	</Item>
-	<CraftedItem id="cs_mirror_cs_exact_northern_spear_4_t5_66291883" name="{=N28bDEhh}Fine Steel Hewing Spear" crafting_template="TwoHandedPolearm" culture="Culture.sturgia" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_cs_exact_northern_spear_4_t5_66291883" name="{=N28bDEhh}Fine Steel Hewing Spear" crafting_template="TwoHandedPolearm" culture="Culture.sturgia" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_13" Type="Blade" scale_factor="90" />
 			<Piece id="spear_guard_7" Type="Guard" scale_factor="100" />
@@ -9323,7 +9323,7 @@
 		</ItemComponent>
 		<Flags Civilian="true" DoesNotHideChest="true" UseTeamColor="true" />
 	</Item>
-	<CraftedItem id="cs_mirror_cs_exact_southern_spear_4_t3_5937a09b" name="{=IDfl59yt}Knob Headed Spear" crafting_template="TwoHandedPolearm" culture="Culture.aserai" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_cs_exact_southern_spear_4_t3_5937a09b" name="{=IDfl59yt}Knob Headed Spear" crafting_template="TwoHandedPolearm" culture="Culture.aserai" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_14" Type="Blade" scale_factor="100" />
 			<Piece id="default_polearm_guard" Type="Guard" scale_factor="100" />
@@ -9346,7 +9346,7 @@
 		</ItemComponent>
 		<Flags WoodenParry="true" HeldInOffHand="true" ForceAttachOffHandSecondaryItemBone="true" />
 	</Item>
-	<CraftedItem id="cs_mirror_cs_exact_southern_throwing_axe_1_t4_22248103" name="{=X31qND4N}Tribesman Throwing Axe" crafting_template="ThrowingAxe" culture="Culture.aserai" modifier_group="axe_throwing">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_cs_exact_southern_throwing_axe_1_t4_22248103" name="{=X31qND4N}Tribesman Throwing Axe" crafting_template="ThrowingAxe" culture="Culture.aserai" modifier_group="axe_throwing">
 		<Pieces>
 			<Piece id="axe_craft_4_head" Type="Blade" scale_factor="100" />
 			<Piece id="axe_craft_12_handle" Type="Handle" scale_factor="100" />
@@ -9366,19 +9366,19 @@
 		</ItemComponent>
 		<Flags />
 	</Item>
-	<CraftedItem id="cs_mirror_cs_exact_peasant_hammer_1_t1_6999377f" name="{=6WcZ5Tr0}Blacksmith Hammer" crafting_template="Mace" modifier_group="cheap_weapon">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_cs_exact_peasant_hammer_1_t1_6999377f" name="{=6WcZ5Tr0}Blacksmith Hammer" crafting_template="Mace" modifier_group="cheap_weapon">
 		<Pieces>
 			<Piece id="blacksmith_hammer_tip_1" Type="Blade" scale_factor="100" />
 			<Piece id="blacksmith_hammer_handle_1" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_cs_exact_peasant_maul_t1_2_81e9a419" name="{=gYpNILVC}Sledgehammer" crafting_template="TwoHandedMace" culture="Culture.battania" modifier_group="cheap_weapon">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_cs_exact_peasant_maul_t1_2_81e9a419" name="{=gYpNILVC}Sledgehammer" crafting_template="TwoHandedMace" culture="Culture.battania" modifier_group="cheap_weapon">
 		<Pieces>
 			<Piece id="mace_head_24" Type="Blade" scale_factor="102" />
 			<Piece id="spear_handle_1" Type="Handle" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_cs_exact_northern_2hsword_t4_9d555f0b" name="{=1WxLaeQE}Fine Steel Two Handed Sword" crafting_template="TwoHandedSword" culture="Culture.sturgia" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_cs_exact_northern_2hsword_t4_9d555f0b" name="{=1WxLaeQE}Fine Steel Two Handed Sword" crafting_template="TwoHandedSword" culture="Culture.sturgia" modifier_group="sword">
 		<Pieces>
 			<Piece id="sturgian_blade_4" Type="Blade" scale_factor="100" />
 			<Piece id="sturgian_guard_12" Type="Guard" scale_factor="100" />
@@ -9386,13 +9386,13 @@
 			<Piece id="sturgian_pommel_10" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_cs_exact_peasant_pitchfork_2_t1_5c805bbe" name="{=JBVAeXx3}Pitchfork" crafting_template="TwoHandedPolearm" modifier_group="cheap_weapon">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_cs_exact_peasant_pitchfork_2_t1_5c805bbe" name="{=JBVAeXx3}Pitchfork" crafting_template="TwoHandedPolearm" modifier_group="cheap_weapon">
 		<Pieces>
 			<Piece id="spear_blade_29" Type="Blade" scale_factor="100" />
 			<Piece id="spear_handle_1" Type="Handle" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_cs_exact_peasant_hammer_2_t1_7123b5e0" name="{=beVFwINO}Wooden Hammer" crafting_template="Mace" modifier_group="cheap_weapon">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_cs_exact_peasant_hammer_2_t1_7123b5e0" name="{=beVFwINO}Wooden Hammer" crafting_template="Mace" modifier_group="cheap_weapon">
 		<Pieces>
 			<Piece id="mace_head_24" Type="Blade" />
 			<Piece id="blacksmith_hammer_handle_1" Type="Handle" />
@@ -9400,7 +9400,7 @@
 		</Pieces>
 		<!-- Length: 45 Weight: 1.48 -->
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_cs_exact_western_javelin_2_t3_a412eefd" name="{=oV5AhcDl}Lowland Javelin" crafting_template="Javelin" culture="Culture.vlandia" modifier_group="spear_dart_throwing">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_cs_exact_western_javelin_2_t3_a412eefd" name="{=oV5AhcDl}Lowland Javelin" crafting_template="Javelin" culture="Culture.vlandia" modifier_group="spear_dart_throwing">
 		<Pieces>
 			<Piece id="spear_blade_1" Type="Blade" scale_factor="100" />
 			<Piece id="default_polearm_guard" Type="Guard" scale_factor="100" />
@@ -9453,7 +9453,7 @@
 		</ItemComponent>
 		<Flags Stealth="true" ForceAttachOffHandPrimaryItemBone="true" />
 	</Item>
-	<CraftedItem id="cs_mirror_cs_exact_southern_spear_3_t3_f086d784" name="{=zH0QF7mE}Knob Headed Spear with Frills" crafting_template="TwoHandedPolearm" culture="Culture.aserai" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_cs_exact_southern_spear_3_t3_f086d784" name="{=zH0QF7mE}Knob Headed Spear with Frills" crafting_template="TwoHandedPolearm" culture="Culture.aserai" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_14" Type="Blade" scale_factor="90" />
 			<Piece id="spear_banner_16" Type="Guard" scale_factor="90" />
@@ -9461,7 +9461,7 @@
 			<Piece id="default_polearm_pommel" Type="Pommel" />
 		</Pieces>
 	</CraftedItem>
-	<CraftedItem id="cs_mirror_cs_exact_southern_spear_3_t4_ef86d5f1" name="{=vXYlLH6L}Long Thamaskene Tipped Spear" crafting_template="TwoHandedPolearm" culture="Culture.aserai" modifier_group="polearm">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_cs_exact_southern_spear_3_t4_ef86d5f1" name="{=vXYlLH6L}Long Thamaskene Tipped Spear" crafting_template="TwoHandedPolearm" culture="Culture.aserai" modifier_group="polearm">
 		<Pieces>
 			<Piece id="spear_blade_11" Type="Blade" scale_factor="100" />
 			<Piece id="spear_guard_7" Type="Guard" scale_factor="100" />
@@ -9520,7 +9520,7 @@
 		</ItemComponent>
 		<Flags ForceAttachOffHandPrimaryItemBone="true" />
 	</Item>
-	<CraftedItem id="cs_mirror_mp_coop_test_bastard_sword_bd2aa6ab" name="{=!}Coop Test Bastard Sword" crafting_template="OneHandedSword" culture="Culture.aserai" modifier_group="sword">
+	<CraftedItem multiplayer_item="true" id="cs_mirror_mp_coop_test_bastard_sword_bd2aa6ab" name="{=!}Coop Test Bastard Sword" crafting_template="OneHandedSword" culture="Culture.aserai" modifier_group="sword">
 		<Pieces>
 			<Piece id="aserai_blade_7" Type="Blade" scale_factor="100" />
 			<Piece id="aserai_guard_9" Type="Guard" scale_factor="100" />
