@@ -27,7 +27,7 @@ namespace CoopSpectator.Infrastructure
                 return null;
 
             List<RosterEntryState> candidateEntries = candidates
-                .Where(entry => entry != null)
+                .Where(HasHealthyBattleParticipant)
                 .ToList();
             if (candidateEntries.Count <= 0)
                 return null;
@@ -54,6 +54,11 @@ namespace CoopSpectator.Infrastructure
             }
 
             return ResolveFallbackCommanderEntry(runtimeState, sideState, candidateEntries);
+        }
+
+        private static bool HasHealthyBattleParticipant(RosterEntryState entry)
+        {
+            return entry != null && Math.Max(0, entry.Count - entry.WoundedCount) > 0;
         }
 
         public static bool IsCommanderEntry(BattleRuntimeState runtimeState, BattleSideEnum side, RosterEntryState entry)
