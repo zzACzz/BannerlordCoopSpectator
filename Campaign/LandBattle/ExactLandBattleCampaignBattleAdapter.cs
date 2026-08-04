@@ -25,6 +25,8 @@ namespace CoopSpectator.Campaign.LandBattle
         private static string _pendingFinalEncounterWinnerSide;
         private static string _pendingFinalEncounterMode;
         private static string _lastConsumedFinalEncounterResultId;
+        private static ExactLandBattleNativeAftermathBridge.Preparation
+            _pendingNativeAftermathPreparation;
         private static readonly Dictionary<Hero, int> PendingFinalEncounterHeroHitPoints =
             new Dictionary<Hero, int>();
 
@@ -55,10 +57,17 @@ namespace CoopSpectator.Campaign.LandBattle
 
             string resultId = ResolveResultId(result);
             int cachedHeroHitPoints;
+            bool nativeAftermathPrepared;
+            string nativeAftermathDiagnostics;
             lock (FinalEncounterCompletionSync)
             {
                 _lastConsumedFinalEncounterResultId = null;
-                ClearFinalEncounterCompletionNoLock();
+                ClearFinalEncounterCompletionNoLock(rollbackNativeAftermath: true);
+                nativeAftermathPrepared = ExactLandBattleNativeAftermathBridge.TryPrepare(
+                    battle,
+                    result,
+                    out _pendingNativeAftermathPreparation,
+                    out nativeAftermathDiagnostics);
                 _pendingFinalEncounterBattle = battle;
                 _pendingFinalEncounterResultId = resultId;
                 _pendingFinalEncounterWinnerSide = result.WinnerSide;
@@ -89,6 +98,8 @@ namespace CoopSpectator.Campaign.LandBattle
                 " ResultId=" + resultId +
                 " WinnerSide=" + result.WinnerSide +
                 " CachedHeroHp=" + cachedHeroHitPoints +
+                " NativeAftermathPrepared=" + nativeAftermathPrepared +
+                " NativeAftermath={" + nativeAftermathDiagnostics + "}" +
                 " HeroCaptureArmed=" + heroCaptureArmed +
                 " HeroCapture={" + heroCaptureDiagnostics + "}";
             return true;
@@ -103,6 +114,7 @@ namespace CoopSpectator.Campaign.LandBattle
             string resultId;
             string winnerSide;
             string mode;
+            ExactLandBattleNativeAftermathBridge.Preparation nativeAftermathPreparation;
 
             lock (FinalEncounterCompletionSync)
             {
@@ -111,7 +123,7 @@ namespace CoopSpectator.Campaign.LandBattle
 
                 if (!ReferenceEquals(_pendingFinalEncounterBattle, battle))
                 {
-                    ClearFinalEncounterCompletionNoLock();
+                    ClearFinalEncounterCompletionNoLock(rollbackNativeAftermath: true);
                     diagnostics = "contract-battle-mismatch";
                     return false;
                 }
@@ -120,7 +132,9 @@ namespace CoopSpectator.Campaign.LandBattle
                 winnerSide = _pendingFinalEncounterWinnerSide;
                 mode = _pendingFinalEncounterMode;
                 heroHitPoints = new Dictionary<Hero, int>(PendingFinalEncounterHeroHitPoints);
-                ClearFinalEncounterCompletionNoLock();
+                nativeAftermathPreparation = _pendingNativeAftermathPreparation;
+                nativeAftermathPreparation?.Commit();
+                ClearFinalEncounterCompletionNoLock(rollbackNativeAftermath: false);
             }
 
             int reappliedHeroHitPoints = 0;
@@ -157,6 +171,9 @@ namespace CoopSpectator.Campaign.LandBattle
                 " CachedHeroHp=" + heroHitPoints.Count +
                 " ReappliedHeroHp=" + reappliedHeroHitPoints +
                 " SkippedDeadHeroes=" + skippedDeadHeroes +
+                " NativeAftermathCommitted=" + (nativeAftermathPreparation != null) +
+                " NativeAftermath={" +
+                (nativeAftermathPreparation?.Diagnostics ?? "not-prepared") + "}" +
                 " ReappliedSamples=[" + string.Join("; ", reappliedSamples) + "]";
             lock (FinalEncounterCompletionSync)
             {
@@ -292,8 +309,12 @@ namespace CoopSpectator.Campaign.LandBattle
             return (result?.BattleId ?? "null") + "|" + result?.UpdatedUtc.ToString("O");
         }
 
-        private static void ClearFinalEncounterCompletionNoLock()
+        private static void ClearFinalEncounterCompletionNoLock(bool rollbackNativeAftermath)
         {
+            if (rollbackNativeAftermath)
+                _pendingNativeAftermathPreparation?.Rollback();
+
+            _pendingNativeAftermathPreparation = null;
             _pendingFinalEncounterBattle = null;
             _pendingFinalEncounterResultId = null;
             _pendingFinalEncounterWinnerSide = null;
