@@ -8,7 +8,7 @@ namespace CoopSpectator.Infrastructure
     internal static class BattleSnapshotBinarySerializer
     {
         private const int Magic = 0x43534231; // "CSB1"
-        private const int SchemaVersion = 17;
+        private const int SchemaVersion = 18;
 
         public static bool TrySerialize(BattleSnapshotMessage snapshot, out byte[] payloadBytes)
         {
@@ -75,6 +75,7 @@ namespace CoopSpectator.Infrastructure
                         schemaVersion != 14 &&
                         schemaVersion != 15 &&
                         schemaVersion != 16 &&
+                        schemaVersion != 17 &&
                         schemaVersion != SchemaVersion)
                     {
                         ModLogger.Info(
@@ -705,6 +706,7 @@ namespace CoopSpectator.Infrastructure
             writer.Write(troop?.HeroCanDieInBattle ?? true);
             writer.Write(troop?.ForceUnconscious ?? false);
             WriteList(writer, troop?.CaptainPerkEffects, WriteCaptainPerkEffect);
+            writer.Write(troop?.CurrentHitPoints ?? 0);
         }
 
         private static TroopStackInfo ReadTroopStack(BinaryReader reader, int schemaVersion)
@@ -812,6 +814,9 @@ namespace CoopSpectator.Infrastructure
                     ReadList(reader, ReadCaptainPerkEffect) ??
                     new List<CaptainPerkEffectSnapshotMessage>();
             }
+
+            if (schemaVersion >= 18)
+                troop.CurrentHitPoints = reader.ReadInt32();
 
             return troop;
         }

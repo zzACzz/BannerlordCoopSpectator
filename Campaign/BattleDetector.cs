@@ -12006,6 +12006,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             CharacterObject campaignCharacter = characterObject as CharacterObject;
             Hero hero = TryResolveHeroObject(characterObject);
+            troop.CurrentHitPoints = hero != null ? Math.Max(0, hero.HitPoints) : 0;
             troop.IsPlayerCharacter = campaignCharacter?.IsPlayerCharacter ?? false;
             troop.IsPlayerClanHero = hero != null && Clan.PlayerClan != null && hero.Clan == Clan.PlayerClan;
             troop.HeroTotalArmorSum = campaignCharacter?.GetTotalArmorSum() ?? 0f;

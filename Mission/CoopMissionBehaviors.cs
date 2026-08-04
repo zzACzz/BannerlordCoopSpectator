@@ -4310,11 +4310,13 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly Dictionary<string, int> MaterializedCombatProfileApplyCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private static readonly object MaterializedEquipmentCountersSync = new object();
         private static readonly ConcurrentDictionary<int, MaterializedCombatProfileRuntimeState> _materializedCombatProfilesByAgentIndex = new ConcurrentDictionary<int, MaterializedCombatProfileRuntimeState>();
+        private static readonly Dictionary<int, Agent> _materializedMutableStateInitializedAgentByIndex = new Dictionary<int, Agent>();
         private static readonly Queue<int> _pendingMaterializedCombatProfileRefreshAgentIndices = new Queue<int>();
         private static readonly Dictionary<int, Agent> _pendingMaterializedCombatProfileRefreshAgentsByIndex = new Dictionary<int, Agent>();
         private static readonly Dictionary<string, MaterializedBattleResultEntryRuntimeState> _materializedBattleResultEntriesByEntryId = new Dictionary<string, MaterializedBattleResultEntryRuntimeState>(StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<int> _materializedBattleResultRemovedAgentIndices = new HashSet<int>();
         private static readonly Dictionary<int, string> _materializedBattleResultSpawnInstanceIdsByAgentIndex = new Dictionary<int, string>();
+        private static readonly Dictionary<int, float> _materializedBattleResultInitialHealthByAgentIndex = new Dictionary<int, float>();
         private static readonly HashSet<string> _materializedBattleResultTerminalSpawnInstanceIds = new HashSet<string>(StringComparer.Ordinal);
         private static readonly List<CoopBattleResultBridgeFile.BattleResultCasualtyEventSnapshot> _materializedBattleResultCasualtyEvents = new List<CoopBattleResultBridgeFile.BattleResultCasualtyEventSnapshot>();
         private static long _nextMaterializedBattleResultSpawnOrdinal;
@@ -15778,15 +15780,8 @@ namespace CoopSpectator.MissionBehaviors
 
             try
             {
-                const string prefix = "AppliedCombatProfile=";
-                string summary = TryApplyMaterializedCombatProfile(agent, entryState);
-                if (string.IsNullOrWhiteSpace(summary))
-                    return "AppliedCombatProfile=client-visual-only";
-
-                if (summary.StartsWith(prefix, StringComparison.Ordinal))
-                    return prefix + "client-local/" + summary.Substring(prefix.Length);
-
-                return summary;
+                RegisterMaterializedCombatProfile(agent, entryState);
+                return "AppliedCombatProfile=client-visual-only/static-profile";
             }
             catch (Exception ex)
             {
@@ -18682,6 +18677,7 @@ namespace CoopSpectator.MissionBehaviors
                 SkillRiding = template.SkillRiding,
                 SkillAthletics = template.SkillAthletics,
                 BaseHitPoints = template.BaseHitPoints,
+                CurrentHitPoints = template.CurrentHitPoints,
                 PerkIds = template.PerkIds != null ? new List<string>(template.PerkIds) : new List<string>(),
                 CombatItem0Id = template.CombatItem0Id,
                 CombatItem0Amount = template.CombatItem0Amount,
@@ -24808,13 +24804,14 @@ namespace CoopSpectator.MissionBehaviors
                 return "AppliedCombatProfile=(none)";
 
             RegisterMaterializedCombatProfile(agent, entryState);
+            bool initializeMutableState = TryBeginMaterializedMutableStateInitialization(agent);
             BattleRuntimeState runtimeState = BattleSnapshotRuntimeState.GetState();
             BattlePartyState partyState = null;
             if (runtimeState?.PartiesById != null && !string.IsNullOrWhiteSpace(entryState.PartyId))
                 runtimeState.PartiesById.TryGetValue(entryState.PartyId, out partyState);
 
             var parts = new List<string>();
-            if (entryState.BaseHitPoints > 0)
+            if (initializeMutableState && entryState.BaseHitPoints > 0)
             {
                 float targetHitPoints = Math.Max(1f, entryState.BaseHitPoints);
                 try
@@ -24823,9 +24820,19 @@ namespace CoopSpectator.MissionBehaviors
                     if (statModel != null)
                         targetHitPoints = Math.Max(1f, statModel.GetEffectiveMaxHealth(agent));
 
+                    float initialHitPoints = targetHitPoints;
+                    if (HasEntryHeroIdentity(entryState) && entryState.CurrentHitPoints > 0)
+                    {
+                        initialHitPoints = Math.Max(
+                            1f,
+                            Math.Min(targetHitPoints, entryState.CurrentHitPoints));
+                    }
+
                     agent.HealthLimit = targetHitPoints;
-                    agent.Health = targetHitPoints;
-                    parts.Add("Hp=" + targetHitPoints.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture));
+                    SetMaterializedInitialAgentHealthWithNetworkSync(agent, initialHitPoints);
+                    parts.Add(
+                        "Hp=" + agent.Health.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) +
+                        "/" + targetHitPoints.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture));
                 }
                 catch (Exception ex)
                 {
@@ -24834,7 +24841,7 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             Agent mountAgent = agent.MountAgent;
-            if (mountAgent != null && mountAgent.IsActive())
+            if (initializeMutableState && mountAgent != null && mountAgent.IsActive())
             {
                 try
                 {
@@ -24844,7 +24851,7 @@ namespace CoopSpectator.MissionBehaviors
                         targetMountHitPoints = Math.Max(1f, statModel.GetEffectiveMaxHealth(mountAgent));
 
                     mountAgent.HealthLimit = targetMountHitPoints;
-                    mountAgent.Health = targetMountHitPoints;
+                    SetMaterializedInitialAgentHealthWithNetworkSync(mountAgent, targetMountHitPoints);
                     parts.Add("MountHp=" + targetMountHitPoints.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture));
                 }
                 catch (Exception ex)
@@ -24855,15 +24862,77 @@ namespace CoopSpectator.MissionBehaviors
 
             if (IsHeroEntryEligibleForExactPersonalPerks(entryState))
             {
-                if (TryApplyExactCampaignMissionEquipmentPerks(agent, entryState, partyState, out string equipmentSummary))
+                if (initializeMutableState &&
+                    TryApplyExactCampaignMissionEquipmentPerks(agent, entryState, partyState, out string equipmentSummary))
+                {
                     parts.Add(equipmentSummary);
+                }
                 if (TryApplyExactCampaignHeroFlags(agent, entryState, out string flagSummary))
                     parts.Add(flagSummary);
             }
 
+            if (initializeMutableState)
+                RecordMaterializedBattleResultInitialHealth(agent, overwriteExisting: true);
+            else
+                parts.Add("MutableState=preserved");
+
             return parts.Count == 0
                 ? "AppliedCombatProfile=(none)"
                 : "AppliedCombatProfile=" + string.Join(", ", parts);
+        }
+
+        private static bool TryBeginMaterializedMutableStateInitialization(Agent agent)
+        {
+            if (agent?.Mission == null || !GameNetwork.IsServer)
+                return false;
+
+            if (_materializedMutableStateInitializedAgentByIndex.TryGetValue(agent.Index, out Agent initializedAgent) &&
+                ReferenceEquals(initializedAgent, agent))
+            {
+                return false;
+            }
+
+            _materializedMutableStateInitializedAgentByIndex[agent.Index] = agent;
+            return agent.MissionPeer == null && !agent.IsPlayerControlled;
+        }
+
+        private static void MarkMaterializedMutableStateInitialized(Agent agent)
+        {
+            if (agent != null)
+                _materializedMutableStateInitializedAgentByIndex[agent.Index] = agent;
+        }
+
+        private static void SetMaterializedInitialAgentHealthWithNetworkSync(Agent agent, float targetHealth)
+        {
+            if (agent == null)
+                return;
+
+            targetHealth = Math.Max(0f, Math.Min(agent.HealthLimit, targetHealth));
+            bool restoreTargetedHealthSync = !agent.SyncHealthToAllClients;
+            if (restoreTargetedHealthSync)
+                agent.UpdateSyncHealthToAllClients(true);
+
+            try
+            {
+                agent.Health = targetHealth;
+            }
+            finally
+            {
+                if (restoreTargetedHealthSync)
+                    agent.UpdateSyncHealthToAllClients(false);
+            }
+        }
+
+        private static void RecordMaterializedBattleResultInitialHealth(Agent agent, bool overwriteExisting)
+        {
+            if (agent?.Mission == null || !GameNetwork.IsServer || agent.IsMount)
+                return;
+
+            EnsureMaterializedBattleResultMission(agent.Mission);
+            if (!overwriteExisting && _materializedBattleResultInitialHealthByAgentIndex.ContainsKey(agent.Index))
+                return;
+
+            _materializedBattleResultInitialHealthByAgentIndex[agent.Index] = Math.Max(0f, agent.Health);
         }
 
         private static bool TryApplyExactCampaignMissionEquipmentPerks(
@@ -25133,6 +25202,7 @@ namespace CoopSpectator.MissionBehaviors
         private static void ResetMaterializedCombatProfileRuntimeState()
         {
             _materializedCombatProfilesByAgentIndex.Clear();
+            _materializedMutableStateInitializedAgentByIndex.Clear();
             _pendingMaterializedCombatProfileRefreshAgentIndices.Clear();
             _pendingMaterializedCombatProfileRefreshAgentsByIndex.Clear();
             ClearMaterializedEquipmentCounter(MaterializedCombatProfileApplyCounts);
@@ -25148,6 +25218,7 @@ namespace CoopSpectator.MissionBehaviors
             _materializedBattleResultEntriesByEntryId.Clear();
             _materializedBattleResultRemovedAgentIndices.Clear();
             _materializedBattleResultSpawnInstanceIdsByAgentIndex.Clear();
+            _materializedBattleResultInitialHealthByAgentIndex.Clear();
             _materializedBattleResultTerminalSpawnInstanceIds.Clear();
             _materializedBattleResultCasualtyEvents.Clear();
             _nextMaterializedBattleResultSpawnOrdinal = 0;
@@ -25175,6 +25246,7 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             _materializedCombatProfilesByAgentIndex.Clear();
+            _materializedMutableStateInitializedAgentByIndex.Clear();
             _pendingMaterializedCombatProfileRefreshAgentIndices.Clear();
             _pendingMaterializedCombatProfileRefreshAgentsByIndex.Clear();
             ClearMaterializedEquipmentCounter(MaterializedCombatProfileApplyCounts);
@@ -25193,6 +25265,7 @@ namespace CoopSpectator.MissionBehaviors
             _materializedBattleResultEntriesByEntryId.Clear();
             _materializedBattleResultRemovedAgentIndices.Clear();
             _materializedBattleResultSpawnInstanceIdsByAgentIndex.Clear();
+            _materializedBattleResultInitialHealthByAgentIndex.Clear();
             _materializedBattleResultTerminalSpawnInstanceIds.Clear();
             _materializedBattleResultCasualtyEvents.Clear();
             _nextMaterializedBattleResultSpawnOrdinal = 0;
@@ -25284,6 +25357,7 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             EnsureMaterializedBattleResultMission(agent.Mission);
+            RecordMaterializedBattleResultInitialHealth(agent, overwriteExisting: false);
             _materializedAgentInstanceByIndex[agent.Index] = agent;
             _materializedArmyEntryIdByAgentIndex[agent.Index] = entryState.EntryId;
             TrackAuthoritativeMaterializedAgentEntryLedgerMapping(
@@ -25735,7 +25809,11 @@ namespace CoopSpectator.MissionBehaviors
             _materializedBattleResultSpawnInstanceIdsByAgentIndex.Remove(agentIndex);
             _materializedBattleResultLastHitDebugByVictimAgentIndex.Remove(agentIndex);
             if (clearRemovedGuard)
+            {
                 _materializedBattleResultRemovedAgentIndices.Remove(agentIndex);
+                _materializedBattleResultInitialHealthByAgentIndex.Remove(agentIndex);
+            }
+            _materializedMutableStateInitializedAgentByIndex.Remove(agentIndex);
             _exactNativeSnapshotOverlayAppliedAgentIndices.Remove(agentIndex);
             ClearClientExactCampaignVisualOverlayAgentIndexState(agentIndex, "clear-materialized-agent-index-runtime-caches");
             if (!preserveClientMountedHeroPayloadState)
@@ -26358,7 +26436,12 @@ namespace CoopSpectator.MissionBehaviors
                     exactOriginFallbackAgents++;
 
                 trackedAgents++;
-                counts.ObservedDamageTaken += Math.Max(0f, agent.HealthLimit - agent.Health);
+                float initialHealth = _materializedBattleResultInitialHealthByAgentIndex.TryGetValue(
+                    agent.Index,
+                    out float trackedInitialHealth)
+                        ? trackedInitialHealth
+                        : agent.HealthLimit;
+                counts.ObservedDamageTaken += Math.Max(0f, initialHealth - agent.Health);
                 if (agent.IsActive())
                 {
                     counts.ActiveCount++;
@@ -35545,6 +35628,7 @@ namespace CoopSpectator.MissionBehaviors
                 }
             }
 
+            MarkMaterializedMutableStateInitialized(replacedAgent);
             TryApplyEntryIdentityToAgent(replacedAgent, entryState);
             string appliedCombatProfile = TryApplyMaterializedCombatProfile(replacedAgent, entryState);
             return
@@ -35570,6 +35654,7 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
+            MarkMaterializedMutableStateInitialized(replacedAgent);
             TryApplyEntryIdentityToAgent(replacedAgent, entryState);
             preservedState =
                 "ReappliedEquipment=preserved-existing-materialized-agent" +
@@ -35673,6 +35758,19 @@ namespace CoopSpectator.MissionBehaviors
             {
                 _materializedBattleResultSpawnInstanceIdsByAgentIndex[targetAgent.Index] = spawnInstanceId;
                 _materializedBattleResultSpawnInstanceIdsByAgentIndex.Remove(sourceAgent.Index);
+            }
+
+            if (_materializedBattleResultInitialHealthByAgentIndex.TryGetValue(sourceAgent.Index, out float initialHealth))
+            {
+                _materializedBattleResultInitialHealthByAgentIndex[targetAgent.Index] = initialHealth;
+                _materializedBattleResultInitialHealthByAgentIndex.Remove(sourceAgent.Index);
+            }
+
+            if (_materializedMutableStateInitializedAgentByIndex.TryGetValue(sourceAgent.Index, out Agent initializedAgent) &&
+                ReferenceEquals(initializedAgent, sourceAgent))
+            {
+                _materializedMutableStateInitializedAgentByIndex[targetAgent.Index] = targetAgent;
+                _materializedMutableStateInitializedAgentByIndex.Remove(sourceAgent.Index);
             }
 
             if (_strictExactHeroTransferStateByRiderAgentIndex.TryGetValue(sourceAgent.Index, out StrictExactHeroTransferRuntimeState strictState) &&

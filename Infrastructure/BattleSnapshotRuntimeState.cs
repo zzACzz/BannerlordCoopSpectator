@@ -145,6 +145,7 @@ namespace CoopSpectator.Infrastructure
         public int SkillRiding { get; set; }
         public int SkillAthletics { get; set; }
         public int BaseHitPoints { get; set; }
+        public int CurrentHitPoints { get; set; }
         public List<string> PerkIds { get; set; } = new List<string>();
         public List<CaptainPerkEffectSnapshotMessage> CaptainPerkEffects { get; set; } = new List<CaptainPerkEffectSnapshotMessage>();
         public string CombatItem0Id { get; set; }
@@ -291,6 +292,7 @@ namespace CoopSpectator.Infrastructure
         public int SkillRiding { get; set; }
         public int SkillAthletics { get; set; }
         public int BaseHitPoints { get; set; }
+        public int CurrentHitPoints { get; set; }
         public List<string> PerkIds { get; set; } = new List<string>();
         public List<CaptainPerkEffectSnapshotMessage> CaptainPerkEffects { get; set; } = new List<CaptainPerkEffectSnapshotMessage>();
         public string CombatItem0Id { get; set; }
@@ -1760,6 +1762,7 @@ namespace CoopSpectator.Infrastructure
                         SkillRiding = entryProjection.SkillRiding,
                         SkillAthletics = entryProjection.SkillAthletics,
                         BaseHitPoints = entryProjection.BaseHitPoints,
+                        CurrentHitPoints = entryProjection.CurrentHitPoints,
                         PerkIds = entryProjection.PerkIds != null ? new List<string>(entryProjection.PerkIds) : new List<string>(),
                         CaptainPerkEffects = CloneCaptainPerkEffects(entryProjection.CaptainPerkEffects),
                         CombatItem0Id = entryProjection.CombatItem0Id,
@@ -1882,6 +1885,7 @@ namespace CoopSpectator.Infrastructure
                 SkillRiding = troop.SkillRiding,
                 SkillAthletics = troop.SkillAthletics,
                 BaseHitPoints = troop.BaseHitPoints,
+                CurrentHitPoints = troop.CurrentHitPoints,
                 PerkIds = troop.PerkIds != null ? new List<string>(troop.PerkIds) : new List<string>(),
                 CaptainPerkEffects = CloneCaptainPerkEffects(troop.CaptainPerkEffects),
                 CombatItem0Id = troop.CombatItem0Id,
