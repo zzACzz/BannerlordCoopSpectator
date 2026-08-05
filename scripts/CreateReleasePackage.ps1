@@ -147,11 +147,13 @@ function Assert-ProductVersionMatches([string]$expectedVersion, [string]$targetF
 function Validate-LightReleasePayload([string]$lightRoot)
 {
     $clientDll = Join-Path $lightRoot "CoopSpectator\bin\Win64_Shipping_Client\CoopSpectator.dll"
+    $clientMultiplayerDll = Join-Path $lightRoot "CoopSpectator\bin\Win64_Shipping_Client\TaleWorlds.MountAndBlade.Multiplayer.dll"
     $dedicatedServerDll = Join-Path $lightRoot "CoopSpectatorDedicated\bin\Win64_Shipping_Server\CoopSpectator.dll"
     $dedicatedClientDll = Join-Path $lightRoot "CoopSpectatorDedicated\bin\Win64_Shipping_Client\CoopSpectator.dll"
     $dedicatedMultiplayerDll = Join-Path $lightRoot "CoopSpectatorDedicated\bin\Win64_Shipping_Client\TaleWorlds.MountAndBlade.Multiplayer.dll"
 
     Assert-PathExists $clientDll "client CoopSpectator.dll"
+    Assert-PathExists $clientMultiplayerDll "client TaleWorlds.MountAndBlade.Multiplayer.dll"
     Assert-PathExists $dedicatedServerDll "dedicated server CoopSpectator.dll"
     Assert-PathExists $dedicatedClientDll "dedicated client CoopSpectator.dll"
     Assert-PathExists $dedicatedMultiplayerDll "dedicated client TaleWorlds.MountAndBlade.Multiplayer.dll"

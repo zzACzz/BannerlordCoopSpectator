@@ -41,6 +41,9 @@
     <HasGameModeDll Condition="'$(UseGameDlls)'=='true' and Exists('$(BannerlordBinDir)\TaleWorlds.MountAndBlade.Multiplayer.dll')">true</HasGameModeDll>
     <HasGameModeDll Condition="'$(UseGameDlls)'=='true' and Exists('$(BannerlordMultiplayerModuleBinDir)\TaleWorlds.MountAndBlade.Multiplayer.dll')">true</HasGameModeDll>
     <HasGameModeDll Condition="'$(UseGameDlls)'!='true' and Exists('TaleWorlds.MountAndBlade.Multiplayer.dll')">true</HasGameModeDll>
+    <MultiplayerDependencySource Condition="'$(UseGameDlls)'=='true' and Exists('$(BannerlordBinDir)\TaleWorlds.MountAndBlade.Multiplayer.dll')">$(BannerlordBinDir)\TaleWorlds.MountAndBlade.Multiplayer.dll</MultiplayerDependencySource>
+    <MultiplayerDependencySource Condition="'$(MultiplayerDependencySource)'=='' and '$(UseGameDlls)'=='true' and Exists('$(BannerlordMultiplayerModuleBinDir)\TaleWorlds.MountAndBlade.Multiplayer.dll')">$(BannerlordMultiplayerModuleBinDir)\TaleWorlds.MountAndBlade.Multiplayer.dll</MultiplayerDependencySource>
+    <MultiplayerDependencySource Condition="'$(MultiplayerDependencySource)'=='' and '$(UseGameDlls)'!='true' and Exists('TaleWorlds.MountAndBlade.Multiplayer.dll')">$(ProjectDir)TaleWorlds.MountAndBlade.Multiplayer.dll</MultiplayerDependencySource>
     <DefineConstants Condition="'$(HasGameModeDll)'=='true'">$(DefineConstants);HAS_GAMEMODE</DefineConstants>
 
     <!-- Гарантуємо копіювання NuGet-залежностей у OutputPath (потрібно для HarmonyLib, якщо він не присутній у грі) -->
@@ -276,6 +279,7 @@
   <Target Name="DeployModToGame" AfterTargets="Build">
     <RemoveDir Directories="$(GameModulesMPDir)" Condition="Exists('$(GameModulesMPDir)')" />
     <MakeDir Directories="$(GameModulesDir);$(GameModulesBinDir)" />
+    <Copy SourceFiles="$(MultiplayerDependencySource)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" Condition="Exists('$(MultiplayerDependencySource)')" />
     <Copy SourceFiles="$(ProjectDir)Module\CoopSpectator\SubModule.xml" DestinationFolder="$(GameModulesDir)" SkipUnchangedFiles="true" />
     <ItemGroup>
       <_DeployBinFiles Include="$(OutputPath)*" />

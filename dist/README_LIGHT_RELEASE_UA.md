@@ -1,34 +1,38 @@
-# Mount & Blade II: Bannerlord - Coop Campaign (Light Release)
+# Mount & Blade II: Bannerlord — Coop Campaign (легкий випуск)
 
-Мод оптимізовано під `Mount & Blade II: Bannerlord v1.4.5 (Steam build 23524942)` та `Mount & Blade II Dedicated Server v1.4.5 (Steam build 23232800)`.
+Пакет підготовлено для `Mount & Blade II: Bannerlord v1.4.7.117484` (Steam build `24127665`) і відповідної версії `Mount & Blade II Dedicated Server`.
 
-У цьому легкому архіві є тільки:
+Архів містить лише:
 
-- `CoopSpectator`
-- `CoopSpectatorDedicated`
-- `README_EN.md`
-- `README_UA.md`
-- `CHANGELOG_v0.1.3.md`
+- `CoopSpectator` — клієнтський модуль;
+- `CoopSpectatorDedicated` — серверний модуль;
+- `README_EN.md`;
+- `README_UA.md`;
+- `CHANGELOG_v0.1.3.md`.
+
+## Перед розпакуванням
+
+Якщо Windows позначила завантажений ZIP як файл з Інтернету, відкрий його властивості, увімкни `Розблокувати` та натисни `Застосувати`. Після цього розпакуй архів.
 
 ## Встановлення
 
-- Клієнт: скопіюй `CoopSpectator` у `Mount & Blade II Bannerlord\Modules`.
-- Хост: скопіюй `CoopSpectatorDedicated` у `Mount & Blade II Dedicated Server\Modules`.
+- Клієнт: скопіюй папку `CoopSpectator` у `Mount & Blade II Bannerlord\Modules` із заміною файлів.
+- Хост: скопіюй папку `CoopSpectatorDedicated` у `Mount & Blade II Dedicated Server\Modules` із заміною файлів.
 
-## Важливо
+На чистому клієнті обов'язково має існувати файл:
 
-Цей легкий пакет не містить `SandBox` і `SandBoxCore`.
+- `Modules\CoopSpectator\bin\Win64_Shipping_Client\TaleWorlds.MountAndBlade.Multiplayer.dll`
 
-`BannerlordCoopCampaign_v0.1.3_HostLarge.zip` не входить до цього випуску через великий розмір стандартних модулів.
+## Важливо для сервера
 
-Для коректного запуску сервера також скопіюй `SandBox` та `SandBoxCore` з папки `Modules` гри до папки `Modules` виділеного сервера з заміною.
+Легкий пакет не містить стандартні модулі `SandBox` і `SandBoxCore` через їхній великий розмір. Для коректного запуску сервера скопіюй ці дві папки з `Modules` встановленої гри до `Modules` виділеного сервера із заміною файлів.
 
-Після копіювання на хості мають існувати такі шляхи:
+Після встановлення на хості мають існувати:
 
-- `Modules\CoopSpectatorDedicated\SubModule.xml`
-- `Modules\CoopSpectatorDedicated\ModuleData\coopspectator_mpcharacters.xml`
-- `Modules\CoopSpectatorDedicated\ModuleData\coopspectator_mpclassdivisions.xml`
-- `Modules\CoopSpectatorDedicated\ModuleData\coopspectator_items.xml`
-- `Modules\CoopSpectatorDedicated\bin\Win64_Shipping_Client\CoopSpectator.dll`
-- `Modules\SandBox\SubModule.xml`
-- `Modules\SandBoxCore\SubModule.xml`
+- `Modules\CoopSpectatorDedicated\SubModule.xml`;
+- `Modules\CoopSpectatorDedicated\ModuleData\coopspectator_mpcharacters.xml`;
+- `Modules\CoopSpectatorDedicated\ModuleData\coopspectator_mpclassdivisions.xml`;
+- `Modules\CoopSpectatorDedicated\ModuleData\coopspectator_items.xml`;
+- `Modules\CoopSpectatorDedicated\bin\Win64_Shipping_Client\CoopSpectator.dll`;
+- `Modules\SandBox\SubModule.xml`;
+- `Modules\SandBoxCore\SubModule.xml`.
