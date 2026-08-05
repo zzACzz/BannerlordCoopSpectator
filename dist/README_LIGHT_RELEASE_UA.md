@@ -8,7 +8,8 @@
 - `CoopSpectatorDedicated` — серверний модуль;
 - `README_EN.md`;
 - `README_UA.md`;
-- `CHANGELOG_v0.1.3.md`.
+- `CHANGELOG_v0.2.1_UA.md`;
+- `CHANGELOG_v0.2.1_EN.md`.
 
 ## Перед розпакуванням
 

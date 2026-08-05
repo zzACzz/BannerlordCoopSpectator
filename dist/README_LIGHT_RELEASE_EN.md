@@ -8,7 +8,8 @@ This archive contains only:
 - `CoopSpectatorDedicated` — dedicated server module;
 - `README_EN.md`;
 - `README_UA.md`;
-- `CHANGELOG_v0.1.3.md`.
+- `CHANGELOG_v0.2.1_EN.md`;
+- `CHANGELOG_v0.2.1_UA.md`.
 
 ## Before extracting
 

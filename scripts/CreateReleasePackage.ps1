@@ -2,7 +2,8 @@ param(
     [string]$BannerlordRootDir = "C:\Program Files (x86)\Steam\steamapps\common\Mount & Blade II Bannerlord",
     [string]$DedicatedServerRootDir = "C:\Program Files (x86)\Steam\steamapps\common\Mount & Blade II Dedicated Server",
     [switch]$SkipBuild,
-    [switch]$LightOnly
+    [switch]$LightOnly,
+    [switch]$GitHubAssetsOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -22,6 +23,8 @@ $lightReleaseReadmeUaTemplate = Join-Path $distRoot "README_LIGHT_RELEASE_UA.md"
 $moduleVersion = $moduleXml.Module.Version.value
 $releaseTag = "BannerlordCoopCampaign_{0}" -f $moduleVersion.Trim()
 $releaseChangelogTemplate = Join-Path $distRoot ("CHANGELOG_{0}.md" -f $moduleVersion.Trim())
+$releaseChangelogEnTemplate = Join-Path $distRoot ("CHANGELOG_{0}_EN.md" -f $moduleVersion.Trim())
+$releaseChangelogUaTemplate = Join-Path $distRoot ("CHANGELOG_{0}_UA.md" -f $moduleVersion.Trim())
 
 $legacyClientDir = Join-Path $distRoot "CoopSpectator_ClientPackage"
 $legacyClientZip = Join-Path $distRoot "CoopSpectator_ClientPackage.zip"
@@ -29,6 +32,10 @@ $releaseDir = Join-Path $distRoot ($releaseTag + "_Release")
 $releaseZip = Join-Path $distRoot ($releaseTag + "_Release.zip")
 $lightReleaseDir = Join-Path $distRoot ($releaseTag + "_LightRelease")
 $lightReleaseZip = Join-Path $distRoot ($releaseTag + "_LightRelease.zip")
+$githubClientDir = Join-Path $distRoot ($releaseTag + "_Client")
+$githubClientZip = Join-Path $distRoot ($releaseTag + "_Client.zip")
+$githubHostDir = Join-Path $distRoot ($releaseTag + "_Host")
+$githubHostZip = Join-Path $distRoot ($releaseTag + "_Host.zip")
 
 function Reset-Path([string]$targetPath)
 {
@@ -172,6 +179,90 @@ function Validate-LightReleasePayload([string]$lightRoot)
     Write-Host ("Validated light release payload. ProductVersion={0}" -f $expectedClientVersion)
 }
 
+function Validate-GitHubReleasePayload([string]$clientRoot, [string]$hostRoot)
+{
+    $clientDll = Join-Path $clientRoot "Modules\CoopSpectator\bin\Win64_Shipping_Client\CoopSpectator.dll"
+    $clientMultiplayerDll = Join-Path $clientRoot "Modules\CoopSpectator\bin\Win64_Shipping_Client\TaleWorlds.MountAndBlade.Multiplayer.dll"
+    $clientModuleXml = Join-Path $clientRoot "Modules\CoopSpectator\SubModule.xml"
+    $hostServerDll = Join-Path $hostRoot "Modules\CoopSpectatorDedicated\bin\Win64_Shipping_Server\CoopSpectator.dll"
+    $hostClientDll = Join-Path $hostRoot "Modules\CoopSpectatorDedicated\bin\Win64_Shipping_Client\CoopSpectator.dll"
+    $hostMultiplayerDll = Join-Path $hostRoot "Modules\CoopSpectatorDedicated\bin\Win64_Shipping_Client\TaleWorlds.MountAndBlade.Multiplayer.dll"
+    $hostModuleXml = Join-Path $hostRoot "Modules\CoopSpectatorDedicated\SubModule.xml"
+
+    Assert-PathExists $clientDll "GitHub client CoopSpectator.dll"
+    Assert-PathExists $clientMultiplayerDll "GitHub client TaleWorlds.MountAndBlade.Multiplayer.dll"
+    Assert-PathExists $clientModuleXml "GitHub client SubModule.xml"
+    Assert-PathExists $hostServerDll "GitHub host server CoopSpectator.dll"
+    Assert-PathExists $hostClientDll "GitHub host client CoopSpectator.dll"
+    Assert-PathExists $hostMultiplayerDll "GitHub host TaleWorlds.MountAndBlade.Multiplayer.dll"
+    Assert-PathExists $hostModuleXml "GitHub host SubModule.xml"
+    Assert-PathExists (Join-Path $clientRoot (Split-Path $releaseChangelogEnTemplate -Leaf)) "GitHub client English changelog"
+    Assert-PathExists (Join-Path $clientRoot (Split-Path $releaseChangelogUaTemplate -Leaf)) "GitHub client Ukrainian changelog"
+    Assert-PathExists (Join-Path $hostRoot (Split-Path $releaseChangelogEnTemplate -Leaf)) "GitHub host English changelog"
+    Assert-PathExists (Join-Path $hostRoot (Split-Path $releaseChangelogUaTemplate -Leaf)) "GitHub host Ukrainian changelog"
+
+    $expectedClientVersion = Get-ProductVersion (Join-Path $clientModuleSource "bin\Win64_Shipping_Client\CoopSpectator.dll")
+    $expectedDedicatedVersion = Get-ProductVersion (Join-Path $dedicatedModuleSource "bin\Win64_Shipping_Server\CoopSpectator.dll")
+    if (-not [string]::Equals($expectedClientVersion, $expectedDedicatedVersion, [System.StringComparison]::Ordinal))
+    {
+        throw "GitHub release validation failed: client/dedicated product versions do not match. Client=$expectedClientVersion Dedicated=$expectedDedicatedVersion"
+    }
+
+    Assert-ProductVersionMatches $expectedClientVersion $clientDll "GitHub client CoopSpectator.dll"
+    Assert-ProductVersionMatches $expectedDedicatedVersion $hostServerDll "GitHub host server CoopSpectator.dll"
+    Assert-ProductVersionMatches $expectedDedicatedVersion $hostClientDll "GitHub host client CoopSpectator.dll"
+
+    [xml]$clientXml = Get-Content $clientModuleXml
+    [xml]$hostXml = Get-Content $hostModuleXml
+    if ($clientXml.Module.Version.value -ne $moduleVersion -or $hostXml.Module.Version.value -ne $moduleVersion)
+    {
+        throw "GitHub release validation failed: SubModule versions do not match $moduleVersion."
+    }
+
+    $debugSymbols = @(Get-ChildItem -Path $clientRoot, $hostRoot -Recurse -File -Filter "*.pdb")
+    if ($debugSymbols.Count -ne 0)
+    {
+        throw "GitHub release validation failed: debug symbols remain in payload."
+    }
+
+    Write-Host ("Validated GitHub release payloads. ModuleVersion={0} ProductVersion={1}" -f $moduleVersion, $expectedClientVersion)
+}
+
+function Create-GitHubReleaseAssets
+{
+    Assert-PathExists $releaseChangelogEnTemplate "English release changelog"
+    Assert-PathExists $releaseChangelogUaTemplate "Ukrainian release changelog"
+
+    Reset-Path $githubClientDir
+    Reset-Path $githubClientZip
+    Reset-Path $githubHostDir
+    Reset-Path $githubHostZip
+
+    New-Item -ItemType Directory -Path (Join-Path $githubClientDir "Modules") -Force | Out-Null
+    Copy-DirectoryContent $clientModuleSource (Join-Path $githubClientDir "Modules\CoopSpectator")
+    Copy-Item -LiteralPath $portableLauncher -Destination (Join-Path $githubClientDir "run_mp_with_mod_from_game_root.bat") -Force
+    Copy-Item -LiteralPath $releaseChangelogEnTemplate -Destination $githubClientDir -Force
+    Copy-Item -LiteralPath $releaseChangelogUaTemplate -Destination $githubClientDir -Force
+
+    New-Item -ItemType Directory -Path (Join-Path $githubHostDir "Modules") -Force | Out-Null
+    Copy-HostPayload (Join-Path $githubHostDir "Modules") $false
+    Copy-Item -LiteralPath $releaseChangelogEnTemplate -Destination $githubHostDir -Force
+    Copy-Item -LiteralPath $releaseChangelogUaTemplate -Destination $githubHostDir -Force
+
+    Remove-DebugSymbols $githubClientDir
+    Remove-DebugSymbols $githubHostDir
+    Validate-GitHubReleasePayload $githubClientDir $githubHostDir
+
+    Compress-Archive -Path (Join-Path $githubClientDir "*") -DestinationPath $githubClientZip -CompressionLevel Optimal
+    Compress-Archive -Path (Join-Path $githubHostDir "*") -DestinationPath $githubHostZip -CompressionLevel Optimal
+
+    Reset-Path $githubClientDir
+    Reset-Path $githubHostDir
+
+    Write-Host ("Created GitHub client package: {0}" -f $githubClientZip)
+    Write-Host ("Created GitHub host package: {0}" -f $githubHostZip)
+}
+
 function Copy-HostPayload([string]$hostModulesDir, [bool]$includeBaseSceneModules)
 {
     $hostDedicatedModuleDir = Join-Path $hostModulesDir "CoopSpectatorDedicated"
@@ -219,6 +310,12 @@ if (-not $SkipBuild)
     {
         Pop-Location
     }
+}
+
+if ($GitHubAssetsOnly)
+{
+    Create-GitHubReleaseAssets
+    return
 }
 
 if (-not $LightOnly)
