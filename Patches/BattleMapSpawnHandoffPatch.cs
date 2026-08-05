@@ -10088,7 +10088,7 @@ namespace CoopSpectator.Patches
                     continue;
                 }
 
-                if (IsRedundantServerNativeExactSiegeClientWeaponAmmoZeroUpdate(
+                if (IsRedundantServerNativeExactBattleClientWeaponAmmoZeroUpdate(
                         mission,
                         agent,
                         setWeaponAmmoData))
@@ -10166,7 +10166,7 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static bool IsRedundantServerNativeExactSiegeClientWeaponAmmoZeroUpdate(
+        private static bool IsRedundantServerNativeExactBattleClientWeaponAmmoZeroUpdate(
             Mission mission,
             Agent agent,
             SetWeaponAmmoData setWeaponAmmoData)
@@ -10175,7 +10175,7 @@ namespace CoopSpectator.Patches
                 agent == null ||
                 setWeaponAmmoData == null ||
                 GameNetwork.IsServer ||
-                !ExactCampaignSiegeAssaultWithDeploymentRuntime.ShouldUseServerNativeExactSiegeAgentOwnership(mission) ||
+                !SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty) ||
                 !agent.IsActive() ||
                 agent.IsMount ||
                 agent.MissionPeer != null ||
@@ -18833,7 +18833,7 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
-                if (IsRedundantServerNativeExactSiegeClientWeaponAmmoZeroUpdate(
+                if (IsRedundantServerNativeExactBattleClientWeaponAmmoZeroUpdate(
                         mission,
                         agent,
                         setWeaponAmmoData))
