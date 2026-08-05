@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
+    <Compile Include="Program.cs" />
+    <Compile Include="..\..\Infrastructure\CoopHeroCreationContract.cs" Link="CoopHeroCreationContract.cs" />
+    <Compile Include="..\..\Infrastructure\CoopHeroCreationChunkCodec.cs" Link="CoopHeroCreationChunkCodec.cs" />
+    <Compile Include="..\..\Infrastructure\CoopHeroCreationStateMachine.cs" Link="CoopHeroCreationStateMachine.cs" />
+  </ItemGroup>
+</Project>

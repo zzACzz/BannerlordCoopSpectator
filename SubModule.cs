@@ -97,6 +97,7 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
             if (EnableClientGameModeRegistration)
             {
                 TryRegisterCoopBattleForClient();
+                TryRegisterCoopHeroCreatorForClient();
                 if (ExperimentalFeatures.EnableTdmCloneExperiment)
                     TryRegisterTdmCloneForClient(); // Ð ÐµÑ”ÑÑ‚Ñ€ÑƒÑ”Ð¼Ð¾ TdmClone Ð»Ð¸ÑˆÐµ ÐºÐ¾Ð»Ð¸ ÐµÐºÑÐ¿ÐµÑ€Ð¸Ð¼ÐµÐ½Ñ‚Ð°Ð»ÑŒÐ½Ð¸Ð¹ path ÑÐ²Ð½Ð¾ ÑƒÐ²Ñ–Ð¼ÐºÐ½ÐµÐ½Ð¾.
                 else
@@ -164,6 +165,21 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
             }
         }
 
+        private static void TryRegisterCoopHeroCreatorForClient()
+        {
+            try
+            {
+                if (TaleWorlds.MountAndBlade.Module.CurrentModule == null) return;
+                TaleWorlds.MountAndBlade.Module.CurrentModule.AddMultiplayerGameMode(
+                    new MissionMultiplayerCoopHeroCreatorMode(CoopGameModeIds.CoopHeroCreator));
+                ModLogger.Info("[CoopSpectator] CoopHeroCreator client registration success.");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("[CoopSpectator] CoopHeroCreator client registration fail: " + ex.Message);
+            }
+        }
+
         /// <summary>Ð ÐµÑ”ÑÑ‚Ñ€ÑƒÑ”Ð¼Ð¾ TdmClone Ð½Ð° ÐºÐ»Ñ–Ñ”Ð½Ñ‚Ñ–, Ñ‰Ð¾Ð± Ð¿Ñ€Ð¸ Join Ð´Ð¾ ÑÐµÑ€Ð²ÐµÑ€Ð° Ð· GameType TdmClone Ð³Ñ€Ð° Ð·Ð½Ð°Ð¹ÑˆÐ»Ð° Ð½Ð°Ñˆ Ñ€ÐµÐ¶Ð¸Ð¼ (multiplayer_strings.TdmClone Ð²Ð¶Ðµ Ñ”).</summary>
         private static void TryRegisterTdmCloneForClient()
         {
@@ -222,6 +238,8 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
 
                     if (EnableManualPatchMissionFlowUi)
                     {
+                        CoopHeroCreatorBodyGeneratorPatch.Apply(harmony);
+
                         if (EnableManualPatchMissionFlowOpenNew)
                         {
                             MissionStateOpenNewPatches.Apply(harmony);
@@ -387,6 +405,7 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                         if (loadedAssemblyName == "TaleWorlds.MountAndBlade.GauntletUI")
                         {
                             CoopBattleDisplayNameConsumerPatch.Apply(harmony);
+                            CoopHeroCreatorBodyGeneratorPatch.Apply(harmony);
                         }
 
                         if (loadedAssemblyName == "TaleWorlds.MountAndBlade.Multiplayer.GauntletUI")
@@ -425,6 +444,7 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                     starter.AddBehavior(new ClientBattleNotification()); // ÐšÐ»Ñ–Ñ”Ð½Ñ‚: ÑÐ»ÑƒÑ…Ð°Ñ” BATTLE_START Ñ– Ð¿Ð¾ÐºÐ°Ð·ÑƒÑ” countdown/notification
                     starter.AddBehavior(new MainThreadDispatcherPumpBehavior()); // Pump dispatcher from campaign tick for reliable UI feedback
                     starter.AddBehavior(new BattleResultWritebackJournalBehavior());
+                    starter.AddBehavior(new PlayerHeroCreationCampaignBehavior());
                     ModLogger.Info("Campaign behaviors Ð´Ð¾Ð´Ð°Ð½Ð¾ (HostStateBroadcaster + SpectatorStateReceiver)."); // Ð›Ð¾Ð³ÑƒÑ”Ð¼Ð¾ Ñ„Ð°ÐºÑ‚ Ð´Ð¾Ð´Ð°Ð²Ð°Ð½Ð½Ñ behaviors Ð´Ð»Ñ Ð´ÐµÐ±Ð°Ð³Ñƒ
                 } // Ð—Ð°Ð²ÐµÑ€ÑˆÑƒÑ”Ð¼Ð¾ Ð±Ð»Ð¾Ðº if
                 else if (!EnableCampaignBehaviors)

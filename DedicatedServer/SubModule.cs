@@ -68,6 +68,13 @@ namespace CoopSpectator
 
                 _hasAppliedFixedTestCultures = false;
 
+                if (IsCoopHeroCreatorMission(currentMission))
+                {
+                    ResetDedicatedObserverMissionActivationState("coop-hero-creator-mission");
+                    DedicatedKnockoutOutcomeModelOverride.RestoreIfNeeded();
+                    return;
+                }
+
                 CoopMissionSpawnLogic.TryRunDedicatedMissionNetworkBootstrap(currentMission);
 
                 if (ShouldDelayDedicatedMissionObserverActivation(currentMission))
@@ -117,6 +124,13 @@ namespace CoopSpectator
             {
                 return "exception:" + ex.GetType().Name;
             }
+        }
+
+        private static bool IsCoopHeroCreatorMission(Mission mission)
+        {
+            return mission != null &&
+                   (mission.GetMissionBehavior<CoopHeroCreationMissionNetwork>() != null ||
+                    mission.GetMissionBehavior<MissionMultiplayerCoopHeroCreator>() != null);
         }
 
         private static bool ShouldDelayDedicatedMissionObserverActivation(Mission mission)
@@ -1038,6 +1052,9 @@ namespace CoopSpectator
                 ModLogger.Info("[GameModeReg] Battle override armed via Harmony. GetMultiplayerGameMode(Battle) will return CoopBattle runtime.");
                 ModLogger.Info("[GameModeReg] add CoopTdm id=" + MissionMultiplayerCoopTdmMode.GameModeId);
                 TaleWorlds.MountAndBlade.Module.CurrentModule.AddMultiplayerGameMode(new MissionMultiplayerCoopTdmMode(MissionMultiplayerCoopTdmMode.GameModeId));
+                ModLogger.Info("[GameModeReg] add CoopHeroCreator id=" + MissionMultiplayerCoopHeroCreatorMode.GameModeId);
+                TaleWorlds.MountAndBlade.Module.CurrentModule.AddMultiplayerGameMode(
+                    new MissionMultiplayerCoopHeroCreatorMode(CoopGameModeIds.CoopHeroCreator));
                 if (ExperimentalFeatures.EnableTdmCloneExperiment)
                 {
                     ModLogger.Info("[GameModeReg] add TdmClone id=" + MissionMultiplayerTdmCloneMode.GameModeId);

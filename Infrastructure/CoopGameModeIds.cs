@@ -15,6 +15,8 @@ namespace CoopSpectator.Infrastructure
         /// <summary>Поточний робочий режим TDM (клон ванільного TDM).</summary>
         public const string CoopTdm = "CoopTdm";
 
+        public const string CoopHeroCreator = "CoopHeroCreator";
+
         /// <summary>Точна копія 1:1 TDM з іншою назвою — для тесту без зміни логіки (виключення помилок через розсинхрон ID).</summary>
         public const string TdmClone = "TdmClone";
 

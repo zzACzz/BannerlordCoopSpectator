@@ -160,6 +160,46 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
             ModLogger.Info("DedicatedServerCommands: SendStartMission [ID check] expected GameTypeId on dedicated=" + CoopGameModeIds.OfficialBattle + " for battle-map runtime, fallback custom ids otherwise.");
             return SendCommand(StartMissionCommand);
         }
+
+        public static bool SendStartHeroCreatorMission()
+        {
+            const string creatorScene = "mp_tdm_map_001";
+            const string creatorGameType = "CoopHeroCreator";
+            try
+            {
+                TryLogAvailableServerOptionsViaHttp();
+                if (!DedicatedHelperLauncher.HasDedicatedProcess())
+                {
+                    ModLogger.Info("DedicatedServerCommands: hero creator start rejected because no local dedicated process is available.");
+                    return false;
+                }
+
+                bool optionsApplied = TryApplySceneAwareMissionSelectionViaWebOptions(
+                    creatorScene,
+                    creatorGameType,
+                    creatorGameType);
+                if (!optionsApplied)
+                {
+                    bool addMapSent = DedicatedHelperLauncher.TrySendConsoleLine(
+                        "add_map_to_usable_maps " + creatorScene + " " + creatorGameType);
+                    bool gameTypeSent = DedicatedHelperLauncher.TrySendConsoleLine("GameType " + creatorGameType);
+                    bool mapSent = DedicatedHelperLauncher.TrySendConsoleLine("Map " + creatorScene);
+                    ModLogger.Info(
+                        "DedicatedServerCommands: hero creator fallback options sent. AddMap=" + addMapSent +
+                        " GameType=" + gameTypeSent + " Map=" + mapSent + ".");
+                    if (!gameTypeSent || !mapSent) return false;
+                    Thread.Sleep(100);
+                }
+
+                ModLogger.Info("DedicatedServerCommands: starting isolated hero creator mission.");
+                return SendCommand(StartMissionCommand);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("DedicatedServerCommands: hero creator mission start failed. " + ex.Message);
+                return false;
+            }
+        }
         public static bool SendEndMission() => SendCommand(EndMissionCommand);
 
         private static void TryApplySceneAwareMissionSelectionFromBattleRoster()

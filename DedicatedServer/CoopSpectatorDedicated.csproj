@@ -45,6 +45,9 @@
     <Compile Include="..\GameMode\MissionMultiplayerCoopTdmMode.cs" Link="GameMode\MissionMultiplayerCoopTdmMode.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopTdm.cs" Link="GameMode\MissionMultiplayerCoopTdm.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopTdmClient.cs" Link="GameMode\MissionMultiplayerCoopTdmClient.cs" />
+    <Compile Include="..\GameMode\MissionMultiplayerCoopHeroCreatorMode.cs" Link="GameMode\MissionMultiplayerCoopHeroCreatorMode.cs" />
+    <Compile Include="..\GameMode\MissionMultiplayerCoopHeroCreator.cs" Link="GameMode\MissionMultiplayerCoopHeroCreator.cs" />
+    <Compile Include="..\GameMode\MissionMultiplayerCoopHeroCreatorClient.cs" Link="GameMode\MissionMultiplayerCoopHeroCreatorClient.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerTdmCloneMode.cs" Link="GameMode\MissionMultiplayerTdmCloneMode.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerTdmClone.cs" Link="GameMode\MissionMultiplayerTdmClone.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerTdmCloneClient.cs" Link="GameMode\MissionMultiplayerTdmCloneClient.cs" />
@@ -58,6 +61,7 @@
     <Compile Include="..\Mission\CoopExactCampaignReliefMissionController.cs" Link="Mission\CoopExactCampaignReliefMissionController.cs" />
     <Compile Include="..\Mission\CoopExactCampaignSiegeAmbushMissionController.cs" Link="Mission\CoopExactCampaignSiegeAmbushMissionController.cs" />
     <Compile Include="..\Mission\CoopMissionNetworkBridge.cs" Link="Mission\CoopMissionNetworkBridge.cs" />
+    <Compile Include="..\Mission\CoopHeroCreationMissionNetwork.cs" Link="Mission\CoopHeroCreationMissionNetwork.cs" />
     <Compile Include="..\Mission\CoopSiegeAssaultFormationOrderRuntime.cs" Link="Mission\CoopSiegeAssaultFormationOrderRuntime.cs" />
     <Compile Include="..\MissionModels\CoopCampaignDerivedAgentStatCalculateModel.cs" Link="MissionModels\CoopCampaignDerivedAgentStatCalculateModel.cs" />
     <Compile Include="..\MissionModels\CoopCampaignDerivedStrikeMagnitudeCalculationModel.cs" Link="MissionModels\CoopCampaignDerivedStrikeMagnitudeCalculationModel.cs" />
@@ -71,6 +75,7 @@
     <Compile Include="..\Network\Messages\BattleStartMessage.cs" Link="Network\Messages\BattleStartMessage.cs" />
     <Compile Include="..\Network\Messages\CoopPreMissionTopologyNetworkMessages.cs" Link="Network\Messages\CoopPreMissionTopologyNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopBattleSelectionNetworkMessages.cs" Link="Network\Messages\CoopBattleSelectionNetworkMessages.cs" />
+    <Compile Include="..\Network\Messages\CoopHeroCreationNetworkMessages.cs" Link="Network\Messages\CoopHeroCreationNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopBattleAgentControlNetworkMessages.cs" Link="Network\Messages\CoopBattleAgentControlNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopSiegeAmbushOrderNetworkMessages.cs" Link="Network\Messages\CoopSiegeAmbushOrderNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopSiegeAssaultOrderNetworkMessages.cs" Link="Network\Messages\CoopSiegeAssaultOrderNetworkMessages.cs" />
@@ -137,6 +142,10 @@
     <Compile Include="..\Infrastructure\CoopBattlePeerReconnectState.cs" Link="Infrastructure\CoopBattlePeerReconnectState.cs" />
     <Compile Include="..\Infrastructure\CoopBattleAgentControlRuntimeState.cs" Link="Infrastructure\CoopBattleAgentControlRuntimeState.cs" />
     <Compile Include="..\Infrastructure\AtomicBridgeFileIO.cs" Link="Infrastructure\AtomicBridgeFileIO.cs" />
+    <Compile Include="..\Infrastructure\CoopHeroCreationContract.cs" Link="Infrastructure\CoopHeroCreationContract.cs" />
+    <Compile Include="..\Infrastructure\CoopHeroCreationChunkCodec.cs" Link="Infrastructure\CoopHeroCreationChunkCodec.cs" />
+    <Compile Include="..\Infrastructure\CoopHeroCreationStateMachine.cs" Link="Infrastructure\CoopHeroCreationStateMachine.cs" />
+    <Compile Include="..\Infrastructure\CoopHeroCreationBridgeFile.cs" Link="Infrastructure\CoopHeroCreationBridgeFile.cs" />
     <Compile Include="..\Infrastructure\CoopRoleMatrixStreamBridgeFile.cs" Link="Infrastructure\CoopRoleMatrixStreamBridgeFile.cs" />
     <Compile Include="..\Infrastructure\CoopBattleEntryPolicy.cs" Link="Infrastructure\CoopBattleEntryPolicy.cs" />
     <Compile Include="..\Infrastructure\CoopBattlePeerSessionState.cs" Link="Infrastructure\CoopBattlePeerSessionState.cs" />

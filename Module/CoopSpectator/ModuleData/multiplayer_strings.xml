@@ -6,6 +6,8 @@
   <string id="str_multiplayer_game_type.CoopBattle" text="{=*}Coop Battle" />
   <string id="str_multiplayer_official_game_type_name.TdmClone" text="{=*}TDM Clone" />
   <string id="str_multiplayer_game_type.TdmClone" text="{=*}TDM Clone" />
+  <string id="str_multiplayer_official_game_type_name.CoopHeroCreator" text="{=*}Coop Hero Creator" />
+  <string id="str_multiplayer_game_type.CoopHeroCreator" text="{=*}Coop Hero Creator" />
   <string id="CoopDelegateControlToAi" text="{=*}Delegate control to AI" />
   <string id="CoopReturnControlHint" text="{=*}H — Return control" />
   <string id="CoopAttackSiegeEngines" text="{=*}Attack Siege Engines" />

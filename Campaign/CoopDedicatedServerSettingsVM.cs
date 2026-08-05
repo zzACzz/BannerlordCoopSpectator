@@ -26,8 +26,10 @@ namespace CoopSpectator.Campaign
         private bool _isServerPasswordObfuscated = true;
         private bool _isAdminPasswordObfuscated = true;
         private bool _canStartServer;
+        private bool _canExecuteHeroCreation;
         private bool _hasToken;
         private bool _hasPersistedCloseSnapshot;
+        private string _heroCreationAvailabilityText;
 
         public CoopDedicatedServerSettingsVM(Action onClose)
         {
@@ -54,6 +56,7 @@ namespace CoopSpectator.Campaign
             RefreshTokenStatus();
             RefreshHostingModeBindings();
             UpdateStartAvailability();
+            RefreshHeroCreationBindings();
         }
 
         [DataSourceProperty] public string TitleText => "Bannerlord Coop Campaign";
@@ -122,6 +125,11 @@ namespace CoopSpectator.Campaign
         [DataSourceProperty] public bool IsServerPasswordObfuscated { get => _isServerPasswordObfuscated; private set => SetField(ref _isServerPasswordObfuscated, value, nameof(IsServerPasswordObfuscated)); }
         [DataSourceProperty] public bool IsAdminPasswordObfuscated { get => _isAdminPasswordObfuscated; private set => SetField(ref _isAdminPasswordObfuscated, value, nameof(IsAdminPasswordObfuscated)); }
         [DataSourceProperty] public bool CanStartServer { get => _canStartServer; private set => SetField(ref _canStartServer, value, nameof(CanStartServer)); }
+        [DataSourceProperty] public bool CanExecuteHeroCreation { get => _canExecuteHeroCreation; private set => SetField(ref _canExecuteHeroCreation, value, nameof(CanExecuteHeroCreation)); }
+        [DataSourceProperty] public string HeroCreationAvailabilityText { get => _heroCreationAvailabilityText; private set => SetField(ref _heroCreationAvailabilityText, value, nameof(HeroCreationAvailabilityText)); }
+        [DataSourceProperty] public string HeroCreationButtonText => PlayerHeroCreationCampaignBehavior.HasActiveSession
+            ? "Cancel Hero Creation"
+            : "Create Player Heroes";
         [DataSourceProperty] public string ServerPasswordToggleText => IsServerPasswordObfuscated ? "Show" : "Hide";
         [DataSourceProperty] public string AdminPasswordToggleText => IsAdminPasswordObfuscated ? "Show" : "Hide";
         [DataSourceProperty] public bool IsPublicHostingMode => _hostingMode == DedicatedServerHostingMode.PublicListed;
@@ -220,6 +228,23 @@ namespace CoopSpectator.Campaign
                 " advertisedHostAddress=" + (string.IsNullOrWhiteSpace(AdvertisedHostAddress) ? "(default)" : AdvertisedHostAddress) + ".");
 
             StatusText = DedicatedHelperLauncher.Start(null, 7210, normalized);
+            RefreshHeroCreationBindings();
+        }
+
+        public void ExecuteHeroCreation()
+        {
+            bool succeeded;
+            string message;
+            if (PlayerHeroCreationCampaignBehavior.HasActiveSession)
+                succeeded = PlayerHeroCreationCampaignBehavior.TryCancelActiveSession(out message);
+            else
+                succeeded = PlayerHeroCreationCampaignBehavior.TryStart(out message);
+
+            StatusText = message;
+            UiFeedback.ShowMessageDeferred(message);
+            RefreshHeroCreationBindings();
+            if (succeeded)
+                ExecuteDone();
         }
 
         public void ExecuteToggleServerPasswordVisibility()
@@ -418,6 +443,21 @@ namespace CoopSpectator.Campaign
                 DedicatedHelperLauncher.RememberPreferredLaunchSettings(normalized, "CoopDedicatedServerSettingsVM.UpdateStartAvailability");
             }
             CanStartServer = _hasToken && isValid;
+        }
+
+        private void RefreshHeroCreationBindings()
+        {
+            bool hasActiveSession = PlayerHeroCreationCampaignBehavior.HasActiveSession;
+            string reason = string.Empty;
+            bool canStart = hasActiveSession || PlayerHeroCreationCampaignBehavior.CanStart(out reason);
+
+            CanExecuteHeroCreation = canStart;
+            HeroCreationAvailabilityText = hasActiveSession
+                ? "Сесія створення героїв активна. Її можна скасувати тут."
+                : canStart
+                    ? "Виділений сервер готовий до запуску місії створення героїв."
+                    : "Створення героїв недоступне: " + reason;
+            OnPropertyChanged(nameof(HeroCreationButtonText));
         }
 
         private void SetTextField(ref string field, string value, string propertyName)

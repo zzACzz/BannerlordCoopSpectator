@@ -1,0 +1,55 @@
+<Brushes>
+  <Brush Name="CoopHeroCreator.PlusButton">
+    <Layers>
+      <BrushLayer Name="Default" Sprite="StdAssets\plus_button_default" IsHidden="true" />
+      <BrushLayer Name="Hovered" Sprite="StdAssets\plus_button_hover" IsHidden="true" />
+      <BrushLayer Name="Pressed" Sprite="StdAssets\plus_button_pressed" IsHidden="true" />
+    </Layers>
+    <Styles>
+      <Style Name="Default">
+        <BrushLayer Name="Default" IsHidden="false" />
+      </Style>
+      <Style Name="Hovered">
+        <BrushLayer Name="Hovered" IsHidden="false" />
+      </Style>
+      <Style Name="Pressed">
+        <BrushLayer Name="Pressed" IsHidden="false" />
+      </Style>
+      <Style Name="Disabled">
+        <BrushLayer Name="Default" ColorFactor="0.6" IsHidden="false" />
+      </Style>
+    </Styles>
+    <SoundProperties>
+      <EventSounds>
+        <EventSound EventName="Click" Audio="popup" />
+      </EventSounds>
+    </SoundProperties>
+  </Brush>
+
+  <Brush Name="CoopHeroCreator.MinusButton">
+    <Layers>
+      <BrushLayer Name="Default" Sprite="StdAssets\minus_button_default" IsHidden="true" />
+      <BrushLayer Name="Hovered" Sprite="StdAssets\minus_button_hover" IsHidden="true" />
+      <BrushLayer Name="Pressed" Sprite="StdAssets\minus_button_pressed" IsHidden="true" />
+    </Layers>
+    <Styles>
+      <Style Name="Default">
+        <BrushLayer Name="Default" IsHidden="false" />
+      </Style>
+      <Style Name="Hovered">
+        <BrushLayer Name="Hovered" IsHidden="false" />
+      </Style>
+      <Style Name="Pressed">
+        <BrushLayer Name="Pressed" IsHidden="false" />
+      </Style>
+      <Style Name="Disabled">
+        <BrushLayer Name="Default" ColorFactor="0.6" IsHidden="false" />
+      </Style>
+    </Styles>
+    <SoundProperties>
+      <EventSounds>
+        <EventSound EventName="Click" Audio="popup" />
+      </EventSounds>
+    </SoundProperties>
+  </Brush>
+</Brushes>

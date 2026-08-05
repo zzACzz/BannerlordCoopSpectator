@@ -202,6 +202,17 @@
                   </Children>
                 </Widget>
 
+                <ListPanel WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" HorizontalAlignment="Center" MarginBottom="12" StackLayout.LayoutMethod="VerticalTopToBottom">
+                  <Children>
+                    <RichTextWidget WidthSizePolicy="Fixed" HeightSizePolicy="CoverChildren" SuggestedWidth="620" HorizontalAlignment="Center" MarginBottom="8" Brush="Popup.Description.Text" Text="@HeroCreationAvailabilityText" />
+                    <ButtonWidget DoNotPassEventsToChildren="true" WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="518" SuggestedHeight="64" HorizontalAlignment="Center" Brush="Popup.Done.Button" Command.Click="ExecuteHeroCreation" IsEnabled="@CanExecuteHeroCreation">
+                      <Children>
+                        <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" VerticalAlignment="Center" Brush="Popup.Button.Text" Text="@HeroCreationButtonText" />
+                      </Children>
+                    </ButtonWidget>
+                  </Children>
+                </ListPanel>
+
                 <RichTextWidget WidthSizePolicy="Fixed" HeightSizePolicy="CoverChildren" SuggestedWidth="620" HorizontalAlignment="Center" MarginBottom="12" Brush="Popup.Description.Text" Text="@StatusText" />
 
                 <ListPanel WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" HorizontalAlignment="Center" MarginBottom="18" StackLayout.LayoutMethod="VerticalTopToBottom">

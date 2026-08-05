@@ -1,0 +1,130 @@
+<Prefab>
+  <Window>
+    <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Sprite="BlankWhiteSquare_9" Color="#000000CC">
+      <Children>
+        <Standard.Background />
+        <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="1450" SuggestedHeight="1010" HorizontalAlignment="Center" VerticalAlignment="Center">
+          <Children>
+            <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Sprite="StdAssets\Popup\canvas" />
+            <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Sprite="StdAssets\Popup\canvas_gradient" IsEnabled="false" />
+            <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Sprite="frame_9" ExtendLeft="18" ExtendTop="18" ExtendRight="18" ExtendBottom="18" IsEnabled="false" />
+
+            <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginLeft="36" MarginRight="36" MarginTop="20" MarginBottom="20" StackLayout.LayoutMethod="VerticalTopToBottom">
+              <Children>
+                <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" HorizontalAlignment="Center" Brush="Popup.Title.Text" Text="@TitleText" />
+                <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" HorizontalAlignment="Center" MarginTop="2" Brush="Popup.Description.Text" Text="@SubtitleText" />
+                <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" HorizontalAlignment="Center" MarginTop="2" Brush="Popup.Description.Text" Text="@StatusText" />
+
+                <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="36" MarginTop="3" StackLayout.LayoutMethod="HorizontalLeftToRight">
+                  <Children>
+                    <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Brush="Popup.Description.Text" Text="@ProgressText" />
+                    <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Brush="Popup.Description.Text" Brush.TextHorizontalAlignment="Right" Text="@RemainingText" />
+                  </Children>
+                </ListPanel>
+
+                <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="60" MarginTop="4" StackLayout.LayoutMethod="HorizontalLeftToRight">
+                  <Children>
+                    <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="335" SuggestedHeight="56" Sprite="General\CharacterCreation\name_input_area">
+                      <Children>
+                        <EditableTextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginLeft="12" MarginRight="12" MarginTop="8" MarginBottom="8" Brush="Review.NameInput.Text" RealText="@HeroName" KeyboardInfoText="Hero Name" IsEnabled="@CanEdit" />
+                      </Children>
+                    </Widget>
+                    <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="StretchToParent" SuggestedWidth="230" MarginLeft="18" Brush="Popup.Description.Text" Text="@CultureText" />
+                    <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="StretchToParent" SuggestedWidth="210" Brush="Popup.Description.Text" Text="@GenderText" />
+                    <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="StretchToParent" SuggestedWidth="125" Brush="Popup.Description.Text" Text="@AgeText" />
+                    <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Brush="Popup.Description.Text" Text="@AppearanceText" />
+                  </Children>
+                </ListPanel>
+
+                <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="42" StackLayout.LayoutMethod="HorizontalLeftToRight">
+                  <Children>
+                    <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Brush="Popup.Description.Text" Brush.TextHorizontalAlignment="Center" Text="@AttributeBudgetText" />
+                    <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Brush="Popup.Description.Text" Brush.TextHorizontalAlignment="Center" Text="@FocusBudgetText" />
+                    <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Brush="Popup.Description.Text" Brush.TextHorizontalAlignment="Center" Text="@SkillBudgetText" />
+                  </Children>
+                </ListPanel>
+
+                <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginTop="5" MarginBottom="10" StackLayout.LayoutMethod="HorizontalLeftToRight">
+                  <Children>
+                    <Widget WidthSizePolicy="Fixed" HeightSizePolicy="StretchToParent" SuggestedWidth="480" Sprite="BlankWhiteSquare_9" Color="#111111CC">
+                      <Children>
+                        <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="45" HorizontalAlignment="Center" Brush="MPClassLoadout.FactionText" Text="Attributes" />
+                        <ScrollablePanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginTop="45" MarginRight="12" AutoHideScrollBars="true" ClipRect="AttributeClipRect" InnerPanel="AttributeClipRect\AttributeList" VerticalScrollbar="..\AttributeScrollbar">
+                          <Children>
+                            <Widget Id="AttributeClipRect" WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" ClipContents="true">
+                              <Children>
+                                <ListPanel Id="AttributeList" DataSource="{Attributes}" WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginLeft="16" MarginRight="16" MarginTop="8" MarginBottom="8" StackLayout.LayoutMethod="VerticalTopToBottom">
+                                  <ItemTemplate>
+                                    <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="58" StackLayout.LayoutMethod="HorizontalLeftToRight">
+                                      <Children>
+                                        <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="StretchToParent" SuggestedWidth="250" Brush="Popup.Description.Text" Text="@NameText" />
+                                        <ButtonWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="40" SuggestedHeight="40" VerticalAlignment="Center" Brush="CoopHeroCreator.MinusButton" Command.Click="ExecuteMinus" IsEnabled="@CanDecrease" DoNotPassEventsToChildren="true" UpdateChildrenStates="true" />
+                                        <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="StretchToParent" SuggestedWidth="65" Brush="MPHUD.CountdownText" Brush.TextHorizontalAlignment="Center" Brush.TextVerticalAlignment="Center" Text="@ValueText" />
+                                        <ButtonWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="40" SuggestedHeight="40" VerticalAlignment="Center" Brush="CoopHeroCreator.PlusButton" Command.Click="ExecutePlus" IsEnabled="@CanIncrease" DoNotPassEventsToChildren="true" UpdateChildrenStates="true" />
+                                      </Children>
+                                    </ListPanel>
+                                  </ItemTemplate>
+                                </ListPanel>
+                              </Children>
+                            </Widget>
+                          </Children>
+                        </ScrollablePanel>
+                        <ScrollbarWidget Id="AttributeScrollbar" WidthSizePolicy="Fixed" HeightSizePolicy="StretchToParent" SuggestedWidth="7" HorizontalAlignment="Right" MarginTop="52" MarginBottom="10" Brush="MPClassLoadout.Scrollbar.Bed" AlignmentAxis="Vertical" Handle="AttributeHandle" MaxValue="100" MinValue="0">
+                          <Children><ImageWidget Id="AttributeHandle" WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="10" SuggestedHeight="150" Brush="MPClassLoadout.Scrollbar.Handle" /></Children>
+                        </ScrollbarWidget>
+                      </Children>
+                    </Widget>
+
+                    <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginLeft="14" Sprite="BlankWhiteSquare_9" Color="#111111CC">
+                      <Children>
+                        <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="45" HorizontalAlignment="Center" Brush="MPClassLoadout.FactionText" Text="Focus and Skills" />
+                        <ScrollablePanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginTop="45" MarginRight="12" AutoHideScrollBars="true" ClipRect="SkillClipRect" InnerPanel="SkillClipRect\SkillList" VerticalScrollbar="..\SkillScrollbar">
+                          <Children>
+                            <Widget Id="SkillClipRect" WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" ClipContents="true">
+                              <Children>
+                                <ListPanel Id="SkillList" DataSource="{Skills}" WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginLeft="18" MarginRight="18" MarginTop="8" MarginBottom="8" StackLayout.LayoutMethod="VerticalTopToBottom">
+                                  <ItemTemplate>
+                                    <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="58" StackLayout.LayoutMethod="HorizontalLeftToRight">
+                                      <Children>
+                                        <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="StretchToParent" SuggestedWidth="240" Brush="Popup.Description.Text" Text="@NameText" />
+                                        <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="StretchToParent" SuggestedWidth="65" Brush="Popup.Description.Text" Text="Focus" />
+                                        <ButtonWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="40" SuggestedHeight="40" VerticalAlignment="Center" Brush="CoopHeroCreator.MinusButton" Command.Click="ExecuteFocusMinus" IsEnabled="@CanDecreaseFocus" DoNotPassEventsToChildren="true" UpdateChildrenStates="true" />
+                                        <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="StretchToParent" SuggestedWidth="55" Brush="Popup.Description.Text" Brush.TextHorizontalAlignment="Center" Brush.TextVerticalAlignment="Center" Text="@FocusText" />
+                                        <ButtonWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="40" SuggestedHeight="40" VerticalAlignment="Center" Brush="CoopHeroCreator.PlusButton" Command.Click="ExecuteFocusPlus" IsEnabled="@CanIncreaseFocus" DoNotPassEventsToChildren="true" UpdateChildrenStates="true" />
+                                        <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="StretchToParent" SuggestedWidth="85" MarginLeft="20" Brush="Popup.Description.Text" Text="Skill" />
+                                        <ButtonWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="40" SuggestedHeight="40" VerticalAlignment="Center" Brush="CoopHeroCreator.MinusButton" Command.Click="ExecuteSkillMinus" IsEnabled="@CanDecreaseSkill" DoNotPassEventsToChildren="true" UpdateChildrenStates="true" />
+                                        <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="StretchToParent" SuggestedWidth="65" Brush="MPHUD.CountdownText" Brush.TextHorizontalAlignment="Center" Brush.TextVerticalAlignment="Center" Text="@SkillValueText" />
+                                        <ButtonWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="40" SuggestedHeight="40" VerticalAlignment="Center" Brush="CoopHeroCreator.PlusButton" Command.Click="ExecuteSkillPlus" IsEnabled="@CanIncreaseSkill" DoNotPassEventsToChildren="true" UpdateChildrenStates="true" />
+                                      </Children>
+                                    </ListPanel>
+                                  </ItemTemplate>
+                                </ListPanel>
+                              </Children>
+                            </Widget>
+                          </Children>
+                        </ScrollablePanel>
+                        <ScrollbarWidget Id="SkillScrollbar" WidthSizePolicy="Fixed" HeightSizePolicy="StretchToParent" SuggestedWidth="7" HorizontalAlignment="Right" MarginTop="52" MarginBottom="10" Brush="MPClassLoadout.Scrollbar.Bed" AlignmentAxis="Vertical" Handle="SkillHandle" MaxValue="100" MinValue="0">
+                          <Children><ImageWidget Id="SkillHandle" WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="10" SuggestedHeight="180" Brush="MPClassLoadout.Scrollbar.Handle" /></Children>
+                        </ScrollbarWidget>
+                      </Children>
+                    </Widget>
+                  </Children>
+                </ListPanel>
+
+                <ListPanel WidthSizePolicy="CoverChildren" HeightSizePolicy="Fixed" SuggestedHeight="64" HorizontalAlignment="Center" StackLayout.LayoutMethod="HorizontalLeftToRight">
+                  <Children>
+                    <ButtonWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="250" SuggestedHeight="58" Brush="Popup.Cancel.Button" Command.Click="ExecuteBackToCulture" IsEnabled="@CanEdit" DoNotPassEventsToChildren="true"><Children><TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Brush="Popup.Button.Text" Text="Back to Culture" /></Children></ButtonWidget>
+                    <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="24" SuggestedHeight="1" />
+                    <ButtonWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="290" SuggestedHeight="58" Brush="WideButton.Flat" Command.Click="ExecuteOpenAppearance" IsEnabled="@CanEdit" DoNotPassEventsToChildren="true"><Children><TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Brush="MPLobby.PlayButton.Text" Text="Edit Appearance" /></Children></ButtonWidget>
+                    <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="24" SuggestedHeight="1" />
+                    <ButtonWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="320" SuggestedHeight="58" Brush="Popup.Done.Button" Command.Click="ExecuteSubmit" IsEnabled="@CanSubmit" DoNotPassEventsToChildren="true"><Children><TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Brush="Popup.Button.Text" Text="Confirm Hero" /></Children></ButtonWidget>
+                  </Children>
+                </ListPanel>
+              </Children>
+            </ListPanel>
+          </Children>
+        </Widget>
+      </Children>
+    </Widget>
+  </Window>
+</Prefab>
