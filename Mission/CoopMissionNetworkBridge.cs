@@ -4961,6 +4961,18 @@ namespace CoopSpectator.MissionBehaviors
 
     public sealed class CoopMissionNetworkBridge : MissionNetwork
     {
+        public override void OnBehaviorInitialize()
+        {
+            base.OnBehaviorInitialize();
+
+            if (GameNetwork.IsClient && !GameNetwork.IsServer)
+            {
+                CoopBattlePhaseRuntimeState.StartMission(
+                    Mission,
+                    "CoopMissionNetworkBridge.OnBehaviorInitialize client mission boundary");
+            }
+        }
+
         private static bool IsValidatedInitialSallyOutMaterializationScenario(Mission mission)
         {
             if (mission == null)
@@ -7079,6 +7091,11 @@ namespace CoopSpectator.MissionBehaviors
                 CoopBattleAgentControlRuntimeState.ResetServer("CoopMissionNetworkBridge.OnRemoveBehavior");
             if (GameNetwork.IsClient)
                 CoopBattleAgentControlRuntimeState.ResetClient("CoopMissionNetworkBridge.OnRemoveBehavior");
+            if (GameNetwork.IsClient && !GameNetwork.IsServer)
+            {
+                CoopBattlePhaseRuntimeState.Clear(
+                    "CoopMissionNetworkBridge.OnRemoveBehavior client mission boundary");
+            }
             ExactVillageBattleDeploymentBoundaryRuntime.Reset(
                 "CoopMissionNetworkBridge.OnRemoveBehavior");
             base.OnRemoveBehavior();
@@ -16486,7 +16503,7 @@ namespace CoopSpectator.MissionBehaviors
                     {
                         _clientAppliedBattleDataReadinessStage =
                             snapshot.BattleDataReadinessStage?.Trim() ?? string.Empty;
-                        TryApplyClientAuthoritativeSiegeAssaultBattlePhase(snapshot);
+                        TryApplyClientAuthoritativeBattlePhase(snapshot);
                         bool frozenCaptainStateApplied = false;
                         if (!string.IsNullOrWhiteSpace(snapshot.FrozenCaptainStateSignature))
                         {
@@ -16585,18 +16602,14 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        private void TryApplyClientAuthoritativeSiegeAssaultBattlePhase(
+        private void TryApplyClientAuthoritativeBattlePhase(
             CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot)
         {
             if (snapshot == null ||
                 !GameNetwork.IsClient ||
                 GameNetwork.IsServer ||
                 Mission == null ||
-                !ExactSiegeAssaultInitialMaterializationRuntime.IsValidatedScenario(
-                    Mission,
-                    out _) ||
-                !ExactSiegeAssaultInitialMaterializationRuntime
-                    .IsInitialClientMaterializationComplete(Mission) ||
+                !IsClientInitialMaterializationCompleteForAuthoritativePhaseSync() ||
                 !Enum.TryParse(snapshot.BattlePhase, true, out CoopBattlePhase authoritativePhase) ||
                 !Enum.IsDefined(typeof(CoopBattlePhase), authoritativePhase))
             {
@@ -16605,8 +16618,34 @@ namespace CoopSpectator.MissionBehaviors
 
             CoopBattlePhaseRuntimeState.AdvanceToAtLeast(
                 authoritativePhase,
-                "CoopMissionNetworkBridge.ApplyCompletedPayload authoritative external-siege EntryStatusSnapshot",
+                "CoopMissionNetworkBridge.ApplyCompletedPayload authoritative EntryStatusSnapshot",
                 Mission);
+        }
+
+        private bool IsClientInitialMaterializationCompleteForAuthoritativePhaseSync()
+        {
+            if (IsValidatedInitialSallyOutMaterializationScenario(Mission))
+                return _clientConfirmedInitialAgentMaterializationTransmissionId > 0;
+
+            if (IsValidatedInitialFieldBattleMaterializationScenario(Mission))
+                return _clientConfirmedInitialFieldBattleMaterializationTransmissionId > 0;
+
+            if (IsValidatedInitialVillageBattleMaterializationScenario(Mission))
+                return _clientConfirmedInitialVillageBattleMaterializationTransmissionId > 0;
+
+            if (IsValidatedInitialSiegeAssaultMaterializationScenario(Mission))
+            {
+                return ExactSiegeAssaultInitialMaterializationRuntime
+                    .IsInitialClientMaterializationComplete(Mission);
+            }
+
+            if (IsValidatedInitialSiegeAmbushMaterializationScenario(Mission))
+            {
+                return ExactSiegeAmbushInitialMaterializationRuntime
+                    .IsInitialClientMaterializationComplete(Mission);
+            }
+
+            return false;
         }
 
         private static bool TryValidatePreMissionTopologyAgainstFullSnapshot(

@@ -1,0 +1,106 @@
+using System;
+using CoopSpectator.Infrastructure;
+
+internal static class Program
+{
+    private static int Main()
+    {
+        try
+        {
+            ValidateSingleStagePlan();
+            ValidateMultiStageAggregation();
+            ValidateExactRetryIsNoOp();
+            ValidateExistingNativeStateIsPreserved();
+            ValidateDecisiveSiegeAmbushPlan();
+            ValidateInvalidInputsAreClamped();
+            Console.WriteLine("Native aftermath contract tests passed.");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(ex.ToString());
+            return 1;
+        }
+    }
+
+    private static void ValidateSingleStagePlan()
+    {
+        ExactCasualtyLedgerDelta killed =
+            ExactCasualtyLedgerMath.PlanMissingDelta(0, 0, 113, 0);
+        ExactCasualtyLedgerDelta wounded =
+            ExactCasualtyLedgerMath.PlanMissingDelta(0, 0, 492, 492);
+        Assert(killed.NumberDelta == 113 && killed.WoundedDelta == 0,
+            "Single-stage killed ledger delta is invalid.");
+        Assert(wounded.NumberDelta == 492 && wounded.WoundedDelta == 492,
+            "Single-stage wounded ledger delta is invalid.");
+    }
+
+    private static void ValidateMultiStageAggregation()
+    {
+        int killed = ExactCasualtyLedgerMath.CombineStageCounts(73, 40);
+        int wounded = ExactCasualtyLedgerMath.CombineStageCounts(320, 172);
+        Assert(killed == 113, "Killed casualties from two siege stages must be summed.");
+        Assert(wounded == 492, "Wounded casualties from two siege stages must be summed.");
+    }
+
+    private static void ValidateExactRetryIsNoOp()
+    {
+        ExactCasualtyLedgerDelta killed =
+            ExactCasualtyLedgerMath.PlanMissingDelta(113, 0, 113, 0);
+        ExactCasualtyLedgerDelta wounded =
+            ExactCasualtyLedgerMath.PlanMissingDelta(492, 492, 492, 492);
+        Assert(killed.NumberDelta == 0 && killed.WoundedDelta == 0,
+            "Repeated killed result must not duplicate the ledger.");
+        Assert(wounded.NumberDelta == 0 && wounded.WoundedDelta == 0,
+            "Repeated wounded result must not duplicate the ledger.");
+    }
+
+    private static void ValidateExistingNativeStateIsPreserved()
+    {
+        ExactCasualtyLedgerDelta partial =
+            ExactCasualtyLedgerMath.PlanMissingDelta(13, 13, 20, 20);
+        ExactCasualtyLedgerDelta surplus =
+            ExactCasualtyLedgerMath.PlanMissingDelta(25, 25, 20, 20);
+        Assert(partial.NumberDelta == 7 && partial.WoundedDelta == 7,
+            "Only missing native casualty rows should be added.");
+        Assert(surplus.NumberDelta == 0 && surplus.WoundedDelta == 0,
+            "Existing native casualty rows must never be removed.");
+    }
+
+    private static void ValidateDecisiveSiegeAmbushPlan()
+    {
+        ExactCasualtyLedgerDelta killed =
+            ExactCasualtyLedgerMath.PlanMissingDelta(2, 0, 7, 0);
+        ExactCasualtyLedgerDelta wounded =
+            ExactCasualtyLedgerMath.PlanMissingDelta(3, 3, 11, 11);
+        Assert(killed.NumberDelta == 5 && killed.WoundedDelta == 0,
+            "Siege-ambush loot must receive only missing killed casualties.");
+        Assert(wounded.NumberDelta == 8 && wounded.WoundedDelta == 8,
+            "Siege-ambush loot must receive only missing wounded casualties.");
+
+        ExactCasualtyLedgerDelta retryKilled =
+            ExactCasualtyLedgerMath.PlanMissingDelta(7, 0, 7, 0);
+        ExactCasualtyLedgerDelta retryWounded =
+            ExactCasualtyLedgerMath.PlanMissingDelta(11, 11, 11, 11);
+        Assert(retryKilled.NumberDelta == 0 && retryKilled.WoundedDelta == 0,
+            "Repeated siege-ambush killed casualties must not duplicate loot.");
+        Assert(retryWounded.NumberDelta == 0 && retryWounded.WoundedDelta == 0,
+            "Repeated siege-ambush wounded casualties must not duplicate loot.");
+    }
+
+    private static void ValidateInvalidInputsAreClamped()
+    {
+        Assert(ExactCasualtyLedgerMath.CombineStageCounts(-5, 7) == 7,
+            "Negative stage totals must be treated as zero.");
+        ExactCasualtyLedgerDelta delta =
+            ExactCasualtyLedgerMath.PlanMissingDelta(-1, 10, 4, 9);
+        Assert(delta.NumberDelta == 4 && delta.WoundedDelta == 4,
+            "Invalid wounded totals must be clamped to the planned member total.");
+    }
+
+    private static void Assert(bool condition, string message)
+    {
+        if (!condition)
+            throw new InvalidOperationException(message);
+    }
+}

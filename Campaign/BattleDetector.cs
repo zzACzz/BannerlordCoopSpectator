@@ -76,6 +76,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         private static readonly List<string> _pendingLordsHallCaptainEntryIds = new List<string>();
         private static readonly List<FrozenCaptainCombatGroupSnapshotMessage> _pendingLordsHallCaptainCombatGroups = new List<FrozenCaptainCombatGroupSnapshotMessage>();
         private static readonly List<CoopBattleResultBridgeFile.BattleResultEntrySnapshot> _pendingLordsHallPrisonerEntries = new List<CoopBattleResultBridgeFile.BattleResultEntrySnapshot>();
+        private static readonly List<CoopBattleResultBridgeFile.BattleResultEntrySnapshot> _pendingLordsHallCasualtyEntries = new List<CoopBattleResultBridgeFile.BattleResultEntrySnapshot>();
         private static string _pendingLordsHallSettlementId = string.Empty;
         private static SyntheticRosterMode _syntheticRosterMode;
         private static readonly Dictionary<string, object> CachedDefaultSkillObjects = new Dictionary<string, object>(StringComparer.Ordinal);
@@ -3457,6 +3458,34 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     finalSiegeDefeatedUnconsciousHeroes,
                     out finalSiegeHeroCaptureDiagnostics);
             }
+            bool finalSiegeNativeAftermathArmed = false;
+            string finalSiegeNativeAftermathDiagnostics = "not-requested";
+            if (encounterPrepared &&
+                ExactSiegeAssaultNativeAftermathRuntime.IsFinalSiegeResult(
+                    PlayerEncounter.Battle,
+                    result))
+            {
+                IEnumerable<CoopBattleResultBridgeFile.BattleResultEntrySnapshot> previousStageCasualties =
+                    LordsHallResultBridge.IsLordsHallResult(result)
+                        ? _pendingLordsHallCasualtyEntries
+                        : Enumerable.Empty<CoopBattleResultBridgeFile.BattleResultEntrySnapshot>();
+                finalSiegeNativeAftermathArmed =
+                    ExactSiegeAssaultNativeAftermathRuntime.TryArm(
+                        PlayerEncounter.Battle,
+                        result,
+                        previousStageCasualties,
+                        out finalSiegeNativeAftermathDiagnostics);
+            }
+            bool siegeAmbushNativeAftermathArmed = false;
+            string siegeAmbushNativeAftermathDiagnostics = "not-requested";
+            if (encounterPrepared && useNativeSiegeAmbushAftermath)
+            {
+                siegeAmbushNativeAftermathArmed =
+                    ExactSiegeAmbushNativeAftermathRuntime.TryArm(
+                        PlayerEncounter.Battle,
+                        result,
+                        out siegeAmbushNativeAftermathDiagnostics);
+            }
             bool exitRequested = TryRequestLocalMissionExit(mission, "campaign battle_result bridge");
             if (exitRequested)
             {
@@ -3484,11 +3513,36 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     "FinalLandBattleCompletionDiagnostics=[" + finalLandBattleCompletionDiagnostics + "] " +
                     "FinalSiegeHeroCaptureArmed=" + finalSiegeHeroCaptureArmed + " " +
                     "FinalSiegeHeroCaptureDiagnostics=[" + finalSiegeHeroCaptureDiagnostics + "] " +
-                    "NativeSiegeAmbushAftermath=" + useNativeSiegeAmbushAftermath + " " +
+                    "FinalSiegeNativeAftermathArmed=" + finalSiegeNativeAftermathArmed + " " +
+                    "FinalSiegeNativeAftermathDiagnostics=[" + finalSiegeNativeAftermathDiagnostics + "] " +
+                    "SiegeAmbushNativeAftermathArmed=" + siegeAmbushNativeAftermathArmed + " " +
+                    "SiegeAmbushNativeAftermathDiagnostics=[" + siegeAmbushNativeAftermathDiagnostics + "] " +
                     "BattleId=" + (result.BattleId ?? "null") +
                     " WinnerSide=" + (result.WinnerSide ?? "none") +
                     " MissionScene=" + SafeMissionSceneName(mission) + ".");
                 return;
+            }
+
+            if (finalSiegeNativeAftermathArmed &&
+                ExactSiegeAssaultNativeAftermathRuntime.TryRollback(
+                    PlayerEncounter.Battle,
+                    resultKey,
+                    out string siegeAftermathRollbackDiagnostics))
+            {
+                finalSiegeNativeAftermathDiagnostics +=
+                    " ExitRequestRollback={" +
+                    siegeAftermathRollbackDiagnostics + "}";
+            }
+
+            if (siegeAmbushNativeAftermathArmed &&
+                ExactSiegeAmbushNativeAftermathRuntime.TryRollback(
+                    PlayerEncounter.Battle,
+                    resultKey,
+                    out string siegeAmbushAftermathRollbackDiagnostics))
+            {
+                siegeAmbushNativeAftermathDiagnostics +=
+                    " ExitRequestRollback={" +
+                    siegeAmbushAftermathRollbackDiagnostics + "}";
             }
 
             if (string.Equals(_lastMissionExitFailedBattleResultKey, resultKey, StringComparison.Ordinal))
@@ -4446,6 +4500,29 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     UnconsciousCount = entry.UnconsciousCount
                 });
             }
+
+            _pendingLordsHallCasualtyEntries.Clear();
+            foreach (CoopBattleResultBridgeFile.BattleResultEntrySnapshot entry in
+                result?.Entries?.Where(item =>
+                    item != null &&
+                    (item.KilledCount > 0 || item.UnconsciousCount > 0)) ??
+                Enumerable.Empty<CoopBattleResultBridgeFile.BattleResultEntrySnapshot>())
+            {
+                _pendingLordsHallCasualtyEntries.Add(new CoopBattleResultBridgeFile.BattleResultEntrySnapshot
+                {
+                    EntryId = entry.EntryId,
+                    SideId = entry.SideId,
+                    PartyId = entry.PartyId,
+                    CharacterId = entry.CharacterId,
+                    OriginalCharacterId = entry.OriginalCharacterId,
+                    SpawnTemplateId = entry.SpawnTemplateId,
+                    TroopName = entry.TroopName,
+                    HeroId = entry.HeroId,
+                    IsHero = entry.IsHero,
+                    KilledCount = entry.KilledCount,
+                    UnconsciousCount = entry.UnconsciousCount
+                });
+            }
         }
 
         private void TryCacheFinalLandBattleEndHealing(
@@ -4495,6 +4572,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             _pendingLordsHallCaptainEntryIds.Clear();
             _pendingLordsHallCaptainCombatGroups.Clear();
             _pendingLordsHallPrisonerEntries.Clear();
+            _pendingLordsHallCasualtyEntries.Clear();
             _pendingLordsHallSettlementId = string.Empty;
         }
 
@@ -4503,7 +4581,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             if (string.IsNullOrWhiteSpace(_pendingLordsHallSettlementId) &&
                 _pendingLordsHallCaptainEntryIds.Count == 0 &&
                 _pendingLordsHallCaptainCombatGroups.Count == 0 &&
-                _pendingLordsHallPrisonerEntries.Count == 0)
+                _pendingLordsHallPrisonerEntries.Count == 0 &&
+                _pendingLordsHallCasualtyEntries.Count == 0)
             {
                 return;
             }

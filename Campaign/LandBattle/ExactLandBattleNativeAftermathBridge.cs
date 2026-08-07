@@ -147,6 +147,12 @@ namespace CoopSpectator.Campaign.LandBattle
 
             internal int WoundedDelta { get; set; }
 
+            internal bool ApplyMissingOnly { get; set; }
+
+            internal int DesiredMinimumNumber { get; set; }
+
+            internal int DesiredMinimumWounded { get; set; }
+
             internal void CaptureBeforeState()
             {
                 int index = Roster.FindIndexOfTroop(Character);
@@ -160,11 +166,28 @@ namespace CoopSpectator.Campaign.LandBattle
                 if (!_beforeCaptured)
                     throw new InvalidOperationException("casualty-before-state-not-captured");
 
+                int numberDelta = NumberDelta;
+                int woundedDelta = WoundedDelta;
+                if (ApplyMissingOnly)
+                {
+                    ExactCasualtyLedgerDelta delta =
+                        ExactCasualtyLedgerMath.PlanMissingDelta(
+                            _beforeNumber,
+                            _beforeWounded,
+                            DesiredMinimumNumber,
+                            DesiredMinimumWounded);
+                    numberDelta = delta.NumberDelta;
+                    woundedDelta = delta.WoundedDelta;
+                }
+
+                if (numberDelta == 0 && woundedDelta == 0)
+                    return;
+
                 Roster.AddToCounts(
                     Character,
-                    NumberDelta,
+                    numberDelta,
                     insertAtFront: false,
-                    woundedCount: WoundedDelta);
+                    woundedCount: woundedDelta);
             }
 
             internal void Rollback()
@@ -240,6 +263,45 @@ namespace CoopSpectator.Campaign.LandBattle
             out Preparation preparation,
             out string diagnostics)
         {
+            return TryPrepareCore(
+                battle,
+                result,
+                result?.Entries,
+                validateCasualtyEvents: true,
+                includeContributionChanges: true,
+                applyMissingCasualtiesOnly: false,
+                out preparation,
+                out diagnostics);
+        }
+
+        internal static bool TryPrepareCasualtyLedgers(
+            MapEvent battle,
+            CoopBattleResultBridgeFile.BattleResultSnapshot result,
+            IEnumerable<CoopBattleResultBridgeFile.BattleResultEntrySnapshot> casualtyEntries,
+            out Preparation preparation,
+            out string diagnostics)
+        {
+            return TryPrepareCore(
+                battle,
+                result,
+                casualtyEntries,
+                validateCasualtyEvents: false,
+                includeContributionChanges: false,
+                applyMissingCasualtiesOnly: true,
+                out preparation,
+                out diagnostics);
+        }
+
+        private static bool TryPrepareCore(
+            MapEvent battle,
+            CoopBattleResultBridgeFile.BattleResultSnapshot result,
+            IEnumerable<CoopBattleResultBridgeFile.BattleResultEntrySnapshot> casualtyEntries,
+            bool validateCasualtyEvents,
+            bool includeContributionChanges,
+            bool applyMissingCasualtiesOnly,
+            out Preparation preparation,
+            out string diagnostics)
+        {
             preparation = null;
             diagnostics = "not-prepared";
             if (battle == null || result == null)
@@ -267,6 +329,8 @@ namespace CoopSpectator.Campaign.LandBattle
             var defeatedPartySet = new HashSet<MapEventParty>(defeatedParties);
             if (!TryBuildCasualtyAggregates(
                     result,
+                    casualtyEntries,
+                    validateCasualtyEvents,
                     defeatedSide,
                     allPartiesById,
                     defeatedPartySet,
@@ -284,40 +348,68 @@ namespace CoopSpectator.Campaign.LandBattle
             {
                 if (aggregate.Killed > 0)
                 {
-                    casualtyChanges.Add(new CasualtyRosterChange
+                    var change = new CasualtyRosterChange
                     {
                         Roster = aggregate.MapEventParty.DiedInBattle,
                         Character = aggregate.Character,
                         NumberDelta = aggregate.Killed,
                         WoundedDelta = 0
-                    });
+                    };
+                    if (applyMissingCasualtiesOnly)
+                    {
+                        change.ApplyMissingOnly = true;
+                        change.DesiredMinimumNumber = aggregate.Killed;
+                        change.DesiredMinimumWounded = 0;
+                    }
+                    casualtyChanges.Add(change);
                     killed += aggregate.Killed;
                 }
 
                 if (aggregate.Wounded > 0)
                 {
-                    casualtyChanges.Add(new CasualtyRosterChange
+                    var change = new CasualtyRosterChange
                     {
                         Roster = aggregate.MapEventParty.WoundedInBattle,
                         Character = aggregate.Character,
                         NumberDelta = aggregate.Wounded,
                         WoundedDelta = aggregate.Wounded
-                    });
+                    };
+                    if (applyMissingCasualtiesOnly)
+                    {
+                        change.ApplyMissingOnly = true;
+                        change.DesiredMinimumNumber = aggregate.Wounded;
+                        change.DesiredMinimumWounded = aggregate.Wounded;
+                    }
+                    casualtyChanges.Add(change);
                     wounded += aggregate.Wounded;
                 }
             }
 
-            List<ContributionChange> contributionChanges = BuildContributionChanges(
-                result,
-                winnerSide,
-                winnerParties,
-                allPartiesById,
-                out string contributionDiagnostics,
-                out int contributionDelta);
+            List<ContributionChange> contributionChanges;
+            string contributionDiagnostics;
+            int contributionDelta;
+            if (includeContributionChanges)
+            {
+                contributionChanges = BuildContributionChanges(
+                    result,
+                    winnerSide,
+                    winnerParties,
+                    allPartiesById,
+                    out contributionDiagnostics,
+                    out contributionDelta);
+            }
+            else
+            {
+                contributionChanges = new List<ContributionChange>();
+                contributionDiagnostics = "disabled-casualty-ledgers-only";
+                contributionDelta = 0;
+            }
 
             string resultId = ResolveResultId(result);
             string preparationDiagnostics =
                 "ResultId=" + resultId +
+                " CasualtyMode=" +
+                (applyMissingCasualtiesOnly ? "missing-only" : "additive") +
                 " CasualtyEntries=" + casualtyAggregates.Count +
                 " Died=" + killed +
                 " Wounded=" + wounded +
@@ -344,6 +436,8 @@ namespace CoopSpectator.Campaign.LandBattle
 
         private static bool TryBuildCasualtyAggregates(
             CoopBattleResultBridgeFile.BattleResultSnapshot result,
+            IEnumerable<CoopBattleResultBridgeFile.BattleResultEntrySnapshot> casualtyEntries,
+            bool validateCasualtyEvents,
             BattleSideEnum defeatedSide,
             IDictionary<string, MapEventParty> allPartiesById,
             ISet<MapEventParty> defeatedParties,
@@ -354,7 +448,7 @@ namespace CoopSpectator.Campaign.LandBattle
             diagnostics = "casualties-ready";
 
             foreach (CoopBattleResultBridgeFile.BattleResultEntrySnapshot entry in
-                     (result.Entries ?? new List<CoopBattleResultBridgeFile.BattleResultEntrySnapshot>())
+                     (casualtyEntries ?? Enumerable.Empty<CoopBattleResultBridgeFile.BattleResultEntrySnapshot>())
                          .Where(item => item != null))
             {
                 int killed = Math.Max(0, entry.KilledCount);
@@ -399,8 +493,18 @@ namespace CoopSpectator.Campaign.LandBattle
                     aggregates[key] = aggregate;
                 }
 
-                aggregate.Killed += killed;
-                aggregate.Wounded += wounded;
+                aggregate.Killed = ExactCasualtyLedgerMath.CombineStageCounts(
+                    aggregate.Killed,
+                    killed);
+                aggregate.Wounded = ExactCasualtyLedgerMath.CombineStageCounts(
+                    aggregate.Wounded,
+                    wounded);
+            }
+
+            if (!validateCasualtyEvents)
+            {
+                diagnostics = "casualty-events-not-validated;authoritative-combined-entries-used";
+                return true;
             }
 
             if (!TryValidateCasualtyEvents(
