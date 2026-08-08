@@ -9,6 +9,7 @@ internal static class Program
         {
             ValidateCampaignBridgePolicy();
             ValidateScenePolicy();
+            ValidatePreOpenMissionContractPolicy();
             ValidateTriggerPolicy();
             ValidatePhaseTransitions();
             ValidateHostChoiceAuthority();
@@ -64,6 +65,40 @@ internal static class Program
                 !CoopHideoutBossPhaseContract.IsSupportedDayHideoutSceneName(scene),
                 "Expected non-hideout scene rejection: " + (scene ?? "null"));
         }
+    }
+
+    private static void ValidatePreOpenMissionContractPolicy()
+    {
+        Assert(
+            CoopHideoutBossPhaseContract.IsMatchingDayHideoutMissionContract(
+                "bandit_forest_sv",
+                "BANDIT_FOREST_SV",
+                CoopHideoutBossPhaseContract.ScenarioKind),
+            "A matching exact hideout scene and hideout scenario must be accepted.");
+        Assert(
+            !CoopHideoutBossPhaseContract.IsMatchingDayHideoutMissionContract(
+                "bandit_forest_sv",
+                "bandit_forest_sv",
+                null),
+            "A pre-open contract with a missing scenario kind must be rejected.");
+        Assert(
+            !CoopHideoutBossPhaseContract.IsMatchingDayHideoutMissionContract(
+                "bandit_forest_sv",
+                "battle_terrain_n",
+                CoopHideoutBossPhaseContract.ScenarioKind),
+            "A pre-open contract with a field battle scene must be rejected.");
+        Assert(
+            !CoopHideoutBossPhaseContract.IsMatchingDayHideoutMissionContract(
+                "bandit_forest_sv",
+                "forest_hideout_003",
+                CoopHideoutBossPhaseContract.ScenarioKind),
+            "A different supported hideout scene must be rejected.");
+        Assert(
+            !CoopHideoutBossPhaseContract.IsMatchingDayHideoutMissionContract(
+                "bandit_forest_sv",
+                "bandit_forest_sv",
+                "FieldBattle"),
+            "A non-hideout scenario kind must be rejected.");
     }
 
     private static void ValidateCampaignBridgePolicy()

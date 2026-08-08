@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using CoopSpectator.Campaign;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.Infrastructure.Hideout;
 using CoopSpectator.MissionBehaviors;
+using CoopSpectator.Network.Messages;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.Multiplayer;
@@ -31,24 +33,99 @@ namespace CoopSpectator.GameMode
                 return;
             }
 
-            var scenarioContext =
-                BattleSnapshotRuntimeState.GetScenarioContext() ??
-                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext;
+            BattleScenarioContextMessage scenarioContext = ResolvePreOpenScenarioContext(
+                normalizedScene,
+                out string scenarioSource);
             if (!CoopHideoutBossPhaseContract.IsHideoutScenario(scenarioContext?.ScenarioKind))
             {
                 ModLogger.Info(
                     "CoopHideoutDay: rejected mission start because the active battle snapshot is not a hideout scenario. " +
                     "Scene=" + normalizedScene +
-                    " ScenarioKind=" + (scenarioContext?.ScenarioKind ?? "missing") + ".");
+                    " ScenarioKind=" + (scenarioContext?.ScenarioKind ?? "missing") +
+                    " ScenarioSource=" + scenarioSource + ".");
                 return;
             }
 
             ModLogger.Info(
                 "CoopHideoutDay: opening isolated day hideout mission. " +
                 "Scene=" + normalizedScene +
+                " ScenarioSource=" + scenarioSource +
                 " Shell=" + BattleMissionShell + ".");
             MissionInitializerRecord record = new MissionInitializerRecord(normalizedScene);
             MissionState.OpenNew(BattleMissionShell, record, CreateBehaviorsForMission);
+        }
+
+        private static BattleScenarioContextMessage ResolvePreOpenScenarioContext(
+            string normalizedScene,
+            out string source)
+        {
+            if (GameNetwork.IsServer)
+            {
+                BattleSnapshotMessage snapshot = BattleRosterFileHelper.PeekSnapshot();
+                string snapshotScene = !string.IsNullOrWhiteSpace(snapshot?.MultiplayerScene)
+                    ? snapshot.MultiplayerScene
+                    : snapshot?.MapScene;
+                if (!CoopHideoutBossPhaseContract.IsMatchingDayHideoutMissionContract(
+                        normalizedScene,
+                        snapshotScene,
+                        snapshot?.ScenarioContext?.ScenarioKind))
+                {
+                    source =
+                        "server-battle-roster-rejected:" +
+                        "Scene=" + (snapshotScene ?? "missing") +
+                        ",ScenarioKind=" + (snapshot?.ScenarioContext?.ScenarioKind ?? "missing");
+                    return null;
+                }
+
+                BattleSnapshotRuntimeState.SetCurrent(
+                    snapshot,
+                    "CoopHideoutDay server pre-open battle roster");
+                source = "server-battle-roster";
+                return snapshot.ScenarioContext;
+            }
+
+            if (GameNetwork.IsClientOrReplay)
+            {
+                if (!CoopPreMissionTopologyRuntimeState.TryGetActive(
+                        normalizedScene,
+                        out CoopPreMissionTopologyContract contract,
+                        out string topologyDiagnostics))
+                {
+                    source = "client-pre-mission-topology-rejected:" + topologyDiagnostics;
+                    return null;
+                }
+
+                if (!CoopHideoutBossPhaseContract.IsMatchingDayHideoutMissionContract(
+                        normalizedScene,
+                        contract.RuntimeScene,
+                        contract.ScenarioContext?.ScenarioKind))
+                {
+                    source =
+                        "client-pre-mission-topology-contract-rejected:" +
+                        "Scene=" + (contract.RuntimeScene ?? "missing") +
+                        ",ScenarioKind=" + (contract.ScenarioContext?.ScenarioKind ?? "missing");
+                    return null;
+                }
+
+                source = "client-active-pre-mission-topology";
+                return contract.ScenarioContext;
+            }
+
+            BattleSnapshotMessage current = BattleSnapshotRuntimeState.GetCurrent();
+            string currentScene = !string.IsNullOrWhiteSpace(current?.MultiplayerScene)
+                ? current.MultiplayerScene
+                : current?.MapScene;
+            if (CoopHideoutBossPhaseContract.IsMatchingDayHideoutMissionContract(
+                    normalizedScene,
+                    currentScene,
+                    current?.ScenarioContext?.ScenarioKind))
+            {
+                source = "existing-runtime-snapshot";
+                return current.ScenarioContext;
+            }
+
+            source = "matching-pre-open-contract-missing";
+            return null;
         }
 
         private static IEnumerable<MissionBehavior> CreateBehaviorsForMission(Mission mission)

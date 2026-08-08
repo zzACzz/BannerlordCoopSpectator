@@ -102,6 +102,28 @@ namespace CoopSpectator.Infrastructure.Hideout
                    normalizedSceneName.StartsWith("sea_bandit_", StringComparison.OrdinalIgnoreCase);
         }
 
+        public static bool IsMatchingDayHideoutMissionContract(
+            string requestedSceneName,
+            string contractSceneName,
+            string scenarioKind)
+        {
+            if (!TryNormalizeDayHideoutSceneName(
+                    requestedSceneName,
+                    out string normalizedRequestedScene) ||
+                !TryNormalizeDayHideoutSceneName(
+                    contractSceneName,
+                    out string normalizedContractScene))
+            {
+                return false;
+            }
+
+            return string.Equals(
+                       normalizedRequestedScene,
+                       normalizedContractScene,
+                       StringComparison.OrdinalIgnoreCase) &&
+                   IsHideoutScenario(scenarioKind);
+        }
+
         public static bool CanEnterDayHideoutCampaignBridge(
             bool hasDayController,
             bool hasAmbushController,
