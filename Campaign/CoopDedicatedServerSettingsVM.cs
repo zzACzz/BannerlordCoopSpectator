@@ -453,10 +453,10 @@ namespace CoopSpectator.Campaign
 
             CanExecuteHeroCreation = canStart;
             HeroCreationAvailabilityText = hasActiveSession
-                ? "Сесія створення героїв активна. Її можна скасувати тут."
+                ? "A hero creation session is active. You can cancel it here."
                 : canStart
-                    ? "Виділений сервер готовий до запуску місії створення героїв."
-                    : "Створення героїв недоступне: " + reason;
+                    ? "The dedicated server is ready to start a hero creation mission."
+                    : "Hero creation is unavailable: " + reason;
             OnPropertyChanged(nameof(HeroCreationButtonText));
         }
 

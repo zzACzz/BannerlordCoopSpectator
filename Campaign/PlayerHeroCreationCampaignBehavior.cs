@@ -46,10 +46,10 @@ namespace CoopSpectator.Campaign
 
         public static bool CanStart(out string reason)
         {
-            if (_instance == null || CampaignSystemRuntime.Current == null) { reason = "Кампанійний координатор ще не готовий."; return false; }
-            if (!string.IsNullOrWhiteSpace(_instance._activeRequestJson)) { reason = "Попередня сесія створення ще активна."; return false; }
-            if (TaleWorlds.MountAndBlade.Mission.Current != null) { reason = "Спершу завершіть поточну місію."; return false; }
-            if (!DedicatedHelperLauncher.HasDedicatedProcess()) { reason = "Локальний dedicated/server не запущено."; return false; }
+            if (_instance == null || CampaignSystemRuntime.Current == null) { reason = "The campaign coordinator is not ready yet."; return false; }
+            if (!string.IsNullOrWhiteSpace(_instance._activeRequestJson)) { reason = "A previous hero creation session is still active."; return false; }
+            if (TaleWorlds.MountAndBlade.Mission.Current != null) { reason = "Finish the current mission first."; return false; }
+            if (!DedicatedHelperLauncher.HasDedicatedProcess()) { reason = "The local dedicated server is not running."; return false; }
             reason = string.Empty;
             return true;
         }
@@ -68,12 +68,12 @@ namespace CoopSpectator.Campaign
         {
             if (_instance == null || CampaignSystemRuntime.Current == null)
             {
-                message = "Кампанійний координатор ще не готовий.";
+                message = "The campaign coordinator is not ready yet.";
                 return false;
             }
             if (string.IsNullOrWhiteSpace(_instance._activeRequestJson))
             {
-                message = "Активної сесії створення героїв немає.";
+                message = "There is no active hero creation session.";
                 return false;
             }
 
@@ -82,8 +82,8 @@ namespace CoopSpectator.Campaign
             _instance._activeRequestJson = null;
             _instance.RestoreCampaignTime();
             message = endMissionRequested
-                ? "Створення героїв скасовано."
-                : "Створення героїв скасовано в кампанії, але сервер не підтвердив завершення місії.";
+                ? "Hero creation has been canceled."
+                : "Hero creation was canceled in the campaign, but the server did not confirm that the mission ended.";
             return true;
         }
 
@@ -112,17 +112,17 @@ namespace CoopSpectator.Campaign
                 {
                     _activeRequestJson = null;
                     RestoreCampaignTime();
-                    message = "Dedicated/server не прийняв запуск місії створення героїв.";
+                    message = "The dedicated server did not accept the request to start the hero creation mission.";
                     return false;
                 }
-                message = "Місію створення героїв запущено. Підключені гравці отримають редактор.";
+                message = "The hero creation mission has started. Connected players will be taken to the hero editor.";
                 return true;
             }
             catch (Exception ex)
             {
                 _activeRequestJson = null;
                 RestoreCampaignTime();
-                message = "Не вдалося запустити створення героїв: " + ex.Message;
+                message = "Failed to start hero creation: " + ex.Message;
                 return false;
             }
         }
@@ -138,12 +138,12 @@ namespace CoopSpectator.Campaign
             CoopHeroCreationRequest request;
             try { request = JsonConvert.DeserializeObject<CoopHeroCreationRequest>(_activeRequestJson); }
             catch { request = null; }
-            if (request == null) { ClearActiveSession("Збережений запит створення героя пошкоджено."); return; }
+            if (request == null) { ClearActiveSession("The saved hero creation request is corrupted."); return; }
 
             DateTime createdUtc;
             if (DateTime.TryParse(request.CreatedUtc, out createdUtc) && DateTime.UtcNow > createdUtc.ToUniversalTime().AddMinutes(12))
             {
-                ClearActiveSession("Сесію створення героїв скасовано після аварійного граничного часу.");
+                ClearActiveSession("The hero creation session was canceled because it timed out.");
                 return;
             }
 
@@ -158,7 +158,7 @@ namespace CoopSpectator.Campaign
             }
 
             if (!DedicatedHelperLauncher.HasDedicatedProcess())
-                ClearActiveSession("Сесію створення героїв скасовано, тому що виділений сервер завершив роботу.");
+                ClearActiveSession("The hero creation session was canceled because the dedicated server stopped running.");
         }
 
         private void ConsumeResult(CoopHeroCreationRequest request, CoopHeroCreationResult result)
@@ -170,8 +170,8 @@ namespace CoopSpectator.Campaign
                     result.FailureReason,
                     "rules_hash_mismatch",
                     StringComparison.OrdinalIgnoreCase)
-                    ? "Сервер відхилив сесію: не збігся контрольний відбиток правил."
-                    : "Сервер відхилив сесію створення героїв; подробиці записано в журнал.";
+                    ? "The server rejected the session because the creation rules did not match."
+                    : "The server rejected the hero creation session. See the log for details.";
                 ClearActiveSession(failureMessage);
                 return;
             }
@@ -226,7 +226,7 @@ namespace CoopSpectator.Campaign
             _activeRequestJson = null;
             RestoreCampaignTime();
             InformationManager.DisplayMessage(new InformationMessage(
-                "Створення героїв завершено. Додано компаньйонів: " + created + ", пропущено: " + skipped + "."));
+                "Hero creation completed. Companions added: " + created + ", skipped: " + skipped + "."));
         }
 
         private void RememberConsumedResult(string resultId)
