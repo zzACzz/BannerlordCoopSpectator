@@ -10,6 +10,7 @@ internal static class Program
             ValidateCampaignBridgePolicy();
             ValidateScenePolicy();
             ValidatePreOpenMissionContractPolicy();
+            ValidateNativeTimerStartupPolicy();
             ValidateTriggerPolicy();
             ValidatePhaseTransitions();
             ValidateHostChoiceAuthority();
@@ -127,6 +128,35 @@ internal static class Program
                 hasAmbushController: false,
                 hasSelectedRosterContract: false),
             "A day assault without the selected-roster contract must remain blocked.");
+    }
+
+    private static void ValidateNativeTimerStartupPolicy()
+    {
+        Assert(
+            CoopHideoutBossPhaseContract.ShouldAllowNativeTimerStartup(
+                hasHideoutDayRuntimeMarker: true,
+                CoopHideoutBossPhaseContract.NativeTimerStartAsServerSource),
+            "The isolated hideout runtime must allow the native server timer initialization call.");
+        Assert(
+            CoopHideoutBossPhaseContract.ShouldAllowNativeTimerStartup(
+                hasHideoutDayRuntimeMarker: true,
+                CoopHideoutBossPhaseContract.NativeTimerStartAsClientSource),
+            "The isolated hideout runtime must allow the native client timer initialization call.");
+        Assert(
+            !CoopHideoutBossPhaseContract.ShouldAllowNativeTimerStartup(
+                hasHideoutDayRuntimeMarker: false,
+                CoopHideoutBossPhaseContract.NativeTimerStartAsServerSource),
+            "A non-hideout runtime must retain native server timer suppression.");
+        Assert(
+            !CoopHideoutBossPhaseContract.ShouldAllowNativeTimerStartup(
+                hasHideoutDayRuntimeMarker: true,
+                "MultiplayerWarmupComponent.AfterStart"),
+            "The hideout timer exception must not allow another native battle shell method.");
+        Assert(
+            !CoopHideoutBossPhaseContract.ShouldAllowNativeTimerStartup(
+                hasHideoutDayRuntimeMarker: true,
+                null),
+            "A missing native battle shell source must remain suppressed.");
     }
 
     private static void ValidateTriggerPolicy()

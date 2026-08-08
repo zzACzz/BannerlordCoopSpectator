@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.Infrastructure.Hideout;
 using CoopSpectator.MissionBehaviors;
 using CoopSpectator.Network.Messages;
 using HarmonyLib;
@@ -22,6 +23,7 @@ namespace CoopSpectator.Patches
     public static class BattleShellSuppressionPatch
     {
         private static string _lastSuppressionLogKey;
+        private static string _lastHideoutDayTimerPassThroughLogKey;
         private static string _lastEndTransitionPassThroughLogKey;
         private static string _lastClientBootstrapPassThroughLogKey;
         private static string _lastWarmupAfterStartObservationKey;
@@ -1519,6 +1521,9 @@ namespace CoopSpectator.Patches
             if (!IsCoopBattleMapRuntime(mission))
                 return false;
 
+            if (ShouldAllowHideoutDayNativeTimerStartup(mission, source))
+                return false;
+
             if (ShouldAllowNativeSiegeAssaultStartupPath(mission, source))
                 return false;
 
@@ -1581,6 +1586,39 @@ namespace CoopSpectator.Patches
                     " HasCoopSiegeServer=" + (mission?.GetMissionBehavior<MissionMultiplayerCoopSiegeAssaultWithDeployment>() != null) +
                     " HasCoopSiegeClient=" + (mission?.GetMissionBehavior<MissionMultiplayerCoopSiegeAssaultWithDeploymentClient>() != null) +
                     " HasCoopSpawnLogic=" + (mission?.GetMissionBehavior<CoopMissionSpawnLogic>() != null) + ".");
+            }
+
+            return true;
+        }
+
+        private static bool ShouldAllowHideoutDayNativeTimerStartup(Mission mission, string source)
+        {
+            bool hasHideoutDayRuntimeMarker =
+                mission?.GetMissionBehavior<CoopHideoutBossPhaseController>() != null;
+            if (!CoopHideoutBossPhaseContract.ShouldAllowNativeTimerStartup(
+                    hasHideoutDayRuntimeMarker,
+                    source))
+            {
+                return false;
+            }
+
+            string key =
+                (source ?? "unknown") + "|" +
+                (mission?.SceneName ?? "unknown") + "|" +
+                GameNetwork.IsServer + "|" +
+                GameNetwork.IsClient;
+            if (!string.Equals(
+                    _lastHideoutDayTimerPassThroughLogKey,
+                    key,
+                    StringComparison.Ordinal))
+            {
+                _lastHideoutDayTimerPassThroughLogKey = key;
+                ModLogger.Info(
+                    "BattleShellSuppressionPatch: allowed isolated CoopHideoutDay native timer startup path. " +
+                    "Source=" + (source ?? "unknown") +
+                    " Scene=" + (mission?.SceneName ?? "unknown") +
+                    " IsServer=" + GameNetwork.IsServer +
+                    " IsClient=" + GameNetwork.IsClient + ".");
             }
 
             return true;

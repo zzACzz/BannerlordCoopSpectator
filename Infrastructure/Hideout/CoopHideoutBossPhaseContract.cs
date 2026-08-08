@@ -62,6 +62,8 @@ namespace CoopSpectator.Infrastructure.Hideout
         public const string ScenarioKind = "Hideout";
         public const string GameModeId = "CoopHideoutDay";
         public const string BossFightEntityTag = "hideout_boss_fight";
+        public const string NativeTimerStartAsServerSource = "MultiplayerTimerComponent.StartTimerAsServer";
+        public const string NativeTimerStartAsClientSource = "MultiplayerTimerComponent.StartTimerAsClient";
         public const int MaximumBattleInstanceIdCharacters = 64;
         public const int MaximumReasonCharacters = 128;
         public const int CinematicReadyTimeoutMilliseconds = 2500;
@@ -74,6 +76,23 @@ namespace CoopSpectator.Infrastructure.Hideout
                 (scenarioKind ?? string.Empty).Trim(),
                 ScenarioKind,
                 StringComparison.OrdinalIgnoreCase);
+        }
+
+        public static bool ShouldAllowNativeTimerStartup(
+            bool hasHideoutDayRuntimeMarker,
+            string source)
+        {
+            if (!hasHideoutDayRuntimeMarker)
+                return false;
+
+            return string.Equals(
+                       source,
+                       NativeTimerStartAsServerSource,
+                       StringComparison.Ordinal) ||
+                   string.Equals(
+                       source,
+                       NativeTimerStartAsClientSource,
+                       StringComparison.Ordinal);
         }
 
         public static bool IsSupportedDayHideoutSceneName(string sceneName)
