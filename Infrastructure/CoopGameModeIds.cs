@@ -17,6 +17,9 @@ namespace CoopSpectator.Infrastructure
 
         public const string CoopHeroCreator = "CoopHeroCreator";
 
+        /// <summary>Isolated daytime bandit-hideout assault runtime.</summary>
+        public const string CoopHideoutDay = "CoopHideoutDay";
+
         /// <summary>Точна копія 1:1 TDM з іншою назвою — для тесту без зміни логіки (виключення помилок через розсинхрон ID).</summary>
         public const string TdmClone = "TdmClone";
 

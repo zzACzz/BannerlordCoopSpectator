@@ -98,6 +98,7 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
             {
                 TryRegisterCoopBattleForClient();
                 TryRegisterCoopHeroCreatorForClient();
+                TryRegisterCoopHideoutDayForClient();
                 if (ExperimentalFeatures.EnableTdmCloneExperiment)
                     TryRegisterTdmCloneForClient(); // Ð ÐµÑ”ÑÑ‚Ñ€ÑƒÑ”Ð¼Ð¾ TdmClone Ð»Ð¸ÑˆÐµ ÐºÐ¾Ð»Ð¸ ÐµÐºÑÐ¿ÐµÑ€Ð¸Ð¼ÐµÐ½Ñ‚Ð°Ð»ÑŒÐ½Ð¸Ð¹ path ÑÐ²Ð½Ð¾ ÑƒÐ²Ñ–Ð¼ÐºÐ½ÐµÐ½Ð¾.
                 else
@@ -177,6 +178,21 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
             catch (Exception ex)
             {
                 ModLogger.Info("[CoopSpectator] CoopHeroCreator client registration fail: " + ex.Message);
+            }
+        }
+
+        private static void TryRegisterCoopHideoutDayForClient()
+        {
+            try
+            {
+                if (TaleWorlds.MountAndBlade.Module.CurrentModule == null) return;
+                TaleWorlds.MountAndBlade.Module.CurrentModule.AddMultiplayerGameMode(
+                    new MissionMultiplayerCoopHideoutDayMode(CoopGameModeIds.CoopHideoutDay));
+                ModLogger.Info("[CoopSpectator] CoopHideoutDay client registration success.");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("[CoopSpectator] CoopHideoutDay client registration fail: " + ex.Message);
             }
         }
 

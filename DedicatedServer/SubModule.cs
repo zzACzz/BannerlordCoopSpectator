@@ -1055,6 +1055,9 @@ namespace CoopSpectator
                 ModLogger.Info("[GameModeReg] add CoopHeroCreator id=" + MissionMultiplayerCoopHeroCreatorMode.GameModeId);
                 TaleWorlds.MountAndBlade.Module.CurrentModule.AddMultiplayerGameMode(
                     new MissionMultiplayerCoopHeroCreatorMode(CoopGameModeIds.CoopHeroCreator));
+                ModLogger.Info("[GameModeReg] add CoopHideoutDay id=" + MissionMultiplayerCoopHideoutDayMode.GameModeId);
+                TaleWorlds.MountAndBlade.Module.CurrentModule.AddMultiplayerGameMode(
+                    new MissionMultiplayerCoopHideoutDayMode(CoopGameModeIds.CoopHideoutDay));
                 if (ExperimentalFeatures.EnableTdmCloneExperiment)
                 {
                     ModLogger.Info("[GameModeReg] add TdmClone id=" + MissionMultiplayerTdmCloneMode.GameModeId);

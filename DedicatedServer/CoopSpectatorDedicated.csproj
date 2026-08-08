@@ -53,6 +53,7 @@
     <Compile Include="..\GameMode\MissionMultiplayerCoopHeroCreatorMode.cs" Link="GameMode\MissionMultiplayerCoopHeroCreatorMode.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopHeroCreator.cs" Link="GameMode\MissionMultiplayerCoopHeroCreator.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopHeroCreatorClient.cs" Link="GameMode\MissionMultiplayerCoopHeroCreatorClient.cs" />
+    <Compile Include="..\GameMode\MissionMultiplayerCoopHideoutDayMode.cs" Link="GameMode\MissionMultiplayerCoopHideoutDayMode.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerTdmCloneMode.cs" Link="GameMode\MissionMultiplayerTdmCloneMode.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerTdmClone.cs" Link="GameMode\MissionMultiplayerTdmClone.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerTdmCloneClient.cs" Link="GameMode\MissionMultiplayerTdmCloneClient.cs" />
@@ -67,6 +68,7 @@
     <Compile Include="..\Mission\CoopExactCampaignSiegeAmbushMissionController.cs" Link="Mission\CoopExactCampaignSiegeAmbushMissionController.cs" />
     <Compile Include="..\Mission\CoopMissionNetworkBridge.cs" Link="Mission\CoopMissionNetworkBridge.cs" />
     <Compile Include="..\Mission\CoopHeroCreationMissionNetwork.cs" Link="Mission\CoopHeroCreationMissionNetwork.cs" />
+    <Compile Include="..\Mission\CoopHideoutBossPhaseController.cs" Link="Mission\CoopHideoutBossPhaseController.cs" />
     <Compile Include="..\Mission\CoopSiegeAssaultFormationOrderRuntime.cs" Link="Mission\CoopSiegeAssaultFormationOrderRuntime.cs" />
     <Compile Include="..\MissionModels\CoopCampaignDerivedAgentStatCalculateModel.cs" Link="MissionModels\CoopCampaignDerivedAgentStatCalculateModel.cs" />
     <Compile Include="..\MissionModels\CoopCampaignDerivedStrikeMagnitudeCalculationModel.cs" Link="MissionModels\CoopCampaignDerivedStrikeMagnitudeCalculationModel.cs" />
@@ -81,6 +83,7 @@
     <Compile Include="..\Network\Messages\CoopPreMissionTopologyNetworkMessages.cs" Link="Network\Messages\CoopPreMissionTopologyNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopBattleSelectionNetworkMessages.cs" Link="Network\Messages\CoopBattleSelectionNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopHeroCreationNetworkMessages.cs" Link="Network\Messages\CoopHeroCreationNetworkMessages.cs" />
+    <Compile Include="..\Network\Messages\CoopHideoutBossPhaseNetworkMessages.cs" Link="Network\Messages\CoopHideoutBossPhaseNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopBattleAgentControlNetworkMessages.cs" Link="Network\Messages\CoopBattleAgentControlNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopSiegeAmbushOrderNetworkMessages.cs" Link="Network\Messages\CoopSiegeAmbushOrderNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopSiegeAssaultOrderNetworkMessages.cs" Link="Network\Messages\CoopSiegeAssaultOrderNetworkMessages.cs" />
@@ -148,6 +151,7 @@
     <Compile Include="..\Infrastructure\CoopBattleAgentControlRuntimeState.cs" Link="Infrastructure\CoopBattleAgentControlRuntimeState.cs" />
     <Compile Include="..\Infrastructure\AtomicBridgeFileIO.cs" Link="Infrastructure\AtomicBridgeFileIO.cs" />
     <Compile Include="..\Infrastructure\CoopHeroCreationContract.cs" Link="Infrastructure\CoopHeroCreationContract.cs" />
+    <Compile Include="..\Infrastructure\Hideout\CoopHideoutBossPhaseContract.cs" Link="Infrastructure\Hideout\CoopHideoutBossPhaseContract.cs" />
     <Compile Include="..\Infrastructure\CoopHeroCreationChunkCodec.cs" Link="Infrastructure\CoopHeroCreationChunkCodec.cs" />
     <Compile Include="..\Infrastructure\CoopHeroCreationStateMachine.cs" Link="Infrastructure\CoopHeroCreationStateMachine.cs" />
     <Compile Include="..\Infrastructure\CoopHeroCreationBridgeFile.cs" Link="Infrastructure\CoopHeroCreationBridgeFile.cs" />
@@ -343,7 +347,7 @@
       <_MultiplayerClientBin Condition="Exists('$(DedicatedServerRootDir)\Modules\Multiplayer\bin\Win64_Shipping_Client\TaleWorlds.MountAndBlade.Multiplayer.dll')">$(DedicatedServerRootDir)\Modules\Multiplayer\bin\Win64_Shipping_Client</_MultiplayerClientBin>
       <_MultiplayerClientBin Condition="'$(_MultiplayerClientBin)'=='' and Exists('$(DedicatedServerRootDir)\bin\Win64_Shipping_Client\TaleWorlds.MountAndBlade.Multiplayer.dll')">$(DedicatedServerRootDir)\bin\Win64_Shipping_Client</_MultiplayerClientBin>
     </PropertyGroup>
-    <MakeDir Directories="$(_DedicatedModuleDir);$(_DedicatedBinServer);$(_DedicatedBinClient);$(_DedicatedModuleData);$(_DedicatedSandboxDir);$(_DedicatedSandboxDir)\ModuleData;$(_DedicatedSandboxCoreDir);$(_DedicatedSandboxCoreDir)\ModuleData;$(_DedicatedSandboxCoreDir)\SceneObj" Condition="Exists('$(DedicatedServerRootDir)')" />
+    <MakeDir Directories="$(_DedicatedModuleDir);$(_DedicatedModuleDir)\SceneObj;$(_DedicatedBinServer);$(_DedicatedBinClient);$(_DedicatedModuleData);$(_DedicatedSandboxDir);$(_DedicatedSandboxDir)\ModuleData;$(_DedicatedSandboxCoreDir);$(_DedicatedSandboxCoreDir)\ModuleData;$(_DedicatedSandboxCoreDir)\SceneObj" Condition="Exists('$(DedicatedServerRootDir)')" />
     <Copy SourceFiles="..\Module\CoopSpectatorDedicated\SubModule.xml" DestinationFolder="$(_DedicatedModuleDir)" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)')" />
     <ItemGroup>
       <_ServerBinFiles Include="$(OutputPath)*" />
@@ -358,6 +362,30 @@
       <_DedicatedSandboxCoreRootFiles Include="$(BannerlordRootDir)\Modules\SandBoxCore\SubModule.xml" Condition="Exists('$(BannerlordRootDir)\Modules\SandBoxCore\SubModule.xml')" />
       <_DedicatedSandboxCoreModuleDataFiles Include="$(BannerlordRootDir)\Modules\SandBoxCore\ModuleData\**\*.xml" Condition="Exists('$(BannerlordRootDir)\Modules\SandBoxCore\ModuleData')" />
       <_DedicatedSandboxCoreSceneFiles Include="$(BannerlordRootDir)\Modules\SandBoxCore\SceneObj\battle_terrain*\**\*" Condition="Exists('$(BannerlordRootDir)\Modules\SandBoxCore\SceneObj')" />
+      <_DedicatedHideoutSceneFiles Include="$(BannerlordRootDir)\Modules\SandBox\SceneObj\bandit_forest\**\*" SceneDirectory="bandit_forest" />
+      <_DedicatedHideoutSceneFiles Include="$(BannerlordRootDir)\Modules\SandBox\SceneObj\bandit_forest_sv\**\*" SceneDirectory="bandit_forest_sv" />
+      <_DedicatedHideoutSceneFiles Include="$(BannerlordRootDir)\Modules\SandBox\SceneObj\desert_hideout_002\**\*" SceneDirectory="desert_hideout_002" />
+      <_DedicatedHideoutSceneFiles Include="$(BannerlordRootDir)\Modules\SandBox\SceneObj\desert_hideout_002_sv\**\*" SceneDirectory="desert_hideout_002_sv" />
+      <_DedicatedHideoutSceneFiles Include="$(BannerlordRootDir)\Modules\SandBox\SceneObj\desert_hideout_004\**\*" SceneDirectory="desert_hideout_004" />
+      <_DedicatedHideoutSceneFiles Include="$(BannerlordRootDir)\Modules\SandBox\SceneObj\desert_hideout_004_sv\**\*" SceneDirectory="desert_hideout_004_sv" />
+      <_DedicatedHideoutSceneFiles Include="$(BannerlordRootDir)\Modules\SandBox\SceneObj\forest_hideout_003\**\*" SceneDirectory="forest_hideout_003" />
+      <_DedicatedHideoutSceneFiles Include="$(BannerlordRootDir)\Modules\SandBox\SceneObj\forest_hideout_004\**\*" SceneDirectory="forest_hideout_004" />
+      <_DedicatedHideoutSceneFiles Include="$(BannerlordRootDir)\Modules\SandBox\SceneObj\forest_hideout_004_sv\**\*" SceneDirectory="forest_hideout_004_sv" />
+      <_DedicatedHideoutSceneFiles Include="$(BannerlordRootDir)\Modules\SandBox\SceneObj\hideout_steppe_001\**\*" SceneDirectory="hideout_steppe_001" />
+      <_DedicatedHideoutSceneFiles Include="$(BannerlordRootDir)\Modules\SandBox\SceneObj\hideout_steppe_001_sv\**\*" SceneDirectory="hideout_steppe_001_sv" />
+      <_DedicatedHideoutSceneFiles Include="$(BannerlordRootDir)\Modules\SandBox\SceneObj\hideout_steppe_002\**\*" SceneDirectory="hideout_steppe_002" />
+      <_DedicatedHideoutSceneFiles Include="$(BannerlordRootDir)\Modules\SandBox\SceneObj\hideout_steppe_002_sv\**\*" SceneDirectory="hideout_steppe_002_sv" />
+      <_DedicatedHideoutSceneFiles Include="$(BannerlordRootDir)\Modules\SandBox\SceneObj\mountain_hideout_002\**\*" SceneDirectory="mountain_hideout_002" />
+      <_DedicatedHideoutSceneFiles Include="$(BannerlordRootDir)\Modules\SandBox\SceneObj\mountain_hideout_002_sv\**\*" SceneDirectory="mountain_hideout_002_sv" />
+      <_DedicatedHideoutSceneFiles Include="$(BannerlordRootDir)\Modules\SandBox\SceneObj\mountain_hideout_004\**\*" SceneDirectory="mountain_hideout_004" />
+      <_DedicatedHideoutSceneFiles Include="$(BannerlordRootDir)\Modules\SandBox\SceneObj\mountain_hideout_004_sv\**\*" SceneDirectory="mountain_hideout_004_sv" />
+      <_DedicatedHideoutSceneFiles Include="$(BannerlordRootDir)\Modules\SandBox\SceneObj\sea_bandit_a\**\*" SceneDirectory="sea_bandit_a" />
+      <_DedicatedHideoutSceneFiles Include="$(BannerlordRootDir)\Modules\SandBox\SceneObj\sea_bandit_a_sv\**\*" SceneDirectory="sea_bandit_a_sv" />
+      <_DedicatedHideoutSceneFiles Include="$(BannerlordRootDir)\Modules\SandBox\SceneObj\sea_bandit_b\**\*" SceneDirectory="sea_bandit_b" />
+      <_DedicatedHideoutSceneFiles Include="$(BannerlordRootDir)\Modules\SandBox\SceneObj\sea_bandit_b_sv\**\*" SceneDirectory="sea_bandit_b_sv" />
+      <_DedicatedHideoutSceneFiles Include="$(BannerlordRootDir)\Modules\SandBox\SceneObj\sea_bandit_c\**\*" SceneDirectory="sea_bandit_c" />
+      <_DedicatedHideoutSceneFiles Include="$(BannerlordRootDir)\Modules\SandBox\SceneObj\sea_bandit_c_sv\**\*" SceneDirectory="sea_bandit_c_sv" />
+      <_DedicatedHideoutSceneFiles Include="$(BannerlordRootDir)\Modules\SandBox\SceneObj\sea_bandit_d_sv\**\*" SceneDirectory="sea_bandit_d_sv" />
     </ItemGroup>
     <Delete Files="$(_DedicatedBinServer)\CoopSpectator.pdb" Condition="Exists('$(_DedicatedBinServer)\CoopSpectator.pdb')" />
     <Delete Files="$(_DedicatedBinClient)\CoopSpectator.pdb" Condition="Exists('$(_DedicatedBinClient)\CoopSpectator.pdb')" />
@@ -372,6 +400,7 @@
     <Copy SourceFiles="@(_DedicatedSandboxCoreRootFiles)" DestinationFiles="@(_DedicatedSandboxCoreRootFiles->'$(_DedicatedSandboxCoreDir)\%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)') and '@(_DedicatedSandboxCoreRootFiles)' != ''" />
     <Copy SourceFiles="@(_DedicatedSandboxCoreModuleDataFiles)" DestinationFiles="@(_DedicatedSandboxCoreModuleDataFiles->'$(_DedicatedSandboxCoreDir)\ModuleData\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)') and '@(_DedicatedSandboxCoreModuleDataFiles)' != ''" />
     <Copy SourceFiles="@(_DedicatedSandboxCoreSceneFiles)" DestinationFiles="@(_DedicatedSandboxCoreSceneFiles->'$(_DedicatedSandboxCoreDir)\SceneObj\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)') and '@(_DedicatedSandboxCoreSceneFiles)' != ''" />
+    <Copy SourceFiles="@(_DedicatedHideoutSceneFiles)" DestinationFiles="@(_DedicatedHideoutSceneFiles->'$(_DedicatedModuleDir)\SceneObj\%(SceneDirectory)\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="Exists('$(DedicatedServerRootDir)') and '@(_DedicatedHideoutSceneFiles)' != ''" />
     <!-- TaleWorlds.MountAndBlade.Multiplayer.dll має лежати поруч із CoopSpectator.dll у Win64_Shipping_Client, інакше модуль не завантажується → "Cannot find game type: TdmClone". -->
     <Copy SourceFiles="$(_MultiplayerServerBin)\TaleWorlds.MountAndBlade.Multiplayer.dll" DestinationFolder="$(_DedicatedBinClient)" SkipUnchangedFiles="true" Condition="Exists('$(_MultiplayerServerBin)\TaleWorlds.MountAndBlade.Multiplayer.dll')" />
     <Copy SourceFiles="$(_MultiplayerClientBin)\TaleWorlds.MountAndBlade.Multiplayer.dll" DestinationFolder="$(_DedicatedBinClient)" SkipUnchangedFiles="true" Condition="Exists('$(_MultiplayerClientBin)\TaleWorlds.MountAndBlade.Multiplayer.dll')" />

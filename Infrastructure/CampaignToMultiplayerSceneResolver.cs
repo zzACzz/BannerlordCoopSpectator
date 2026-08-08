@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using CoopSpectator.Infrastructure.Hideout;
 using CoopSpectator.Network.Messages;
 using TaleWorlds.CampaignSystem;
 
@@ -53,6 +54,17 @@ namespace CoopSpectator.Infrastructure
 
             if (string.IsNullOrWhiteSpace(campaignBattleScene))
                 return resolution;
+
+            if (CoopHideoutBossPhaseContract.IsHideoutScenario(scenarioContext?.ScenarioKind))
+            {
+                resolution.RuntimeScene = campaignBattleScene;
+                resolution.RuntimeGameType = CoopHideoutBossPhaseContract.GameModeId;
+                resolution.Source = "isolated-day-hideout-scene";
+                resolution.Terrain = "Hideout";
+                resolution.ForestDensity = "Unknown";
+                resolution.IsNaval = false;
+                return resolution;
+            }
 
             if (scenarioContext?.IsSiegeBattle == true)
             {

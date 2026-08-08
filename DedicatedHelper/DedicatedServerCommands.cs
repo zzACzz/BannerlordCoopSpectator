@@ -4,6 +4,7 @@ using System.Net; // HttpWebRequest, WebRequest, WebException
 using System.Threading; // Thread.Sleep
 using CoopSpectator.Campaign; // BattleRosterFileHelper
 using CoopSpectator.Infrastructure; // ModLogger, UiFeedback, CoopGameModeIds
+using CoopSpectator.Infrastructure.Hideout;
 using CoopSpectator.Network.Messages; // BattleSnapshotMessage
 using Newtonsoft.Json.Linq; // JToken, JObject, JArray
 using TaleWorlds.MountAndBlade;
@@ -215,10 +216,18 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
 
                 string requestedScene = snapshot.MultiplayerScene;
                 string requestedGameType = snapshot.MultiplayerGameType;
-                bool requiresSceneRegistration = SceneRuntimeClassifier.RequiresDedicatedSceneRegistration(requestedScene);
-                string appliedGameType = string.Equals(requestedGameType, CoopGameModeIds.OfficialBattle, StringComparison.Ordinal)
-                    ? CoopGameModeIds.OfficialBattle
-                    : CoopGameModeIds.CoopBattle;
+                bool isIsolatedDayHideout = string.Equals(
+                    requestedGameType,
+                    CoopHideoutBossPhaseContract.GameModeId,
+                    StringComparison.Ordinal);
+                bool requiresSceneRegistration =
+                    isIsolatedDayHideout ||
+                    SceneRuntimeClassifier.RequiresDedicatedSceneRegistration(requestedScene);
+                string appliedGameType = isIsolatedDayHideout
+                    ? CoopHideoutBossPhaseContract.GameModeId
+                    : string.Equals(requestedGameType, CoopGameModeIds.OfficialBattle, StringComparison.Ordinal)
+                        ? CoopGameModeIds.OfficialBattle
+                        : CoopGameModeIds.CoopBattle;
 
                 if (string.IsNullOrWhiteSpace(requestedScene))
                 {
@@ -303,7 +312,8 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
 
                 optionValues["GameType"] = appliedGameType;
                 optionValues["Map"] = requestedScene;
-                if (string.Equals(appliedGameType, CoopGameModeIds.OfficialBattle, StringComparison.Ordinal))
+                if (string.Equals(appliedGameType, CoopGameModeIds.OfficialBattle, StringComparison.Ordinal) ||
+                    string.Equals(appliedGameType, CoopHideoutBossPhaseContract.GameModeId, StringComparison.Ordinal))
                 {
         // CoopBattle owns side/unit selection, deployment, and the explicit H-start flow.
                     // Disable native Battle/TDM warmup countdown so the client does not keep showing
