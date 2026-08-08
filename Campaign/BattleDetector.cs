@@ -805,13 +805,13 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             diagnostics =
                 "DayController=" + hasDayController +
                 " AmbushController=" + hasAmbushController +
-                " BossFightEntity=" + hasBossFightEntity +
+                " BossFightEntityReadyAtGate=" + hasBossFightEntity +
                 " SelectedRosterContract=" + hasSelectedRosterContract +
                 " Scene=" + (mission.SceneName ?? "null");
-            return hasDayController &&
-                   !hasAmbushController &&
-                   hasBossFightEntity &&
-                   hasSelectedRosterContract;
+            return CoopHideoutBossPhaseContract.CanEnterDayHideoutCampaignBridge(
+                hasDayController,
+                hasAmbushController,
+                hasSelectedRosterContract);
         }
 
         private static bool TryApplyVanillaHideoutSelectedRoster(

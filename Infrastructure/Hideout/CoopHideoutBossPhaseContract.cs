@@ -76,6 +76,16 @@ namespace CoopSpectator.Infrastructure.Hideout
                 StringComparison.OrdinalIgnoreCase);
         }
 
+        public static bool CanEnterDayHideoutCampaignBridge(
+            bool hasDayController,
+            bool hasAmbushController,
+            bool hasSelectedRosterContract)
+        {
+            return hasDayController &&
+                   !hasAmbushController &&
+                   hasSelectedRosterContract;
+        }
+
         public static int ResolveBossTriggerCount(int initialEnemyCount)
         {
             if (initialEnemyCount <= 0)

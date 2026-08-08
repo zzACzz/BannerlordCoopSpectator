@@ -7,6 +7,7 @@ internal static class Program
     {
         try
         {
+            ValidateCampaignBridgePolicy();
             ValidateTriggerPolicy();
             ValidatePhaseTransitions();
             ValidateHostChoiceAuthority();
@@ -19,6 +20,34 @@ internal static class Program
             Console.Error.WriteLine(ex.ToString());
             return 1;
         }
+    }
+
+    private static void ValidateCampaignBridgePolicy()
+    {
+        Assert(
+            CoopHideoutBossPhaseContract.CanEnterDayHideoutCampaignBridge(
+                hasDayController: true,
+                hasAmbushController: false,
+                hasSelectedRosterContract: true),
+            "A vanilla day assault must enter the isolated campaign bridge before scene entities finish loading.");
+        Assert(
+            !CoopHideoutBossPhaseContract.CanEnterDayHideoutCampaignBridge(
+                hasDayController: false,
+                hasAmbushController: false,
+                hasSelectedRosterContract: true),
+            "A mission without the vanilla day controller must remain unsupported.");
+        Assert(
+            !CoopHideoutBossPhaseContract.CanEnterDayHideoutCampaignBridge(
+                hasDayController: true,
+                hasAmbushController: true,
+                hasSelectedRosterContract: true),
+            "A night ambush must not enter the day-assault bridge.");
+        Assert(
+            !CoopHideoutBossPhaseContract.CanEnterDayHideoutCampaignBridge(
+                hasDayController: true,
+                hasAmbushController: false,
+                hasSelectedRosterContract: false),
+            "A day assault without the selected-roster contract must remain blocked.");
     }
 
     private static void ValidateTriggerPolicy()
