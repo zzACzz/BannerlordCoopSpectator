@@ -162,6 +162,23 @@ namespace CoopSpectator.Infrastructure.Hideout
             return Math.Max(1, Math.Min(5, quarter));
         }
 
+        public static int ResolveBossReserveCount(int totalEnemyCount)
+        {
+            if (totalEnemyCount <= 1)
+                return 0;
+
+            return Math.Min(
+                totalEnemyCount - 1,
+                ResolveBossTriggerCount(totalEnemyCount));
+        }
+
+        public static int ResolveInitialAssaultDefenderCount(int totalEnemyCount)
+        {
+            return Math.Max(
+                0,
+                totalEnemyCount - ResolveBossReserveCount(totalEnemyCount));
+        }
+
         public static bool ShouldPrepareBossPhase(
             int initialEnemyCount,
             int activeEnemyCount,

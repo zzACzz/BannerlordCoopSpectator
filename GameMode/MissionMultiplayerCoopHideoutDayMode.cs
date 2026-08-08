@@ -148,6 +148,21 @@ namespace CoopSpectator.GameMode
             if (!list.Any(behavior => behavior is BattleMissionStarterLogic))
                 list.Add(new BattleMissionStarterLogic());
 
+            if (GameNetwork.IsServer &&
+                !list.Any(behavior => behavior is AgentHumanAILogic))
+            {
+                list.Add(new AgentHumanAILogic());
+                ModLogger.Info(
+                    "CoopHideoutDay: inserted the current AgentHumanAILogic into the isolated server behavior stack.");
+            }
+
+            if (GameNetwork.IsServer &&
+                !list.Any(behavior => behavior is AgentHumanAILogic))
+            {
+                throw new InvalidOperationException(
+                    "CoopHideoutDay requires AgentHumanAILogic before agent materialization.");
+            }
+
             if (!list.Any(behavior => behavior is CoopHideoutBossPhaseController))
                 list.Add(new CoopHideoutBossPhaseController());
 

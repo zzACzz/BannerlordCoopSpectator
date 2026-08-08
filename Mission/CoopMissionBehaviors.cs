@@ -20,6 +20,7 @@ using TaleWorlds.ObjectSystem; // MBObjectManager
 using CoopSpectator.Campaign; // BattleRosterFileHelper (варіант A: roster з кампанії)
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure; // ModLogger, UiFeedback
+using CoopSpectator.Infrastructure.Hideout;
 using CoopSpectator.Infrastructure.LordsHall;
 using CoopSpectator.Infrastructure.Relief;
 using CoopSpectator.Infrastructure.SallyOut;
@@ -13179,7 +13180,8 @@ namespace CoopSpectator.MissionBehaviors
             ExactCampaignArmyBootstrap.ResetForMission(mission);
             if (!ExperimentalFeatures.EnableExactCampaignNativeArmyBootstrap ||
                 !IsSceneAwareBattleMapRuntime(mission) ||
-                !SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty))
+                (!SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty) &&
+                 !IsIsolatedDayHideoutMaterializationRuntime(mission)))
             {
                 return;
             }
@@ -13240,6 +13242,28 @@ namespace CoopSpectator.MissionBehaviors
             {
                 LogExactSceneNativeBootstrapDeferred(mission, initializeReason, source);
             }
+        }
+
+        private static bool IsIsolatedDayHideoutMaterializationRuntime(Mission mission)
+        {
+            if (mission == null ||
+                !CoopHideoutBossPhaseContract.IsSupportedDayHideoutSceneName(
+                    mission.SceneName ?? string.Empty))
+            {
+                return false;
+            }
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            if (CoopHideoutBossPhaseContract.IsHideoutScenario(
+                    scenarioContext?.ScenarioKind))
+            {
+                return true;
+            }
+
+            return mission.GetMissionBehavior<CoopHideoutBossPhaseController>() != null;
         }
 
         private static void TrySyncExactCampaignNativeArmyBootstrapReinforcements(Mission mission, string source)
@@ -20004,6 +20028,9 @@ namespace CoopSpectator.MissionBehaviors
                 _nextMaterializedArmyReinforcementPulseUtc = DateTime.MinValue;
                 _nextExactSceneNativeBootstrapDeferLogUtc = DateTime.MinValue;
             }
+
+            if (IsIsolatedDayHideoutMaterializationRuntime(mission))
+                return;
 
             if (_hasMaterializedBattlefieldArmies)
                 return;

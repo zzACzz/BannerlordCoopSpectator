@@ -324,8 +324,14 @@ namespace CoopSpectator.MissionBehaviors
             if (enemyTeam == null)
                 return;
 
+            CoopExactCampaignHideoutMissionController hideoutController =
+                Mission.GetMissionBehavior<CoopExactCampaignHideoutMissionController>();
             List<Agent> activeEnemies = GetActiveHumanAgents(enemyTeam);
-            _initialEnemyCount = Math.Max(_initialEnemyCount, activeEnemies.Count);
+            _initialEnemyCount = Math.Max(
+                _initialEnemyCount,
+                Math.Max(
+                    activeEnemies.Count,
+                    hideoutController?.InitialAssaultEnemyCount ?? 0));
             if ((nowUtc - _missionStartedUtc).TotalSeconds < InitialAssaultGraceSeconds)
                 return;
 
@@ -343,16 +349,42 @@ namespace CoopSpectator.MissionBehaviors
                 return;
             }
 
-            if (!CoopHideoutBossPhaseContract.ShouldPrepareBossPhase(
-                    _initialEnemyCount,
-                    activeEnemies.Count,
-                    hostAgent.IsActive(),
-                    bossFightEntity != null))
+            int activeInitialAssaultEnemies = activeEnemies.Count;
+            Agent bossAgent;
+            if (hideoutController?.HasReservedBossGroup == true)
             {
-                return;
-            }
+                int triggerCount = CoopHideoutBossPhaseContract.ResolveBossTriggerCount(
+                    _initialEnemyCount);
+                if (triggerCount <= 0 || activeInitialAssaultEnemies > triggerCount)
+                    return;
 
-            Agent bossAgent = SelectBossAgent(activeEnemies);
+                if (!hideoutController.TrySpawnReservedBossGroup(
+                        out bossAgent,
+                        out int spawnedBossGroupCount))
+                {
+                    return;
+                }
+
+                activeEnemies = GetActiveHumanAgents(enemyTeam);
+                ModLogger.Info(
+                    "CoopHideoutBossPhaseController: reserved boss group entered the encounter. " +
+                    "InitialAssaultEnemiesActive=" + activeInitialAssaultEnemies +
+                    " SpawnedBossGroup=" + spawnedBossGroupCount +
+                    " EnemyAgentsAfterSpawn=" + activeEnemies.Count + ".");
+            }
+            else
+            {
+                if (!CoopHideoutBossPhaseContract.ShouldPrepareBossPhase(
+                        _initialEnemyCount,
+                        activeEnemies.Count,
+                        hostAgent.IsActive(),
+                        bossFightEntity != null))
+                {
+                    return;
+                }
+
+                bossAgent = SelectBossAgent(activeEnemies);
+            }
             if (bossAgent == null)
                 return;
 
@@ -378,7 +410,8 @@ namespace CoopSpectator.MissionBehaviors
             ModLogger.Info(
                 "CoopHideoutBossPhaseController: boss cinematic preparation started. " +
                 "InitialEnemyCount=" + _initialEnemyCount +
-                " ActiveEnemyCount=" + activeEnemies.Count +
+                " ActiveInitialAssaultEnemyCount=" + activeInitialAssaultEnemies +
+                " ActiveEnemyCountAfterReserve=" + activeEnemies.Count +
                 " TriggerCount=" + CoopHideoutBossPhaseContract.ResolveBossTriggerCount(_initialEnemyCount) +
                 " HostPeer=" + hostPeer.Index +
                 " HostAgent=" + hostAgent.Index +

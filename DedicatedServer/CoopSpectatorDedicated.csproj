@@ -63,6 +63,7 @@
     <Compile Include="..\GameMode\MissionBehaviorDiagnostic.cs" Link="GameMode\MissionBehaviorDiagnostic.cs" />
     <Compile Include="..\Mission\CoopMissionBehaviors.cs" Link="Mission\CoopMissionBehaviors.cs" />
     <Compile Include="..\Mission\CoopExactCampaignLordsHallMissionController.cs" Link="Mission\CoopExactCampaignLordsHallMissionController.cs" />
+    <Compile Include="..\Mission\CoopExactCampaignHideoutMissionController.cs" Link="Mission\CoopExactCampaignHideoutMissionController.cs" />
     <Compile Include="..\Mission\LordsHall\LordsHallMissionRuntime.cs" Link="Mission\LordsHall\LordsHallMissionRuntime.cs" />
     <Compile Include="..\Mission\CoopExactCampaignReliefMissionController.cs" Link="Mission\CoopExactCampaignReliefMissionController.cs" />
     <Compile Include="..\Mission\CoopExactCampaignSiegeAmbushMissionController.cs" Link="Mission\CoopExactCampaignSiegeAmbushMissionController.cs" />

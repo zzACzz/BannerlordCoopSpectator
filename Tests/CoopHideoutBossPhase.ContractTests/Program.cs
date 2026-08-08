@@ -12,6 +12,7 @@ internal static class Program
             ValidatePreOpenMissionContractPolicy();
             ValidateNativeTimerStartupPolicy();
             ValidateTriggerPolicy();
+            ValidateMaterializationPolicy();
             ValidatePhaseTransitions();
             ValidateHostChoiceAuthority();
             ValidateFallbackTransitions();
@@ -178,6 +179,17 @@ internal static class Program
         Assert(
             !CoopHideoutBossPhaseContract.ShouldPrepareBossPhase(20, 5, hostAgentActive: true, bossFightEntityAvailable: false),
             "Preparation must require the scene anchor.");
+    }
+
+    private static void ValidateMaterializationPolicy()
+    {
+        Assert(CoopHideoutBossPhaseContract.ResolveBossReserveCount(0) == 0, "An empty roster must not reserve a boss group.");
+        Assert(CoopHideoutBossPhaseContract.ResolveBossReserveCount(1) == 0, "A one-unit roster must keep its only defender in the initial assault.");
+        Assert(CoopHideoutBossPhaseContract.ResolveBossReserveCount(2) == 1, "A two-unit roster must reserve one defender.");
+        Assert(CoopHideoutBossPhaseContract.ResolveBossReserveCount(5) == 2, "A five-unit roster must reserve the rounded-up quarter.");
+        Assert(CoopHideoutBossPhaseContract.ResolveBossReserveCount(29) == 5, "The reserved boss group must be capped at five.");
+        Assert(CoopHideoutBossPhaseContract.ResolveInitialAssaultDefenderCount(29) == 24, "A 29-unit roster must materialize 24 initial defenders.");
+        Assert(CoopHideoutBossPhaseContract.ResolveInitialAssaultDefenderCount(1) == 1, "A one-unit roster must remain playable.");
     }
 
     private static void ValidatePhaseTransitions()

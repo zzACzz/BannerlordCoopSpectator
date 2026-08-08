@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using CoopSpectator.GameMode;
+using CoopSpectator.Infrastructure.Hideout;
 using CoopSpectator.Infrastructure.LordsHall;
 using CoopSpectator.Infrastructure.Relief;
 using CoopSpectator.Infrastructure.SallyOut;
@@ -27,7 +28,8 @@ namespace CoopSpectator.Infrastructure
             NativeSpawnLogic = 1,
             LordsHallController = 2,
             SiegeAssaultNoDeployment = 3,
-            SiegeAssaultWithDeployment = 4
+            SiegeAssaultWithDeployment = 4,
+            HideoutController = 5
         }
 
         private static Mission _activeMission;
@@ -418,7 +420,10 @@ namespace CoopSpectator.Infrastructure
 
                 initializationStep = "validate-scene";
                 string sceneName = mission.SceneName ?? string.Empty;
-                if (!SceneRuntimeClassifier.IsExactCampaignBattleScene(sceneName))
+                bool isSupportedDayHideoutScene =
+                    CoopHideoutBossPhaseContract.IsSupportedDayHideoutSceneName(sceneName);
+                if (!SceneRuntimeClassifier.IsExactCampaignBattleScene(sceneName) &&
+                    !isSupportedDayHideoutScene)
                 {
                     reason = "scene-not-exact-campaign";
                     return false;
@@ -457,6 +462,15 @@ namespace CoopSpectator.Infrastructure
                         out string scenarioContractReason))
                 {
                     reason = scenarioContractReason ?? "scenario-contract-rejected";
+                    return false;
+                }
+                bool useHideoutController =
+                    isSupportedDayHideoutScene &&
+                    CoopHideoutBossPhaseContract.IsHideoutScenario(
+                        scenarioContext?.ScenarioKind);
+                if (isSupportedDayHideoutScene && !useHideoutController)
+                {
+                    reason = "hideout-scene-without-hideout-scenario-contract";
                     return false;
                 }
                 bool useSiegeAmbushController = RequiresSiegeAmbushController(scenarioContext);
@@ -605,6 +619,76 @@ namespace CoopSpectator.Infrastructure
                 {
                     reason = teamAiDiagnostics ?? "mission-team-ai-contract-failed";
                     return false;
+                }
+
+                if (useHideoutController)
+                {
+                    initializationStep = "validate-hideout-contract";
+                    if (mission.GetMissionBehavior<BattleSpawnLogic>() != null)
+                    {
+                        reason = "hideout-unexpected-battle-spawn-logic";
+                        return false;
+                    }
+
+                    if (mission.GetMissionBehavior<NativeMissionAgentSpawnLogic>() != null)
+                    {
+                        reason = "hideout-unexpected-native-spawn-logic";
+                        return false;
+                    }
+
+                    initializationStep = "log-bootstrap-contract";
+                    LogBootstrapContractSnapshot(
+                        mission,
+                        null,
+                        playerSide,
+                        supplierDiagnostics +
+                        " FormationBannerSeed={" + formationBannerDiagnostics + "}" +
+                        " RuntimeContract={Hideout Isolated=true MissionSpawnTroop=true}",
+                        "pre-init-hideout-controller",
+                        source);
+
+                    initializationStep = "init-hideout-controller";
+                    if (!TryEnsureHideoutControllerInitialized(
+                            mission,
+                            suppliers,
+                            playerSide,
+                            defenderTotal,
+                            attackerTotal,
+                            out string hideoutDiagnostics))
+                    {
+                        reason = hideoutDiagnostics ?? "hideout-controller-failed";
+                        return false;
+                    }
+
+                    initializationStep = "subscribe-agent-removal-events";
+                    mission.OnBeforeAgentRemoved -= OnMissionBeforeAgentRemoved;
+                    mission.OnBeforeAgentRemoved += OnMissionBeforeAgentRemoved;
+
+                    initializationStep = "activate-runtime";
+                    _activeMission = mission;
+                    _activeSpawnLogic = null;
+                    _activeSuppliers = suppliers;
+                    _activeMode = ActiveBootstrapMode.HideoutController;
+                    _activePlayerSide = playerSide;
+                    _activePlayerTeam = mission.PlayerTeam;
+                    _activePlayerEnemyTeam = mission.PlayerEnemyTeam;
+                    _reinforcementsEnabled = false;
+                    reason = "initialized";
+
+                    ModLogger.Info(
+                        "ExactCampaignArmyBootstrap: initialized isolated day-hideout army bootstrap. " +
+                        "Scene=" + sceneName +
+                        " PlayerSide=" + playerSide +
+                        " ScenarioKind=" + (scenarioContext?.ScenarioKind ?? "Unknown") +
+                        " DefenderTotal=" + defenderTotal +
+                        " AttackerTotal=" + attackerTotal +
+                        " FormationBannerSeed={" + formationBannerDiagnostics + "}" +
+                        " ObjectCatalog={" + ExactCampaignObjectCatalogBootstrap.LastSummary + "}" +
+                        " SupplierDiagnostics=" + supplierDiagnostics +
+                        " TeamAIDiagnostics={" + teamAiDiagnostics + "}" +
+                        " ControllerDiagnostics=" + hideoutDiagnostics +
+                        " Source=" + (source ?? "unknown"));
+                    return true;
                 }
 
                 if (useLordsHallController)
@@ -2998,6 +3082,40 @@ namespace CoopSpectator.Infrastructure
             return controller.HasStarted;
         }
 
+        private static bool TryEnsureHideoutControllerInitialized(
+            Mission mission,
+            IMissionTroopSupplier[] suppliers,
+            BattleSideEnum playerSide,
+            int defenderTotal,
+            int attackerTotal,
+            out string diagnostics)
+        {
+            diagnostics = "mission-null";
+            if (mission == null)
+                return false;
+
+            CoopExactCampaignHideoutMissionController controller =
+                mission.GetMissionBehavior<CoopExactCampaignHideoutMissionController>();
+            bool created = false;
+            if (controller == null)
+            {
+                controller = new CoopExactCampaignHideoutMissionController(
+                    suppliers,
+                    playerSide);
+                mission.AddMissionBehavior(controller);
+                created = true;
+            }
+
+            controller.EnsureInitializedAndStarted();
+            diagnostics =
+                "Created=" + created +
+                " Started=" + controller.HasStarted +
+                " PlayerSide=" + playerSide +
+                " DefenderTotal=" + defenderTotal +
+                " AttackerTotal=" + attackerTotal;
+            return controller.HasStarted;
+        }
+
         private static void LogBootstrapContractSnapshot(
             Mission mission,
             NativeMissionAgentSpawnLogic spawnLogic,
@@ -3913,6 +4031,18 @@ namespace CoopSpectator.Infrastructure
                 return true;
             }
 
+            if (_activeMode == ActiveBootstrapMode.HideoutController)
+            {
+                CoopExactCampaignHideoutMissionController controller =
+                    mission.GetMissionBehavior<CoopExactCampaignHideoutMissionController>();
+                if (controller == null)
+                    return false;
+
+                attackerRemaining = controller.GetRemainingTroopCount(BattleSideEnum.Attacker);
+                defenderRemaining = controller.GetRemainingTroopCount(BattleSideEnum.Defender);
+                return true;
+            }
+
             return false;
         }
 
@@ -3939,6 +4069,13 @@ namespace CoopSpectator.Infrastructure
                     mission.GetMissionBehavior<CoopExactCampaignLordsHallMissionController>();
                 summary = controller?.BuildRuntimeSummary() ??
                           "Mode=LordsHall Started=false Controller=missing";
+            }
+            else if (_activeMode == ActiveBootstrapMode.HideoutController)
+            {
+                CoopExactCampaignHideoutMissionController controller =
+                    mission.GetMissionBehavior<CoopExactCampaignHideoutMissionController>();
+                summary = controller?.BuildRuntimeSummary() ??
+                          "Mode=Hideout Started=false Controller=missing";
             }
             else
             {
