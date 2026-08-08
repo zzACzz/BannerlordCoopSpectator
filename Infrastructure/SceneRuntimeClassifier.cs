@@ -1,4 +1,5 @@
 using System;
+using CoopSpectator.Infrastructure.Hideout;
 using CoopSpectator.Infrastructure.LordsHall;
 using CoopSpectator.Infrastructure.SallyOut;
 using CoopSpectator.Network.Messages;
@@ -64,7 +65,8 @@ namespace CoopSpectator.Infrastructure
         public static bool IsSceneAwareBattleRuntimeScene(string sceneName)
         {
             return IsOfficialMultiplayerBattleScene(sceneName)
-                || IsExactCampaignBattleScene(sceneName);
+                || IsExactCampaignBattleScene(sceneName)
+                || CoopHideoutBossPhaseContract.IsSupportedDayHideoutSceneName(sceneName);
         }
 
         public static bool IsExactSiegeAssaultWithDeploymentScene(string sceneName)

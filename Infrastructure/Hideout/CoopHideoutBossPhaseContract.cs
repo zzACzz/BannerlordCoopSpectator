@@ -76,6 +76,32 @@ namespace CoopSpectator.Infrastructure.Hideout
                 StringComparison.OrdinalIgnoreCase);
         }
 
+        public static bool IsSupportedDayHideoutSceneName(string sceneName)
+        {
+            return TryNormalizeDayHideoutSceneName(sceneName, out _);
+        }
+
+        public static bool TryNormalizeDayHideoutSceneName(
+            string sceneName,
+            out string normalizedSceneName)
+        {
+            normalizedSceneName = (sceneName ?? string.Empty).Trim();
+            if (normalizedSceneName.Length == 0)
+                return false;
+
+            if (string.Equals(normalizedSceneName, "bandit_forest", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(normalizedSceneName, "bandit_forest_sv", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return normalizedSceneName.StartsWith("desert_hideout_", StringComparison.OrdinalIgnoreCase) ||
+                   normalizedSceneName.StartsWith("forest_hideout_", StringComparison.OrdinalIgnoreCase) ||
+                   normalizedSceneName.StartsWith("hideout_steppe_", StringComparison.OrdinalIgnoreCase) ||
+                   normalizedSceneName.StartsWith("mountain_hideout_", StringComparison.OrdinalIgnoreCase) ||
+                   normalizedSceneName.StartsWith("sea_bandit_", StringComparison.OrdinalIgnoreCase);
+        }
+
         public static bool CanEnterDayHideoutCampaignBridge(
             bool hasDayController,
             bool hasAmbushController,

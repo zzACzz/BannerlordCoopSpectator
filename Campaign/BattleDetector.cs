@@ -5128,7 +5128,14 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             message.MapPatchSceneIndex = sceneContext?.MapPatchSceneIndex ?? -1;
             message.MapPatchNormalizedX = sceneContext?.MapPatchNormalizedX ?? 0f;
             message.MapPatchNormalizedY = sceneContext?.MapPatchNormalizedY ?? 0f;
-            if (SceneRuntimeClassifier.IsVillageBattleScene(message.MapScene))
+            if (CoopHideoutBossPhaseContract.IsSupportedDayHideoutSceneName(message.MapScene))
+            {
+                message.HasPatchEncounterDirection = false;
+                message.PatchEncounterDirX = 0f;
+                message.PatchEncounterDirY = 0f;
+                message.PatchEncounterDirectionSource = "fixed-day-hideout-scene-no-map-patch";
+            }
+            else if (SceneRuntimeClassifier.IsVillageBattleScene(message.MapScene))
             {
                 message.HasPatchEncounterDirection = false;
                 message.PatchEncounterDirX = 0f;
@@ -11258,6 +11265,29 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         ? "native-siege-ambush-mission-scene"
                         : "siege-ambush-contract-invalid:" +
                           siegeAmbushDiagnostics;
+                    return context;
+                }
+
+                bool isHideoutEncounter =
+                    battle?.IsHideoutBattle == true ||
+                    encounterSettlement?.IsHideout == true;
+                if (isHideoutEncounter)
+                {
+                    bool contractValid = TryValidateSupportedDayHideoutAssaultMission(
+                        mission,
+                        out string hideoutDiagnostics);
+                    bool sceneValid =
+                        CoopHideoutBossPhaseContract.TryNormalizeDayHideoutSceneName(
+                            missionSceneName,
+                            out string normalizedHideoutScene);
+                    context.BattleSceneName = sceneValid
+                        ? normalizedHideoutScene
+                        : missionSceneName;
+                    context.Source = contractValid && sceneValid
+                        ? "native-day-hideout-mission-scene"
+                        : "day-hideout-mission-scene-invalid:" +
+                          hideoutDiagnostics +
+                          " SceneValid=" + sceneValid;
                     return context;
                 }
 

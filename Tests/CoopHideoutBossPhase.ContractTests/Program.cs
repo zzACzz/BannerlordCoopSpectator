@@ -8,6 +8,7 @@ internal static class Program
         try
         {
             ValidateCampaignBridgePolicy();
+            ValidateScenePolicy();
             ValidateTriggerPolicy();
             ValidatePhaseTransitions();
             ValidateHostChoiceAuthority();
@@ -19,6 +20,49 @@ internal static class Program
         {
             Console.Error.WriteLine(ex.ToString());
             return 1;
+        }
+    }
+
+    private static void ValidateScenePolicy()
+    {
+        string[] supportedScenes =
+        {
+            "bandit_forest",
+            "bandit_forest_sv",
+            "desert_hideout_004_sv",
+            "forest_hideout_003",
+            "hideout_steppe_001",
+            "mountain_hideout_004_sv",
+            "sea_bandit_d_sv"
+        };
+        foreach (string scene in supportedScenes)
+        {
+            Assert(
+                CoopHideoutBossPhaseContract.IsSupportedDayHideoutSceneName(scene),
+                "Expected supported vanilla hideout scene: " + scene);
+        }
+
+        Assert(
+            CoopHideoutBossPhaseContract.TryNormalizeDayHideoutSceneName(
+                "  BANDIT_FOREST_SV  ",
+                out string normalizedScene) &&
+            normalizedScene == "BANDIT_FOREST_SV",
+            "A supported hideout scene must be trimmed without changing its identifier casing.");
+
+        string[] rejectedScenes =
+        {
+            null,
+            string.Empty,
+            "battle_terrain_n",
+            "mp_battle_map_001",
+            "village_battania_a",
+            "bandit_forest_variant"
+        };
+        foreach (string scene in rejectedScenes)
+        {
+            Assert(
+                !CoopHideoutBossPhaseContract.IsSupportedDayHideoutSceneName(scene),
+                "Expected non-hideout scene rejection: " + (scene ?? "null"));
         }
     }
 

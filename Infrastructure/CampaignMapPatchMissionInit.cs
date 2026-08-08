@@ -1,5 +1,6 @@
 using System;
 using CoopSpectator.Campaign;
+using CoopSpectator.Infrastructure.Hideout;
 using CoopSpectator.Infrastructure.LordsHall;
 using CoopSpectator.Infrastructure.SallyOut;
 using CoopSpectator.Infrastructure.SiegeAmbush;
@@ -166,6 +167,21 @@ namespace CoopSpectator.Infrastructure
                 return;
 
             BattleMapContractDiagnostics.LogMissionInitializerRecordState(record, source + " pre-apply");
+            if (CoopHideoutBossPhaseContract.IsSupportedDayHideoutSceneName(runtimeScene))
+            {
+                record.PlayingInCampaignMode = false;
+                record.SceneHasMapPatch = false;
+                record.PatchCoordinates = new Vec2(0f, 0f);
+                record.PatchEncounterDir = new Vec2(0f, 0f);
+                ModLogger.Info(
+                    source + ": skipped campaign map patch context for fixed day hideout scene. " +
+                    "RuntimeScene=" + runtimeScene + ".");
+                BattleMapContractDiagnostics.LogMissionInitializerRecordState(
+                    record,
+                    source + " skipped-fixed-day-hideout-map-patch");
+                return;
+            }
+
             ApplyVillageBattleSceneContext(ref record, runtimeScene, source);
             BattleSnapshotMessage snapshot = TryResolveSnapshot(source);
             if (snapshot == null)

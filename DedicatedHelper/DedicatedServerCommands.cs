@@ -157,7 +157,12 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
         public static bool SendStartMission()
         {
             TryLogAvailableServerOptionsViaHttp();
-            TryApplySceneAwareMissionSelectionFromBattleRoster();
+            if (!TryApplySceneAwareMissionSelectionFromBattleRoster())
+            {
+                ModLogger.Info(
+                    "DedicatedServerCommands: SendStartMission rejected by the isolated hideout scene contract.");
+                return false;
+            }
             ModLogger.Info("DedicatedServerCommands: SendStartMission [ID check] expected GameTypeId on dedicated=" + CoopGameModeIds.OfficialBattle + " for battle-map runtime, fallback custom ids otherwise.");
             return SendCommand(StartMissionCommand);
         }
@@ -203,7 +208,7 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
         }
         public static bool SendEndMission() => SendCommand(EndMissionCommand);
 
-        private static void TryApplySceneAwareMissionSelectionFromBattleRoster()
+        private static bool TryApplySceneAwareMissionSelectionFromBattleRoster()
         {
             try
             {
@@ -211,7 +216,7 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
                 if (snapshot == null)
                 {
                     ModLogger.Info("DedicatedServerCommands: scene-aware mission selection skipped (battle snapshot missing).");
-                    return;
+                    return true;
                 }
 
                 string requestedScene = snapshot.MultiplayerScene;
@@ -220,6 +225,35 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
                     requestedGameType,
                     CoopHideoutBossPhaseContract.GameModeId,
                     StringComparison.Ordinal);
+                bool snapshotIsHideout = CoopHideoutBossPhaseContract.IsHideoutScenario(
+                    snapshot.ScenarioContext?.ScenarioKind);
+                if (isIsolatedDayHideout && !snapshotIsHideout)
+                {
+                    ModLogger.Info(
+                        "DedicatedServerCommands: rejected CoopHideoutDay mission selection because the snapshot scenario is not a hideout. " +
+                        "RequestedScene=" + (requestedScene ?? "missing") +
+                        " ScenarioKind=" + (snapshot.ScenarioContext?.ScenarioKind ?? "missing") + ".");
+                    return false;
+                }
+
+                if (snapshotIsHideout)
+                {
+                    if (!isIsolatedDayHideout ||
+                        !CoopHideoutBossPhaseContract.TryNormalizeDayHideoutSceneName(
+                            requestedScene,
+                            out string normalizedHideoutScene))
+                    {
+                        ModLogger.Info(
+                            "DedicatedServerCommands: rejected isolated day hideout mission selection before start_mission. " +
+                            "RequestedScene=" + (requestedScene ?? "missing") +
+                            " RequestedGameType=" + (requestedGameType ?? "missing") +
+                            " ScenarioKind=" + (snapshot.ScenarioContext?.ScenarioKind ?? "missing") + ".");
+                        return false;
+                    }
+
+                    requestedScene = normalizedHideoutScene;
+                }
+
                 bool requiresSceneRegistration =
                     isIsolatedDayHideout ||
                     SceneRuntimeClassifier.RequiresDedicatedSceneRegistration(requestedScene);
@@ -232,7 +266,7 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
                 if (string.IsNullOrWhiteSpace(requestedScene))
                 {
                     ModLogger.Info("DedicatedServerCommands: scene-aware mission selection skipped (snapshot MultiplayerScene missing).");
-                    return;
+                    return true;
                 }
 
                 if (!DedicatedHelperLauncher.HasDedicatedProcess())
@@ -242,7 +276,7 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
                         "RequestedScene=" + requestedScene +
                         " RequestedGameType=" + (requestedGameType ?? "unknown") +
                         " AppliedGameType=" + appliedGameType + ".");
-                    return;
+                    return true;
                 }
 
                 if (requiresSceneRegistration)
@@ -263,7 +297,7 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
                     " ResolverSource=" + (snapshot.MultiplayerSceneResolverSource ?? "unknown") + ".");
 
                 if (TryApplySceneAwareMissionSelectionViaWebOptions(requestedScene, requestedGameType, appliedGameType))
-                    return;
+                    return true;
 
                 bool addMapSent = DedicatedHelperLauncher.TrySendConsoleLine("add_map_to_usable_maps " + requestedScene + " " + appliedGameType);
                 bool gameTypeSent = DedicatedHelperLauncher.TrySendConsoleLine("GameType " + appliedGameType);
@@ -278,10 +312,12 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
                     " MapSent=" + mapSent +
                     " RequestedScene=" + requestedScene +
                     " AppliedGameType=" + appliedGameType + ".");
+                return true;
             }
             catch (Exception ex)
             {
                 ModLogger.Info("DedicatedServerCommands: scene-aware mission selection failed. " + ex.Message);
+                return true;
             }
         }
 

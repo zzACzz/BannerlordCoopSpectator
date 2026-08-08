@@ -21,11 +21,33 @@ namespace CoopSpectator.GameMode
 
         public override void StartMultiplayerGame(string scene)
         {
+            if (!CoopHideoutBossPhaseContract.TryNormalizeDayHideoutSceneName(
+                    scene,
+                    out string normalizedScene))
+            {
+                ModLogger.Info(
+                    "CoopHideoutDay: rejected mission start because the requested scene is not a supported hideout scene. " +
+                    "Scene=" + (scene ?? string.Empty) + ".");
+                return;
+            }
+
+            var scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext;
+            if (!CoopHideoutBossPhaseContract.IsHideoutScenario(scenarioContext?.ScenarioKind))
+            {
+                ModLogger.Info(
+                    "CoopHideoutDay: rejected mission start because the active battle snapshot is not a hideout scenario. " +
+                    "Scene=" + normalizedScene +
+                    " ScenarioKind=" + (scenarioContext?.ScenarioKind ?? "missing") + ".");
+                return;
+            }
+
             ModLogger.Info(
                 "CoopHideoutDay: opening isolated day hideout mission. " +
-                "Scene=" + (scene ?? string.Empty) +
+                "Scene=" + normalizedScene +
                 " Shell=" + BattleMissionShell + ".");
-            MissionInitializerRecord record = new MissionInitializerRecord(scene);
+            MissionInitializerRecord record = new MissionInitializerRecord(normalizedScene);
             MissionState.OpenNew(BattleMissionShell, record, CreateBehaviorsForMission);
         }
 
