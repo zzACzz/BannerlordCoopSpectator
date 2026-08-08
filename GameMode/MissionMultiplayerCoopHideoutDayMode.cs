@@ -136,6 +136,15 @@ namespace CoopSpectator.GameMode
                     .Where(behavior => behavior != null)
                     .ToList();
 
+            if (GameNetwork.IsServer &&
+                GameNetwork.IsDedicatedServer &&
+                !list.Any(behavior => behavior is MissionMultiplayerGameModeBaseClient))
+            {
+                list.Insert(0, new MissionMultiplayerCoopBattleClient());
+                ModLogger.Info(
+                    "CoopHideoutDay: inserted dedicated MissionMultiplayerGameModeBaseClient bridge before MissionCustomGameServerComponent for MissionScoreboardComponent lifecycle compatibility.");
+            }
+
             if (!list.Any(behavior => behavior is CoopHideoutBossPhaseController))
                 list.Add(new CoopHideoutBossPhaseController());
 
