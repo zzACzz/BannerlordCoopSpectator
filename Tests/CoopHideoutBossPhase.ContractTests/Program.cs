@@ -172,6 +172,23 @@ internal static class Program
         Assert(CoopHideoutBossPhaseContract.ResolveBossTriggerCount(20) == 5, "Twenty enemies must trigger at five.");
         Assert(CoopHideoutBossPhaseContract.ResolveBossTriggerCount(100) == 5, "The trigger must be capped at five.");
         Assert(
+            CoopHideoutBossPhaseContract.ResolveReservedBossTriggerCount(20) == 0,
+            "A reserved boss group must wait until every initial defender is depleted.");
+        Assert(
+            CoopHideoutBossPhaseContract.ShouldSpawnReservedBossGroup(
+                20,
+                activeInitialEnemyCount: 0,
+                hostAgentActive: true,
+                bossFightEntityAvailable: true),
+            "A reserved boss group must start after the initial group is depleted.");
+        Assert(
+            !CoopHideoutBossPhaseContract.ShouldSpawnReservedBossGroup(
+                20,
+                activeInitialEnemyCount: 1,
+                hostAgentActive: true,
+                bossFightEntityAvailable: true),
+            "A reserved boss group must not overlap the last initial defender.");
+        Assert(
             CoopHideoutBossPhaseContract.ShouldPrepareBossPhase(20, 5, hostAgentActive: true, bossFightEntityAvailable: true),
             "A valid five-enemy boss threshold must start preparation.");
         Assert(
@@ -271,6 +288,21 @@ internal static class Program
                 out rejection) && rejection == "choice_already_committed",
             "A committed choice must be idempotent.");
         AssertTransition(session, CoopHideoutBossPhase.Duel);
+
+        CoopHideoutBossPhaseSession allBattleSession = NewSession();
+        allBattleSession.HostPeerIndex = 7;
+        AssertTransition(allBattleSession, CoopHideoutBossPhase.PreparingCinematic);
+        AssertTransition(allBattleSession, CoopHideoutBossPhase.Cinematic);
+        AssertTransition(allBattleSession, CoopHideoutBossPhase.AwaitingHostChoice);
+        Assert(
+            CoopHideoutBossPhaseContract.TryAcceptHostChoice(
+                allBattleSession,
+                senderPeerIndex: 7,
+                expectedRevision: allBattleSession.Revision,
+                CoopHideoutBossClientCommandKind.ChooseAllBattle,
+                out choice,
+                out rejection) && choice == CoopHideoutBossChoice.AllBattle,
+            "The explicit fight-together command must resolve to an all-participants battle.");
     }
 
     private static void ValidateFallbackTransitions()

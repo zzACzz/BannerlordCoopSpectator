@@ -353,10 +353,14 @@ namespace CoopSpectator.MissionBehaviors
             Agent bossAgent;
             if (hideoutController?.HasReservedBossGroup == true)
             {
-                int triggerCount = CoopHideoutBossPhaseContract.ResolveBossTriggerCount(
-                    _initialEnemyCount);
-                if (triggerCount <= 0 || activeInitialAssaultEnemies > triggerCount)
+                if (!CoopHideoutBossPhaseContract.ShouldSpawnReservedBossGroup(
+                        _initialEnemyCount,
+                        activeInitialAssaultEnemies,
+                        hostAgent.IsActive(),
+                        bossFightEntity != null))
+                {
                     return;
+                }
 
                 if (!hideoutController.TrySpawnReservedBossGroup(
                         out bossAgent,
@@ -412,7 +416,7 @@ namespace CoopSpectator.MissionBehaviors
                 "InitialEnemyCount=" + _initialEnemyCount +
                 " ActiveInitialAssaultEnemyCount=" + activeInitialAssaultEnemies +
                 " ActiveEnemyCountAfterReserve=" + activeEnemies.Count +
-                " TriggerCount=" + CoopHideoutBossPhaseContract.ResolveBossTriggerCount(_initialEnemyCount) +
+                " ReservedTriggerCount=" + CoopHideoutBossPhaseContract.ResolveReservedBossTriggerCount(_initialEnemyCount) +
                 " HostPeer=" + hostPeer.Index +
                 " HostAgent=" + hostAgent.Index +
                 " BossAgent=" + bossAgent.Index +

@@ -163,6 +163,14 @@ namespace CoopSpectator.GameMode
                     "CoopHideoutDay requires AgentHumanAILogic before agent materialization.");
             }
 
+            if (GameNetwork.IsServer &&
+                !list.Any(behavior => behavior is CoopHideoutStealthPatrolController))
+            {
+                list.Add(new CoopHideoutStealthPatrolController());
+                ModLogger.Info(
+                    "CoopHideoutDay: inserted the isolated hideout stealth and patrol controller into the server behavior stack.");
+            }
+
             if (!list.Any(behavior => behavior is CoopHideoutBossPhaseController))
                 list.Add(new CoopHideoutBossPhaseController());
 

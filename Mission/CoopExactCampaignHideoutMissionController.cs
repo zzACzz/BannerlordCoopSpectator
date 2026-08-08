@@ -21,6 +21,13 @@ namespace CoopSpectator.MissionBehaviors
     {
         private const string HideoutBanditActionSetSuffix = "_hideout_bandit";
 
+        private sealed class DefenderPlacementSlot
+        {
+            internal MatrixFrame SpawnFrame { get; set; }
+
+            internal List<MatrixFrame> PatrolFrames { get; set; } = new List<MatrixFrame>();
+        }
+
         private readonly IMissionTroopSupplier[] _suppliers;
         private readonly BattleSideEnum _playerSide;
         private readonly int _firstPhaseEnemyTroopCount;
@@ -272,8 +279,8 @@ namespace CoopSpectator.MissionBehaviors
                         " EnemyFirstPhase=" + _firstPhaseEnemyTroopCount);
                 }
 
-                List<MatrixFrame> defenderFrames = CollectHideoutDefenderFrames();
-                if (defenderFrames.Count == 0)
+                List<DefenderPlacementSlot> defenderSlots = CollectHideoutDefenderSlots();
+                if (defenderSlots.Count == 0)
                     throw new InvalidOperationException("hideout-defender-scene-frames-empty");
 
                 List<IAgentOriginBase> playerOrigins = SupplyAll(playerSupplier);
@@ -295,16 +302,21 @@ namespace CoopSpectator.MissionBehaviors
                 SetTeamsAsEnemies(playerTeam, enemyTeam, false);
 
                 SpawnPlayerGroup(playerOrigins);
+                CoopHideoutStealthPatrolController stealthController =
+                    Mission.GetMissionBehavior<CoopHideoutStealthPatrolController>();
                 for (int index = 0; index < initialEnemyOrigins.Count; index++)
                 {
-                    MatrixFrame frame = defenderFrames[index % defenderFrames.Count];
+                    DefenderPlacementSlot slot = defenderSlots[index % defenderSlots.Count];
                     Agent agent = SpawnEnemy(
                         initialEnemyOrigins[index],
-                        frame,
+                        slot.SpawnFrame,
                         isAlarmed: false,
                         wieldInitialWeapons: false);
                     if (agent != null)
+                    {
                         _spawnedEnemyAgents.Add(agent);
+                        stealthController?.RegisterDefender(agent, slot.PatrolFrames);
+                    }
                 }
 
                 _initialAssaultEnemyCount = _spawnedEnemyAgents.Count;
@@ -318,7 +330,8 @@ namespace CoopSpectator.MissionBehaviors
                     "PlayerAgents=" + _spawnedPlayerAgents.Count +
                     " EnemyAgents=" + _initialAssaultEnemyCount +
                     " ReservedBossGroup=" + ReservedEnemyCount +
-                    " DefenderFrames=" + defenderFrames.Count + ".");
+                    " DefenderSlots=" + defenderSlots.Count +
+                    " PatrolRoutes=" + defenderSlots.Count(slot => slot.PatrolFrames.Count > 1) + ".");
             }
             catch (Exception ex)
             {
@@ -383,7 +396,7 @@ namespace CoopSpectator.MissionBehaviors
 
             AgentFlag flags = agent.GetAgentFlags();
             agent.SetAgentFlags((AgentFlag)(((uint)flags | 0x10000u) & 0xFFEFFFFFu));
-            agent.SetAutomaticTargetSelection(true);
+            agent.SetAutomaticTargetSelection(isAlarmed);
             if (isAlarmed)
             {
                 agent.SetWatchState(Agent.WatchState.Alarmed);
@@ -398,12 +411,31 @@ namespace CoopSpectator.MissionBehaviors
             Team enemyTeam = ResolveTeam(OpposingSide(_playerSide));
             SetTeamsAsEnemies(playerTeam, enemyTeam, true);
 
-            foreach (Agent agent in _spawnedPlayerAgents.Concat(_spawnedEnemyAgents))
+            CoopHideoutStealthPatrolController stealthController =
+                Mission.GetMissionBehavior<CoopHideoutStealthPatrolController>();
+
+            foreach (Agent agent in _spawnedPlayerAgents)
             {
                 if (agent?.IsActive() != true)
                     continue;
                 agent.SetWatchState(Agent.WatchState.Alarmed);
                 TryWieldInitialSlots(agent);
+            }
+
+            if (stealthController != null)
+            {
+                stealthController.Activate();
+            }
+            else
+            {
+                foreach (Agent agent in _spawnedEnemyAgents)
+                {
+                    if (agent?.IsActive() != true)
+                        continue;
+                    agent.SetAutomaticTargetSelection(true);
+                    agent.SetWatchState(Agent.WatchState.Alarmed);
+                    TryWieldInitialSlots(agent);
+                }
             }
 
             if (playerTeam == null)
@@ -413,8 +445,12 @@ namespace CoopSpectator.MissionBehaviors
             {
                 if (formation == null || formation.CountOfUnits <= 0)
                     continue;
-                formation.SetMovementOrder(MovementOrder.MovementOrderCharge);
-                formation.SetFiringOrder(FiringOrder.FiringOrderFireAtWill);
+                Agent playerAgent = _spawnedPlayerAgents.FirstOrDefault(agent =>
+                    agent?.IsActive() == true && !agent.IsAIControlled);
+                formation.SetMovementOrder(playerAgent != null
+                    ? MovementOrder.MovementOrderFollow(playerAgent)
+                    : MovementOrder.MovementOrderStop);
+                formation.SetFiringOrder(FiringOrder.FiringOrderHoldYourFire);
             }
 
             _combatActivated = true;
@@ -439,8 +475,23 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        private List<MatrixFrame> CollectHideoutDefenderFrames()
+        private List<DefenderPlacementSlot> CollectHideoutDefenderSlots()
         {
+            var slots = new List<DefenderPlacementSlot>();
+            AppendGuardPatrolSlots(slots);
+            AppendDynamicPatrolSlots(slots);
+
+            string source = "engine-scene-routes";
+            if (slots.Count > 0)
+            {
+                ModLogger.Info(
+                    "CoopExactCampaignHideoutMissionController: resolved defender scene slots. " +
+                    "Count=" + slots.Count +
+                    " Routes=" + slots.Count(slot => slot.PatrolFrames.Count > 1) +
+                    " Source=" + source + ".");
+                return slots;
+            }
+
             var frames = new List<MatrixFrame>();
             if (Mission?.ActiveMissionObjects != null)
             {
@@ -461,7 +512,7 @@ namespace CoopSpectator.MissionBehaviors
                 }
             }
 
-            string source = "managed-mission-objects";
+            source = "managed-mission-objects";
             if (frames.Count == 0)
             {
                 AppendSceneEntityFrames(
@@ -473,11 +524,104 @@ namespace CoopSpectator.MissionBehaviors
                 source = "engine-scene-tags";
             }
 
+            foreach (MatrixFrame frame in frames)
+            {
+                slots.Add(new DefenderPlacementSlot
+                {
+                    SpawnFrame = frame,
+                    PatrolFrames = new List<MatrixFrame> { frame }
+                });
+            }
+
             ModLogger.Info(
-                "CoopExactCampaignHideoutMissionController: resolved defender scene frames. " +
-                "Count=" + frames.Count +
+                "CoopExactCampaignHideoutMissionController: resolved defender scene slots. " +
+                "Count=" + slots.Count +
+                " Routes=0" +
                 " Source=" + source + ".");
-            return frames;
+            return slots;
+        }
+
+        private void AppendGuardPatrolSlots(List<DefenderPlacementSlot> slots)
+        {
+            if (slots == null)
+                return;
+
+            try
+            {
+                IEnumerable<GameEntity> entities = Mission?.Scene?.FindEntitiesWithTag(
+                    CoopHideoutBossPhaseContract.DefenderGuardPatrolEntityTag);
+                foreach (GameEntity entity in (entities ?? Enumerable.Empty<GameEntity>())
+                             .Where(candidate => candidate != null))
+                {
+                    List<MatrixFrame> route = entity.GetChildren()
+                        .Where(child => child != null)
+                        .OrderBy(child => ReadEntityOrder(child.Name))
+                        .Select(child => child.GetGlobalFrame())
+                        .ToList();
+                    if (route.Count == 0)
+                        route.Add(entity.GetGlobalFrame());
+                    slots.Add(new DefenderPlacementSlot
+                    {
+                        SpawnFrame = route[0],
+                        PatrolFrames = route
+                    });
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private void AppendDynamicPatrolSlots(List<DefenderPlacementSlot> slots)
+        {
+            if (slots == null)
+                return;
+
+            try
+            {
+                IEnumerable<GameEntity> entities = Mission?.Scene?.FindEntitiesWithTag(
+                    CoopHideoutBossPhaseContract.DefenderDynamicPatrolAreaEntityTag);
+                foreach (GameEntity entity in (entities ?? Enumerable.Empty<GameEntity>())
+                             .Where(candidate => candidate != null))
+                {
+                    MatrixFrame frame = ResolveDynamicPatrolFrame(entity);
+                    slots.Add(new DefenderPlacementSlot
+                    {
+                        SpawnFrame = frame,
+                        PatrolFrames = new List<MatrixFrame> { frame }
+                    });
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static MatrixFrame ResolveDynamicPatrolFrame(GameEntity entity)
+        {
+            if (entity == null)
+                return MatrixFrame.Identity;
+
+            try
+            {
+                var descendants = new List<GameEntity>();
+                entity.GetChildrenRecursive(ref descendants);
+                GameEntity patrolPoint = descendants.LastOrDefault(candidate =>
+                    candidate != null &&
+                    string.Equals(candidate.Name, "patrol_point", StringComparison.OrdinalIgnoreCase));
+                if (patrolPoint != null)
+                    return patrolPoint.GetGlobalFrame();
+            }
+            catch
+            {
+            }
+
+            return entity.GetGlobalFrame();
+        }
+
+        private static int ReadEntityOrder(string entityName)
+        {
+            return int.TryParse(entityName, out int order) ? order : int.MaxValue;
         }
 
         private void AppendSceneEntityFrames(
@@ -691,7 +835,7 @@ namespace CoopSpectator.MissionBehaviors
             right.SetIsEnemyOf(left, enemies);
         }
 
-        private static void TryWieldInitialSlots(Agent agent)
+        internal static void TryWieldInitialSlots(Agent agent)
         {
             if (agent == null)
                 return;
@@ -715,6 +859,477 @@ namespace CoopSpectator.MissionBehaviors
                 Agent.WeaponWieldActionType.Instant,
                 out _,
                 out _);
+        }
+    }
+
+    /// <summary>
+    /// Dedicated-safe hideout stealth and patrol runtime. It deliberately uses
+    /// only MountAndBlade/Engine APIs because the dedicated mission has no live
+    /// campaign or SandBox CampaignAgentComponent graph.
+    /// </summary>
+    internal sealed class CoopHideoutStealthPatrolController : MissionLogic
+    {
+        private const float VisionRange = 20f;
+        private const float CrouchedVisionFactor = 0.65f;
+        private const float CloseAwarenessRange = 4f;
+        private const float RearAwarenessRange = 6f;
+        private const float MinimumFrontDot = 0.15f;
+        private const float CautiousThreshold = 0.35f;
+        private const float AlarmThreshold = 1.25f;
+        private const float AlarmPropagationRange = 12f;
+        private const float CorpseAwarenessRange = 10f;
+        private const float DetectionInterval = 0.15f;
+        private const float PatrolArrivalDistanceSquared = 2.25f;
+        private const float PatrolWaitSeconds = 1.25f;
+        private const float PatrolProgressTimeoutSeconds = 12f;
+        private const float StalledAssaultAlarmSeconds = 45f;
+
+        private sealed class DefenderState
+        {
+            internal Agent Agent { get; set; }
+
+            internal List<MatrixFrame> Route { get; set; }
+
+            internal int RouteIndex { get; set; }
+
+            internal float Suspicion { get; set; }
+
+            internal bool IsCautious { get; set; }
+
+            internal bool IsAlarmed { get; set; }
+
+            internal float NextRouteAt { get; set; }
+
+            internal float NextCommandAt { get; set; }
+
+            internal Vec2 PreviousPosition { get; set; }
+
+            internal float LastProgressAt { get; set; }
+        }
+
+        private readonly Dictionary<int, DefenderState> _defenders =
+            new Dictionary<int, DefenderState>();
+        private bool _active;
+        private bool _globalAlarm;
+        private float _detectionAccumulator;
+        private float _lastCombatProgressAt;
+
+        internal void RegisterDefender(
+            Agent agent,
+            IReadOnlyList<MatrixFrame> routeFrames)
+        {
+            if (!GameNetwork.IsServer || agent == null)
+                return;
+
+            List<MatrixFrame> route = (routeFrames ?? Array.Empty<MatrixFrame>())
+                .ToList();
+            if (route.Count == 0)
+            {
+                MatrixFrame frame = MatrixFrame.Identity;
+                frame.origin = agent.Position;
+                route.Add(frame);
+            }
+
+            var state = new DefenderState
+            {
+                Agent = agent,
+                Route = route,
+                RouteIndex = route.Count > 1 ? 1 : 0,
+                PreviousPosition = agent.Position.AsVec2,
+                LastProgressAt = Mission?.CurrentTime ?? 0f
+            };
+            _defenders[agent.Index] = state;
+            PreparePatrollingAgent(state, issueMovement: true);
+        }
+
+        internal void Activate()
+        {
+            if (!GameNetwork.IsServer || _active)
+                return;
+
+            _active = true;
+            _lastCombatProgressAt = Mission?.CurrentTime ?? 0f;
+            foreach (DefenderState state in _defenders.Values)
+                PreparePatrollingAgent(state, issueMovement: true);
+
+            ModLogger.Info(
+                "CoopHideoutStealthPatrolController: isolated stealth patrol runtime activated. " +
+                "Defenders=" + _defenders.Count +
+                " Routes=" + _defenders.Values.Count(state => state.Route.Count > 1) + ".");
+        }
+
+        public override void OnMissionTick(float dt)
+        {
+            if (!GameNetwork.IsServer || !_active || Mission == null || Mission.MissionEnded)
+                return;
+
+            CoopBattlePhase phase = CoopBattlePhaseRuntimeState.GetPhase();
+            if (phase < CoopBattlePhase.BattleActive || phase >= CoopBattlePhase.BattleEnded)
+                return;
+
+            float now = Mission.CurrentTime;
+            foreach (DefenderState state in _defenders.Values.ToArray())
+            {
+                if (state.Agent?.IsActive() != true || state.IsAlarmed)
+                    continue;
+                TickPatrol(state, now);
+            }
+
+            _detectionAccumulator += Math.Max(0f, dt);
+            if (_detectionAccumulator >= DetectionInterval)
+            {
+                float detectionDt = _detectionAccumulator;
+                _detectionAccumulator = 0f;
+                foreach (DefenderState state in _defenders.Values.ToArray())
+                {
+                    if (state.Agent?.IsActive() == true && !state.IsAlarmed)
+                        TickAwareness(state, detectionDt);
+                }
+            }
+
+            if (_globalAlarm &&
+                now - _lastCombatProgressAt >= StalledAssaultAlarmSeconds &&
+                _defenders.Values.Any(state => state.Agent?.IsActive() == true && !state.IsAlarmed))
+            {
+                AlarmAll("stalled-assault-failsafe");
+            }
+        }
+
+        public override void OnScoreHit(
+            Agent affectedAgent,
+            Agent affectorAgent,
+            WeaponComponentData attackerWeapon,
+            bool isBlocked,
+            bool isSiegeEngineHit,
+            in Blow blow,
+            in AttackCollisionData collisionData,
+            float damagedHp,
+            float hitDistance,
+            float shotDifficulty)
+        {
+            if (GameNetwork.IsServer &&
+                affectedAgent != null &&
+                _defenders.TryGetValue(affectedAgent.Index, out DefenderState affectedState) &&
+                affectedAgent.IsActive())
+            {
+                AlarmWithPropagation(affectedState, "defender-hit");
+            }
+
+            base.OnScoreHit(
+                affectedAgent,
+                affectorAgent,
+                attackerWeapon,
+                isBlocked,
+                isSiegeEngineHit,
+                blow,
+                collisionData,
+                damagedHp,
+                hitDistance,
+                shotDifficulty);
+        }
+
+        public override void OnAgentRemoved(
+            Agent affectedAgent,
+            Agent affectorAgent,
+            AgentState agentState,
+            KillingBlow blow)
+        {
+            if (GameNetwork.IsServer &&
+                affectedAgent != null &&
+                _defenders.TryGetValue(affectedAgent.Index, out DefenderState removedState))
+            {
+                _lastCombatProgressAt = Mission?.CurrentTime ?? _lastCombatProgressAt;
+                AlarmNearby(
+                    removedState.Agent.Position,
+                    CorpseAwarenessRange,
+                    "nearby-defender-removed");
+            }
+
+            base.OnAgentRemoved(affectedAgent, affectorAgent, agentState, blow);
+        }
+
+        private void PreparePatrollingAgent(DefenderState state, bool issueMovement)
+        {
+            Agent agent = state?.Agent;
+            if (agent?.IsActive() != true || state.IsAlarmed)
+                return;
+
+            agent.SetAutomaticTargetSelection(false);
+            agent.SetFiringOrder(FiringOrder.RangedWeaponUsageOrderEnum.HoldYourFire);
+            agent.SetWatchState(state.IsCautious
+                ? Agent.WatchState.Cautious
+                : Agent.WatchState.Patrolling);
+            if (issueMovement)
+                IssuePatrolTarget(state);
+        }
+
+        private void TickPatrol(DefenderState state, float now)
+        {
+            if (state.Route == null || state.Route.Count == 0)
+                return;
+
+            MatrixFrame targetFrame = state.Route[state.RouteIndex % state.Route.Count];
+            float distanceSquared = state.Agent.Position.AsVec2.DistanceSquared(targetFrame.origin.AsVec2);
+            Vec2 currentPosition = state.Agent.Position.AsVec2;
+            if (currentPosition.DistanceSquared(state.PreviousPosition) > 0.09f)
+            {
+                state.PreviousPosition = currentPosition;
+                state.LastProgressAt = now;
+            }
+
+            if (distanceSquared <= PatrolArrivalDistanceSquared && now >= state.NextRouteAt)
+            {
+                state.NextRouteAt = now + PatrolWaitSeconds;
+                if (state.Route.Count > 1)
+                {
+                    state.RouteIndex = (state.RouteIndex + 1) % state.Route.Count;
+                    state.NextCommandAt = state.NextRouteAt;
+                }
+            }
+            else if (distanceSquared > PatrolArrivalDistanceSquared &&
+                     now - state.LastProgressAt >= PatrolProgressTimeoutSeconds)
+            {
+                state.RouteIndex = (state.RouteIndex + 1) % state.Route.Count;
+                state.LastProgressAt = now;
+                state.NextCommandAt = now;
+                ModLogger.Verbose(
+                    "CoopHideoutStealthPatrolController: advanced a stalled patrol route. " +
+                    "Agent=" + state.Agent.Index + ".");
+            }
+
+            if (now >= state.NextCommandAt)
+            {
+                IssuePatrolTarget(state);
+                state.NextCommandAt = now + 1f;
+            }
+        }
+
+        private void IssuePatrolTarget(DefenderState state)
+        {
+            Agent agent = state?.Agent;
+            if (agent?.IsActive() != true || state.Route == null || state.Route.Count == 0)
+                return;
+
+            try
+            {
+                MatrixFrame targetFrame = state.Route[state.RouteIndex % state.Route.Count];
+                Vec2 direction = targetFrame.rotation.f.AsVec2;
+                if (direction.LengthSquared < 0.0001f)
+                    direction = new Vec2(0f, 1f);
+                direction.Normalize();
+                var targetPosition = new WorldPosition(
+                    Mission.Scene,
+                    UIntPtr.Zero,
+                    targetFrame.origin,
+                    hasValidZ: false);
+                agent.SetScriptedPositionAndDirection(
+                    ref targetPosition,
+                    direction.RotationInRadians,
+                    addHumanLikeDelay: true);
+            }
+            catch
+            {
+            }
+        }
+
+        private void TickAwareness(DefenderState state, float dt)
+        {
+            Agent guard = state.Agent;
+            Agent visibleTarget = null;
+            float strongestRate = 0f;
+            foreach (Agent candidate in Mission.Agents)
+            {
+                if (!IsPotentialPlayerTarget(guard, candidate))
+                    continue;
+
+                float rate = ResolveDetectionRate(guard, candidate);
+                if (rate <= strongestRate)
+                    continue;
+                strongestRate = rate;
+                visibleTarget = candidate;
+            }
+
+            if (visibleTarget != null)
+            {
+                state.Suspicion = Math.Min(AlarmThreshold, state.Suspicion + strongestRate * dt);
+                if (!state.IsCautious && state.Suspicion >= CautiousThreshold)
+                {
+                    state.IsCautious = true;
+                    guard.SetWatchState(Agent.WatchState.Cautious);
+                    guard.SetLookAgent(visibleTarget);
+                }
+
+                if (state.Suspicion >= AlarmThreshold)
+                    AlarmWithPropagation(state, "visual-detection");
+                return;
+            }
+
+            state.Suspicion = Math.Max(0f, state.Suspicion - dt * 0.3f);
+            if (state.IsCautious && state.Suspicion < CautiousThreshold * 0.4f)
+            {
+                state.IsCautious = false;
+                guard.SetLookAgent(null);
+                guard.SetWatchState(Agent.WatchState.Patrolling);
+            }
+        }
+
+        private float ResolveDetectionRate(Agent guard, Agent target)
+        {
+            Vec3 guardEye = guard.Position + Vec3.Up * 1.55f;
+            Vec3 targetEye = target.Position + Vec3.Up * 1.35f;
+            Vec3 delta = targetEye - guardEye;
+            float distanceSquared = delta.AsVec2.LengthSquared;
+            if (distanceSquared <= 0.0001f || Math.Abs(delta.z) > 5f)
+                return 0f;
+
+            float distance = (float)Math.Sqrt(distanceSquared);
+            float effectiveRange = VisionRange * (target.CrouchMode ? CrouchedVisionFactor : 1f);
+            if (distance > effectiveRange)
+                return 0f;
+
+            Vec2 toTarget = delta.AsVec2;
+            toTarget.Normalize();
+            Vec2 look = guard.LookDirection.AsVec2;
+            if (look.LengthSquared < 0.0001f)
+                look = new Vec2(0f, 1f);
+            look.Normalize();
+            float frontDot = look.x * toTarget.x + look.y * toTarget.y;
+            if (distance > CloseAwarenessRange &&
+                frontDot < MinimumFrontDot &&
+                distance > RearAwarenessRange)
+            {
+                return 0f;
+            }
+
+            if (!HasLineOfSight(guardEye, targetEye, distance))
+                return 0f;
+
+            if (distance <= CloseAwarenessRange)
+                return AlarmThreshold / DetectionInterval;
+
+            float proximity = Math.Max(0f, (effectiveRange - distance) / effectiveRange);
+            float facing = Math.Max(0.2f, (frontDot + 1f) * 0.5f);
+            return (0.45f + proximity * 1.35f) * facing;
+        }
+
+        private bool HasLineOfSight(Vec3 from, Vec3 to, float distance)
+        {
+            try
+            {
+                if (!Mission.Scene.RayCastForClosestEntityOrTerrain(
+                        from,
+                        to,
+                        out float collisionDistance,
+                        out Vec3 collisionPoint,
+                        out WeakGameEntity collidedEntity,
+                        0.05f,
+                        (BodyFlags)67188481))
+                {
+                    return true;
+                }
+
+                return collisionDistance >= distance - 0.75f;
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        private static bool IsPotentialPlayerTarget(Agent guard, Agent candidate)
+        {
+            return guard != null &&
+                   candidate?.IsActive() == true &&
+                   candidate.IsHuman &&
+                   candidate.Team != null &&
+                   candidate.Team != Team.Invalid &&
+                   guard.Team != null &&
+                   candidate.Team.Side != guard.Team.Side;
+        }
+
+        private void AlarmWithPropagation(DefenderState source, string reason)
+        {
+            if (source == null)
+                return;
+
+            AlarmDefender(source, reason);
+            AlarmNearby(source.Agent.Position, AlarmPropagationRange, "alarm-propagation");
+        }
+
+        private void AlarmNearby(Vec3 position, float range, string reason)
+        {
+            float rangeSquared = range * range;
+            foreach (DefenderState state in _defenders.Values)
+            {
+                if (state.Agent?.IsActive() != true || state.IsAlarmed)
+                    continue;
+                if (state.Agent.Position.AsVec2.DistanceSquared(position.AsVec2) <= rangeSquared)
+                    AlarmDefender(state, reason);
+            }
+        }
+
+        private void AlarmAll(string reason)
+        {
+            foreach (DefenderState state in _defenders.Values)
+            {
+                if (state.Agent?.IsActive() == true && !state.IsAlarmed)
+                    AlarmDefender(state, reason);
+            }
+            _lastCombatProgressAt = Mission?.CurrentTime ?? _lastCombatProgressAt;
+            ModLogger.Info(
+                "CoopHideoutStealthPatrolController: alarmed all remaining defenders. " +
+                "Reason=" + reason + ".");
+        }
+
+        private void AlarmDefender(DefenderState state, string reason)
+        {
+            Agent agent = state?.Agent;
+            if (agent?.IsActive() != true || state.IsAlarmed)
+                return;
+
+            state.IsAlarmed = true;
+            state.IsCautious = false;
+            state.Suspicion = AlarmThreshold;
+            agent.DisableScriptedMovement();
+            agent.SetLookAgent(null);
+            agent.SetWatchState(Agent.WatchState.Alarmed);
+            agent.SetAlarmState(Agent.AIStateFlag.Alarmed);
+            agent.SetAutomaticTargetSelection(true);
+            agent.SetFiringOrder(FiringOrder.RangedWeaponUsageOrderEnum.FireAtWill);
+            CoopExactCampaignHideoutMissionController.TryWieldInitialSlots(agent);
+            agent.ResetEnemyCaches();
+            agent.HumanAIComponent?.SyncBehaviorParamsIfNecessary();
+            agent.ForceAiBehaviorSelection();
+
+            if (!_globalAlarm)
+            {
+                _globalAlarm = true;
+                _lastCombatProgressAt = Mission?.CurrentTime ?? 0f;
+                ReleasePlayerFormationFireControl();
+                ModLogger.Info(
+                    "CoopHideoutStealthPatrolController: hideout alarm started. " +
+                    "Agent=" + agent.Index +
+                    " Reason=" + reason + ".");
+            }
+        }
+
+        private void ReleasePlayerFormationFireControl()
+        {
+            Team playerTeam = Mission?.AttackerTeam;
+            if (playerTeam == null)
+                return;
+
+            Agent playerAgent = playerTeam.ActiveAgents?
+                .FirstOrDefault(agent => agent?.IsActive() == true && !agent.IsAIControlled);
+            foreach (Formation formation in playerTeam.FormationsIncludingEmpty)
+            {
+                if (formation == null || formation.CountOfUnits <= 0)
+                    continue;
+                formation.SetMovementOrder(playerAgent != null
+                    ? MovementOrder.MovementOrderFollow(playerAgent)
+                    : MovementOrder.MovementOrderStop);
+                formation.SetFiringOrder(FiringOrder.FiringOrderFireAtWill);
+            }
         }
     }
 }
