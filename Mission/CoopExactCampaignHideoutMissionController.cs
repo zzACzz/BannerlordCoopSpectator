@@ -23,7 +23,7 @@ namespace CoopSpectator.MissionBehaviors
 
         private readonly IMissionTroopSupplier[] _suppliers;
         private readonly BattleSideEnum _playerSide;
-        private readonly List<IAgentOriginBase> _reservedEnemyOrigins = new List<IAgentOriginBase>();
+        private readonly int _firstPhaseEnemyTroopCount;
         private readonly List<Agent> _spawnedPlayerAgents = new List<Agent>();
         private readonly List<Agent> _spawnedEnemyAgents = new List<Agent>();
         private bool _initialized;
@@ -39,15 +39,19 @@ namespace CoopSpectator.MissionBehaviors
 
         public CoopExactCampaignHideoutMissionController(
             IMissionTroopSupplier[] suppliers,
-            BattleSideEnum playerSide)
+            BattleSideEnum playerSide,
+            int firstPhaseEnemyTroopCount)
         {
             _suppliers = suppliers ?? Array.Empty<IMissionTroopSupplier>();
             _playerSide = playerSide;
+            _firstPhaseEnemyTroopCount = firstPhaseEnemyTroopCount;
         }
 
         public bool HasStarted => _started;
 
         public BattleSideEnum PlayerSide => _playerSide;
+
+        public int FirstPhaseEnemyTroopCount => _firstPhaseEnemyTroopCount;
 
         public bool HasMaterializedBothSides =>
             _initialAssaultMaterialized &&
@@ -55,12 +59,16 @@ namespace CoopSpectator.MissionBehaviors
             _spawnedEnemyAgents.Any(agent => agent?.IsActive() == true);
 
         public bool HasReservedBossGroup =>
-            !_reservedBossGroupSpawned && _reservedEnemyOrigins.Count > 0;
+            !_reservedBossGroupSpawned && ReservedEnemyCount > 0;
 
         public int InitialAssaultEnemyCount => _initialAssaultEnemyCount;
 
         public int ReservedEnemyCount =>
-            _reservedBossGroupSpawned ? 0 : _reservedEnemyOrigins.Count;
+            _reservedBossGroupSpawned
+                ? 0
+                : Math.Max(
+                    0,
+                    GetSupplier(OpposingSide(_playerSide))?.NumTroopsNotSupplied ?? 0);
 
         public Agent ReservedBossAgent => _reservedBossAgent;
 
@@ -120,7 +128,7 @@ namespace CoopSpectator.MissionBehaviors
             if (!GameNetwork.IsServer ||
                 !_initialAssaultMaterialized ||
                 _reservedBossGroupSpawned ||
-                _reservedEnemyOrigins.Count == 0)
+                ReservedEnemyCount == 0)
             {
                 return bossAgent?.IsActive() == true;
             }
@@ -129,13 +137,19 @@ namespace CoopSpectator.MissionBehaviors
             if (enemyTeam == null)
                 return false;
 
-            List<MatrixFrame> frames = BuildBossSpawnFrames(_reservedEnemyOrigins.Count);
+            IMissionTroopSupplier enemySupplier = GetSupplier(OpposingSide(_playerSide));
+            int requestedCount = Math.Max(0, enemySupplier?.NumTroopsNotSupplied ?? 0);
+            List<MatrixFrame> frames = BuildBossSpawnFrames(requestedCount);
             if (frames.Count == 0)
                 return false;
 
-            for (int index = 0; index < _reservedEnemyOrigins.Count; index++)
+            List<IAgentOriginBase> reservedEnemyOrigins = enemySupplier
+                .SupplyTroops(requestedCount)
+                .Where(origin => origin != null)
+                .ToList();
+            for (int index = 0; index < reservedEnemyOrigins.Count; index++)
             {
-                IAgentOriginBase origin = _reservedEnemyOrigins[index];
+                IAgentOriginBase origin = reservedEnemyOrigins[index];
                 MatrixFrame frame = frames[index % frames.Count];
                 Agent agent = SpawnEnemy(origin, frame, isAlarmed: true, wieldInitialWeapons: true);
                 if (agent == null)
@@ -152,7 +166,7 @@ namespace CoopSpectator.MissionBehaviors
             ModLogger.Info(
                 "CoopExactCampaignHideoutMissionController: materialized reserved boss group. " +
                 "Spawned=" + spawnedCount +
-                " Requested=" + _reservedEnemyOrigins.Count +
+                " Requested=" + requestedCount +
                 " BossAgent=" + (bossAgent?.Index.ToString() ?? "null") + ".");
             return spawnedCount > 0 && bossAgent?.IsActive() == true;
         }
@@ -245,31 +259,42 @@ namespace CoopSpectator.MissionBehaviors
                 if (playerSupplier == null || enemySupplier == null)
                     throw new InvalidOperationException("hideout-troop-supplier-missing");
 
-                List<IAgentOriginBase> playerOrigins = SupplyAll(playerSupplier);
-                List<IAgentOriginBase> enemyOrigins = SupplyAll(enemySupplier);
-                if (playerOrigins.Count == 0 || enemyOrigins.Count == 0)
-                    throw new InvalidOperationException("hideout-initial-roster-empty");
+                int playerCount = Math.Max(0, playerSupplier.NumTroopsNotSupplied);
+                int enemyTotalCount = Math.Max(0, enemySupplier.NumTroopsNotSupplied);
+                if (playerCount <= 0 ||
+                    !CoopHideoutBossPhaseContract.IsValidFirstPhaseParticipantCount(
+                        enemyTotalCount,
+                        _firstPhaseEnemyTroopCount))
+                {
+                    throw new InvalidOperationException(
+                        "hideout-initial-roster-contract-invalid Player=" + playerCount +
+                        " EnemyTotal=" + enemyTotalCount +
+                        " EnemyFirstPhase=" + _firstPhaseEnemyTroopCount);
+                }
 
-                int reserveCount = CoopHideoutBossPhaseContract.ResolveBossReserveCount(enemyOrigins.Count);
-                HashSet<IAgentOriginBase> reserved = new HashSet<IAgentOriginBase>(
-                    enemyOrigins
-                        .OrderByDescending(IsBossOrigin)
-                        .ThenByDescending(ResolveOriginPriority)
-                        .Take(reserveCount));
-                _reservedEnemyOrigins.Clear();
-                _reservedEnemyOrigins.AddRange(enemyOrigins.Where(reserved.Contains));
-                List<IAgentOriginBase> initialEnemyOrigins = enemyOrigins
-                    .Where(origin => !reserved.Contains(origin))
+                List<MatrixFrame> defenderFrames = CollectHideoutDefenderFrames();
+                if (defenderFrames.Count == 0)
+                    throw new InvalidOperationException("hideout-defender-scene-frames-empty");
+
+                List<IAgentOriginBase> playerOrigins = SupplyAll(playerSupplier);
+                List<IAgentOriginBase> initialEnemyOrigins = enemySupplier
+                    .SupplyTroops(_firstPhaseEnemyTroopCount)
+                    .Where(origin => origin != null)
                     .ToList();
+                if (playerOrigins.Count == 0 || initialEnemyOrigins.Count == 0)
+                    throw new InvalidOperationException("hideout-initial-roster-empty");
+                if (initialEnemyOrigins.Count != _firstPhaseEnemyTroopCount)
+                {
+                    throw new InvalidOperationException(
+                        "hideout-first-phase-enemy-supply-incomplete Expected=" +
+                        _firstPhaseEnemyTroopCount +
+                        " Actual=" + initialEnemyOrigins.Count);
+                }
 
                 Mission.DeploymentPlan.MakeDefaultDeploymentPlans();
                 SetTeamsAsEnemies(playerTeam, enemyTeam, false);
 
                 SpawnPlayerGroup(playerOrigins);
-                List<MatrixFrame> defenderFrames = CollectHideoutDefenderFrames();
-                if (defenderFrames.Count == 0)
-                    throw new InvalidOperationException("hideout-defender-scene-frames-empty");
-
                 for (int index = 0; index < initialEnemyOrigins.Count; index++)
                 {
                     MatrixFrame frame = defenderFrames[index % defenderFrames.Count];
@@ -292,7 +317,7 @@ namespace CoopSpectator.MissionBehaviors
                     "CoopExactCampaignHideoutMissionController: initial day-hideout assault materialized. " +
                     "PlayerAgents=" + _spawnedPlayerAgents.Count +
                     " EnemyAgents=" + _initialAssaultEnemyCount +
-                    " ReservedBossGroup=" + _reservedEnemyOrigins.Count +
+                    " ReservedBossGroup=" + ReservedEnemyCount +
                     " DefenderFrames=" + defenderFrames.Count + ".");
             }
             catch (Exception ex)
@@ -417,26 +442,63 @@ namespace CoopSpectator.MissionBehaviors
         private List<MatrixFrame> CollectHideoutDefenderFrames()
         {
             var frames = new List<MatrixFrame>();
-            if (Mission?.ActiveMissionObjects == null)
-                return frames;
-
-            List<MissionObject> markers = Mission.ActiveMissionObjects
-                .Where(missionObject =>
-                    missionObject != null &&
-                    (string.Equals(missionObject.GetType().Name, "CommonAreaMarker", StringComparison.Ordinal) ||
-                     string.Equals(missionObject.GetType().Name, "PatrolArea", StringComparison.Ordinal)))
-                .OrderBy(ReadAreaIndex)
-                .ToList();
-
-            foreach (MissionObject marker in markers)
+            if (Mission?.ActiveMissionObjects != null)
             {
-                int frameCountBeforeMarker = frames.Count;
-                AppendStandingPointFrames(marker, frames);
-                if (frames.Count == frameCountBeforeMarker)
-                    AppendFrame(marker, frames);
+                List<MissionObject> markers = Mission.ActiveMissionObjects
+                    .Where(missionObject =>
+                        missionObject != null &&
+                        (string.Equals(missionObject.GetType().Name, "CommonAreaMarker", StringComparison.Ordinal) ||
+                         string.Equals(missionObject.GetType().Name, "PatrolArea", StringComparison.Ordinal)))
+                    .OrderBy(ReadAreaIndex)
+                    .ToList();
+
+                foreach (MissionObject marker in markers)
+                {
+                    int frameCountBeforeMarker = frames.Count;
+                    AppendStandingPointFrames(marker, frames);
+                    if (frames.Count == frameCountBeforeMarker)
+                        AppendFrame(marker, frames);
+                }
             }
 
+            string source = "managed-mission-objects";
+            if (frames.Count == 0)
+            {
+                AppendSceneEntityFrames(
+                    CoopHideoutBossPhaseContract.DefenderGuardPatrolEntityTag,
+                    frames);
+                AppendSceneEntityFrames(
+                    CoopHideoutBossPhaseContract.DefenderDynamicPatrolAreaEntityTag,
+                    frames);
+                source = "engine-scene-tags";
+            }
+
+            ModLogger.Info(
+                "CoopExactCampaignHideoutMissionController: resolved defender scene frames. " +
+                "Count=" + frames.Count +
+                " Source=" + source + ".");
             return frames;
+        }
+
+        private void AppendSceneEntityFrames(
+            string tag,
+            List<MatrixFrame> frames)
+        {
+            if (string.IsNullOrWhiteSpace(tag) || frames == null)
+                return;
+
+            try
+            {
+                IEnumerable<GameEntity> entities = Mission?.Scene?.FindEntitiesWithTag(tag);
+                if (entities == null)
+                    return;
+
+                foreach (GameEntity entity in entities.Where(candidate => candidate != null))
+                    frames.Add(entity.GetGlobalFrame());
+            }
+            catch
+            {
+            }
         }
 
         private static void AppendStandingPointFrames(MissionObject marker, List<MatrixFrame> frames)
@@ -553,20 +615,6 @@ namespace CoopSpectator.MissionBehaviors
                    ContainsBossToken(entry?.CharacterId) ||
                    ContainsBossToken(entry?.TroopName) ||
                    ContainsBossToken(origin?.Troop?.StringId);
-        }
-
-        private static int ResolveOriginPriority(IAgentOriginBase origin)
-        {
-            RosterEntryState entry = ResolveEntry(origin);
-            int priority = origin?.Troop?.Level ?? 0;
-            if (ContainsToken(entry?.OriginalCharacterId, "chief") ||
-                ContainsToken(entry?.OriginalCharacterId, "leader"))
-            {
-                priority += 1000;
-            }
-            if (entry?.IsHero == true)
-                priority += 500;
-            return priority;
         }
 
         private static RosterEntryState ResolveEntry(IAgentOriginBase origin)

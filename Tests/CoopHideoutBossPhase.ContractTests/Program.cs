@@ -51,6 +51,10 @@ internal static class Program
                 out string normalizedScene) &&
             normalizedScene == "BANDIT_FOREST_SV",
             "A supported hideout scene must be trimmed without changing its identifier casing.");
+        Assert(
+            CoopHideoutBossPhaseContract.DefenderGuardPatrolEntityTag == "sp_guard_patrol" &&
+            CoopHideoutBossPhaseContract.DefenderDynamicPatrolAreaEntityTag == "dynamic_patrol_area_tag",
+            "The dedicated hideout fallback must use the vanilla engine scene tags.");
 
         string[] rejectedScenes =
         {
@@ -183,13 +187,24 @@ internal static class Program
 
     private static void ValidateMaterializationPolicy()
     {
-        Assert(CoopHideoutBossPhaseContract.ResolveBossReserveCount(0) == 0, "An empty roster must not reserve a boss group.");
-        Assert(CoopHideoutBossPhaseContract.ResolveBossReserveCount(1) == 0, "A one-unit roster must keep its only defender in the initial assault.");
-        Assert(CoopHideoutBossPhaseContract.ResolveBossReserveCount(2) == 1, "A two-unit roster must reserve one defender.");
-        Assert(CoopHideoutBossPhaseContract.ResolveBossReserveCount(5) == 2, "A five-unit roster must reserve the rounded-up quarter.");
-        Assert(CoopHideoutBossPhaseContract.ResolveBossReserveCount(29) == 5, "The reserved boss group must be capped at five.");
-        Assert(CoopHideoutBossPhaseContract.ResolveInitialAssaultDefenderCount(29) == 24, "A 29-unit roster must materialize 24 initial defenders.");
-        Assert(CoopHideoutBossPhaseContract.ResolveInitialAssaultDefenderCount(1) == 1, "A one-unit roster must remain playable.");
+        Assert(
+            CoopHideoutBossPhaseContract.ResolveVanillaFirstPhaseDefenderCount(29, 22) == 22,
+            "The exact native first-phase count must be retained when a boss reserve exists.");
+        Assert(
+            CoopHideoutBossPhaseContract.ResolveVanillaFirstPhaseDefenderCount(20, 20) == 14,
+            "The native seventy-percent fallback must be mirrored when the requested phase consumes the full roster.");
+        Assert(
+            CoopHideoutBossPhaseContract.ResolveVanillaFirstPhaseDefenderCount(0, 5) == 0,
+            "An empty defender roster must not produce an initial phase.");
+        Assert(
+            CoopHideoutBossPhaseContract.IsValidFirstPhaseParticipantCount(28, 16),
+            "A selected sixteen-unit player group must remain valid inside a larger campaign army.");
+        Assert(
+            !CoopHideoutBossPhaseContract.IsValidFirstPhaseParticipantCount(28, 29),
+            "A first-phase count larger than the available roster must be rejected.");
+        Assert(
+            !CoopHideoutBossPhaseContract.IsValidFirstPhaseParticipantCount(29, 0),
+            "A missing exact first-phase count must fail closed instead of materializing the full roster.");
     }
 
     private static void ValidatePhaseTransitions()

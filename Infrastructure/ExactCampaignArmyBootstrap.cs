@@ -636,12 +636,22 @@ namespace CoopSpectator.Infrastructure
                         return false;
                     }
 
+                    if (!TryResolveHideoutFirstPhaseEnemyCount(
+                            playerSide,
+                            out int firstPhaseEnemyCount,
+                            out string firstPhaseEnemyDiagnostics))
+                    {
+                        reason = firstPhaseEnemyDiagnostics ?? "hideout-first-phase-enemy-count-invalid";
+                        return false;
+                    }
+
                     initializationStep = "log-bootstrap-contract";
                     LogBootstrapContractSnapshot(
                         mission,
                         null,
                         playerSide,
                         supplierDiagnostics +
+                        " FirstPhaseEnemy={" + firstPhaseEnemyDiagnostics + "}" +
                         " FormationBannerSeed={" + formationBannerDiagnostics + "}" +
                         " RuntimeContract={Hideout Isolated=true MissionSpawnTroop=true}",
                         "pre-init-hideout-controller",
@@ -652,6 +662,7 @@ namespace CoopSpectator.Infrastructure
                             mission,
                             suppliers,
                             playerSide,
+                            firstPhaseEnemyCount,
                             defenderTotal,
                             attackerTotal,
                             out string hideoutDiagnostics))
@@ -3086,6 +3097,7 @@ namespace CoopSpectator.Infrastructure
             Mission mission,
             IMissionTroopSupplier[] suppliers,
             BattleSideEnum playerSide,
+            int firstPhaseEnemyCount,
             int defenderTotal,
             int attackerTotal,
             out string diagnostics)
@@ -3101,9 +3113,19 @@ namespace CoopSpectator.Infrastructure
             {
                 controller = new CoopExactCampaignHideoutMissionController(
                     suppliers,
-                    playerSide);
+                    playerSide,
+                    firstPhaseEnemyCount);
                 mission.AddMissionBehavior(controller);
                 created = true;
+            }
+
+            if (controller.FirstPhaseEnemyTroopCount != firstPhaseEnemyCount)
+            {
+                diagnostics =
+                    "first-phase-enemy-count-mismatch Existing=" +
+                    controller.FirstPhaseEnemyTroopCount +
+                    " Requested=" + firstPhaseEnemyCount;
+                return false;
             }
 
             controller.EnsureInitializedAndStarted();
@@ -3111,9 +3133,42 @@ namespace CoopSpectator.Infrastructure
                 "Created=" + created +
                 " Started=" + controller.HasStarted +
                 " PlayerSide=" + playerSide +
+                " FirstPhaseEnemy=" + firstPhaseEnemyCount +
                 " DefenderTotal=" + defenderTotal +
                 " AttackerTotal=" + attackerTotal;
             return controller.HasStarted;
+        }
+
+        private static bool TryResolveHideoutFirstPhaseEnemyCount(
+            BattleSideEnum playerSide,
+            out int firstPhaseEnemyCount,
+            out string diagnostics)
+        {
+            firstPhaseEnemyCount = 0;
+            diagnostics = "runtime-state-missing";
+            BattleRuntimeState runtimeState = BattleSnapshotRuntimeState.GetState();
+            BattleSideEnum enemySide = playerSide == BattleSideEnum.Attacker
+                ? BattleSideEnum.Defender
+                : playerSide == BattleSideEnum.Defender
+                    ? BattleSideEnum.Attacker
+                    : BattleSideEnum.None;
+            if (runtimeState?.Sides == null || enemySide == BattleSideEnum.None)
+                return false;
+
+            BattleSideState enemyState = runtimeState.Sides.FirstOrDefault(
+                candidate => ResolveBattleSide(candidate) == enemySide);
+            int totalHealthyCount = enemyState?.Entries?
+                .Where(entry => entry != null)
+                .Sum(entry => Math.Max(0, entry.Count - entry.WoundedCount)) ?? 0;
+            firstPhaseEnemyCount = enemyState?.MissionReadyEntryOrder?
+                .Count(entryId => !string.IsNullOrWhiteSpace(entryId)) ?? 0;
+            diagnostics =
+                "EnemySide=" + enemySide +
+                " TotalHealthy=" + totalHealthyCount +
+                " MissionReady=" + firstPhaseEnemyCount;
+            return CoopHideoutBossPhaseContract.IsValidFirstPhaseParticipantCount(
+                totalHealthyCount,
+                firstPhaseEnemyCount);
         }
 
         private static void LogBootstrapContractSnapshot(

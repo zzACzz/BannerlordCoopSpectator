@@ -25,6 +25,7 @@ using TaleWorlds.Library;
 using Helpers;
 using TaleWorlds.ObjectSystem;
 using CoopSpectator.Campaign.Capture;
+using CoopSpectator.Campaign.Hideout;
 using CoopSpectator.Campaign.LandBattle;
 using CoopSpectator.Campaign.LordsHall;
 using CoopSpectator.Campaign.Relief;
@@ -820,31 +821,14 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             out string diagnostics)
         {
             diagnostics = "not-started";
-            if (snapshot?.Sides == null || Mission.Current?.MissionBehaviors == null)
+            if (snapshot?.Sides == null)
             {
-                diagnostics = "snapshot-or-mission-missing";
+                diagnostics = "snapshot-missing";
                 return false;
             }
 
             try
             {
-                MissionBehavior dayController = Mission.Current.MissionBehaviors.FirstOrDefault(behavior =>
-                    string.Equals(
-                        behavior?.GetType().FullName,
-                        "SandBox.Missions.MissionLogics.Hideout.HideoutMissionController",
-                        StringComparison.Ordinal));
-                MethodInfo getSelectedTroops = dayController?.GetType().GetMethod(
-                    "GetAllTroopsForSide",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                    binder: null,
-                    types: new[] { typeof(BattleSideEnum) },
-                    modifiers: null);
-                if (getSelectedTroops == null)
-                {
-                    diagnostics = "selected-roster-method-missing";
-                    return false;
-                }
-
                 if (!Enum.TryParse(playerSideText, ignoreCase: true, out BattleSideEnum playerSide))
                 {
                     string snapshotPlayerSide = snapshot.Sides
@@ -856,32 +840,6 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     }
                 }
 
-                IEnumerable selectedOrigins =
-                    getSelectedTroops.Invoke(dayController, new object[] { playerSide }) as IEnumerable;
-                if (selectedOrigins == null)
-                {
-                    diagnostics = "selected-roster-null";
-                    return false;
-                }
-
-                var selectedCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-                foreach (object origin in selectedOrigins)
-                {
-                    object troop = TryGetPropertyValue(origin, "Troop");
-                    string troopId = TryGetStringId(troop);
-                    if (string.IsNullOrWhiteSpace(troopId))
-                        continue;
-                    selectedCounts.TryGetValue(troopId, out int count);
-                    selectedCounts[troopId] = count + 1;
-                }
-
-                int selectedTotal = selectedCounts.Values.Sum();
-                if (selectedTotal <= 0)
-                {
-                    diagnostics = "selected-roster-empty";
-                    return false;
-                }
-
                 BattleSideSnapshotMessage playerSideSnapshot = snapshot.Sides.FirstOrDefault(side =>
                     side?.IsPlayerSide == true ||
                     string.Equals(side?.SideText, playerSide.ToString(), StringComparison.OrdinalIgnoreCase));
@@ -891,47 +849,52 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     return false;
                 }
 
-                var selectedKeyByTroop = new Dictionary<TroopStackInfo, string>();
-                var availableCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-                foreach (TroopStackInfo troop in playerSideSnapshot.Parties
-                    .Where(party => party?.Troops != null)
-                    .SelectMany(party => party.Troops)
-                    .Where(troop => troop != null))
+                List<string> selectedEntryOrder = playerSideSnapshot.MissionReadyEntryOrder?
+                    .Where(entryId => !string.IsNullOrWhiteSpace(entryId))
+                    .ToList() ?? new List<string>();
+                int selectedTotal = selectedEntryOrder.Count;
+                if (selectedTotal <= 0)
                 {
-                    string selectedKey = ResolveSelectedHideoutRosterKey(troop, selectedCounts);
-                    if (string.IsNullOrWhiteSpace(selectedKey))
-                        continue;
-
-                    selectedKeyByTroop[troop] = selectedKey;
-                    availableCounts.TryGetValue(selectedKey, out int available);
-                    availableCounts[selectedKey] =
-                        available + Math.Max(0, troop.Count - troop.WoundedCount);
+                    diagnostics = "selected-entry-order-empty";
+                    return false;
                 }
 
-                string missingKey = selectedCounts.Keys.FirstOrDefault(key =>
-                    !availableCounts.TryGetValue(key, out int available) ||
-                    available < selectedCounts[key]);
-                if (!string.IsNullOrWhiteSpace(missingKey))
+                var remainingSelectedByEntryId = selectedEntryOrder
+                    .GroupBy(entryId => entryId, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(
+                        group => group.Key,
+                        group => group.Count(),
+                        StringComparer.OrdinalIgnoreCase);
+                var availableByEntryId = playerSideSnapshot.Parties
+                    .Where(party => party?.Troops != null)
+                    .SelectMany(party => party.Troops)
+                    .Where(troop => troop != null && !string.IsNullOrWhiteSpace(troop.EntryId))
+                    .GroupBy(troop => troop.EntryId, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(
+                        group => group.Key,
+                        group => group.Sum(troop => Math.Max(0, troop.Count - troop.WoundedCount)),
+                        StringComparer.OrdinalIgnoreCase);
+                string unavailableEntryId = remainingSelectedByEntryId.Keys.FirstOrDefault(entryId =>
+                    !availableByEntryId.TryGetValue(entryId, out int available) ||
+                    available < remainingSelectedByEntryId[entryId]);
+                if (!string.IsNullOrWhiteSpace(unavailableEntryId))
                 {
-                    availableCounts.TryGetValue(missingKey, out int available);
+                    availableByEntryId.TryGetValue(unavailableEntryId, out int available);
                     diagnostics =
-                        "selected-troop-unmapped:" + missingKey +
-                        " selected=" + selectedCounts[missingKey] +
+                        "selected-entry-unavailable:" + unavailableEntryId +
+                        " selected=" + remainingSelectedByEntryId[unavailableEntryId] +
                         " available=" + available;
                     return false;
                 }
 
-                var remainingCounts = new Dictionary<string, int>(
-                    selectedCounts,
-                    StringComparer.OrdinalIgnoreCase);
                 foreach (BattlePartySnapshotMessage party in playerSideSnapshot.Parties)
                 {
                     var retainedTroops = new List<TroopStackInfo>();
                     foreach (TroopStackInfo troop in party?.Troops ?? new List<TroopStackInfo>())
                     {
                         if (troop == null ||
-                            !selectedKeyByTroop.TryGetValue(troop, out string selectedKey) ||
-                            !remainingCounts.TryGetValue(selectedKey, out int remaining) ||
+                            string.IsNullOrWhiteSpace(troop.EntryId) ||
+                            !remainingSelectedByEntryId.TryGetValue(troop.EntryId, out int remaining) ||
                             remaining <= 0)
                         {
                             continue;
@@ -946,7 +909,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         troop.Count = take;
                         troop.WoundedCount = 0;
                         retainedTroops.Add(troop);
-                        remainingCounts[selectedKey] = remaining - take;
+                        remainingSelectedByEntryId[troop.EntryId] = remaining - take;
                     }
 
                     if (party != null)
@@ -972,8 +935,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     playerSideSnapshot.LeaderPartyId =
                         playerSideSnapshot.Parties.FirstOrDefault()?.PartyId;
                 }
-                playerSideSnapshot.MissionReadyEntryOrder =
-                    ProjectMissionReadyOrderToSelectedHideoutRoster(playerSideSnapshot);
+                playerSideSnapshot.MissionReadyEntryOrder = selectedEntryOrder;
 
                 diagnostics =
                     "selected=" + selectedTotal +
@@ -989,68 +951,6 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 diagnostics = "exception:" + ex.GetType().Name + ":" + ex.Message;
                 return false;
             }
-        }
-
-        private static string ResolveSelectedHideoutRosterKey(
-            TroopStackInfo troop,
-            IReadOnlyDictionary<string, int> selectedCounts)
-        {
-            if (troop == null || selectedCounts == null)
-                return null;
-
-            foreach (string candidate in new[]
-            {
-                troop.CharacterId,
-                troop.OriginalCharacterId,
-                troop.SpawnTemplateId,
-                troop.HeroTemplateId,
-                troop.HeroId
-            })
-            {
-                if (!string.IsNullOrWhiteSpace(candidate) && selectedCounts.ContainsKey(candidate))
-                    return candidate;
-            }
-            return null;
-        }
-
-        private static List<string> ProjectMissionReadyOrderToSelectedHideoutRoster(
-            BattleSideSnapshotMessage side)
-        {
-            var projected = new List<string>();
-            if (side?.Troops == null)
-                return projected;
-
-            var remainingByEntry = side.Troops
-                .Where(troop => troop != null && !string.IsNullOrWhiteSpace(troop.EntryId))
-                .GroupBy(troop => troop.EntryId, StringComparer.Ordinal)
-                .ToDictionary(
-                    group => group.Key,
-                    group => group.Sum(troop => Math.Max(0, troop.Count - troop.WoundedCount)),
-                    StringComparer.Ordinal);
-
-            foreach (string entryId in side.MissionReadyEntryOrder ?? new List<string>())
-            {
-                if (string.IsNullOrWhiteSpace(entryId) ||
-                    !remainingByEntry.TryGetValue(entryId, out int remaining) ||
-                    remaining <= 0)
-                {
-                    continue;
-                }
-                projected.Add(entryId);
-                remainingByEntry[entryId] = remaining - 1;
-            }
-
-            foreach (TroopStackInfo troop in side.Troops)
-            {
-                if (troop == null || string.IsNullOrWhiteSpace(troop.EntryId))
-                    continue;
-                while (remainingByEntry.TryGetValue(troop.EntryId, out int remaining) && remaining > 0)
-                {
-                    projected.Add(troop.EntryId);
-                    remainingByEntry[troop.EntryId] = remaining - 1;
-                }
-            }
-            return projected;
         }
 
         private static bool LooksLikeUnsupportedKeepScene(string sceneName)
@@ -9643,6 +9543,38 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     PlayerEncounter.EncounterSettlement ??
                     battle?.MapEventSettlement ??
                     MobileParty.MainParty?.CurrentSettlement;
+                if (HideoutCampaignBattleAdapter.IsCampaignStage(
+                        battle,
+                        encounterSettlement,
+                        Mission.Current))
+                {
+                    BattleSideEnum side = string.Equals(sideId, "attacker", StringComparison.OrdinalIgnoreCase)
+                        ? BattleSideEnum.Attacker
+                        : string.Equals(sideId, "defender", StringComparison.OrdinalIgnoreCase)
+                            ? BattleSideEnum.Defender
+                            : BattleSideEnum.None;
+                    if (side == BattleSideEnum.None)
+                    {
+                        ModLogger.Info(
+                            "BattleDetector: rejected hideout participant order because side id is unknown. " +
+                            "SideId=" + (sideId ?? "null") + ".");
+                        return orderedEntryIds;
+                    }
+
+                    bool exactOrderBuilt = HideoutCampaignBattleAdapter.TryBuildInitialParticipantEntryOrder(
+                        Mission.Current,
+                        side,
+                        sideSnapshot,
+                        out List<string> exactOrder,
+                        out string exactOrderDiagnostics);
+                    ModLogger.Info(
+                        "BattleDetector: hideout exact native initial participant order resolved. " +
+                        "SideId=" + sideId +
+                        " Success=" + exactOrderBuilt +
+                        " Diagnostics={" + exactOrderDiagnostics + "}.");
+                    return exactOrderBuilt ? exactOrder : orderedEntryIds;
+                }
+
                 if (LordsHallCampaignBattleAdapter.IsCampaignStage(battle, encounterSettlement))
                 {
                     BattleSideEnum side = string.Equals(sideId, "attacker", StringComparison.OrdinalIgnoreCase)

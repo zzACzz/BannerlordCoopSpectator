@@ -62,6 +62,8 @@ namespace CoopSpectator.Infrastructure.Hideout
         public const string ScenarioKind = "Hideout";
         public const string GameModeId = "CoopHideoutDay";
         public const string BossFightEntityTag = "hideout_boss_fight";
+        public const string DefenderGuardPatrolEntityTag = "sp_guard_patrol";
+        public const string DefenderDynamicPatrolAreaEntityTag = "dynamic_patrol_area_tag";
         public const string NativeTimerStartAsServerSource = "MultiplayerTimerComponent.StartTimerAsServer";
         public const string NativeTimerStartAsClientSource = "MultiplayerTimerComponent.StartTimerAsClient";
         public const int MaximumBattleInstanceIdCharacters = 64;
@@ -162,21 +164,26 @@ namespace CoopSpectator.Infrastructure.Hideout
             return Math.Max(1, Math.Min(5, quarter));
         }
 
-        public static int ResolveBossReserveCount(int totalEnemyCount)
+        public static int ResolveVanillaFirstPhaseDefenderCount(
+            int totalEnemyCount,
+            int nativeFirstPhaseEnemyCount)
         {
-            if (totalEnemyCount <= 1)
+            if (totalEnemyCount <= 0 || nativeFirstPhaseEnemyCount <= 0)
                 return 0;
 
-            return Math.Min(
-                totalEnemyCount - 1,
-                ResolveBossTriggerCount(totalEnemyCount));
+            if (totalEnemyCount <= nativeFirstPhaseEnemyCount)
+                return (int)(totalEnemyCount * 0.7f);
+
+            return nativeFirstPhaseEnemyCount;
         }
 
-        public static int ResolveInitialAssaultDefenderCount(int totalEnemyCount)
+        public static bool IsValidFirstPhaseParticipantCount(
+            int totalTroopCount,
+            int firstPhaseTroopCount)
         {
-            return Math.Max(
-                0,
-                totalEnemyCount - ResolveBossReserveCount(totalEnemyCount));
+            return totalTroopCount > 0 &&
+                   firstPhaseTroopCount > 0 &&
+                   firstPhaseTroopCount <= totalTroopCount;
         }
 
         public static bool ShouldPrepareBossPhase(
