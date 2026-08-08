@@ -145,6 +145,9 @@ namespace CoopSpectator.GameMode
                     "CoopHideoutDay: inserted dedicated MissionMultiplayerGameModeBaseClient bridge before MissionCustomGameServerComponent for MissionScoreboardComponent lifecycle compatibility.");
             }
 
+            if (!list.Any(behavior => behavior is BattleMissionStarterLogic))
+                list.Add(new BattleMissionStarterLogic());
+
             if (!list.Any(behavior => behavior is CoopHideoutBossPhaseController))
                 list.Add(new CoopHideoutBossPhaseController());
 
