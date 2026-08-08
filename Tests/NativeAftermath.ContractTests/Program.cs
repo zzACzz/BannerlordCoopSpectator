@@ -12,6 +12,7 @@ internal static class Program
             ValidateExactRetryIsNoOp();
             ValidateExistingNativeStateIsPreserved();
             ValidateDecisiveSiegeAmbushPlan();
+            ValidateHideoutCasualtyLedgerPlan();
             ValidateInvalidInputsAreClamped();
             Console.WriteLine("Native aftermath contract tests passed.");
             return 0;
@@ -86,6 +87,27 @@ internal static class Program
             "Repeated siege-ambush killed casualties must not duplicate loot.");
         Assert(retryWounded.NumberDelta == 0 && retryWounded.WoundedDelta == 0,
             "Repeated siege-ambush wounded casualties must not duplicate loot.");
+    }
+
+    private static void ValidateHideoutCasualtyLedgerPlan()
+    {
+        ExactCasualtyLedgerDelta killed =
+            ExactCasualtyLedgerMath.PlanMissingDelta(0, 0, 12, 0);
+        ExactCasualtyLedgerDelta wounded =
+            ExactCasualtyLedgerMath.PlanMissingDelta(0, 0, 7, 7);
+        Assert(killed.NumberDelta == 12 && killed.WoundedDelta == 0,
+            "Hideout killed defenders must populate the native died-in-battle ledger.");
+        Assert(wounded.NumberDelta == 7 && wounded.WoundedDelta == 7,
+            "Hideout unconscious defenders must populate the native wounded-in-battle ledger.");
+
+        ExactCasualtyLedgerDelta retryKilled =
+            ExactCasualtyLedgerMath.PlanMissingDelta(12, 0, 12, 0);
+        ExactCasualtyLedgerDelta retryWounded =
+            ExactCasualtyLedgerMath.PlanMissingDelta(7, 7, 7, 7);
+        Assert(retryKilled.NumberDelta == 0 && retryKilled.WoundedDelta == 0,
+            "Repeated hideout killed casualties must not duplicate equipment loot.");
+        Assert(retryWounded.NumberDelta == 0 && retryWounded.WoundedDelta == 0,
+            "Repeated hideout wounded casualties must not duplicate equipment loot.");
     }
 
     private static void ValidateInvalidInputsAreClamped()

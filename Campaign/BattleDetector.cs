@@ -3684,6 +3684,19 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                         result,
                         out siegeAmbushNativeAftermathDiagnostics);
             }
+            bool hideoutNativeAftermathArmed = false;
+            string hideoutNativeAftermathDiagnostics = "not-requested";
+            if (encounterPrepared &&
+                ExactHideoutNativeAftermathRuntime.IsFinalHideoutResult(
+                    PlayerEncounter.Battle,
+                    result))
+            {
+                hideoutNativeAftermathArmed =
+                    ExactHideoutNativeAftermathRuntime.TryArm(
+                        PlayerEncounter.Battle,
+                        result,
+                        out hideoutNativeAftermathDiagnostics);
+            }
             bool exitRequested = TryRequestLocalMissionExit(mission, "campaign battle_result bridge");
             if (exitRequested)
             {
@@ -3715,6 +3728,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     "FinalSiegeNativeAftermathDiagnostics=[" + finalSiegeNativeAftermathDiagnostics + "] " +
                     "SiegeAmbushNativeAftermathArmed=" + siegeAmbushNativeAftermathArmed + " " +
                     "SiegeAmbushNativeAftermathDiagnostics=[" + siegeAmbushNativeAftermathDiagnostics + "] " +
+                    "HideoutNativeAftermathArmed=" + hideoutNativeAftermathArmed + " " +
+                    "HideoutNativeAftermathDiagnostics=[" + hideoutNativeAftermathDiagnostics + "] " +
                     "BattleId=" + (result.BattleId ?? "null") +
                     " WinnerSide=" + (result.WinnerSide ?? "none") +
                     " MissionScene=" + SafeMissionSceneName(mission) + ".");
@@ -3741,6 +3756,17 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 siegeAmbushNativeAftermathDiagnostics +=
                     " ExitRequestRollback={" +
                     siegeAmbushAftermathRollbackDiagnostics + "}";
+            }
+
+            if (hideoutNativeAftermathArmed &&
+                ExactHideoutNativeAftermathRuntime.TryRollback(
+                    PlayerEncounter.Battle,
+                    resultKey,
+                    out string hideoutAftermathRollbackDiagnostics))
+            {
+                hideoutNativeAftermathDiagnostics +=
+                    " ExitRequestRollback={" +
+                    hideoutAftermathRollbackDiagnostics + "}";
             }
 
             if (string.Equals(_lastMissionExitFailedBattleResultKey, resultKey, StringComparison.Ordinal))

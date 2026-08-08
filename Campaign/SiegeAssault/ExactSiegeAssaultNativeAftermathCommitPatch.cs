@@ -1,4 +1,5 @@
 using System;
+using CoopSpectator.Campaign.Hideout;
 using CoopSpectator.Campaign.SiegeAmbush;
 using CoopSpectator.Infrastructure;
 using HarmonyLib;
@@ -71,6 +72,15 @@ namespace CoopSpectator.Campaign.SiegeAssault
                             "ExactSiegeAssaultNativeAftermathCommitPatch: committed exact siege-ambush casualty ledgers after native map-event results. " +
                             siegeAmbushCommitDiagnostics + ".");
                     }
+
+                    if (ExactHideoutNativeAftermathRuntime.TryCommit(
+                            __instance,
+                            out string hideoutCommitDiagnostics))
+                    {
+                        ModLogger.Info(
+                            "ExactSiegeAssaultNativeAftermathCommitPatch: committed exact hideout casualty ledgers after native map-event results. " +
+                            hideoutCommitDiagnostics + ".");
+                    }
                 }
                 else
                 {
@@ -93,6 +103,17 @@ namespace CoopSpectator.Campaign.SiegeAssault
                         ModLogger.Info(
                             "ExactSiegeAssaultNativeAftermathCommitPatch: rolled back exact siege-ambush casualty ledgers and winner because native map-event results faulted. " +
                             siegeAmbushRollbackDiagnostics +
+                            " Error=" + __exception.GetType().Name + ":" + __exception.Message + ".");
+                    }
+
+                    if (ExactHideoutNativeAftermathRuntime.TryRollback(
+                            __instance,
+                            resultId: null,
+                            out string hideoutRollbackDiagnostics))
+                    {
+                        ModLogger.Info(
+                            "ExactSiegeAssaultNativeAftermathCommitPatch: rolled back exact hideout casualty ledgers because native map-event results faulted. " +
+                            hideoutRollbackDiagnostics +
                             " Error=" + __exception.GetType().Name + ":" + __exception.Message + ".");
                     }
                 }

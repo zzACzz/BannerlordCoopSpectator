@@ -1,4 +1,6 @@
 using System;
+using System.Linq;
+using System.Reflection;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.Infrastructure.Hideout;
 using CoopSpectator.MissionBehaviors;
@@ -191,16 +193,24 @@ namespace CoopSpectator.UI
                     isNegativeOptionShown: true,
                     affirmativeText: "Accept the duel",
                     negativeText: "Fight together",
-                    affirmativeAction: () =>
-                        CoopHideoutBossPhaseController.SendHostChoice(CoopHideoutBossChoice.Duel),
-                    negativeAction: () =>
-                        CoopHideoutBossPhaseController.SendHostChoice(CoopHideoutBossChoice.AllBattle),
+                    affirmativeAction: () => SendHostChoiceWithConfirmation(CoopHideoutBossChoice.Duel),
+                    negativeAction: () => SendHostChoiceWithConfirmation(CoopHideoutBossChoice.AllBattle),
                     soundEventPath: string.Empty,
                     expireTime: CoopHideoutBossPhaseContract.HostChoiceTimeoutMilliseconds / 1000f,
-                    timeoutAction: () =>
-                        CoopHideoutBossPhaseController.SendHostChoice(CoopHideoutBossChoice.AllBattle)),
+                    timeoutAction: () => SendHostChoiceWithConfirmation(CoopHideoutBossChoice.AllBattle)),
                 pauseGameActiveState: false,
                 prioritize: true);
+        }
+
+        private static void SendHostChoiceWithConfirmation(CoopHideoutBossChoice choice)
+        {
+            string selectionText = choice == CoopHideoutBossChoice.Duel
+                ? "Selected: fight the bandit leader one-on-one. Waiting for server confirmation."
+                : "Selected: fight the bandit leader together. Waiting for server confirmation.";
+            InformationManager.DisplayMessage(new InformationMessage(selectionText));
+            ModLogger.Info(
+                "CoopHideoutBossCinematicView: host selected boss-fight command. Choice=" + choice + ".");
+            CoopHideoutBossPhaseController.SendHostChoice(choice);
         }
 
         private void CloseChoiceInquiry()
@@ -262,20 +272,116 @@ namespace CoopSpectator.UI
             Vec3 hostEye = hostAgent.Position + Vec3.Up * 1.45f;
             Vec3 bossEye = bossAgent.Position + Vec3.Up * 1.45f;
             Vec3 focus = (hostEye + bossEye) * 0.5f;
-            Vec2 line2 = (bossEye - hostEye).AsVec2;
-            if (line2.LengthSquared < 0.0001f)
-                line2 = new Vec2(0f, 1f);
-            line2.Normalize();
-            Vec2 side2 = new Vec2(line2.y, -line2.x);
+            MatrixFrame authoredFrame = ResolveAuthoredBossFightFrame();
+            Vec2 forward2 = authoredFrame.rotation.f.AsVec2;
+            if (forward2.LengthSquared < 0.0001f)
+                forward2 = (bossEye - hostEye).AsVec2;
+            if (forward2.LengthSquared < 0.0001f)
+                forward2 = new Vec2(0f, 1f);
+            forward2.Normalize();
+            Vec2 side2 = new Vec2(forward2.y, -forward2.x);
             float orbit = (float)Math.Sin(_cinematicElapsed * 0.22f) * 0.65f;
-            Vec2 cameraOffset2 = side2 * (4.5f + orbit) - line2 * 1.25f;
-            Vec3 cameraPosition = focus + new Vec3(cameraOffset2.x, cameraOffset2.y, 2.25f);
+            Vec2 cameraOffset2 = side2 * (4.5f + orbit) - forward2 * 1.25f;
+            Vec3 desiredCameraPosition = focus + new Vec3(cameraOffset2.x, cameraOffset2.y, 2.25f);
+            Vec3 cameraPosition = ClampToAuthoredCameraVolume(desiredCameraPosition);
+            cameraPosition = ResolveCollisionAwareCameraPosition(focus, cameraPosition);
             Vec3 direction = focus - cameraPosition;
             if (direction.LengthSquared < 0.0001f)
                 direction = Vec3.Forward;
             direction.Normalize();
             SetCameraFrame(cameraPosition, direction, out _cameraFrame);
             _camera.Frame = _cameraFrame;
+        }
+
+        private MatrixFrame ResolveAuthoredBossFightFrame()
+        {
+            try
+            {
+                GameEntity entity = Mission?.Scene?.FindEntityWithTag(
+                    CoopHideoutBossPhaseContract.BossFightEntityTag);
+                if (entity != null)
+                    return entity.GetGlobalFrame();
+            }
+            catch
+            {
+            }
+
+            return MatrixFrame.Identity;
+        }
+
+        private Vec3 ClampToAuthoredCameraVolume(Vec3 desiredPosition)
+        {
+            try
+            {
+                GameEntity entity = Mission?.Scene?.FindEntityWithTag(
+                    CoopHideoutBossPhaseContract.BossFightEntityTag);
+                ScriptComponentBehavior behavior = entity?.GetScriptComponents()
+                    .FirstOrDefault(component =>
+                        string.Equals(
+                            component?.GetType().FullName,
+                            "SandBox.Objects.Cinematics.HideoutBossFightBehavior",
+                            StringComparison.Ordinal));
+                MethodInfo clampMethod = behavior?.GetType().GetMethod(
+                    "ClampWorldPointToCameraVolume",
+                    BindingFlags.Instance | BindingFlags.Public,
+                    binder: null,
+                    types: new[] { typeof(Vec3).MakeByRefType(), typeof(Vec3).MakeByRefType() },
+                    modifiers: null);
+                if (clampMethod == null)
+                    return desiredPosition;
+
+                object[] arguments = { desiredPosition, Vec3.Zero };
+                clampMethod.Invoke(behavior, arguments);
+                if (arguments[1] is Vec3 clampedPosition)
+                    return clampedPosition;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Verbose(
+                    "CoopHideoutBossCinematicView: authored camera-volume clamp unavailable. " +
+                    "Error=" + ex.GetType().Name + ":" + ex.Message + ".");
+            }
+
+            return desiredPosition;
+        }
+
+        private Vec3 ResolveCollisionAwareCameraPosition(Vec3 focus, Vec3 desiredPosition)
+        {
+            try
+            {
+                if (Mission?.Scene == null)
+                    return desiredPosition;
+
+                Vec3 ray = desiredPosition - focus;
+                float rayLength = ray.Length;
+                if (rayLength < 0.5f)
+                    return desiredPosition;
+                ray /= rayLength;
+
+                if (!Mission.Scene.RayCastForClosestEntityOrTerrain(
+                        focus,
+                        desiredPosition,
+                        out float collisionDistance,
+                        out Vec3 collisionPoint,
+                        out WeakGameEntity collidedEntity,
+                        0.15f,
+                        (BodyFlags)67188481))
+                {
+                    return desiredPosition;
+                }
+
+                if (collisionDistance >= rayLength - 0.2f)
+                    return desiredPosition;
+
+                Vec3 corrected = collisionPoint - ray * 0.35f;
+                return (corrected - focus).LengthSquared >= 2.25f
+                    ? corrected
+                    : focus - ray * 1.5f;
+            }
+            catch
+            {
+                return desiredPosition;
+            }
         }
 
         private static void SetCameraFrame(
