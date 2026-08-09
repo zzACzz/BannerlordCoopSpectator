@@ -2107,9 +2107,9 @@ namespace CoopSpectator.UI
             mission = Mission;
             if (mission == null ||
                 !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
-                !IsCurrentCommanderDeploymentScenario(mission))
+                !IsCurrentCommanderBattleOrderScenario(mission))
             {
-                unavailableReason = "not-exact-siege";
+                unavailableReason = "not-commander-battle-order-scenario";
                 return false;
             }
 
@@ -5881,7 +5881,14 @@ namespace CoopSpectator.UI
             return GameNetwork.IsClient &&
                    GameNetwork.IsSessionActive &&
                    MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) &&
-                   IsCurrentCommanderDeploymentScenario(mission);
+                   IsCurrentCommanderBattleOrderScenario(mission);
+        }
+
+        private static bool IsCurrentCommanderBattleOrderScenario(Mission mission)
+        {
+            return IsCurrentCommanderDeploymentScenario(mission) ||
+                   SceneRuntimeClassifier.IsValidatedDayHideoutScenarioScene(
+                       mission?.SceneName ?? string.Empty);
         }
 
         private static bool IsCurrentCommanderDeploymentScenario(Mission mission)

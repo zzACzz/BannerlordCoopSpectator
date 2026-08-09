@@ -69,6 +69,43 @@ namespace CoopSpectator.Infrastructure
                 || CoopHideoutBossPhaseContract.IsSupportedDayHideoutSceneName(sceneName);
         }
 
+        public static bool IsValidatedDayHideoutScenarioScene(string sceneName)
+        {
+            if (!CoopHideoutBossPhaseContract.IsSupportedDayHideoutSceneName(sceneName))
+                return false;
+
+            try
+            {
+                BattleSnapshotMessage snapshot = BattleSnapshotRuntimeState.GetCurrent();
+                string snapshotScene = !string.IsNullOrWhiteSpace(snapshot?.MultiplayerScene)
+                    ? snapshot.MultiplayerScene
+                    : snapshot?.MapScene;
+                if (CoopHideoutBossPhaseContract.IsMatchingDayHideoutMissionContract(
+                        sceneName,
+                        snapshotScene,
+                        snapshot?.ScenarioContext?.ScenarioKind))
+                {
+                    return true;
+                }
+
+                if (CoopPreMissionTopologyRuntimeState.TryGetActive(
+                        sceneName,
+                        out CoopPreMissionTopologyContract topology,
+                        out _))
+                {
+                    return CoopHideoutBossPhaseContract.IsMatchingDayHideoutMissionContract(
+                        sceneName,
+                        topology?.RuntimeScene,
+                        topology?.ScenarioContext?.ScenarioKind);
+                }
+            }
+            catch
+            {
+            }
+
+            return false;
+        }
+
         public static bool IsExactSiegeAssaultWithDeploymentScene(string sceneName)
         {
             return IsExactSiegeWithDeploymentScene(sceneName);

@@ -35091,7 +35091,8 @@ namespace CoopSpectator.MissionBehaviors
                 controlledAgent == null ||
                 !controlledAgent.IsActive() ||
                 !IsSceneAwareBattleMapRuntime(mission) ||
-                !SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty))
+                (!SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty) &&
+                 !SceneRuntimeClassifier.IsValidatedDayHideoutScenarioScene(mission.SceneName ?? string.Empty)))
             {
                 return "CommanderControl=(captain)";
             }

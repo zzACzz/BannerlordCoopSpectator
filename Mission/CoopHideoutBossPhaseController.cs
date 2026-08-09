@@ -324,6 +324,12 @@ namespace CoopSpectator.MissionBehaviors
             if (enemyTeam == null)
                 return;
 
+            // Keep the authoritative team identities before the last initial defender is removed.
+            // The reserved boss group must still be able to resolve its team when that team has
+            // no active agents left in Mission.Agents.
+            _playerTeam = hostAgent.Team;
+            _enemyTeam = enemyTeam;
+
             CoopExactCampaignHideoutMissionController hideoutController =
                 Mission.GetMissionBehavior<CoopExactCampaignHideoutMissionController>();
             List<Agent> activeEnemies = GetActiveHumanAgents(enemyTeam);
@@ -833,15 +839,35 @@ namespace CoopSpectator.MissionBehaviors
             if (Mission?.Teams == null || playerTeam == null)
                 return null;
 
+            if (_enemyTeam != null &&
+                _enemyTeam != Team.Invalid &&
+                !ReferenceEquals(_enemyTeam, playerTeam) &&
+                _enemyTeam.Side != BattleSideEnum.None &&
+                _enemyTeam.Side != playerTeam.Side)
+            {
+                return _enemyTeam;
+            }
+
             Team explicitEnemy = Mission.Teams.FirstOrDefault(team =>
                 team != null && team != playerTeam && team != Team.Invalid &&
                 GetActiveHumanAgents(team).Count > 0 && playerTeam.IsEnemyOf(team));
             if (explicitEnemy != null)
                 return explicitEnemy;
 
-            return Mission.Teams.FirstOrDefault(team =>
+            Team activeOpposingTeam = Mission.Teams.FirstOrDefault(team =>
                 team != null && team != playerTeam && team != Team.Invalid &&
                 GetActiveHumanAgents(team).Count > 0);
+            if (activeOpposingTeam != null)
+                return activeOpposingTeam;
+
+            // Stealth intentionally marks the two teams as non-enemies before the alarm. Resolve
+            // the depleted defender team by battle side so a reserved boss group can be spawned.
+            return Mission.Teams.FirstOrDefault(team =>
+                team != null &&
+                team != playerTeam &&
+                team != Team.Invalid &&
+                team.Side != BattleSideEnum.None &&
+                team.Side != playerTeam.Side);
         }
 
         private List<Agent> GetActiveHumanAgents(Team team)

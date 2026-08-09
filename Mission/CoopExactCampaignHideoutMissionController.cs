@@ -12,6 +12,23 @@ using TaleWorlds.MountAndBlade;
 
 namespace CoopSpectator.MissionBehaviors
 {
+    internal sealed class CoopHideoutPatrolPointDefinition
+    {
+        internal MatrixFrame Frame { get; set; }
+
+        internal int Index { get; set; }
+
+        internal int WaitDurationSeconds { get; set; } = 1;
+
+        internal int WaitDeviationSeconds { get; set; }
+
+        internal bool IsInfiniteWaitPoint { get; set; }
+
+        internal float PatrollingSpeed { get; set; } = -1f;
+
+        internal string LoopAction { get; set; } = string.Empty;
+    }
+
     /// <summary>
     /// Snapshot-backed day-hideout materializer. It keeps the multiplayer shell and
     /// campaign snapshot contracts, but follows the native hideout placement shape
@@ -20,12 +37,15 @@ namespace CoopSpectator.MissionBehaviors
     internal sealed class CoopExactCampaignHideoutMissionController : MissionLogic, IMissionAgentSpawnLogic
     {
         private const string HideoutBanditActionSetSuffix = "_hideout_bandit";
+        private const string PatrolPointScriptName = "PatrolPoint";
+        private const string UnsetScriptStringValue = "__coop_unset_script_value__";
 
         private sealed class DefenderPlacementSlot
         {
             internal MatrixFrame SpawnFrame { get; set; }
 
-            internal List<MatrixFrame> PatrolFrames { get; set; } = new List<MatrixFrame>();
+            internal List<CoopHideoutPatrolPointDefinition> PatrolPoints { get; set; } =
+                new List<CoopHideoutPatrolPointDefinition>();
         }
 
         private readonly IMissionTroopSupplier[] _suppliers;
@@ -315,7 +335,7 @@ namespace CoopSpectator.MissionBehaviors
                     if (agent != null)
                     {
                         _spawnedEnemyAgents.Add(agent);
-                        stealthController?.RegisterDefender(agent, slot.PatrolFrames);
+                        stealthController?.RegisterDefender(agent, slot.PatrolPoints);
                     }
                 }
 
@@ -331,7 +351,9 @@ namespace CoopSpectator.MissionBehaviors
                     " EnemyAgents=" + _initialAssaultEnemyCount +
                     " ReservedBossGroup=" + ReservedEnemyCount +
                     " DefenderSlots=" + defenderSlots.Count +
-                    " PatrolRoutes=" + defenderSlots.Count(slot => slot.PatrolFrames.Count > 1) + ".");
+                    " PatrolRoutes=" + defenderSlots.Count(slot => slot.PatrolPoints.Count > 1) +
+                    " IdleActions=" + defenderSlots.Sum(slot =>
+                        slot.PatrolPoints.Count(point => !string.IsNullOrWhiteSpace(point.LoopAction))) + ".");
             }
             catch (Exception ex)
             {
@@ -487,7 +509,9 @@ namespace CoopSpectator.MissionBehaviors
                 ModLogger.Info(
                     "CoopExactCampaignHideoutMissionController: resolved defender scene slots. " +
                     "Count=" + slots.Count +
-                    " Routes=" + slots.Count(slot => slot.PatrolFrames.Count > 1) +
+                    " Routes=" + slots.Count(slot => slot.PatrolPoints.Count > 1) +
+                    " IdleActions=" + slots.Sum(slot =>
+                        slot.PatrolPoints.Count(point => !string.IsNullOrWhiteSpace(point.LoopAction))) +
                     " Source=" + source + ".");
                 return slots;
             }
@@ -529,7 +553,10 @@ namespace CoopSpectator.MissionBehaviors
                 slots.Add(new DefenderPlacementSlot
                 {
                     SpawnFrame = frame,
-                    PatrolFrames = new List<MatrixFrame> { frame }
+                    PatrolPoints = new List<CoopHideoutPatrolPointDefinition>
+                    {
+                        CreateDefaultPatrolPoint(frame, 0)
+                    }
                 });
             }
 
@@ -563,7 +590,9 @@ namespace CoopSpectator.MissionBehaviors
                     slots.Add(new DefenderPlacementSlot
                     {
                         SpawnFrame = route[0],
-                        PatrolFrames = route
+                        PatrolPoints = route
+                            .Select((frame, index) => CreateDefaultPatrolPoint(frame, index))
+                            .ToList()
                     });
                 }
             }
@@ -584,11 +613,13 @@ namespace CoopSpectator.MissionBehaviors
                 foreach (GameEntity entity in (entities ?? Enumerable.Empty<GameEntity>())
                              .Where(candidate => candidate != null))
                 {
-                    MatrixFrame frame = ResolveDynamicPatrolFrame(entity);
+                    List<CoopHideoutPatrolPointDefinition> route = ResolveDynamicPatrolPoints(entity);
+                    if (route.Count == 0)
+                        route.Add(CreateDefaultPatrolPoint(entity.GetGlobalFrame(), 0));
                     slots.Add(new DefenderPlacementSlot
                     {
-                        SpawnFrame = frame,
-                        PatrolFrames = new List<MatrixFrame> { frame }
+                        SpawnFrame = route[0].Frame,
+                        PatrolPoints = route
                     });
                 }
             }
@@ -597,31 +628,226 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        private static MatrixFrame ResolveDynamicPatrolFrame(GameEntity entity)
+        private static List<CoopHideoutPatrolPointDefinition> ResolveDynamicPatrolPoints(GameEntity entity)
         {
+            var points = new List<CoopHideoutPatrolPointDefinition>();
             if (entity == null)
-                return MatrixFrame.Identity;
+                return points;
 
             try
             {
-                var descendants = new List<GameEntity>();
-                entity.GetChildrenRecursive(ref descendants);
-                GameEntity patrolPoint = descendants.LastOrDefault(candidate =>
-                    candidate != null &&
-                    string.Equals(candidate.Name, "patrol_point", StringComparison.OrdinalIgnoreCase));
-                if (patrolPoint != null)
-                    return patrolPoint.GetGlobalFrame();
+                List<GameEntity> pointContainers = entity.GetChildren()
+                    .Where(child => child != null)
+                    .OrderBy(child => ReadEntityOrder(child.Name))
+                    .ToList();
+                int fallbackIndex = 0;
+                foreach (GameEntity pointContainer in pointContainers)
+                {
+                    GameEntity patrolPoint = FindPatrolPointEntity(pointContainer);
+                    if (patrolPoint == null)
+                        continue;
+
+                    CoopHideoutPatrolPointDefinition definition = ReadPatrolPointDefinition(
+                        patrolPoint,
+                        fallbackIndex++);
+                    if (definition != null)
+                        points.Add(definition);
+                }
+
+                if (points.Count == 0)
+                {
+                    var descendants = new List<GameEntity>();
+                    entity.GetChildrenRecursive(ref descendants);
+                    fallbackIndex = 0;
+                    foreach (GameEntity patrolPoint in descendants
+                                 .Where(candidate =>
+                                     candidate != null &&
+                                     string.Equals(candidate.Name, "patrol_point", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        CoopHideoutPatrolPointDefinition definition = ReadPatrolPointDefinition(
+                            patrolPoint,
+                            fallbackIndex++);
+                        if (definition != null)
+                            points.Add(definition);
+                    }
+                }
             }
             catch
             {
             }
 
-            return entity.GetGlobalFrame();
+            return points
+                .OrderBy(point => point.Index)
+                .ToList();
+        }
+
+        private static GameEntity FindPatrolPointEntity(GameEntity entity)
+        {
+            if (entity == null)
+                return null;
+            if (string.Equals(entity.Name, "patrol_point", StringComparison.OrdinalIgnoreCase))
+                return entity;
+
+            try
+            {
+                var descendants = new List<GameEntity>();
+                entity.GetChildrenRecursive(ref descendants);
+                return descendants.FirstOrDefault(candidate =>
+                    candidate != null &&
+                    string.Equals(candidate.Name, "patrol_point", StringComparison.OrdinalIgnoreCase));
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static CoopHideoutPatrolPointDefinition ReadPatrolPointDefinition(
+            GameEntity patrolPoint,
+            int fallbackIndex)
+        {
+            if (patrolPoint == null)
+                return null;
+
+            CoopHideoutPatrolPointDefinition definition = CreateDefaultPatrolPoint(
+                patrolPoint.GetGlobalFrame(),
+                fallbackIndex);
+            if (TryReadPatrolPointInt(patrolPoint, "Index", out int index))
+                definition.Index = index;
+            if (TryReadPatrolPointInt(patrolPoint, "WaitDuration", out int waitDuration))
+                definition.WaitDurationSeconds = Math.Max(0, waitDuration);
+            if (TryReadPatrolPointInt(patrolPoint, "WaitDeviation", out int waitDeviation))
+                definition.WaitDeviationSeconds = Math.Max(0, waitDeviation);
+            if (TryReadPatrolPointBool(patrolPoint, "IsInfiniteWaitPoint", out bool isInfinite))
+                definition.IsInfiniteWaitPoint = isInfinite;
+            if (TryReadPatrolPointFloat(patrolPoint, "PatrollingSpeed", out float patrollingSpeed))
+                definition.PatrollingSpeed = patrollingSpeed;
+            if (TryReadPatrolPointString(patrolPoint, "LoopAction", out string loopAction))
+                definition.LoopAction = loopAction ?? string.Empty;
+            return definition;
+        }
+
+        private static CoopHideoutPatrolPointDefinition CreateDefaultPatrolPoint(
+            MatrixFrame frame,
+            int index)
+        {
+            return new CoopHideoutPatrolPointDefinition
+            {
+                Frame = frame,
+                Index = Math.Max(0, index),
+                WaitDurationSeconds = 1,
+                WaitDeviationSeconds = 0,
+                IsInfiniteWaitPoint = false,
+                PatrollingSpeed = -1f,
+                LoopAction = string.Empty
+            };
+        }
+
+        private static bool TryReadPatrolPointInt(GameEntity entity, string fieldName, out int value)
+        {
+            value = 0;
+            try
+            {
+                var holder = new ScriptComponentFieldHolder { i = int.MinValue };
+                entity.GetNativeScriptComponentVariable(
+                    PatrolPointScriptName,
+                    fieldName,
+                    ref holder,
+                    RglScriptFieldType.RglSftInt);
+                if (holder.i == int.MinValue)
+                    return false;
+                value = holder.i;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool TryReadPatrolPointBool(GameEntity entity, string fieldName, out bool value)
+        {
+            value = false;
+            try
+            {
+                var holder = new ScriptComponentFieldHolder { b = int.MinValue };
+                entity.GetNativeScriptComponentVariable(
+                    PatrolPointScriptName,
+                    fieldName,
+                    ref holder,
+                    RglScriptFieldType.RglSftBool);
+                if (holder.b == int.MinValue)
+                    return false;
+                value = holder.b != 0;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool TryReadPatrolPointFloat(GameEntity entity, string fieldName, out float value)
+        {
+            value = -1f;
+            try
+            {
+                var holder = new ScriptComponentFieldHolder { f = float.NaN };
+                entity.GetNativeScriptComponentVariable(
+                    PatrolPointScriptName,
+                    fieldName,
+                    ref holder,
+                    RglScriptFieldType.RglSftFloat);
+                if (float.IsNaN(holder.f))
+                    return false;
+                value = holder.f;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool TryReadPatrolPointString(GameEntity entity, string fieldName, out string value)
+        {
+            value = null;
+            try
+            {
+                var holder = new ScriptComponentFieldHolder { s = UnsetScriptStringValue };
+                entity.GetNativeScriptComponentVariable(
+                    PatrolPointScriptName,
+                    fieldName,
+                    ref holder,
+                    RglScriptFieldType.RglSftString);
+                if (string.Equals(holder.s, UnsetScriptStringValue, StringComparison.Ordinal))
+                    return false;
+                value = holder.s ?? string.Empty;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static int ReadEntityOrder(string entityName)
         {
-            return int.TryParse(entityName, out int order) ? order : int.MaxValue;
+            if (int.TryParse(entityName, out int order))
+                return order;
+
+            if (string.IsNullOrWhiteSpace(entityName))
+                return int.MaxValue;
+
+            int end = entityName.Length - 1;
+            while (end >= 0 && char.IsDigit(entityName[end]))
+                end--;
+            if (end >= entityName.Length - 1)
+                return int.MaxValue;
+
+            return int.TryParse(entityName.Substring(end + 1), out order)
+                ? order
+                : int.MaxValue;
         }
 
         private void AppendSceneEntityFrames(
@@ -881,6 +1107,7 @@ namespace CoopSpectator.MissionBehaviors
         private const float DetectionInterval = 0.15f;
         private const float PatrolArrivalDistanceSquared = 2.25f;
         private const float PatrolWaitSeconds = 1.25f;
+        private const float DefaultPatrollingSpeed = 1.05f;
         private const float PatrolProgressTimeoutSeconds = 12f;
         private const float StalledAssaultAlarmSeconds = 45f;
 
@@ -888,7 +1115,7 @@ namespace CoopSpectator.MissionBehaviors
         {
             internal Agent Agent { get; set; }
 
-            internal List<MatrixFrame> Route { get; set; }
+            internal List<CoopHideoutPatrolPointDefinition> Route { get; set; }
 
             internal int RouteIndex { get; set; }
 
@@ -905,6 +1132,10 @@ namespace CoopSpectator.MissionBehaviors
             internal Vec2 PreviousPosition { get; set; }
 
             internal float LastProgressAt { get; set; }
+
+            internal bool IsWaitingAtPoint { get; set; }
+
+            internal bool IsIdleActionPlaying { get; set; }
         }
 
         private readonly Dictionary<int, DefenderState> _defenders =
@@ -916,25 +1147,34 @@ namespace CoopSpectator.MissionBehaviors
 
         internal void RegisterDefender(
             Agent agent,
-            IReadOnlyList<MatrixFrame> routeFrames)
+            IReadOnlyList<CoopHideoutPatrolPointDefinition> routePoints)
         {
             if (!GameNetwork.IsServer || agent == null)
                 return;
 
-            List<MatrixFrame> route = (routeFrames ?? Array.Empty<MatrixFrame>())
+            List<CoopHideoutPatrolPointDefinition> route =
+                (routePoints ?? Array.Empty<CoopHideoutPatrolPointDefinition>())
+                .Where(point => point != null)
+                .OrderBy(point => point.Index)
                 .ToList();
             if (route.Count == 0)
             {
                 MatrixFrame frame = MatrixFrame.Identity;
                 frame.origin = agent.Position;
-                route.Add(frame);
+                route.Add(new CoopHideoutPatrolPointDefinition
+                {
+                    Frame = frame,
+                    Index = 0,
+                    WaitDurationSeconds = 1,
+                    PatrollingSpeed = -1f
+                });
             }
 
             var state = new DefenderState
             {
                 Agent = agent,
                 Route = route,
-                RouteIndex = route.Count > 1 ? 1 : 0,
+                RouteIndex = 0,
                 PreviousPosition = agent.Position.AsVec2,
                 LastProgressAt = Mission?.CurrentTime ?? 0f
             };
@@ -1068,7 +1308,9 @@ namespace CoopSpectator.MissionBehaviors
             if (state.Route == null || state.Route.Count == 0)
                 return;
 
-            MatrixFrame targetFrame = state.Route[state.RouteIndex % state.Route.Count];
+            CoopHideoutPatrolPointDefinition targetPoint =
+                state.Route[state.RouteIndex % state.Route.Count];
+            MatrixFrame targetFrame = targetPoint.Frame;
             float distanceSquared = state.Agent.Position.AsVec2.DistanceSquared(targetFrame.origin.AsVec2);
             Vec2 currentPosition = state.Agent.Position.AsVec2;
             if (currentPosition.DistanceSquared(state.PreviousPosition) > 0.09f)
@@ -1077,18 +1319,28 @@ namespace CoopSpectator.MissionBehaviors
                 state.LastProgressAt = now;
             }
 
-            if (distanceSquared <= PatrolArrivalDistanceSquared && now >= state.NextRouteAt)
+            if (distanceSquared <= PatrolArrivalDistanceSquared)
             {
-                state.NextRouteAt = now + PatrolWaitSeconds;
-                if (state.Route.Count > 1)
-                {
-                    state.RouteIndex = (state.RouteIndex + 1) % state.Route.Count;
-                    state.NextCommandAt = state.NextRouteAt;
-                }
+                if (!state.IsWaitingAtPoint)
+                    BeginPatrolPointWait(state, targetPoint, now);
+
+                if (targetPoint.IsInfiniteWaitPoint)
+                    return;
+
+                if (now < state.NextRouteAt)
+                    return;
+
+                EndPatrolPointWait(state);
+                state.RouteIndex = (state.RouteIndex + 1) % state.Route.Count;
+                ApplyPatrollingSpeed(state.Agent, targetPoint.PatrollingSpeed);
+                state.PreviousPosition = state.Agent.Position.AsVec2;
+                state.LastProgressAt = now;
+                state.NextCommandAt = now;
             }
             else if (distanceSquared > PatrolArrivalDistanceSquared &&
                      now - state.LastProgressAt >= PatrolProgressTimeoutSeconds)
             {
+                EndPatrolPointWait(state);
                 state.RouteIndex = (state.RouteIndex + 1) % state.Route.Count;
                 state.LastProgressAt = now;
                 state.NextCommandAt = now;
@@ -1104,6 +1356,126 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
+        private void BeginPatrolPointWait(
+            DefenderState state,
+            CoopHideoutPatrolPointDefinition point,
+            float now)
+        {
+            if (state == null || point == null)
+                return;
+
+            state.IsWaitingAtPoint = true;
+            float waitSeconds = Math.Max(0f, point.WaitDurationSeconds);
+            if (point.WaitDeviationSeconds > 0)
+            {
+                waitSeconds += MBRandom.RandomFloatRanged(
+                    -point.WaitDeviationSeconds,
+                    point.WaitDeviationSeconds);
+                waitSeconds = Math.Max(0f, waitSeconds);
+            }
+            if (waitSeconds <= 0f && !point.IsInfiniteWaitPoint)
+                waitSeconds = PatrolWaitSeconds;
+            state.NextRouteAt = point.IsInfiniteWaitPoint
+                ? float.MaxValue
+                : now + waitSeconds;
+
+            if (string.IsNullOrWhiteSpace(point.LoopAction))
+                return;
+
+            try
+            {
+                ActionIndexCache action = ActionIndexCache.Create(point.LoopAction);
+                if (action.Index < 0)
+                {
+                    ModLogger.Verbose(
+                        "CoopHideoutStealthPatrolController: scene patrol action was not found. " +
+                        "Action=" + point.LoopAction + ".");
+                    return;
+                }
+
+                state.IsIdleActionPlaying = state.Agent.SetActionChannel(
+                    0,
+                    in action,
+                    ignorePriority: false,
+                    additionalFlags: (AnimFlags)0,
+                    blendWithNextActionFactor: 0f,
+                    actionSpeed: 1f,
+                    blendInPeriod: -0.2f,
+                    blendOutPeriodToNoAnim: 0.4f,
+                    startProgress: 0f,
+                    useLinearSmoothing: false,
+                    blendOutPeriod: -0.2f,
+                    actionShift: 0,
+                    forceFaceMorphRestart: true);
+                if (!state.IsIdleActionPlaying)
+                {
+                    ModLogger.Verbose(
+                        "CoopHideoutStealthPatrolController: scene patrol action was rejected by the agent. " +
+                        "Action=" + point.LoopAction +
+                        " Agent=" + state.Agent.Index + ".");
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Verbose(
+                    "CoopHideoutStealthPatrolController: failed to apply scene patrol action. " +
+                    "Action=" + point.LoopAction +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message + ".");
+            }
+        }
+
+        private static void EndPatrolPointWait(DefenderState state)
+        {
+            if (state == null)
+                return;
+
+            state.IsWaitingAtPoint = false;
+            state.NextRouteAt = 0f;
+            if (!state.IsIdleActionPlaying || state.Agent == null)
+                return;
+
+            try
+            {
+                ActionIndexCache noAction = ActionIndexCache.act_none;
+                state.Agent.SetActionChannel(
+                    0,
+                    in noAction,
+                    ignorePriority: true,
+                    additionalFlags: (AnimFlags)0,
+                    blendWithNextActionFactor: 0f,
+                    actionSpeed: 1f,
+                    blendInPeriod: -0.2f,
+                    blendOutPeriodToNoAnim: 0.4f,
+                    startProgress: 0f,
+                    useLinearSmoothing: false,
+                    blendOutPeriod: -0.2f,
+                    actionShift: 0,
+                    forceFaceMorphRestart: true);
+            }
+            catch
+            {
+            }
+            finally
+            {
+                state.IsIdleActionPlaying = false;
+            }
+        }
+
+        private static void ApplyPatrollingSpeed(Agent agent, float sceneSpeed)
+        {
+            if (agent == null)
+                return;
+            try
+            {
+                agent.SetMaximumSpeedLimit(
+                    sceneSpeed < 0f ? DefaultPatrollingSpeed : sceneSpeed,
+                    isMultiplier: false);
+            }
+            catch
+            {
+            }
+        }
+
         private void IssuePatrolTarget(DefenderState state)
         {
             Agent agent = state?.Agent;
@@ -1112,7 +1484,7 @@ namespace CoopSpectator.MissionBehaviors
 
             try
             {
-                MatrixFrame targetFrame = state.Route[state.RouteIndex % state.Route.Count];
+                MatrixFrame targetFrame = state.Route[state.RouteIndex % state.Route.Count].Frame;
                 Vec2 direction = targetFrame.rotation.f.AsVec2;
                 if (direction.LengthSquared < 0.0001f)
                     direction = new Vec2(0f, 1f);
@@ -1290,6 +1662,14 @@ namespace CoopSpectator.MissionBehaviors
             state.IsAlarmed = true;
             state.IsCautious = false;
             state.Suspicion = AlarmThreshold;
+            EndPatrolPointWait(state);
+            try
+            {
+                agent.SetMaximumSpeedLimit(-1f, isMultiplier: false);
+            }
+            catch
+            {
+            }
             agent.DisableScriptedMovement();
             agent.SetLookAgent(null);
             agent.SetWatchState(Agent.WatchState.Alarmed);
