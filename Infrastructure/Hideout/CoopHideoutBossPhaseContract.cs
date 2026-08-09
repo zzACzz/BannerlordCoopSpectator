@@ -155,6 +155,15 @@ namespace CoopSpectator.Infrastructure.Hideout
                    hasSelectedRosterContract;
         }
 
+        public static bool ShouldAllowCommanderIdentityFallback(
+            int botAliveCount,
+            int botTotalCount,
+            bool isValidatedDayHideoutScenario)
+        {
+            bool hasClientControlledBots = botTotalCount > 1 || botAliveCount > 0;
+            return !hasClientControlledBots && isValidatedDayHideoutScenario;
+        }
+
         public static int ResolveBossTriggerCount(int initialEnemyCount)
         {
             if (initialEnemyCount <= 0)

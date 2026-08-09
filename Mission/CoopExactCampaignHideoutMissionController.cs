@@ -502,18 +502,22 @@ namespace CoopSpectator.MissionBehaviors
         {
             var slots = new List<DefenderPlacementSlot>();
             AppendGuardPatrolSlots(slots);
-            AppendDynamicPatrolSlots(slots);
+            AppendDynamicPatrolSlots(slots, out string sceneManifestDiagnostics);
 
-            string source = "engine-scene-routes";
+            int idleActionCount = slots.Sum(slot =>
+                slot.PatrolPoints.Count(point => !string.IsNullOrWhiteSpace(point.LoopAction)));
+            string source = idleActionCount > 0
+                ? "engine-scene-routes+xscene-manifest"
+                : "engine-scene-routes";
             if (slots.Count > 0)
             {
                 ModLogger.Info(
                     "CoopExactCampaignHideoutMissionController: resolved defender scene slots. " +
                     "Count=" + slots.Count +
                     " Routes=" + slots.Count(slot => slot.PatrolPoints.Count > 1) +
-                    " IdleActions=" + slots.Sum(slot =>
-                        slot.PatrolPoints.Count(point => !string.IsNullOrWhiteSpace(point.LoopAction))) +
-                    " Source=" + source + ".");
+                    " IdleActions=" + idleActionCount +
+                    " Source=" + source +
+                    " Manifest={" + sceneManifestDiagnostics + "}.");
                 return slots;
             }
 
@@ -565,7 +569,8 @@ namespace CoopSpectator.MissionBehaviors
                 "CoopExactCampaignHideoutMissionController: resolved defender scene slots. " +
                 "Count=" + slots.Count +
                 " Routes=0" +
-                " Source=" + source + ".");
+                " Source=" + source +
+                " Manifest={" + sceneManifestDiagnostics + "}.");
             return slots;
         }
 
@@ -602,11 +607,24 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        private void AppendDynamicPatrolSlots(List<DefenderPlacementSlot> slots)
+        private void AppendDynamicPatrolSlots(
+            List<DefenderPlacementSlot> slots,
+            out string manifestDiagnostics)
         {
+            manifestDiagnostics = "not-attempted";
             if (slots == null)
                 return;
 
+            bool hasManifest = CoopHideoutSceneManifestRuntime.TryResolve(
+                Mission?.SceneName,
+                out CoopHideoutSceneManifest manifest,
+                out string loadDiagnostics);
+            var consumedManifestAreaIndices = new HashSet<int>();
+            int matchedAreaCount = 0;
+            int appliedAreaCount = 0;
+            int pointCountMismatchCount = 0;
+            int unmatchedAreaCount = 0;
+            int appliedIdleActionCount = 0;
             try
             {
                 IEnumerable<GameEntity> entities = Mission?.Scene?.FindEntitiesWithTag(
@@ -617,6 +635,33 @@ namespace CoopSpectator.MissionBehaviors
                     List<CoopHideoutPatrolPointDefinition> route = ResolveDynamicPatrolPoints(entity);
                     if (route.Count == 0)
                         route.Add(CreateDefaultPatrolPoint(entity.GetGlobalFrame(), 0));
+
+                    if (hasManifest &&
+                        TryTakeNearestManifestArea(
+                            entity.GetGlobalFrame().origin,
+                            manifest,
+                            consumedManifestAreaIndices,
+                            out CoopHideoutPatrolAreaManifest areaManifest))
+                    {
+                        matchedAreaCount++;
+                        if (TryApplyManifestPatrolPoints(
+                                route,
+                                areaManifest,
+                                out int idleActionsApplied))
+                        {
+                            appliedAreaCount++;
+                            appliedIdleActionCount += idleActionsApplied;
+                        }
+                        else
+                        {
+                            pointCountMismatchCount++;
+                        }
+                    }
+                    else if (hasManifest)
+                    {
+                        unmatchedAreaCount++;
+                    }
+
                     slots.Add(new DefenderPlacementSlot
                     {
                         SpawnFrame = route[0].Frame,
@@ -624,9 +669,99 @@ namespace CoopSpectator.MissionBehaviors
                     });
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                manifestDiagnostics =
+                    "apply-failed:" + ex.GetType().Name + ":" + ex.Message +
+                    " Load={" + loadDiagnostics + "}";
+                return;
             }
+
+            manifestDiagnostics =
+                "Available=" + hasManifest +
+                " Areas=" + (manifest?.PatrolAreas?.Count ?? 0) +
+                " Matched=" + matchedAreaCount +
+                " Applied=" + appliedAreaCount +
+                " PointCountMismatch=" + pointCountMismatchCount +
+                " Unmatched=" + unmatchedAreaCount +
+                " IdleActionsApplied=" + appliedIdleActionCount +
+                " Load={" + loadDiagnostics + "}";
+        }
+
+        private static bool TryTakeNearestManifestArea(
+            Vec3 runtimePosition,
+            CoopHideoutSceneManifest manifest,
+            HashSet<int> consumedAreaIndices,
+            out CoopHideoutPatrolAreaManifest areaManifest)
+        {
+            const float maximumDistanceSquared = 0.75f * 0.75f;
+            areaManifest = null;
+            if (manifest?.PatrolAreas == null || consumedAreaIndices == null)
+                return false;
+
+            int bestAreaIndex = -1;
+            float bestDistanceSquared = maximumDistanceSquared;
+            for (int areaIndex = 0; areaIndex < manifest.PatrolAreas.Count; areaIndex++)
+            {
+                if (consumedAreaIndices.Contains(areaIndex))
+                    continue;
+
+                CoopHideoutPatrolAreaManifest candidate = manifest.PatrolAreas[areaIndex];
+                if (candidate == null)
+                    continue;
+
+                float deltaX = runtimePosition.x - candidate.PositionX;
+                float deltaY = runtimePosition.y - candidate.PositionY;
+                float deltaZ = runtimePosition.z - candidate.PositionZ;
+                float distanceSquared = deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ;
+                if (distanceSquared > bestDistanceSquared)
+                    continue;
+
+                bestDistanceSquared = distanceSquared;
+                bestAreaIndex = areaIndex;
+            }
+
+            if (bestAreaIndex < 0)
+                return false;
+
+            consumedAreaIndices.Add(bestAreaIndex);
+            areaManifest = manifest.PatrolAreas[bestAreaIndex];
+            return true;
+        }
+
+        private static bool TryApplyManifestPatrolPoints(
+            List<CoopHideoutPatrolPointDefinition> runtimePoints,
+            CoopHideoutPatrolAreaManifest areaManifest,
+            out int idleActionsApplied)
+        {
+            idleActionsApplied = 0;
+            if (runtimePoints == null ||
+                areaManifest?.PatrolPoints == null ||
+                runtimePoints.Count == 0 ||
+                runtimePoints.Count != areaManifest.PatrolPoints.Count)
+            {
+                return false;
+            }
+
+            for (int pointIndex = 0; pointIndex < runtimePoints.Count; pointIndex++)
+            {
+                CoopHideoutPatrolPointDefinition runtimePoint = runtimePoints[pointIndex];
+                CoopHideoutPatrolPointManifest manifestPoint = areaManifest.PatrolPoints[pointIndex];
+                if (runtimePoint == null || manifestPoint == null)
+                    return false;
+
+                runtimePoint.Index = manifestPoint.Index;
+                runtimePoint.WaitDurationSeconds = manifestPoint.WaitDurationSeconds;
+                runtimePoint.WaitDeviationSeconds = manifestPoint.WaitDeviationSeconds;
+                runtimePoint.IsInfiniteWaitPoint = manifestPoint.IsInfiniteWaitPoint;
+                runtimePoint.PatrollingSpeed = manifestPoint.PatrollingSpeed;
+                runtimePoint.LoopAction = manifestPoint.LoopAction ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(runtimePoint.LoopAction))
+                    idleActionsApplied++;
+            }
+
+            runtimePoints.Sort((left, right) => left.Index.CompareTo(right.Index));
+            return true;
         }
 
         private static List<CoopHideoutPatrolPointDefinition> ResolveDynamicPatrolPoints(GameEntity entity)
@@ -1248,16 +1383,26 @@ namespace CoopSpectator.MissionBehaviors
 
             _active = true;
             _lastCombatProgressAt = Mission?.CurrentTime ?? 0f;
+            int sheathHandsAttempted = 0;
+            int sheathHandsCleared = 0;
+            int sheathFailures = 0;
             foreach (DefenderState state in _defenders.Values)
             {
                 PreparePatrollingAgent(state, issueMovement: true);
-                TrySheathePatrolWeapons(state.Agent);
+                TrySheathePatrolWeapons(
+                    state.Agent,
+                    ref sheathHandsAttempted,
+                    ref sheathHandsCleared,
+                    ref sheathFailures);
             }
 
             ModLogger.Info(
                 "CoopHideoutStealthPatrolController: isolated stealth patrol runtime activated. " +
                 "Defenders=" + _defenders.Count +
-                " Routes=" + _defenders.Values.Count(state => state.Route.Count > 1) + ".");
+                " Routes=" + _defenders.Values.Count(state => state.Route.Count > 1) +
+                " SheathHandsAttempted=" + sheathHandsAttempted +
+                " SheathHandsCleared=" + sheathHandsCleared +
+                " SheathFailures=" + sheathFailures + ".");
         }
 
         public override void OnMissionTick(float dt)
@@ -1365,7 +1510,11 @@ namespace CoopSpectator.MissionBehaviors
                 IssuePatrolTarget(state);
         }
 
-        private static void TrySheathePatrolWeapons(Agent agent)
+        private static void TrySheathePatrolWeapons(
+            Agent agent,
+            ref int handsAttempted,
+            ref int handsCleared,
+            ref int failures)
         {
             if (agent?.IsActive() != true)
                 return;
@@ -1374,26 +1523,38 @@ namespace CoopSpectator.MissionBehaviors
             {
                 if (agent.GetOffhandWieldedItemIndex() != EquipmentIndex.None)
                 {
+                    handsAttempted++;
                     agent.TryToSheathWeaponInHand(
                         Agent.HandIndex.OffHand,
                         Agent.WeaponWieldActionType.Instant);
+                    if (agent.GetOffhandWieldedItemIndex() == EquipmentIndex.None)
+                        handsCleared++;
+                    else
+                        failures++;
                 }
             }
             catch
             {
+                failures++;
             }
 
             try
             {
                 if (agent.GetPrimaryWieldedItemIndex() != EquipmentIndex.None)
                 {
+                    handsAttempted++;
                     agent.TryToSheathWeaponInHand(
                         Agent.HandIndex.MainHand,
                         Agent.WeaponWieldActionType.Instant);
+                    if (agent.GetPrimaryWieldedItemIndex() == EquipmentIndex.None)
+                        handsCleared++;
+                    else
+                        failures++;
                 }
             }
             catch
             {
+                failures++;
             }
         }
 

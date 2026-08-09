@@ -7,5 +7,6 @@
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="..\..\Infrastructure\Hideout\CoopHideoutBossPhaseContract.cs" Link="CoopHideoutBossPhaseContract.cs" />
+    <Compile Include="..\..\Infrastructure\Hideout\CoopHideoutSceneManifest.cs" Link="CoopHideoutSceneManifest.cs" />
   </ItemGroup>
 </Project>

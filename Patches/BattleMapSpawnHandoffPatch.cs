@@ -7,6 +7,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.Infrastructure.Hideout;
 using CoopSpectator.Infrastructure.SallyOut;
 using CoopSpectator.Infrastructure.SiegeAmbush;
 using CoopSpectator.Infrastructure.VillageBattle;
@@ -23295,7 +23296,15 @@ namespace CoopSpectator.Patches
             bool allowExactSiegeCommanderIdentityFallback =
                 !hasClientControlledBots &&
                 ShouldRunLocalExactSiegeCommanderControlFromOrderTroopPlacer(mission);
-            if (!hasClientControlledBots && !allowExactSiegeCommanderIdentityFallback)
+            bool allowValidatedHideoutCommanderIdentityFallback =
+                CoopHideoutBossPhaseContract.ShouldAllowCommanderIdentityFallback(
+                    botAliveCount,
+                    botTotalCount,
+                    SceneRuntimeClassifier.IsValidatedDayHideoutScenarioScene(
+                        mission.SceneName ?? string.Empty));
+            if (!hasClientControlledBots &&
+                !allowExactSiegeCommanderIdentityFallback &&
+                !allowValidatedHideoutCommanderIdentityFallback)
                 return false;
 
             Formation priorControlledFormation = myMissionPeer.ControlledFormation ?? controlledAgent.Formation;
@@ -23849,7 +23858,7 @@ namespace CoopSpectator.Patches
                 mission == null ||
                 team == null ||
                 !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
-                !SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty))
+                !SceneRuntimeClassifier.IsExactCommanderOrderControlScene(mission.SceneName ?? string.Empty))
             {
                 return;
             }
@@ -24060,7 +24069,7 @@ namespace CoopSpectator.Patches
                 mission == null ||
                 team == null ||
                 !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
-                !SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty) ||
+                !SceneRuntimeClassifier.IsExactCommanderOrderControlScene(mission.SceneName ?? string.Empty) ||
                 !team.IsPlayerGeneral ||
                 !ReferenceEquals(team.GeneralAgent, controlledAgent))
             {
@@ -24692,7 +24701,7 @@ namespace CoopSpectator.Patches
                 mission == null ||
                 team == null ||
                 !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
-                !SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty) ||
+                !SceneRuntimeClassifier.IsExactCommanderOrderControlScene(mission.SceneName ?? string.Empty) ||
                 !team.IsPlayerGeneral ||
                 !ReferenceEquals(team.GeneralAgent, controlledAgent))
             {

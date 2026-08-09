@@ -11,6 +11,8 @@ internal static class Program
             ValidateScenePolicy();
             ValidatePreOpenMissionContractPolicy();
             ValidateNativeTimerStartupPolicy();
+            ValidateCommanderIdentityFallbackPolicy();
+            ValidateSceneManifestParsing();
             ValidateTriggerPolicy();
             ValidateMaterializationPolicy();
             ValidatePhaseTransitions();
@@ -162,6 +164,128 @@ internal static class Program
                 hasHideoutDayRuntimeMarker: true,
                 null),
             "A missing native battle shell source must remain suppressed.");
+    }
+
+    private static void ValidateCommanderIdentityFallbackPolicy()
+    {
+        Assert(
+            CoopHideoutBossPhaseContract.ShouldAllowCommanderIdentityFallback(
+                botAliveCount: 0,
+                botTotalCount: 0,
+                isValidatedDayHideoutScenario: true),
+            "A validated day hideout may restore commander identity before bot counters arrive.");
+        Assert(
+            CoopHideoutBossPhaseContract.ShouldAllowCommanderIdentityFallback(
+                botAliveCount: 0,
+                botTotalCount: 1,
+                isValidatedDayHideoutScenario: true),
+            "The local commander agent must not be mistaken for a controlled bot.");
+        Assert(
+            !CoopHideoutBossPhaseContract.ShouldAllowCommanderIdentityFallback(
+                botAliveCount: 1,
+                botTotalCount: 0,
+                isValidatedDayHideoutScenario: true),
+            "A live controlled bot must use the normal synchronized commander path.");
+        Assert(
+            !CoopHideoutBossPhaseContract.ShouldAllowCommanderIdentityFallback(
+                botAliveCount: 0,
+                botTotalCount: 2,
+                isValidatedDayHideoutScenario: true),
+            "Multiple assigned agents must use the normal synchronized commander path.");
+        Assert(
+            !CoopHideoutBossPhaseContract.ShouldAllowCommanderIdentityFallback(
+                botAliveCount: 0,
+                botTotalCount: 0,
+                isValidatedDayHideoutScenario: false),
+            "The identity fallback must remain isolated from non-hideout battles.");
+    }
+
+    private static void ValidateSceneManifestParsing()
+    {
+        const string xml = @"
+<scene>
+  <entities>
+    <game_entity name=""dynamic_patrol_area"">
+      <transform position=""1.25, 2.5, 3.75"" />
+      <children>
+        <game_entity name=""patrol_point"">
+          <scripts>
+            <script name=""PatrolPoint""><variables>
+              <variable name=""WaitDuration"" value=""7"" />
+              <variable name=""WaitDeviation"" value=""2"" />
+              <variable name=""Index"" value=""1"" />
+              <variable name=""IsInfiniteWaitPoint"" value=""true"" />
+              <variable name=""PatrollingSpeed"" value=""0.65"" />
+              <variable name=""LoopAction"" value=""act_hideout_wait"" />
+            </variables></script>
+          </scripts>
+        </game_entity>
+        <game_entity name=""patrol_point"">
+          <scripts>
+            <script name=""PatrolPoint""><variables>
+              <variable name=""Index"" value=""0"" />
+            </variables></script>
+          </scripts>
+        </game_entity>
+      </children>
+    </game_entity>
+    <game_entity name=""dynamic_patrol_area"">
+      <transform position=""-4, 5, 6"" />
+      <children>
+        <game_entity name=""patrol_point""><scripts>
+          <script name=""PatrolPoint""><variables>
+            <variable name=""Index"" value=""0"" />
+            <variable name=""LoopAction"" value=""act_hideout_sit"" />
+          </variables></script>
+        </scripts></game_entity>
+      </children>
+    </game_entity>
+  </entities>
+</scene>";
+
+        Assert(
+            CoopHideoutSceneManifest.TryParse(
+                xml,
+                "bandit_forest_sv",
+                out CoopHideoutSceneManifest manifest,
+                out string diagnostics),
+            "A valid hideout scene manifest must parse: " + diagnostics);
+        Assert(manifest.PatrolAreas.Count == 2, "Both dynamic patrol areas must be retained.");
+        Assert(manifest.PatrolPointCount == 3, "All scripted patrol points must be retained.");
+        Assert(manifest.IdleActionCount == 2, "Both non-empty idle actions must be retained.");
+        Assert(
+            Math.Abs(manifest.PatrolAreas[0].PositionX - 1.25f) < 0.001f &&
+            Math.Abs(manifest.PatrolAreas[0].PositionY - 2.5f) < 0.001f &&
+            Math.Abs(manifest.PatrolAreas[0].PositionZ - 3.75f) < 0.001f,
+            "The patrol-area anchor must use invariant xscene coordinates.");
+
+        CoopHideoutPatrolPointManifest defaultPoint = manifest.PatrolAreas[0].PatrolPoints[0];
+        CoopHideoutPatrolPointManifest idlePoint = manifest.PatrolAreas[0].PatrolPoints[1];
+        Assert(defaultPoint.Index == 0, "Patrol points must be sorted by their native index.");
+        Assert(
+            defaultPoint.WaitDurationSeconds == 1 &&
+            defaultPoint.WaitDeviationSeconds == 0 &&
+            !defaultPoint.IsInfiniteWaitPoint &&
+            Math.Abs(defaultPoint.PatrollingSpeed - -1f) < 0.001f &&
+            defaultPoint.LoopAction == string.Empty,
+            "Missing optional patrol variables must keep safe vanilla-compatible defaults.");
+        Assert(
+            idlePoint.Index == 1 &&
+            idlePoint.WaitDurationSeconds == 7 &&
+            idlePoint.WaitDeviationSeconds == 2 &&
+            idlePoint.IsInfiniteWaitPoint &&
+            Math.Abs(idlePoint.PatrollingSpeed - 0.65f) < 0.001f &&
+            idlePoint.LoopAction == "act_hideout_wait",
+            "Explicit wait and idle-action metadata must survive parsing.");
+
+        Assert(
+            !CoopHideoutSceneManifest.TryParse(
+                "<scene><entities /></scene>",
+                "bandit_forest_sv",
+                out _,
+                out diagnostics) &&
+            diagnostics == "scene-manifest-dynamic-patrol-areas-missing",
+            "A scene without dynamic patrol areas must fail closed.");
     }
 
     private static void ValidateTriggerPolicy()
