@@ -15,10 +15,18 @@ namespace CoopSpectator.UI
 {
     public sealed class CoopHideoutBossCinematicView : MissionView
     {
+        private const float DefaultBossFightInnerRadius = 2.5f;
+        private const float DefaultBossFightOuterRadius = 6f;
+        private const float DefaultBossFightWalkDistance = 3f;
+
         private CoopHideoutBossPhaseSession _pendingState;
         private CoopHideoutBossPhaseSession _activeState;
         private Camera _camera;
         private MatrixFrame _cameraFrame = MatrixFrame.Identity;
+        private Vec3 _cameraStartPosition = Vec3.Zero;
+        private Vec3 _cameraMoveDirection = Vec3.Forward;
+        private float _cameraSpeed;
+        private bool _cameraPathReady;
         private MissionMode _missionModeBeforeCinematic;
         private bool _missionModeCaptured;
         private int _readySentRevision = -1;
@@ -245,6 +253,7 @@ namespace CoopSpectator.UI
                 if ((NativeObject)(object)combatCamera != (NativeObject)null)
                     _camera.FillParametersFrom(combatCamera);
 
+                SetupVanillaCameraPath(hostAgent, bossAgent);
                 UpdateCamera();
                 MissionScreen.CustomCamera = _camera;
                 return true;
@@ -269,23 +278,17 @@ namespace CoopSpectator.UI
             if (hostAgent == null || bossAgent == null)
                 return;
 
-            Vec3 hostEye = hostAgent.Position + Vec3.Up * 1.45f;
-            Vec3 bossEye = bossAgent.Position + Vec3.Up * 1.45f;
-            Vec3 focus = (hostEye + bossEye) * 0.5f;
-            MatrixFrame authoredFrame = ResolveAuthoredBossFightFrame();
-            Vec2 forward2 = authoredFrame.rotation.f.AsVec2;
-            if (forward2.LengthSquared < 0.0001f)
-                forward2 = (bossEye - hostEye).AsVec2;
-            if (forward2.LengthSquared < 0.0001f)
-                forward2 = new Vec2(0f, 1f);
-            forward2.Normalize();
-            Vec2 side2 = new Vec2(forward2.y, -forward2.x);
-            float orbit = (float)Math.Sin(_cinematicElapsed * 0.22f) * 0.65f;
-            Vec2 cameraOffset2 = side2 * (4.5f + orbit) - forward2 * 1.25f;
-            Vec3 desiredCameraPosition = focus + new Vec3(cameraOffset2.x, cameraOffset2.y, 2.25f);
+            if (!_cameraPathReady)
+                SetupVanillaCameraPath(hostAgent, bossAgent);
+            if (!_cameraPathReady)
+                return;
+
+            Vec3 bossEye = bossAgent.GetEyeGlobalPosition();
+            Vec3 desiredCameraPosition =
+                _cameraStartPosition + _cameraMoveDirection * _cameraSpeed * _cinematicElapsed;
             Vec3 cameraPosition = ClampToAuthoredCameraVolume(desiredCameraPosition);
-            cameraPosition = ResolveCollisionAwareCameraPosition(focus, cameraPosition);
-            Vec3 direction = focus - cameraPosition;
+            cameraPosition = ResolveCollisionAwareCameraPosition(bossEye, cameraPosition);
+            Vec3 direction = bossEye - cameraPosition;
             if (direction.LengthSquared < 0.0001f)
                 direction = Vec3.Forward;
             direction.Normalize();
@@ -293,34 +296,92 @@ namespace CoopSpectator.UI
             _camera.Frame = _cameraFrame;
         }
 
-        private MatrixFrame ResolveAuthoredBossFightFrame()
+        private void SetupVanillaCameraPath(Agent hostAgent, Agent bossAgent)
+        {
+            _cameraPathReady = false;
+            if (hostAgent == null || bossAgent == null)
+                return;
+
+            Vec3 hostEye = hostAgent.GetEyeGlobalPosition();
+            Vec3 bossEye = bossAgent.GetEyeGlobalPosition();
+            Vec3 bossDirection = bossEye - hostEye;
+            if (bossDirection.LengthSquared < 0.0001f)
+                bossDirection = Vec3.Forward;
+            bossDirection.Normalize();
+
+            float innerRadius = ResolveAuthoredBossFightParameter(
+                "InnerRadius",
+                DefaultBossFightInnerRadius);
+            float outerRadius = ResolveAuthoredBossFightParameter(
+                "OuterRadius",
+                DefaultBossFightOuterRadius);
+            float walkDistance = ResolveAuthoredBossFightParameter(
+                "WalkDistance",
+                DefaultBossFightWalkDistance);
+            float cinematicDuration = Math.Max(
+                0.1f,
+                CoopHideoutBossPhaseContract.CinematicDurationMilliseconds / 1000f);
+            _cameraSpeed =
+                (innerRadius + outerRadius + 1.5f * walkDistance) /
+                cinematicDuration;
+            _cameraMoveDirection = -bossDirection;
+
+            SetCameraFrame(bossEye, bossDirection, out MatrixFrame bossFrame);
+            _cameraStartPosition =
+                bossFrame.origin +
+                0.3f * bossFrame.rotation.s +
+                0.3f * bossFrame.rotation.f +
+                1.2f * bossFrame.rotation.u;
+            _cameraPathReady = true;
+        }
+
+        private float ResolveAuthoredBossFightParameter(string fieldName, float fallbackValue)
         {
             try
             {
-                GameEntity entity = Mission?.Scene?.FindEntityWithTag(
-                    CoopHideoutBossPhaseContract.BossFightEntityTag);
-                if (entity != null)
-                    return entity.GetGlobalFrame();
+                ScriptComponentBehavior behavior = ResolveAuthoredBossFightBehavior();
+                FieldInfo field = behavior?.GetType().GetField(
+                    fieldName,
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (field?.GetValue(behavior) is float value &&
+                    value >= 0f &&
+                    !float.IsNaN(value) &&
+                    !float.IsInfinity(value))
+                {
+                    return value;
+                }
             }
             catch
             {
             }
 
-            return MatrixFrame.Identity;
+            return fallbackValue;
+        }
+
+        private ScriptComponentBehavior ResolveAuthoredBossFightBehavior()
+        {
+            try
+            {
+                GameEntity entity = Mission?.Scene?.FindEntityWithTag(
+                    CoopHideoutBossPhaseContract.BossFightEntityTag);
+                return entity?.GetScriptComponents()
+                    .FirstOrDefault(component =>
+                        string.Equals(
+                            component?.GetType().FullName,
+                            "SandBox.Objects.Cinematics.HideoutBossFightBehavior",
+                            StringComparison.Ordinal));
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private Vec3 ClampToAuthoredCameraVolume(Vec3 desiredPosition)
         {
             try
             {
-                GameEntity entity = Mission?.Scene?.FindEntityWithTag(
-                    CoopHideoutBossPhaseContract.BossFightEntityTag);
-                ScriptComponentBehavior behavior = entity?.GetScriptComponents()
-                    .FirstOrDefault(component =>
-                        string.Equals(
-                            component?.GetType().FullName,
-                            "SandBox.Objects.Cinematics.HideoutBossFightBehavior",
-                            StringComparison.Ordinal));
+                ScriptComponentBehavior behavior = ResolveAuthoredBossFightBehavior();
                 MethodInfo clampMethod = behavior?.GetType().GetMethod(
                     "ClampWorldPointToCameraVolume",
                     BindingFlags.Instance | BindingFlags.Public,
@@ -415,6 +476,7 @@ namespace CoopSpectator.UI
             }
             try { _camera.ReleaseCamera(); } catch { }
             _camera = null;
+            _cameraPathReady = false;
         }
 
         private void CaptureMissionMode()

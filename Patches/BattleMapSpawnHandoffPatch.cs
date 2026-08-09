@@ -23286,7 +23286,7 @@ namespace CoopSpectator.Patches
                 mission == null ||
                 team == null ||
                 !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
-                !SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty))
+                !SceneRuntimeClassifier.IsExactCommanderOrderControlScene(mission.SceneName ?? string.Empty))
             {
                 return false;
             }

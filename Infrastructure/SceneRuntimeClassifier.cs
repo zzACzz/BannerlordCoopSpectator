@@ -106,6 +106,12 @@ namespace CoopSpectator.Infrastructure
             return false;
         }
 
+        public static bool IsExactCommanderOrderControlScene(string sceneName)
+        {
+            return IsExactCampaignBattleScene(sceneName) ||
+                   IsValidatedDayHideoutScenarioScene(sceneName);
+        }
+
         public static bool IsExactSiegeAssaultWithDeploymentScene(string sceneName)
         {
             return IsExactSiegeWithDeploymentScene(sceneName);

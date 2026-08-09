@@ -38,6 +38,7 @@ namespace CoopSpectator.MissionBehaviors
     {
         private const string HideoutBanditActionSetSuffix = "_hideout_bandit";
         private const string PatrolPointScriptName = "PatrolPoint";
+        private const string PatrolPointTypeFullName = "SandBox.Objects.PatrolPoint";
         private const string UnsetScriptStringValue = "__coop_unset_script_value__";
 
         private sealed class DefenderPlacementSlot
@@ -712,19 +713,77 @@ namespace CoopSpectator.MissionBehaviors
             CoopHideoutPatrolPointDefinition definition = CreateDefaultPatrolPoint(
                 patrolPoint.GetGlobalFrame(),
                 fallbackIndex);
-            if (TryReadPatrolPointInt(patrolPoint, "Index", out int index))
+            ScriptComponentBehavior managedPatrolPoint = FindManagedPatrolPointComponent(patrolPoint);
+            if (TryReadManagedPatrolPointField(managedPatrolPoint, "Index", out int index) ||
+                TryReadPatrolPointInt(patrolPoint, "Index", out index))
                 definition.Index = index;
-            if (TryReadPatrolPointInt(patrolPoint, "WaitDuration", out int waitDuration))
+            if (TryReadManagedPatrolPointField(managedPatrolPoint, "WaitDuration", out int waitDuration) ||
+                TryReadPatrolPointInt(patrolPoint, "WaitDuration", out waitDuration))
                 definition.WaitDurationSeconds = Math.Max(0, waitDuration);
-            if (TryReadPatrolPointInt(patrolPoint, "WaitDeviation", out int waitDeviation))
+            if (TryReadManagedPatrolPointField(managedPatrolPoint, "WaitDeviation", out int waitDeviation) ||
+                TryReadPatrolPointInt(patrolPoint, "WaitDeviation", out waitDeviation))
                 definition.WaitDeviationSeconds = Math.Max(0, waitDeviation);
-            if (TryReadPatrolPointBool(patrolPoint, "IsInfiniteWaitPoint", out bool isInfinite))
+            if (TryReadManagedPatrolPointField(managedPatrolPoint, "IsInfiniteWaitPoint", out bool isInfinite) ||
+                TryReadPatrolPointBool(patrolPoint, "IsInfiniteWaitPoint", out isInfinite))
                 definition.IsInfiniteWaitPoint = isInfinite;
-            if (TryReadPatrolPointFloat(patrolPoint, "PatrollingSpeed", out float patrollingSpeed))
+            if (TryReadManagedPatrolPointField(managedPatrolPoint, "PatrollingSpeed", out float patrollingSpeed) ||
+                TryReadPatrolPointFloat(patrolPoint, "PatrollingSpeed", out patrollingSpeed))
                 definition.PatrollingSpeed = patrollingSpeed;
-            if (TryReadPatrolPointString(patrolPoint, "LoopAction", out string loopAction))
+            if (TryReadManagedPatrolPointField(managedPatrolPoint, "LoopAction", out string loopAction) ||
+                TryReadPatrolPointString(patrolPoint, "LoopAction", out loopAction))
                 definition.LoopAction = loopAction ?? string.Empty;
             return definition;
+        }
+
+        private static ScriptComponentBehavior FindManagedPatrolPointComponent(GameEntity entity)
+        {
+            try
+            {
+                return entity?.GetScriptComponents()
+                    .FirstOrDefault(component =>
+                        string.Equals(
+                            component?.GetType().FullName,
+                            PatrolPointTypeFullName,
+                            StringComparison.Ordinal));
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static bool TryReadManagedPatrolPointField<T>(
+            ScriptComponentBehavior component,
+            string fieldName,
+            out T value)
+        {
+            value = default(T);
+            if (component == null || string.IsNullOrWhiteSpace(fieldName))
+                return false;
+
+            try
+            {
+                FieldInfo field = component.GetType().GetField(
+                    fieldName,
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                object rawValue = field?.GetValue(component);
+                if (rawValue is T typedValue)
+                {
+                    value = typedValue;
+                    return true;
+                }
+
+                if (typeof(T) == typeof(string) && rawValue == null && field != null)
+                {
+                    value = (T)(object)string.Empty;
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+
+            return false;
         }
 
         private static CoopHideoutPatrolPointDefinition CreateDefaultPatrolPoint(
@@ -1190,7 +1249,10 @@ namespace CoopSpectator.MissionBehaviors
             _active = true;
             _lastCombatProgressAt = Mission?.CurrentTime ?? 0f;
             foreach (DefenderState state in _defenders.Values)
+            {
                 PreparePatrollingAgent(state, issueMovement: true);
+                TrySheathePatrolWeapons(state.Agent);
+            }
 
             ModLogger.Info(
                 "CoopHideoutStealthPatrolController: isolated stealth patrol runtime activated. " +
@@ -1301,6 +1363,38 @@ namespace CoopSpectator.MissionBehaviors
                 : Agent.WatchState.Patrolling);
             if (issueMovement)
                 IssuePatrolTarget(state);
+        }
+
+        private static void TrySheathePatrolWeapons(Agent agent)
+        {
+            if (agent?.IsActive() != true)
+                return;
+
+            try
+            {
+                if (agent.GetOffhandWieldedItemIndex() != EquipmentIndex.None)
+                {
+                    agent.TryToSheathWeaponInHand(
+                        Agent.HandIndex.OffHand,
+                        Agent.WeaponWieldActionType.Instant);
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                if (agent.GetPrimaryWieldedItemIndex() != EquipmentIndex.None)
+                {
+                    agent.TryToSheathWeaponInHand(
+                        Agent.HandIndex.MainHand,
+                        Agent.WeaponWieldActionType.Instant);
+                }
+            }
+            catch
+            {
+            }
         }
 
         private void TickPatrol(DefenderState state, float now)
