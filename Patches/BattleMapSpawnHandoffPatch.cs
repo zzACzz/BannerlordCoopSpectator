@@ -231,6 +231,8 @@ namespace CoopSpectator.Patches
         private static readonly TimeSpan LocalFollowEchoSuppressionWindow = TimeSpan.FromSeconds(2);
         private static readonly TimeSpan DeferredClientSiegeMissionObjectReplayDelay = TimeSpan.FromMilliseconds(750);
         private static readonly TimeSpan DeferredClientSiegeMissingMissionObjectDropDelay = TimeSpan.FromSeconds(8);
+        private const int DeferredClientNonSiegeMissionObjectReplayAttemptLimit = 20;
+        private static readonly TimeSpan DeferredClientNonSiegeMissionObjectReplayLifetime = TimeSpan.FromSeconds(2);
         private static readonly TimeSpan ClientThrownProjectileBecomeInvisibleVisualGrace = TimeSpan.FromMilliseconds(650);
         private static readonly TimeSpan ClientSiegeEngineProjectileVisualGraceMaxAge = TimeSpan.FromMilliseconds(2500);
         private static readonly TimeSpan DelayedLocalControlledWeaponStateMaxDelay = TimeSpan.FromSeconds(3);
@@ -9314,12 +9316,15 @@ namespace CoopSpectator.Patches
                 {
                     deferredPayload.LastAttemptUtc = nowUtc;
                     deferredPayload.Attempts++;
-                    if (ShouldDropDeferredExactSiegeMissingMissionObject(mission, deferredPayload.DeferredUtc))
+                    if (ShouldDropDeferredNonSiegeMissionObjectReplay(
+                            mission,
+                            deferredPayload.DeferredUtc,
+                            deferredPayload.Attempts))
                     {
                         RemoveDeferredClientSynchronizeMissionObjectPayload(synchronizeMissionObject.MissionObjectId);
                         RemoveDeferredClientSetMissionObjectVisibilityPayload(synchronizeMissionObject.MissionObjectId);
                         ModLogger.Info(
-                            "BattleMapSpawnHandoffPatch: dropped stale exact siege SynchronizeMissionObject with no local mission object. " +
+                            "BattleMapSpawnHandoffPatch: dropped stale non-siege SynchronizeMissionObject with no local mission object. " +
                             "MissionObjectId=" + GetMissionObjectIdValue(synchronizeMissionObject.MissionObjectId) +
                             " Attempts=" + deferredPayload.Attempts +
                             " Source=" + (source ?? "unknown"));
@@ -9361,21 +9366,40 @@ namespace CoopSpectator.Patches
                 }
                 catch (Exception ex)
                 {
+                    Exception baseException = ex.GetBaseException();
                     TryLogExactSiegeMissionObjectSyncDiagnostic(
                         mission,
                         synchronizeMissionObject,
                         "deferred-replay-exception",
-                        ex.GetBaseException(),
+                        baseException,
                         "Attempts=" + deferredPayload.Attempts +
                         " SnapshotReadiness=" + (snapshotReadinessSummary ?? "unknown"));
-                    if (deferredPayload.Attempts == 1 || deferredPayload.Attempts % 20 == 0)
+                    if (ShouldDropDeferredNonSiegeMissionObjectReplay(
+                            mission,
+                            deferredPayload.DeferredUtc,
+                            deferredPayload.Attempts))
                     {
+                        RemoveDeferredClientSynchronizeMissionObjectPayload(synchronizeMissionObject.MissionObjectId);
+                        RemoveDeferredClientSetMissionObjectVisibilityPayload(
+                            synchronizeMissionObject.MissionObjectId,
+                            deferredPayload.DeferredUtc);
                         ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: dropped stale non-siege SynchronizeMissionObject after bounded replay failures. " +
+                            "MissionObjectId=" + GetMissionObjectIdValue(synchronizeMissionObject.MissionObjectId) +
+                            " Attempts=" + deferredPayload.Attempts +
+                            " SnapshotReadiness=" + (snapshotReadinessSummary ?? "unknown") +
+                            " Source=" + (source ?? "unknown") +
+                            " Message=" + baseException.Message);
+                    }
+                    else if (ExperimentalFeatures.EnableExactSiegeMissionObjectSyncDiagnostics &&
+                             (deferredPayload.Attempts == 1 || deferredPayload.Attempts % 20 == 0))
+                    {
+                        ModLogger.Verbose(
                             "BattleMapSpawnHandoffPatch: deferred client SynchronizeMissionObject replay failed open. " +
                             "MissionObjectId=" + GetMissionObjectIdValue(synchronizeMissionObject.MissionObjectId) +
                             " Attempts=" + deferredPayload.Attempts +
                             " SnapshotReadiness=" + (snapshotReadinessSummary ?? "unknown") +
-                            " Message=" + ex.GetBaseException().Message);
+                            " Message=" + baseException.Message);
                     }
                 }
             }
@@ -9422,23 +9446,23 @@ namespace CoopSpectator.Patches
             return false;
         }
 
-        private static bool ShouldDropDeferredExactSiegeMissingMissionObject(
+        private static bool ShouldDropDeferredNonSiegeMissionObjectReplay(
             Mission mission,
-            DateTime deferredUtc)
+            DateTime deferredUtc,
+            int attempts)
         {
-            if (mission == null)
+            if (mission == null ||
+                attempts < DeferredClientNonSiegeMissionObjectReplayAttemptLimit)
                 return false;
 
             BattleScenarioContextMessage scenarioContext =
                 BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
-            if (!SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty) ||
-                !ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(scenarioContext))
-            {
+            if (scenarioContext == null ||
+                ExactCampaignSiegeAssaultWithDeploymentRuntime.IsExactSiegeWithDeploymentScenario(scenarioContext))
                 return false;
-            }
 
-            return false;
+            return DateTime.UtcNow - deferredUtc >= DeferredClientNonSiegeMissionObjectReplayLifetime;
         }
 
         private static void TryReplayDeferredClientSetMissionObjectVisibility(
@@ -9484,11 +9508,14 @@ namespace CoopSpectator.Patches
                 {
                     deferredPayload.LastAttemptUtc = nowUtc;
                     deferredPayload.Attempts++;
-                    if (ShouldDropDeferredExactSiegeMissingMissionObject(mission, deferredPayload.DeferredUtc))
+                    if (ShouldDropDeferredNonSiegeMissionObjectReplay(
+                            mission,
+                            deferredPayload.DeferredUtc,
+                            deferredPayload.Attempts))
                     {
                         RemoveDeferredClientSetMissionObjectVisibilityPayload(setMissionObjectVisibility.MissionObjectId);
                         ModLogger.Info(
-                            "BattleMapSpawnHandoffPatch: dropped stale exact siege SetMissionObjectVisibility with no local mission object. " +
+                            "BattleMapSpawnHandoffPatch: dropped stale non-siege SetMissionObjectVisibility with no local mission object. " +
                             "MissionObjectId=" + GetMissionObjectIdValue(setMissionObjectVisibility.MissionObjectId) +
                             " Visible=" + setMissionObjectVisibility.Visible +
                             " Attempts=" + deferredPayload.Attempts +
@@ -9520,16 +9547,33 @@ namespace CoopSpectator.Patches
                 }
                 catch (Exception ex)
                 {
-                    if (deferredPayload.Attempts == 1 || deferredPayload.Attempts % 20 == 0)
+                    Exception baseException = ex.GetBaseException();
+                    if (ShouldDropDeferredNonSiegeMissionObjectReplay(
+                            mission,
+                            deferredPayload.DeferredUtc,
+                            deferredPayload.Attempts))
                     {
+                        RemoveDeferredClientSetMissionObjectVisibilityPayload(setMissionObjectVisibility.MissionObjectId);
                         ModLogger.Info(
+                            "BattleMapSpawnHandoffPatch: dropped stale non-siege SetMissionObjectVisibility after bounded replay failures. " +
+                            "MissionObjectId=" + GetMissionObjectIdValue(setMissionObjectVisibility.MissionObjectId) +
+                            " Visible=" + setMissionObjectVisibility.Visible +
+                            " Attempts=" + deferredPayload.Attempts +
+                            " SnapshotReadiness=" + (snapshotReadinessSummary ?? "unknown") +
+                            " Source=" + (source ?? "unknown") +
+                            " Message=" + baseException.Message);
+                    }
+                    else if (ExperimentalFeatures.EnableExactSiegeMissionObjectSyncDiagnostics &&
+                             (deferredPayload.Attempts == 1 || deferredPayload.Attempts % 20 == 0))
+                    {
+                        ModLogger.Verbose(
                             "BattleMapSpawnHandoffPatch: deferred client SetMissionObjectVisibility replay failed open. " +
                             "MissionObjectId=" + GetMissionObjectIdValue(setMissionObjectVisibility.MissionObjectId) +
                             " Visible=" + setMissionObjectVisibility.Visible +
                             " Attempts=" + deferredPayload.Attempts +
                             " SnapshotReadiness=" + (snapshotReadinessSummary ?? "unknown") +
                             " Source=" + (source ?? "unknown") +
-                            " Message=" + ex.GetBaseException().Message);
+                            " Message=" + baseException.Message);
                     }
                 }
             }
