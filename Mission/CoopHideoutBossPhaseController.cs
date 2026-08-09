@@ -613,23 +613,44 @@ namespace CoopSpectator.MissionBehaviors
             if (playerAgents.Count == 0 || enemyAgents.Count == 0)
                 return false;
 
+            Vec2 playerFacingDirection = anchor.rotation.f.AsVec2;
+            if (playerFacingDirection.LengthSquared < 0.0001f)
+                playerFacingDirection = new Vec2(0f, 1f);
+            playerFacingDirection.Normalize();
+            Vec2 enemyFacingDirection = playerFacingDirection * -1f;
+
+            var placements = new List<BossFightParticipantPlacement>
+            {
+                CreateParticipantPlacement(
+                    _hostAgent,
+                    BuildRadialPosition(anchor, (float)Math.PI, InnerRadius),
+                    playerFacingDirection),
+                CreateParticipantPlacement(
+                    _bossAgent,
+                    BuildRadialPosition(anchor, 0f, InnerRadius),
+                    enemyFacingDirection)
+            };
+            AppendAgentArcPlacements(
+                placements,
+                playerAgents.Where(agent => !ReferenceEquals(agent, _hostAgent)).ToList(),
+                anchor,
+                (float)Math.PI,
+                OuterRadius,
+                playerFacingDirection);
+            AppendAgentArcPlacements(
+                placements,
+                enemyAgents.Where(agent => !ReferenceEquals(agent, _bossAgent)).ToList(),
+                anchor,
+                0f,
+                OuterRadius,
+                enemyFacingDirection);
+
             bool previousTeleportingAgents = Mission.IsTeleportingAgents;
             try
             {
                 Mission.IsTeleportingAgents = true;
-                PlaceAgent(_hostAgent, BuildRadialPosition(anchor, (float)Math.PI, InnerRadius));
-                PlaceAgent(_bossAgent, BuildRadialPosition(anchor, 0f, InnerRadius));
-
-                PlaceAgentArc(
-                    playerAgents.Where(agent => !ReferenceEquals(agent, _hostAgent)).ToList(),
-                    anchor,
-                    (float)Math.PI,
-                    OuterRadius);
-                PlaceAgentArc(
-                    enemyAgents.Where(agent => !ReferenceEquals(agent, _bossAgent)).ToList(),
-                    anchor,
-                    0f,
-                    OuterRadius);
+                foreach (BossFightParticipantPlacement placement in placements)
+                    PlaceAgent(placement);
                 return true;
             }
             catch (Exception ex)
@@ -644,34 +665,55 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        private void PlaceAgentArc(List<Agent> agents, MatrixFrame anchor, float baseAngle, float radius)
+        private void AppendAgentArcPlacements(
+            List<BossFightParticipantPlacement> placements,
+            List<Agent> agents,
+            MatrixFrame anchor,
+            float baseAngle,
+            float radius,
+            Vec2 facingDirection)
         {
+            if (placements == null || agents == null)
+                return;
+
             for (int i = 0; i < agents.Count; i++)
             {
                 int step = i / 2 + 1;
                 float sign = i % 2 == 0 ? 1f : -1f;
                 float angle = baseAngle + sign * step * PlacementAngleStep;
-                PlaceAgent(agents[i], BuildRadialPosition(anchor, angle, radius));
+                placements.Add(CreateParticipantPlacement(
+                    agents[i],
+                    BuildRadialPosition(anchor, angle, radius),
+                    facingDirection));
             }
         }
 
-        private void PlaceAgent(Agent agent, Vec3 position)
+        private BossFightParticipantPlacement CreateParticipantPlacement(
+            Agent agent,
+            Vec3 position,
+            Vec2 facingDirection)
         {
+            return new BossFightParticipantPlacement(
+                agent,
+                ResolveGroundPosition(position),
+                facingDirection);
+        }
+
+        private void PlaceAgent(BossFightParticipantPlacement placement)
+        {
+            Agent agent = placement?.Agent;
             if (agent?.IsActive() != true)
                 return;
 
-            Vec3 groundPosition = ResolveGroundPosition(position);
+            Vec3 groundPosition = placement.GroundPosition;
             agent.MountAgent?.TeleportToPosition(groundPosition);
             agent.TeleportToPosition(groundPosition);
-            Vec3 bossFightCenter = TryResolveBossFightEntity()?.GlobalPosition ?? groundPosition;
-            Vec2 direction = (_bossAgent != null && ReferenceEquals(agent, _bossAgent))
-                ? (_hostAgent.Position - groundPosition).AsVec2
-                : (_bossAgent != null && ReferenceEquals(agent, _hostAgent))
-                    ? (_bossAgent.Position - groundPosition).AsVec2
-                    : bossFightCenter.AsVec2 - groundPosition.AsVec2;
+            Vec2 direction = placement.FacingDirection;
             if (direction.LengthSquared < 0.0001f)
                 direction = new Vec2(0f, 1f);
             direction.Normalize();
+            agent.LookDirection = new Vec3(direction.x, direction.y, 0f);
+            agent.SetMovementDirection(in direction);
             var worldPosition = new WorldPosition(Mission.Scene, UIntPtr.Zero, groundPosition, hasValidZ: false);
             if (agent.IsAIControlled)
             {
@@ -679,6 +721,23 @@ namespace CoopSpectator.MissionBehaviors
                     ref worldPosition,
                     direction.RotationInRadians,
                     addHumanLikeDelay: false);
+            }
+        }
+
+        private sealed class BossFightParticipantPlacement
+        {
+            internal Agent Agent { get; }
+            internal Vec3 GroundPosition { get; }
+            internal Vec2 FacingDirection { get; }
+
+            internal BossFightParticipantPlacement(
+                Agent agent,
+                Vec3 groundPosition,
+                Vec2 facingDirection)
+            {
+                Agent = agent;
+                GroundPosition = groundPosition;
+                FacingDirection = facingDirection;
             }
         }
 

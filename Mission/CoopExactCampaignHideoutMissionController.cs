@@ -1940,30 +1940,10 @@ namespace CoopSpectator.MissionBehaviors
             {
                 _globalAlarm = true;
                 _lastCombatProgressAt = Mission?.CurrentTime ?? 0f;
-                ReleasePlayerFormationFireControl();
                 ModLogger.Info(
                     "CoopHideoutStealthPatrolController: hideout alarm started. " +
                     "Agent=" + agent.Index +
                     " Reason=" + reason + ".");
-            }
-        }
-
-        private void ReleasePlayerFormationFireControl()
-        {
-            Team playerTeam = Mission?.AttackerTeam;
-            if (playerTeam == null)
-                return;
-
-            Agent playerAgent = playerTeam.ActiveAgents?
-                .FirstOrDefault(agent => agent?.IsActive() == true && !agent.IsAIControlled);
-            foreach (Formation formation in playerTeam.FormationsIncludingEmpty)
-            {
-                if (formation == null || formation.CountOfUnits <= 0)
-                    continue;
-                formation.SetMovementOrder(playerAgent != null
-                    ? MovementOrder.MovementOrderFollow(playerAgent)
-                    : MovementOrder.MovementOrderStop);
-                formation.SetFiringOrder(FiringOrder.FiringOrderFireAtWill);
             }
         }
     }
