@@ -5,6 +5,7 @@ using System.Linq;
 using System.Reflection;
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.Infrastructure.Hideout;
 using CoopSpectator.Infrastructure.SiegeAmbush;
 using CoopSpectator.Infrastructure.VillageBattle;
 using CoopSpectator.MissionBehaviors;
@@ -2267,9 +2268,9 @@ namespace CoopSpectator.UI
             string controlledEntryId,
             string commanderEntryId)
         {
-            if (IsCurrentExactLandBattleCommanderDeploymentScenario(mission))
+            if (ShouldUseSingleNativeCommanderOrderInput(mission))
             {
-                return TryEnsureExactLandBattleCommanderBattleOrderProvider(
+                return TryEnsureSingleNativeCommanderBattleOrderProvider(
                     mission,
                     team,
                     mainAgent,
@@ -2350,7 +2351,7 @@ namespace CoopSpectator.UI
             }
         }
 
-        private bool TryEnsureExactLandBattleCommanderBattleOrderProvider(
+        private bool TryEnsureSingleNativeCommanderBattleOrderProvider(
             Mission mission,
             Team team,
             Agent mainAgent,
@@ -2384,7 +2385,7 @@ namespace CoopSpectator.UI
             {
                 _lastCommanderBattleOrderBridgeContextKey = logKey;
                 ModLogger.Info(
-                    "CoopMissionSelectionView: prepared formation-only native commander battle order provider. " +
+                    "CoopMissionSelectionView: prepared single native commander battle order provider. " +
                     "TeamIndex=" + (team?.TeamIndex.ToString() ?? "null") +
                     " Side=" + (team?.Side.ToString() ?? "null") +
                     " AgentMainIndex=" + (mainAgent?.Index.ToString() ?? "null") +
@@ -6010,6 +6011,15 @@ namespace CoopSpectator.UI
                 BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
             return ExactCampaignCommanderDeploymentRuntime
                 .IsExactLandBattleScenario(mission, scenarioContext);
+        }
+
+        private static bool ShouldUseSingleNativeCommanderOrderInput(Mission mission)
+        {
+            return mission != null &&
+                   CoopHideoutBossPhaseContract.ShouldUseSingleNativeCommanderOrderInput(
+                       IsCurrentExactLandBattleCommanderDeploymentScenario(mission),
+                       SceneRuntimeClassifier.IsValidatedDayHideoutScenarioScene(
+                           mission.SceneName ?? string.Empty));
         }
 
         internal static bool ShouldSuppressLocalPreviewFollowedAgentEcho(MissionPeer missionPeer, Agent followedAgent)

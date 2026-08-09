@@ -12,6 +12,7 @@ internal static class Program
             ValidatePreOpenMissionContractPolicy();
             ValidateNativeTimerStartupPolicy();
             ValidateCommanderIdentityFallbackPolicy();
+            ValidateCommanderOrderInputPolicy();
             ValidateSceneManifestParsing();
             ValidateTriggerPolicy();
             ValidateMaterializationPolicy();
@@ -198,6 +199,25 @@ internal static class Program
                 botTotalCount: 0,
                 isValidatedDayHideoutScenario: false),
             "The identity fallback must remain isolated from non-hideout battles.");
+    }
+
+    private static void ValidateCommanderOrderInputPolicy()
+    {
+        Assert(
+            CoopHideoutBossPhaseContract.ShouldUseSingleNativeCommanderOrderInput(
+                isExactLandBattleScenario: true,
+                isValidatedDayHideoutScenario: false),
+            "An exact land battle must retain its established single native order-input path.");
+        Assert(
+            CoopHideoutBossPhaseContract.ShouldUseSingleNativeCommanderOrderInput(
+                isExactLandBattleScenario: false,
+                isValidatedDayHideoutScenario: true),
+            "A validated day hideout must use one native order-input path instead of a second order view model.");
+        Assert(
+            !CoopHideoutBossPhaseContract.ShouldUseSingleNativeCommanderOrderInput(
+                isExactLandBattleScenario: false,
+                isValidatedDayHideoutScenario: false),
+            "An unrelated commander scenario must preserve its existing dedicated order-input path.");
     }
 
     private static void ValidateSceneManifestParsing()

@@ -23897,7 +23897,7 @@ namespace CoopSpectator.Patches
 
             TryInvokeParameterlessMethod(orderUiHandler, "InitializeInADisgustingManner");
             TryInvokeParameterlessMethod(orderUiHandler, "ValidateInADisgustingManner");
-            TryEnableExactCommanderNativeOrderTick(orderUiHandler, mission);
+            TryEnableSingleNativeCommanderOrderTick(orderUiHandler, mission);
 
             object dataSource = TryGetInstanceMemberValue(orderUiHandler, "_dataSource");
             if (dataSource == null)
@@ -24084,7 +24084,7 @@ namespace CoopSpectator.Patches
             if (!ReferenceEquals(mission.PlayerTeam, team))
                 mission.PlayerTeam = team;
 
-            TryEnableExactCommanderNativeOrderTick(orderUiHandler, mission);
+            TryEnableSingleNativeCommanderOrderTick(orderUiHandler, mission);
 
             OrderController playerOrderController = team.PlayerOrderController;
             if (playerOrderController == null)
@@ -24723,9 +24723,9 @@ namespace CoopSpectator.Patches
                 entryId: null,
                 ref dataSource);
 
-            TryEnableExactCommanderNativeOrderTick(orderUiHandler, mission);
+            TryEnableSingleNativeCommanderOrderTick(orderUiHandler, mission);
 
-            if (ShouldUseNativeFormationOnlyCommanderOrderInput(orderUiHandler, mission, dataSource))
+            if (ShouldUseSingleNativeCommanderOrderInput(orderUiHandler, mission, dataSource))
                 return;
 
             bool backspacePressed = Input.IsKeyPressed(InputKey.BackSpace);
@@ -24919,16 +24919,12 @@ namespace CoopSpectator.Patches
                 " Mission=" + (mission.SceneName ?? "null"));
         }
 
-        private static bool TryEnableExactCommanderNativeOrderTick(object orderUiHandler, Mission mission)
+        private static bool TryEnableSingleNativeCommanderOrderTick(object orderUiHandler, Mission mission)
         {
             if (orderUiHandler == null || mission == null)
                 return false;
 
-            BattleScenarioContextMessage scenarioContext =
-                BattleSnapshotRuntimeState.GetScenarioContext() ??
-                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
-                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
-            if (!ExactCampaignCommanderDeploymentRuntime.IsExactLandBattleScenario(mission, scenarioContext))
+            if (!IsSingleNativeCommanderOrderInputScenario(mission))
                 return false;
 
             if (!TryGetInstanceBool(orderUiHandler, "_shouldTick"))
@@ -24991,7 +24987,7 @@ namespace CoopSpectator.Patches
             }
         }
 
-        private static bool ShouldUseNativeFormationOnlyCommanderOrderInput(
+        private static bool ShouldUseSingleNativeCommanderOrderInput(
             object orderUiHandler,
             Mission mission,
             object dataSource)
@@ -24999,17 +24995,30 @@ namespace CoopSpectator.Patches
             if (orderUiHandler == null || mission == null || dataSource == null)
                 return false;
 
-            BattleScenarioContextMessage scenarioContext =
-                BattleSnapshotRuntimeState.GetScenarioContext() ??
-                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
-                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
-            if (!ExactCampaignCommanderDeploymentRuntime.IsExactLandBattleScenario(mission, scenarioContext))
+            if (!IsSingleNativeCommanderOrderInputScenario(mission))
                 return false;
 
             object gauntletLayer = TryGetInstanceMemberValue(orderUiHandler, "_gauntletLayer");
             return gauntletLayer != null &&
                    TryGetInstanceBool(gauntletLayer, "IsActive") &&
                    TryGetInstanceBool(orderUiHandler, "IsValidForTick");
+        }
+
+        private static bool IsSingleNativeCommanderOrderInputScenario(Mission mission)
+        {
+            if (mission == null)
+                return false;
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            return CoopHideoutBossPhaseContract.ShouldUseSingleNativeCommanderOrderInput(
+                ExactCampaignCommanderDeploymentRuntime.IsExactLandBattleScenario(
+                    mission,
+                    scenarioContext),
+                SceneRuntimeClassifier.IsValidatedDayHideoutScenarioScene(
+                    mission.SceneName ?? string.Empty));
         }
 
         private static void TryLogExactCommanderOrderVmState(

@@ -164,6 +164,13 @@ namespace CoopSpectator.Infrastructure.Hideout
             return !hasClientControlledBots && isValidatedDayHideoutScenario;
         }
 
+        public static bool ShouldUseSingleNativeCommanderOrderInput(
+            bool isExactLandBattleScenario,
+            bool isValidatedDayHideoutScenario)
+        {
+            return isExactLandBattleScenario || isValidatedDayHideoutScenario;
+        }
+
         public static int ResolveBossTriggerCount(int initialEnemyCount)
         {
             if (initialEnemyCount <= 0)
