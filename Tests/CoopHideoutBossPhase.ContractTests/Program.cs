@@ -11,6 +11,7 @@ internal static class Program
             ValidateScenePolicy();
             ValidatePreOpenMissionContractPolicy();
             ValidateNightAmbushContractPolicy();
+            ValidateCallTroopsCinematicPolicy();
             ValidateNightUseAuthorityPolicy();
             ValidateNightBossIdentityAndPlacementPolicy();
             ValidateNativeTimerStartupPolicy();
@@ -443,6 +444,38 @@ internal static class Program
                 CoopHideoutAmbushContract.CallTroopsRequestResponseReasonPrefix +
                 "call-troops-revision-stale"),
             "A pending use request must survive unrelated updates but clear on acceptance or an explicit response.");
+    }
+
+    private static void ValidateCallTroopsCinematicPolicy()
+    {
+        Assert(
+            CoopHideoutAmbushContract.ShouldStartCallTroopsCinematic(
+                CoopHideoutAmbushPhase.CallTroops,
+                "battle-a",
+                null),
+            "The first call-troops state for a battle must start its cinematic.");
+        Assert(
+            !CoopHideoutAmbushContract.ShouldStartCallTroopsCinematic(
+                CoopHideoutAmbushPhase.CallTroops,
+                " battle-a ",
+                "battle-a"),
+            "A later state revision for the same battle must not restart its cinematic.");
+        Assert(
+            CoopHideoutAmbushContract.ShouldStartCallTroopsCinematic(
+                CoopHideoutAmbushPhase.CallTroops,
+                "battle-b",
+                "battle-a"),
+            "A different battle instance must be allowed to start its own cinematic.");
+        Assert(
+            !CoopHideoutAmbushContract.ShouldStartCallTroopsCinematic(
+                CoopHideoutAmbushPhase.Stealth,
+                "battle-a",
+                null) &&
+            !CoopHideoutAmbushContract.ShouldStartCallTroopsCinematic(
+                CoopHideoutAmbushPhase.CallTroops,
+                " ",
+                null),
+            "A non-call-troops phase or missing battle identity must not start the cinematic.");
     }
 
     private static void ValidateCommanderIdentityFallbackPolicy()

@@ -32,7 +32,7 @@ namespace CoopSpectator.UI
         private GameEntity _arrowPath;
         private MissionMode _previousMissionMode;
         private CinematicState _state;
-        private int _activeRevision = -1;
+        private string _startedBattleInstanceId = string.Empty;
         private float _arrowFlightEndsAt;
         private bool _missionModeCaptured;
         private bool _mainAgentHidden;
@@ -87,10 +87,12 @@ namespace CoopSpectator.UI
 
         private void ApplyNetworkState(CoopHideoutAmbushState state)
         {
-            if (state.Phase == CoopHideoutAmbushPhase.CallTroops &&
-                state.Revision != _activeRevision)
+            if (CoopHideoutAmbushContract.ShouldStartCallTroopsCinematic(
+                    state.Phase,
+                    state.BattleInstanceId,
+                    _startedBattleInstanceId))
             {
-                StartCinematic(state.Revision);
+                StartCinematic(state.BattleInstanceId);
                 return;
             }
 
@@ -103,10 +105,10 @@ namespace CoopSpectator.UI
             }
         }
 
-        private void StartCinematic(int revision)
+        private void StartCinematic(string battleInstanceId)
         {
             ReleaseCinematic();
-            _activeRevision = revision;
+            _startedBattleInstanceId = battleInstanceId.Trim();
             _state = CinematicState.FirstFade;
             try
             {

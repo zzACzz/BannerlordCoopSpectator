@@ -221,6 +221,23 @@ namespace CoopSpectator.Infrastructure.Hideout
             return attackerEntryOrderCount > 0 && defenderEntryOrderCount > 0;
         }
 
+        public static bool ShouldStartCallTroopsCinematic(
+            CoopHideoutAmbushPhase phase,
+            string incomingBattleInstanceId,
+            string startedBattleInstanceId)
+        {
+            if (phase != CoopHideoutAmbushPhase.CallTroops ||
+                string.IsNullOrWhiteSpace(incomingBattleInstanceId))
+            {
+                return false;
+            }
+
+            return !string.Equals(
+                incomingBattleInstanceId.Trim(),
+                (startedBattleInstanceId ?? string.Empty).Trim(),
+                StringComparison.Ordinal);
+        }
+
         public static int ResolveSyntheticInitialEnemyCount(
             int initialHideoutPopulation,
             int liveInitialEnemyCount,
