@@ -15,9 +15,12 @@ namespace CoopSpectator.Infrastructure
 
         public static bool SupportsScenario(BattleSnapshotMessage snapshot)
         {
-            return snapshot?.ScenarioContext != null &&
-                   (snapshot.ScenarioContext.IsSiegeBattle ||
-                    ExactLandBattleScenarioContract.IsLandBattleScenario(snapshot.ScenarioContext));
+            BattleScenarioContextMessage scenarioContext = snapshot?.ScenarioContext;
+            return scenarioContext != null &&
+                   CampaignCasualtyPolicy.SupportsScenario(
+                       scenarioContext.IsSiegeBattle,
+                       ExactLandBattleScenarioContract.IsLandBattleScenario(scenarioContext),
+                       scenarioContext.ScenarioKind);
         }
 
         public static bool TryCalculateDeathProbability(
@@ -39,9 +42,11 @@ namespace CoopSpectator.Infrastructure
 
             if ((damageType == DamageTypes.Blunt && (weaponFlags & WeaponFlags.CanKillEvenIfBlunt) == 0) ||
                 victimEntry.ForceUnconscious ||
-                (victimEntry.IsHero && !victimEntry.HeroCanDieInBattle) ||
-                (victimEntry.IsHero && snapshot.BattleDeathDifficulty == 0) ||
-                (victimEntry.IsPlayerCharacter && snapshot.BattleDeathDifficulty == 1))
+                (victimEntry.IsHero &&
+                 !CampaignCasualtyPolicy.AllowsHeroDeath(
+                     snapshot.BattleDeathDifficulty,
+                     victimEntry.IsPlayerCharacter,
+                     victimEntry.HeroCanDieInBattle)))
             {
                 deathProbability = 0f;
                 return true;

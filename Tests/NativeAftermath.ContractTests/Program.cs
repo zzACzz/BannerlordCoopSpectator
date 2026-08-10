@@ -13,6 +13,8 @@ internal static class Program
             ValidateExistingNativeStateIsPreserved();
             ValidateDecisiveSiegeAmbushPlan();
             ValidateHideoutCasualtyLedgerPlan();
+            ValidateCampaignCasualtyScenarioPolicy();
+            ValidateCampaignHeroDeathPolicy();
             ValidateInvalidInputsAreClamped();
             Console.WriteLine("Native aftermath contract tests passed.");
             return 0;
@@ -108,6 +110,74 @@ internal static class Program
             "Repeated hideout killed casualties must not duplicate equipment loot.");
         Assert(retryWounded.NumberDelta == 0 && retryWounded.WoundedDelta == 0,
             "Repeated hideout wounded casualties must not duplicate equipment loot.");
+    }
+
+    private static void ValidateCampaignCasualtyScenarioPolicy()
+    {
+        Assert(
+            CampaignCasualtyPolicy.SupportsScenario(
+                isSiegeBattle: true,
+                isExactLandBattle: false,
+                scenarioKind: "Siege"),
+            "Siege battles must use campaign casualty rules.");
+        Assert(
+            CampaignCasualtyPolicy.SupportsScenario(
+                isSiegeBattle: false,
+                isExactLandBattle: true,
+                scenarioKind: "FieldBattle"),
+            "Exact land battles must use campaign casualty rules.");
+        Assert(
+            CampaignCasualtyPolicy.SupportsScenario(
+                isSiegeBattle: false,
+                isExactLandBattle: false,
+                scenarioKind: "Hideout"),
+            "Daytime hideouts must use campaign casualty rules.");
+        Assert(
+            CampaignCasualtyPolicy.SupportsScenario(
+                isSiegeBattle: false,
+                isExactLandBattle: false,
+                scenarioKind: "HideoutAmbush"),
+            "Nighttime hideout ambushes must use campaign casualty rules.");
+        Assert(
+            !CampaignCasualtyPolicy.SupportsScenario(
+                isSiegeBattle: false,
+                isExactLandBattle: false,
+                scenarioKind: "HideoutAmbushExtra"),
+            "An unrelated scenario must not enter campaign casualty rules by partial name.");
+    }
+
+    private static void ValidateCampaignHeroDeathPolicy()
+    {
+        Assert(
+            !CampaignCasualtyPolicy.AllowsHeroDeath(
+                battleDeathDifficulty: 0,
+                isPlayerCharacter: false,
+                heroCanDieInBattle: true),
+            "Disabled battle death must protect every hero.");
+        Assert(
+            !CampaignCasualtyPolicy.AllowsHeroDeath(
+                battleDeathDifficulty: 1,
+                isPlayerCharacter: true,
+                heroCanDieInBattle: true),
+            "Player-protected battle death must protect the player character.");
+        Assert(
+            CampaignCasualtyPolicy.AllowsHeroDeath(
+                battleDeathDifficulty: 1,
+                isPlayerCharacter: false,
+                heroCanDieInBattle: true),
+            "Player-protected battle death may still allow a non-player hero to die.");
+        Assert(
+            CampaignCasualtyPolicy.AllowsHeroDeath(
+                battleDeathDifficulty: 2,
+                isPlayerCharacter: true,
+                heroCanDieInBattle: true),
+            "Realistic battle death may allow the player character to die.");
+        Assert(
+            !CampaignCasualtyPolicy.AllowsHeroDeath(
+                battleDeathDifficulty: 2,
+                isPlayerCharacter: false,
+                heroCanDieInBattle: false),
+            "Hero-specific campaign protection must override the difficulty setting.");
     }
 
     private static void ValidateInvalidInputsAreClamped()

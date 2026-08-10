@@ -99,6 +99,7 @@
     <Compile Include="..\Infrastructure\BattleMapContractDiagnostics.cs" Link="Infrastructure\BattleMapContractDiagnostics.cs" />
     <Compile Include="..\Infrastructure\BattleCommanderResolver.cs" Link="Infrastructure\BattleCommanderResolver.cs" />
     <Compile Include="..\Infrastructure\BattleSnapshotBinarySerializer.cs" Link="Infrastructure\BattleSnapshotBinarySerializer.cs" />
+    <Compile Include="..\Infrastructure\CampaignCasualtyPolicy.cs" Link="Infrastructure\CampaignCasualtyPolicy.cs" />
     <Compile Include="..\Infrastructure\CampaignCasualtyProbabilityCalculator.cs" Link="Infrastructure\CampaignCasualtyProbabilityCalculator.cs" />
     <Compile Include="..\Infrastructure\CampaignMissionShellRuntimeState.cs" Link="Infrastructure\CampaignMissionShellRuntimeState.cs" />
     <Compile Include="..\Infrastructure\LordsHall\LordsHallScenarioContract.cs" Link="Infrastructure\LordsHall\LordsHallScenarioContract.cs" />

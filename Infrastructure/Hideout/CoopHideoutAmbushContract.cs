@@ -202,6 +202,25 @@ namespace CoopSpectator.Infrastructure.Hideout
             return totalTroopCount > 0 && liveInitialEnemyCount > 0;
         }
 
+        public static bool CanUseSyntheticInitialEnemyTroop(
+            string candidateTroopId,
+            string reservedBossTroopId)
+        {
+            return !string.IsNullOrWhiteSpace(candidateTroopId) &&
+                   !string.IsNullOrWhiteSpace(reservedBossTroopId) &&
+                   !string.Equals(
+                       candidateTroopId.Trim(),
+                       reservedBossTroopId.Trim(),
+                       StringComparison.OrdinalIgnoreCase);
+        }
+
+        public static bool AreNightInitialParticipantOrdersReady(
+            int attackerEntryOrderCount,
+            int defenderEntryOrderCount)
+        {
+            return attackerEntryOrderCount > 0 && defenderEntryOrderCount > 0;
+        }
+
         public static int ResolveSyntheticInitialEnemyCount(
             int initialHideoutPopulation,
             int liveInitialEnemyCount,

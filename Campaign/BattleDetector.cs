@@ -1531,7 +1531,12 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
             try
             {
-                if (!hero.CanDie(KillCharacterAction.KillCharacterActionDetail.DiedInBattle))
+                bool heroCanDieInBattle = hero.CanDie(
+                    KillCharacterAction.KillCharacterActionDetail.DiedInBattle);
+                if (!CampaignCasualtyPolicy.AllowsHeroDeath(
+                        (int)CampaignOptions.BattleDeath,
+                        hero.IsHumanPlayerCharacter,
+                        heroCanDieInBattle))
                 {
                     return TryApplyHeroWoundWriteback(
                         hero,
@@ -5050,6 +5055,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             bool hasDefender = false;
             int attackerHealthyCount = 0;
             int defenderHealthyCount = 0;
+            int attackerMissionReadyCount = 0;
+            int defenderMissionReadyCount = 0;
 
             foreach (BattleSideSnapshotMessage side in sides)
             {
@@ -5066,12 +5073,16 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 {
                     hasAttacker = true;
                     attackerHealthyCount = healthyCount;
+                    attackerMissionReadyCount = side.MissionReadyEntryOrder?
+                        .Count(entryId => !string.IsNullOrWhiteSpace(entryId)) ?? 0;
                 }
                 else if (string.Equals(side.SideId, "defender", StringComparison.OrdinalIgnoreCase) ||
                          string.Equals(side.SideText, nameof(BattleSideEnum.Defender), StringComparison.OrdinalIgnoreCase))
                 {
                     hasDefender = true;
                     defenderHealthyCount = healthyCount;
+                    defenderMissionReadyCount = side.MissionReadyEntryOrder?
+                        .Count(entryId => !string.IsNullOrWhiteSpace(entryId)) ?? 0;
                 }
             }
 
@@ -5083,6 +5094,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 " HasDefender=" + hasDefender +
                 " AttackerHealthy=" + attackerHealthyCount +
                 " DefenderHealthy=" + defenderHealthyCount +
+                " AttackerMissionReady=" + attackerMissionReadyCount +
+                " DefenderMissionReady=" + defenderMissionReadyCount +
                 " Troops=" + (payload?.Troops?.Count ?? 0);
 
             bool isCampaignMirrorHeroesSnapshot = CoopTestBattleOptions.IsCampaignMirrorHeroesSnapshot(snapshot);
@@ -5095,7 +5108,16 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             bool landBattleHasTwoHealthySides =
                 !ExactLandBattleScenarioContract.IsLandBattleScenario(snapshot?.ScenarioContext) ||
                 (attackerHealthyCount > 0 && defenderHealthyCount > 0);
-            bool ready = hasRequiredSides && landBattleHasTwoHealthySides;
+            bool nightHideoutHasInitialParticipantOrders =
+                !CoopHideoutAmbushContract.IsHideoutAmbushScenario(
+                    snapshot?.ScenarioContext?.ScenarioKind) ||
+                CoopHideoutAmbushContract.AreNightInitialParticipantOrdersReady(
+                    attackerMissionReadyCount,
+                    defenderMissionReadyCount);
+            bool ready =
+                hasRequiredSides &&
+                landBattleHasTwoHealthySides &&
+                nightHideoutHasInitialParticipantOrders;
             if (!ready && DateTime.UtcNow >= _nextBattleStartWaitLogUtc)
             {
                 _nextBattleStartWaitLogUtc = DateTime.UtcNow.AddSeconds(2);

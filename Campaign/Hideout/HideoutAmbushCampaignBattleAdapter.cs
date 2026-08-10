@@ -27,6 +27,8 @@ namespace CoopSpectator.Campaign.Hideout
         private const string PlayerTroopCountFieldName = "_playerTroopCount";
         private const string InitialHideoutPopulationFieldName = "_initialHideoutPopulation";
         private const string SentryCountFieldName = "_sentryCount";
+        private const string OverriddenHideoutBossCharacterObjectFieldName =
+            "_overriddenHideoutBossCharacterObject";
 
         private sealed class ParticipantBucket
         {
@@ -96,6 +98,9 @@ namespace CoopSpectator.Campaign.Hideout
                     BindingFlags.Instance | BindingFlags.NonPublic) != null &&
                 controllerType.GetField(
                     SentryCountFieldName,
+                    BindingFlags.Instance | BindingFlags.NonPublic) != null &&
+                controllerType.GetField(
+                    OverriddenHideoutBossCharacterObjectFieldName,
                     BindingFlags.Instance | BindingFlags.NonPublic) != null;
 
             diagnostics =
@@ -264,6 +269,15 @@ namespace CoopSpectator.Campaign.Hideout
                 return false;
             }
 
+            if (!TryReadCharacterStringIdField(
+                    controller,
+                    OverriddenHideoutBossCharacterObjectFieldName,
+                    out string reservedBossTroopId))
+            {
+                diagnostics = "native-enemy-boss-identity-not-ready";
+                return false;
+            }
+
             int liveMatchedCount = 0;
             int syntheticMatchedCount = 0;
             List<IAgentOriginBase> liveEnemyOrigins = mission?.Agents?
@@ -286,6 +300,7 @@ namespace CoopSpectator.Campaign.Hideout
                 else if (TryResolveSyntheticOriginEntryId(
                              buckets,
                              origin,
+                             reservedBossTroopId,
                              out entryId))
                 {
                     orderedEntryIds.Add(entryId);
@@ -310,6 +325,7 @@ namespace CoopSpectator.Campaign.Hideout
                     " InitialPopulation=" + initialHideoutPopulation +
                     " NativeSentries=" + sentryCount +
                     " LiveInitialEnemies=" + liveEnemyOrigins.Count +
+                    " ReservedBoss=" + reservedBossTroopId +
                     " ExactMatched=" + liveMatchedCount +
                     " SyntheticMatched=" + syntheticMatchedCount +
                     " Matched=" + orderedEntryIds.Count;
@@ -322,6 +338,7 @@ namespace CoopSpectator.Campaign.Hideout
                 " InitialPopulation=" + initialHideoutPopulation +
                 " NativeSentries=" + sentryCount +
                 " LiveInitialEnemies=" + liveEnemyOrigins.Count +
+                " ReservedBoss=" + reservedBossTroopId +
                 " PopulationContractValid=" + hasValidNativePopulationContract +
                 " ExactMatched=" + liveMatchedCount +
                 " SyntheticMatched=" + syntheticMatchedCount +
@@ -394,6 +411,31 @@ namespace CoopSpectator.Campaign.Hideout
             return false;
         }
 
+        private static bool TryReadCharacterStringIdField(
+            MissionBehavior controller,
+            string fieldName,
+            out string characterId)
+        {
+            characterId = null;
+            try
+            {
+                FieldInfo field = controller?.GetType().GetField(
+                    fieldName,
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                if (field?.GetValue(controller) is BasicCharacterObject character &&
+                    !string.IsNullOrWhiteSpace(character.StringId))
+                {
+                    characterId = character.StringId;
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+
+            return false;
+        }
+
         private static bool TryMatchOrigin(
             IEnumerable<ParticipantBucket> buckets,
             IAgentOriginBase origin,
@@ -426,6 +468,7 @@ namespace CoopSpectator.Campaign.Hideout
         private static bool TryResolveSyntheticOriginEntryId(
             IEnumerable<ParticipantBucket> buckets,
             IAgentOriginBase origin,
+            string reservedBossTroopId,
             out string entryId)
         {
             entryId = null;
@@ -434,6 +477,13 @@ namespace CoopSpectator.Campaign.Hideout
 
             string partyId = (origin as PartyGroupAgentOrigin)?.Party?.Id ?? string.Empty;
             string troopId = origin.Troop.StringId ?? string.Empty;
+            if (!CoopHideoutAmbushContract.CanUseSyntheticInitialEnemyTroop(
+                    troopId,
+                    reservedBossTroopId))
+            {
+                return false;
+            }
+
             ParticipantBucket bucket = FindParticipantBucket(
                 buckets,
                 partyId,
@@ -446,7 +496,7 @@ namespace CoopSpectator.Campaign.Hideout
                     troopId,
                     requireParty: false,
                     requireRemaining: false);
-            if (bucket?.Troop == null || IsBossTroop(bucket.Troop))
+            if (bucket?.Troop == null)
                 return false;
 
             entryId = bucket.Troop.EntryId;
@@ -484,18 +534,6 @@ namespace CoopSpectator.Campaign.Hideout
             }
 
             return null;
-        }
-
-        private static bool IsBossTroop(TroopStackInfo troop)
-        {
-            string token =
-                troop?.OriginalCharacterId ??
-                troop?.CharacterId ??
-                troop?.SpawnTemplateId ??
-                string.Empty;
-            return token.IndexOf("boss", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                   token.IndexOf("chief", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                   token.IndexOf("leader", StringComparison.OrdinalIgnoreCase) >= 0;
         }
     }
 }

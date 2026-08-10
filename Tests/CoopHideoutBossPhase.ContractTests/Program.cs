@@ -234,6 +234,28 @@ internal static class Program
                 liveInitialEnemyCount: 26),
             "A nighttime hideout must allow native-generated initial enemies beyond the persistent roster.");
         Assert(
+            CoopHideoutAmbushContract.CanUseSyntheticInitialEnemyTroop(
+                "forest_bandits_chief",
+                "forest_bandits_boss") &&
+            !CoopHideoutAmbushContract.CanUseSyntheticInitialEnemyTroop(
+                "forest_bandits_boss",
+                "forest_bandits_boss") &&
+            !CoopHideoutAmbushContract.CanUseSyntheticInitialEnemyTroop(
+                "forest_bandits_chief",
+                null),
+            "A native-generated bandit chief may be reused, but the exact reserved boss and an unresolved boss identity must fail closed.");
+        Assert(
+            CoopHideoutAmbushContract.AreNightInitialParticipantOrdersReady(
+                attackerEntryOrderCount: 28,
+                defenderEntryOrderCount: 29) &&
+            !CoopHideoutAmbushContract.AreNightInitialParticipantOrdersReady(
+                attackerEntryOrderCount: 28,
+                defenderEntryOrderCount: 0) &&
+            !CoopHideoutAmbushContract.AreNightInitialParticipantOrdersReady(
+                attackerEntryOrderCount: 0,
+                defenderEntryOrderCount: 29),
+            "A nighttime hideout may start only after both exact initial participant orders are available.");
+        Assert(
             CoopHideoutAmbushContract.ResolveBossBodyguardCount(1) == 0 &&
             CoopHideoutAmbushContract.ResolveBossGroupCount(
                 1,
