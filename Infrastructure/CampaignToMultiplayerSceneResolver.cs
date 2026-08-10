@@ -55,6 +55,27 @@ namespace CoopSpectator.Infrastructure
             if (string.IsNullOrWhiteSpace(campaignBattleScene))
                 return resolution;
 
+            if (CoopHideoutAmbushContract.IsHideoutAmbushScenario(
+                    scenarioContext?.ScenarioKind))
+            {
+                resolution.RuntimeGameType = CoopHideoutAmbushContract.GameModeId;
+                resolution.Terrain = "Hideout";
+                resolution.ForestDensity = "Unknown";
+                resolution.IsNaval = false;
+                if (!CoopHideoutBossPhaseContract.TryNormalizeDayHideoutSceneName(
+                        campaignBattleScene,
+                        out string normalizedNightHideoutScene))
+                {
+                    resolution.RuntimeScene = string.Empty;
+                    resolution.Source = "isolated-night-hideout-scene-rejected";
+                    return resolution;
+                }
+
+                resolution.RuntimeScene = normalizedNightHideoutScene;
+                resolution.Source = "isolated-night-hideout-scene";
+                return resolution;
+            }
+
             if (CoopHideoutBossPhaseContract.IsHideoutScenario(scenarioContext?.ScenarioKind))
             {
                 resolution.RuntimeGameType = CoopHideoutBossPhaseContract.GameModeId;

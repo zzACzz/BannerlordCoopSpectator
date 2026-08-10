@@ -56,6 +56,22 @@ namespace CoopSpectator.Infrastructure.Hideout
         }
     }
 
+    public sealed class CoopHideoutBossPrincipalPlacement
+    {
+        public float PlayerInitialForwardOffset { get; set; }
+        public float PlayerTargetForwardOffset { get; set; }
+        public float BossInitialForwardOffset { get; set; }
+        public float BossTargetForwardOffset { get; set; }
+    }
+
+    public sealed class CoopHideoutBossCompanionPlacement
+    {
+        public float InitialOffsetX { get; set; }
+        public float InitialOffsetY { get; set; }
+        public float TargetOffsetX { get; set; }
+        public float TargetOffsetY { get; set; }
+    }
+
     public static class CoopHideoutBossPhaseContract
     {
         public const int ProtocolVersion = 1;
@@ -71,6 +87,101 @@ namespace CoopSpectator.Infrastructure.Hideout
         public const int CinematicReadyTimeoutMilliseconds = 2500;
         public const int CinematicDurationMilliseconds = 8000;
         public const int HostChoiceTimeoutMilliseconds = 20000;
+        public static readonly float NativeCompanionPlacementAngleStep =
+            (float)(Math.PI / 20d);
+
+        public static CoopHideoutBossPrincipalPlacement ResolvePrincipalPlacement(
+            float innerRadius,
+            float walkDistance)
+        {
+            float safeInnerRadius = Math.Max(0f, innerRadius);
+            float safeWalkDistance = Math.Max(0f, walkDistance);
+            return new CoopHideoutBossPrincipalPlacement
+            {
+                PlayerInitialForwardOffset = -safeInnerRadius - safeWalkDistance,
+                PlayerTargetForwardOffset = -safeInnerRadius,
+                BossInitialForwardOffset = safeInnerRadius + safeWalkDistance,
+                BossTargetForwardOffset = safeInnerRadius
+            };
+        }
+
+        public static float ResolveCompanionPlacementAngle(
+            int zeroBasedIndex,
+            float baseAngle,
+            float angleStep)
+        {
+            int safeIndex = Math.Max(0, zeroBasedIndex);
+            float safeStep = Math.Max(0f, angleStep);
+            int pairIndex = safeIndex / 2;
+            float magnitude = pairIndex + 0.5f;
+            float sign = safeIndex % 2 == 0 ? 1f : -1f;
+            return baseAngle + sign * magnitude * safeStep;
+        }
+
+        public static int ResolveNativeCompanionSpineTroopCount(
+            int totalTroopCount)
+        {
+            if (totalTroopCount <= 0)
+                return 1;
+
+            int spineTroopCount = (int)Math.Ceiling(
+                (-2d + Math.Sqrt(4d + 4d * totalTroopCount)) / 2d);
+            return Math.Max(1, spineTroopCount);
+        }
+
+        public static CoopHideoutBossCompanionPlacement ResolveNativeCompanionPlacement(
+            bool isPlayerSide,
+            int totalTroopCount,
+            int zeroBasedIndex)
+        {
+            if (totalTroopCount <= 0 ||
+                zeroBasedIndex < 0 ||
+                zeroBasedIndex >= totalTroopCount)
+            {
+                return null;
+            }
+
+            int remainingIndex = zeroBasedIndex;
+            int spineTroopCount = ResolveNativeCompanionSpineTroopCount(
+                totalTroopCount);
+            for (int rowIndex = 0; rowIndex < spineTroopCount; rowIndex++)
+            {
+                int rowNumber = rowIndex + 1;
+                int rowSize = 1 + 2 * rowNumber;
+                if (remainingIndex >= rowSize)
+                {
+                    remainingIndex -= rowSize;
+                    continue;
+                }
+
+                float offsetX;
+                if (remainingIndex == 0)
+                {
+                    offsetX = 0f;
+                }
+                else if (remainingIndex <= rowNumber)
+                {
+                    offsetX = -remainingIndex;
+                }
+                else
+                {
+                    offsetX = remainingIndex - rowNumber;
+                }
+
+                float offsetY = isPlayerSide
+                    ? -1.3f * rowNumber
+                    : 1.2f * rowNumber;
+                return new CoopHideoutBossCompanionPlacement
+                {
+                    InitialOffsetX = offsetX,
+                    InitialOffsetY = offsetY,
+                    TargetOffsetX = offsetX,
+                    TargetOffsetY = offsetY - 0.5f
+                };
+            }
+
+            return null;
+        }
 
         public static bool IsHideoutScenario(string scenarioKind)
         {

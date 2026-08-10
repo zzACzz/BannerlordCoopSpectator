@@ -9,6 +9,7 @@ using TaleWorlds.Core;
 using TaleWorlds.Engine;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
+using TaleWorlds.ObjectSystem;
 
 namespace CoopSpectator.MissionBehaviors
 {
@@ -27,6 +28,10 @@ namespace CoopSpectator.MissionBehaviors
         internal float PatrollingSpeed { get; set; } = -1f;
 
         internal string LoopAction { get; set; } = string.Empty;
+
+        internal string SpawnGroupTag { get; set; } = string.Empty;
+
+        internal bool HasTorchTag { get; set; }
     }
 
     /// <summary>
@@ -34,14 +39,14 @@ namespace CoopSpectator.MissionBehaviors
     /// campaign snapshot contracts, but follows the native hideout placement shape
     /// instead of routing the scene through the open-field AgentBuildData path.
     /// </summary>
-    internal sealed class CoopExactCampaignHideoutMissionController : MissionLogic, IMissionAgentSpawnLogic
+    internal class CoopExactCampaignHideoutMissionController : MissionLogic, IMissionAgentSpawnLogic
     {
         private const string HideoutBanditActionSetSuffix = "_hideout_bandit";
         private const string PatrolPointScriptName = "PatrolPoint";
         private const string PatrolPointTypeFullName = "SandBox.Objects.PatrolPoint";
         private const string UnsetScriptStringValue = "__coop_unset_script_value__";
 
-        private sealed class DefenderPlacementSlot
+        protected sealed class DefenderPlacementSlot
         {
             internal MatrixFrame SpawnFrame { get; set; }
 
@@ -49,20 +54,20 @@ namespace CoopSpectator.MissionBehaviors
                 new List<CoopHideoutPatrolPointDefinition>();
         }
 
-        private readonly IMissionTroopSupplier[] _suppliers;
-        private readonly BattleSideEnum _playerSide;
-        private readonly int _firstPhaseEnemyTroopCount;
-        private readonly List<Agent> _spawnedPlayerAgents = new List<Agent>();
-        private readonly List<Agent> _spawnedEnemyAgents = new List<Agent>();
-        private bool _initialized;
-        private bool _started;
-        private bool _initialAssaultMaterialized;
-        private bool _combatActivated;
-        private bool _reservedBossGroupSpawned;
-        private bool _materializationFaulted;
+        protected readonly IMissionTroopSupplier[] _suppliers;
+        protected readonly BattleSideEnum _playerSide;
+        protected readonly int _firstPhaseEnemyTroopCount;
+        protected readonly List<Agent> _spawnedPlayerAgents = new List<Agent>();
+        protected readonly List<Agent> _spawnedEnemyAgents = new List<Agent>();
+        protected bool _initialized;
+        protected bool _started;
+        protected bool _initialAssaultMaterialized;
+        protected bool _combatActivated;
+        protected bool _reservedBossGroupSpawned;
+        protected bool _materializationFaulted;
         private bool _attackerSpawnerEnabled = true;
         private bool _defenderSpawnerEnabled = true;
-        private int _initialAssaultEnemyCount;
+        protected int _initialAssaultEnemyCount;
         private Agent _reservedBossAgent;
 
         public CoopExactCampaignHideoutMissionController(
@@ -99,6 +104,8 @@ namespace CoopSpectator.MissionBehaviors
                     GetSupplier(OpposingSide(_playerSide))?.NumTroopsNotSupplied ?? 0);
 
         public Agent ReservedBossAgent => _reservedBossAgent;
+
+        public virtual bool IsBossPhaseEligible => _combatActivated;
 
         public void EnsureInitializedAndStarted()
         {
@@ -213,7 +220,7 @@ namespace CoopSpectator.MissionBehaviors
                 " ReservedEnemy=" + ReservedEnemyCount;
         }
 
-        public int GetRemainingTroopCount(BattleSideEnum side)
+        public virtual int GetRemainingTroopCount(BattleSideEnum side)
         {
             if (side == OpposingSide(_playerSide))
                 return ReservedEnemyCount;
@@ -242,7 +249,7 @@ namespace CoopSpectator.MissionBehaviors
             return 0f;
         }
 
-        public bool IsSideDepleted(BattleSideEnum side)
+        public virtual bool IsSideDepleted(BattleSideEnum side)
         {
             if (side == _playerSide)
                 return CountActive(_spawnedPlayerAgents) == 0;
@@ -267,7 +274,7 @@ namespace CoopSpectator.MissionBehaviors
             return false;
         }
 
-        private void TryMaterializeInitialAssault()
+        protected virtual void TryMaterializeInitialAssault()
         {
             try
             {
@@ -366,7 +373,7 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        private void SpawnPlayerGroup(IReadOnlyList<IAgentOriginBase> origins)
+        protected void SpawnPlayerGroup(IReadOnlyList<IAgentOriginBase> origins)
         {
             for (int index = 0; index < origins.Count; index++)
             {
@@ -387,7 +394,7 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        private Agent SpawnEnemy(
+        protected Agent SpawnEnemy(
             IAgentOriginBase origin,
             MatrixFrame frame,
             bool isAlarmed,
@@ -428,7 +435,7 @@ namespace CoopSpectator.MissionBehaviors
             return agent;
         }
 
-        private void ActivateCombat()
+        protected virtual void ActivateCombat()
         {
             Team playerTeam = ResolveTeam(_playerSide);
             Team enemyTeam = ResolveTeam(OpposingSide(_playerSide));
@@ -483,7 +490,7 @@ namespace CoopSpectator.MissionBehaviors
                 " EnemyActive=" + CountActive(_spawnedEnemyAgents) + ".");
         }
 
-        private void HoldPlayerFormations()
+        protected void HoldPlayerFormations()
         {
             Team playerTeam = ResolveTeam(_playerSide);
             if (playerTeam == null)
@@ -498,11 +505,15 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        private List<DefenderPlacementSlot> CollectHideoutDefenderSlots()
+        protected List<DefenderPlacementSlot> CollectHideoutDefenderSlots(
+            bool allowPartialManifestMetadata = false)
         {
             var slots = new List<DefenderPlacementSlot>();
             AppendGuardPatrolSlots(slots);
-            AppendDynamicPatrolSlots(slots, out string sceneManifestDiagnostics);
+            AppendDynamicPatrolSlots(
+                slots,
+                allowPartialManifestMetadata,
+                out string sceneManifestDiagnostics);
 
             int idleActionCount = slots.Sum(slot =>
                 slot.PatrolPoints.Count(point => !string.IsNullOrWhiteSpace(point.LoopAction)));
@@ -609,6 +620,7 @@ namespace CoopSpectator.MissionBehaviors
 
         private void AppendDynamicPatrolSlots(
             List<DefenderPlacementSlot> slots,
+            bool allowPartialManifestMetadata,
             out string manifestDiagnostics)
         {
             manifestDiagnostics = "not-attempted";
@@ -644,17 +656,18 @@ namespace CoopSpectator.MissionBehaviors
                             out CoopHideoutPatrolAreaManifest areaManifest))
                     {
                         matchedAreaCount++;
+                        bool pointCountMatched =
+                            route.Count == (areaManifest?.PatrolPoints?.Count ?? 0);
+                        if (!pointCountMatched)
+                            pointCountMismatchCount++;
                         if (TryApplyManifestPatrolPoints(
                                 route,
                                 areaManifest,
+                                allowPartialManifestMetadata,
                                 out int idleActionsApplied))
                         {
                             appliedAreaCount++;
                             appliedIdleActionCount += idleActionsApplied;
-                        }
-                        else
-                        {
-                            pointCountMismatchCount++;
                         }
                     }
                     else if (hasManifest)
@@ -732,18 +745,24 @@ namespace CoopSpectator.MissionBehaviors
         private static bool TryApplyManifestPatrolPoints(
             List<CoopHideoutPatrolPointDefinition> runtimePoints,
             CoopHideoutPatrolAreaManifest areaManifest,
+            bool allowPartialPointCount,
             out int idleActionsApplied)
         {
             idleActionsApplied = 0;
             if (runtimePoints == null ||
                 areaManifest?.PatrolPoints == null ||
                 runtimePoints.Count == 0 ||
-                runtimePoints.Count != areaManifest.PatrolPoints.Count)
+                areaManifest.PatrolPoints.Count == 0 ||
+                (!allowPartialPointCount &&
+                 runtimePoints.Count != areaManifest.PatrolPoints.Count))
             {
                 return false;
             }
 
-            for (int pointIndex = 0; pointIndex < runtimePoints.Count; pointIndex++)
+            int appliedPointCount = Math.Min(
+                runtimePoints.Count,
+                areaManifest.PatrolPoints.Count);
+            for (int pointIndex = 0; pointIndex < appliedPointCount; pointIndex++)
             {
                 CoopHideoutPatrolPointDefinition runtimePoint = runtimePoints[pointIndex];
                 CoopHideoutPatrolPointManifest manifestPoint = areaManifest.PatrolPoints[pointIndex];
@@ -756,6 +775,8 @@ namespace CoopSpectator.MissionBehaviors
                 runtimePoint.IsInfiniteWaitPoint = manifestPoint.IsInfiniteWaitPoint;
                 runtimePoint.PatrollingSpeed = manifestPoint.PatrollingSpeed;
                 runtimePoint.LoopAction = manifestPoint.LoopAction ?? string.Empty;
+                runtimePoint.SpawnGroupTag = manifestPoint.SpawnGroupTag ?? string.Empty;
+                runtimePoint.HasTorchTag = manifestPoint.HasTorchTag;
                 if (!string.IsNullOrWhiteSpace(runtimePoint.LoopAction))
                     idleActionsApplied++;
             }
@@ -933,7 +954,9 @@ namespace CoopSpectator.MissionBehaviors
                 WaitDeviationSeconds = 0,
                 IsInfiniteWaitPoint = false,
                 PatrollingSpeed = -1f,
-                LoopAction = string.Empty
+                LoopAction = string.Empty,
+                SpawnGroupTag = string.Empty,
+                HasTorchTag = false
             };
         }
 
@@ -1122,7 +1145,7 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        private List<MatrixFrame> BuildBossSpawnFrames(int count)
+        protected List<MatrixFrame> BuildBossSpawnFrames(int count)
         {
             var frames = new List<MatrixFrame>();
             GameEntity anchor = null;
@@ -1171,7 +1194,7 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        private static bool IsBossOrigin(IAgentOriginBase origin)
+        protected static bool IsBossOrigin(IAgentOriginBase origin)
         {
             RosterEntryState entry = ResolveEntry(origin);
             return ContainsBossToken(entry?.OriginalCharacterId) ||
@@ -1202,7 +1225,7 @@ namespace CoopSpectator.MissionBehaviors
                    value.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
-        private static List<IAgentOriginBase> SupplyAll(IMissionTroopSupplier supplier)
+        protected static List<IAgentOriginBase> SupplyAll(IMissionTroopSupplier supplier)
         {
             int count = Math.Max(0, supplier?.NumTroopsNotSupplied ?? 0);
             return count == 0
@@ -1210,13 +1233,13 @@ namespace CoopSpectator.MissionBehaviors
                 : supplier.SupplyTroops(count).Where(origin => origin != null).ToList();
         }
 
-        private IMissionTroopSupplier GetSupplier(BattleSideEnum side)
+        protected IMissionTroopSupplier GetSupplier(BattleSideEnum side)
         {
             int index = (int)side;
             return index >= 0 && index < _suppliers.Length ? _suppliers[index] : null;
         }
 
-        private Team ResolveTeam(BattleSideEnum side)
+        protected Team ResolveTeam(BattleSideEnum side)
         {
             return side == BattleSideEnum.Attacker
                 ? Mission?.AttackerTeam
@@ -1225,7 +1248,7 @@ namespace CoopSpectator.MissionBehaviors
                     : null;
         }
 
-        private static BattleSideEnum OpposingSide(BattleSideEnum side)
+        protected static BattleSideEnum OpposingSide(BattleSideEnum side)
         {
             return side == BattleSideEnum.Attacker
                 ? BattleSideEnum.Defender
@@ -1242,12 +1265,12 @@ namespace CoopSpectator.MissionBehaviors
                 _defenderSpawnerEnabled = enabled;
         }
 
-        private static int CountActive(IEnumerable<Agent> agents)
+        protected static int CountActive(IEnumerable<Agent> agents)
         {
             return (agents ?? Enumerable.Empty<Agent>()).Count(agent => agent?.IsActive() == true);
         }
 
-        private static void SetTeamsAsEnemies(Team left, Team right, bool enemies)
+        protected static void SetTeamsAsEnemies(Team left, Team right, bool enemies)
         {
             if (left == null || right == null)
                 return;
@@ -1279,6 +1302,82 @@ namespace CoopSpectator.MissionBehaviors
                 Agent.WeaponWieldActionType.Instant,
                 out _,
                 out _);
+        }
+
+        internal static bool TryEquipNightTorch(Agent agent)
+        {
+            if (agent?.IsActive() != true || !GameNetwork.IsServerOrRecorder)
+                return false;
+
+            try
+            {
+                ItemObject torch = MBObjectManager.Instance?.GetObject<ItemObject>(
+                    CoopHideoutAmbushContract.TorchMirrorItemId);
+                if (torch == null)
+                    return false;
+
+                EquipmentIndex slot = EquipmentIndex.ExtraWeaponSlot;
+                bool hasExistingTorch =
+                    agent.Equipment != null &&
+                    !agent.Equipment[slot].IsEmpty &&
+                    string.Equals(
+                        agent.Equipment[slot].Item?.StringId,
+                        CoopHideoutAmbushContract.TorchMirrorItemId,
+                        StringComparison.OrdinalIgnoreCase);
+                if (hasExistingTorch)
+                {
+                    agent.TryToWieldWeaponInSlot(
+                        slot,
+                        Agent.WeaponWieldActionType.InstantAfterPickUp,
+                        isWieldedOnSpawn: false);
+                }
+                else
+                {
+                    var missionWeapon = new MissionWeapon(torch, null, null);
+                    agent.EquipWeaponToExtraSlotAndWield(ref missionWeapon);
+                }
+
+                bool torchPresent =
+                    agent.Equipment != null &&
+                    !agent.Equipment[slot].IsEmpty &&
+                    string.Equals(
+                        agent.Equipment[slot].Item?.StringId,
+                        CoopHideoutAmbushContract.TorchMirrorItemId,
+                        StringComparison.OrdinalIgnoreCase);
+                return torchPresent &&
+                       (agent.GetPrimaryWieldedItemIndex() == slot ||
+                        agent.GetOffhandWieldedItemIndex() == slot);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopExactCampaignHideoutMissionController: failed to equip authored night torch. " +
+                    "Agent=" + (agent?.Index.ToString() ?? "null") +
+                    " Error=" + ex.GetType().Name + ":" + ex.Message + ".");
+                return false;
+            }
+        }
+
+        internal static void TryRemoveNightTorch(Agent agent)
+        {
+            if (agent?.IsActive() != true || agent.Equipment == null)
+                return;
+
+            try
+            {
+                EquipmentIndex slot = EquipmentIndex.ExtraWeaponSlot;
+                if (!agent.Equipment[slot].IsEmpty &&
+                    string.Equals(
+                        agent.Equipment[slot].Item?.StringId,
+                        CoopHideoutAmbushContract.TorchMirrorItemId,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    agent.RemoveEquippedWeapon(slot);
+                }
+            }
+            catch
+            {
+            }
         }
     }
 
@@ -1319,6 +1418,8 @@ namespace CoopSpectator.MissionBehaviors
 
             internal bool IsAlarmed { get; set; }
 
+            internal int ObservedAgentIndex { get; set; } = -1;
+
             internal float NextRouteAt { get; set; }
 
             internal float NextCommandAt { get; set; }
@@ -1330,18 +1431,47 @@ namespace CoopSpectator.MissionBehaviors
             internal bool IsWaitingAtPoint { get; set; }
 
             internal bool IsIdleActionPlaying { get; set; }
+
+            internal bool ShouldCarryNightTorch { get; set; }
+
+            internal bool ShouldWalkPatrol { get; set; }
         }
 
         private readonly Dictionary<int, DefenderState> _defenders =
             new Dictionary<int, DefenderState>();
         private bool _active;
         private bool _globalAlarm;
+        private bool _useNightAmbushAlarmSemantics;
         private float _detectionAccumulator;
         private float _lastCombatProgressAt;
 
+        internal bool HasGlobalAlarm =>
+            _useNightAmbushAlarmSemantics
+                ? CoopHideoutAmbushContract.ShouldKeepAlarmFailureCounterRunning(
+                    _defenders.Values.Count(state =>
+                        state?.Agent?.IsActive() == true && state.IsAlarmed))
+                : _globalAlarm;
+
+        internal IReadOnlyList<CoopHideoutAmbushAwarenessSnapshot> GetAwarenessSnapshots()
+        {
+            return _defenders.Values
+                .Where(state => state?.Agent != null)
+                .OrderBy(state => state.Agent.Index)
+                .Select(state => new CoopHideoutAmbushAwarenessSnapshot
+                {
+                    GuardAgentIndex = state.Agent.Index,
+                    ObservedAgentIndex = state.ObservedAgentIndex,
+                    Suspicion01 = Math.Max(0f, Math.Min(1f, state.Suspicion / AlarmThreshold)),
+                    IsAlarmed = state.IsAlarmed
+                })
+                .ToArray();
+        }
+
         internal void RegisterDefender(
             Agent agent,
-            IReadOnlyList<CoopHideoutPatrolPointDefinition> routePoints)
+            IReadOnlyList<CoopHideoutPatrolPointDefinition> routePoints,
+            bool carryNightTorch = false,
+            bool forceWalkPatrol = false)
         {
             if (!GameNetwork.IsServer || agent == null)
                 return;
@@ -1370,22 +1500,27 @@ namespace CoopSpectator.MissionBehaviors
                 Route = route,
                 RouteIndex = 0,
                 PreviousPosition = agent.Position.AsVec2,
-                LastProgressAt = Mission?.CurrentTime ?? 0f
+                LastProgressAt = Mission?.CurrentTime ?? 0f,
+                ShouldCarryNightTorch = carryNightTorch,
+                ShouldWalkPatrol = forceWalkPatrol
             };
             _defenders[agent.Index] = state;
             PreparePatrollingAgent(state, issueMovement: true);
         }
 
-        internal void Activate()
+        internal void Activate(bool useNightAmbushAlarmSemantics = false)
         {
             if (!GameNetwork.IsServer || _active)
                 return;
 
+            _useNightAmbushAlarmSemantics = useNightAmbushAlarmSemantics;
             _active = true;
             _lastCombatProgressAt = Mission?.CurrentTime ?? 0f;
             int sheathHandsAttempted = 0;
             int sheathHandsCleared = 0;
             int sheathFailures = 0;
+            int nightTorchesRequested = 0;
+            int nightTorchesWielded = 0;
             foreach (DefenderState state in _defenders.Values)
             {
                 PreparePatrollingAgent(state, issueMovement: true);
@@ -1394,6 +1529,15 @@ namespace CoopSpectator.MissionBehaviors
                     ref sheathHandsAttempted,
                     ref sheathHandsCleared,
                     ref sheathFailures);
+                if (state.ShouldCarryNightTorch)
+                {
+                    nightTorchesRequested++;
+                    if (CoopExactCampaignHideoutMissionController.TryEquipNightTorch(
+                            state.Agent))
+                    {
+                        nightTorchesWielded++;
+                    }
+                }
             }
 
             ModLogger.Info(
@@ -1402,7 +1546,19 @@ namespace CoopSpectator.MissionBehaviors
                 " Routes=" + _defenders.Values.Count(state => state.Route.Count > 1) +
                 " SheathHandsAttempted=" + sheathHandsAttempted +
                 " SheathHandsCleared=" + sheathHandsCleared +
-                " SheathFailures=" + sheathFailures + ".");
+                " SheathFailures=" + sheathFailures +
+                " NightTorchesRequested=" + nightTorchesRequested +
+                " NightTorchesWielded=" + nightTorchesWielded + ".");
+        }
+
+        internal void ActivateGlobalAlarm(string reason)
+        {
+            if (!GameNetwork.IsServer)
+                return;
+
+            AlarmAll(string.IsNullOrWhiteSpace(reason)
+                ? "external-hideout-phase-transition"
+                : reason);
         }
 
         public override void OnMissionTick(float dt)
@@ -1434,7 +1590,8 @@ namespace CoopSpectator.MissionBehaviors
                 }
             }
 
-            if (_globalAlarm &&
+            if (!_useNightAmbushAlarmSemantics &&
+                _globalAlarm &&
                 now - _lastCombatProgressAt >= StalledAssaultAlarmSeconds &&
                 _defenders.Values.Any(state => state.Agent?.IsActive() == true && !state.IsAlarmed))
             {
@@ -1459,7 +1616,10 @@ namespace CoopSpectator.MissionBehaviors
                 _defenders.TryGetValue(affectedAgent.Index, out DefenderState affectedState) &&
                 affectedAgent.IsActive())
             {
-                AlarmWithPropagation(affectedState, "defender-hit");
+                if (_useNightAmbushAlarmSemantics)
+                    AlarmDefender(affectedState, "defender-hit");
+                else
+                    AlarmWithPropagation(affectedState, "defender-hit");
             }
 
             base.OnScoreHit(
@@ -1486,10 +1646,22 @@ namespace CoopSpectator.MissionBehaviors
                 _defenders.TryGetValue(affectedAgent.Index, out DefenderState removedState))
             {
                 _lastCombatProgressAt = Mission?.CurrentTime ?? _lastCombatProgressAt;
-                AlarmNearby(
-                    removedState.Agent.Position,
-                    CorpseAwarenessRange,
-                    "nearby-defender-removed");
+                if (_useNightAmbushAlarmSemantics)
+                {
+                    removedState.IsAlarmed = false;
+                    removedState.IsCautious = false;
+                    removedState.Suspicion = 0f;
+                    removedState.ObservedAgentIndex = -1;
+                    if (!HasGlobalAlarm)
+                        _globalAlarm = false;
+                }
+                else
+                {
+                    AlarmNearby(
+                        removedState.Agent.Position,
+                        CorpseAwarenessRange,
+                        "nearby-defender-removed");
+                }
             }
 
             base.OnAgentRemoved(affectedAgent, affectorAgent, agentState, blow);
@@ -1752,7 +1924,10 @@ namespace CoopSpectator.MissionBehaviors
                 agent.SetScriptedPositionAndDirection(
                     ref targetPosition,
                     direction.RotationInRadians,
-                    addHumanLikeDelay: true);
+                    addHumanLikeDelay: true,
+                    additionalFlags: state.ShouldWalkPatrol
+                        ? Agent.AIScriptedFrameFlags.DoNotRun
+                        : Agent.AIScriptedFrameFlags.None);
             }
             catch
             {
@@ -1778,6 +1953,7 @@ namespace CoopSpectator.MissionBehaviors
 
             if (visibleTarget != null)
             {
+                state.ObservedAgentIndex = visibleTarget.Index;
                 state.Suspicion = Math.Min(AlarmThreshold, state.Suspicion + strongestRate * dt);
                 if (!state.IsCautious && state.Suspicion >= CautiousThreshold)
                 {
@@ -1787,10 +1963,16 @@ namespace CoopSpectator.MissionBehaviors
                 }
 
                 if (state.Suspicion >= AlarmThreshold)
-                    AlarmWithPropagation(state, "visual-detection");
+                {
+                    if (_useNightAmbushAlarmSemantics)
+                        AlarmDefender(state, "visual-detection");
+                    else
+                        AlarmWithPropagation(state, "visual-detection");
+                }
                 return;
             }
 
+            state.ObservedAgentIndex = -1;
             state.Suspicion = Math.Max(0f, state.Suspicion - dt * 0.3f);
             if (state.IsCautious && state.Suspicion < CautiousThreshold * 0.4f)
             {
@@ -1917,7 +2099,9 @@ namespace CoopSpectator.MissionBehaviors
             state.IsAlarmed = true;
             state.IsCautious = false;
             state.Suspicion = AlarmThreshold;
+            state.ObservedAgentIndex = -1;
             EndPatrolPointWait(state);
+            CoopExactCampaignHideoutMissionController.TryRemoveNightTorch(agent);
             try
             {
                 agent.SetMaximumSpeedLimit(-1f, isMultiplier: false);

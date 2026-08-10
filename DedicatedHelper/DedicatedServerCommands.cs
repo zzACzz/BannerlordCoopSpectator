@@ -225,26 +225,39 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
                     requestedGameType,
                     CoopHideoutBossPhaseContract.GameModeId,
                     StringComparison.Ordinal);
-                bool snapshotIsHideout = CoopHideoutBossPhaseContract.IsHideoutScenario(
+                bool isIsolatedNightHideout = string.Equals(
+                    requestedGameType,
+                    CoopHideoutAmbushContract.GameModeId,
+                    StringComparison.Ordinal);
+                bool snapshotIsDayHideout = CoopHideoutBossPhaseContract.IsHideoutScenario(
                     snapshot.ScenarioContext?.ScenarioKind);
-                if (isIsolatedDayHideout && !snapshotIsHideout)
+                bool snapshotIsNightHideout =
+                    CoopHideoutAmbushContract.IsHideoutAmbushScenario(
+                        snapshot.ScenarioContext?.ScenarioKind);
+                bool snapshotIsHideout = snapshotIsDayHideout || snapshotIsNightHideout;
+                if ((isIsolatedDayHideout && !snapshotIsDayHideout) ||
+                    (isIsolatedNightHideout && !snapshotIsNightHideout))
                 {
                     ModLogger.Info(
-                        "DedicatedServerCommands: rejected CoopHideoutDay mission selection because the snapshot scenario is not a hideout. " +
+                        "DedicatedServerCommands: rejected isolated hideout mission selection because the game type and scenario do not match. " +
                         "RequestedScene=" + (requestedScene ?? "missing") +
+                        " RequestedGameType=" + (requestedGameType ?? "missing") +
                         " ScenarioKind=" + (snapshot.ScenarioContext?.ScenarioKind ?? "missing") + ".");
                     return false;
                 }
 
                 if (snapshotIsHideout)
                 {
-                    if (!isIsolatedDayHideout ||
+                    bool matchingHideoutMode =
+                        (snapshotIsDayHideout && isIsolatedDayHideout) ||
+                        (snapshotIsNightHideout && isIsolatedNightHideout);
+                    if (!matchingHideoutMode ||
                         !CoopHideoutBossPhaseContract.TryNormalizeDayHideoutSceneName(
                             requestedScene,
                             out string normalizedHideoutScene))
                     {
                         ModLogger.Info(
-                            "DedicatedServerCommands: rejected isolated day hideout mission selection before start_mission. " +
+                            "DedicatedServerCommands: rejected isolated hideout mission selection before start_mission. " +
                             "RequestedScene=" + (requestedScene ?? "missing") +
                             " RequestedGameType=" + (requestedGameType ?? "missing") +
                             " ScenarioKind=" + (snapshot.ScenarioContext?.ScenarioKind ?? "missing") + ".");
@@ -256,9 +269,12 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
 
                 bool requiresSceneRegistration =
                     isIsolatedDayHideout ||
+                    isIsolatedNightHideout ||
                     SceneRuntimeClassifier.RequiresDedicatedSceneRegistration(requestedScene);
                 string appliedGameType = isIsolatedDayHideout
                     ? CoopHideoutBossPhaseContract.GameModeId
+                    : isIsolatedNightHideout
+                        ? CoopHideoutAmbushContract.GameModeId
                     : string.Equals(requestedGameType, CoopGameModeIds.OfficialBattle, StringComparison.Ordinal)
                         ? CoopGameModeIds.OfficialBattle
                         : CoopGameModeIds.CoopBattle;
@@ -349,7 +365,8 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
                 optionValues["GameType"] = appliedGameType;
                 optionValues["Map"] = requestedScene;
                 if (string.Equals(appliedGameType, CoopGameModeIds.OfficialBattle, StringComparison.Ordinal) ||
-                    string.Equals(appliedGameType, CoopHideoutBossPhaseContract.GameModeId, StringComparison.Ordinal))
+                    string.Equals(appliedGameType, CoopHideoutBossPhaseContract.GameModeId, StringComparison.Ordinal) ||
+                    string.Equals(appliedGameType, CoopHideoutAmbushContract.GameModeId, StringComparison.Ordinal))
                 {
         // CoopBattle owns side/unit selection, deployment, and the explicit H-start flow.
                     // Disable native Battle/TDM warmup countdown so the client does not keep showing

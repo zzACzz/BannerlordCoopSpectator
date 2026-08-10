@@ -420,10 +420,10 @@ namespace CoopSpectator.Infrastructure
 
                 initializationStep = "validate-scene";
                 string sceneName = mission.SceneName ?? string.Empty;
-                bool isSupportedDayHideoutScene =
+                bool isSupportedHideoutScene =
                     CoopHideoutBossPhaseContract.IsSupportedDayHideoutSceneName(sceneName);
                 if (!SceneRuntimeClassifier.IsExactCampaignBattleScene(sceneName) &&
-                    !isSupportedDayHideoutScene)
+                    !isSupportedHideoutScene)
                 {
                     reason = "scene-not-exact-campaign";
                     return false;
@@ -464,11 +464,17 @@ namespace CoopSpectator.Infrastructure
                     reason = scenarioContractReason ?? "scenario-contract-rejected";
                     return false;
                 }
-                bool useHideoutController =
-                    isSupportedDayHideoutScene &&
+                bool useDayHideoutController =
+                    isSupportedHideoutScene &&
                     CoopHideoutBossPhaseContract.IsHideoutScenario(
                         scenarioContext?.ScenarioKind);
-                if (isSupportedDayHideoutScene && !useHideoutController)
+                bool useNightHideoutController =
+                    isSupportedHideoutScene &&
+                    CoopHideoutAmbushContract.IsHideoutAmbushScenario(
+                        scenarioContext?.ScenarioKind);
+                bool useHideoutController =
+                    useDayHideoutController || useNightHideoutController;
+                if (isSupportedHideoutScene && !useHideoutController)
                 {
                     reason = "hideout-scene-without-hideout-scenario-contract";
                     return false;
@@ -638,6 +644,7 @@ namespace CoopSpectator.Infrastructure
 
                     if (!TryResolveHideoutFirstPhaseEnemyCount(
                             playerSide,
+                            useNightHideoutController,
                             out int firstPhaseEnemyCount,
                             out string firstPhaseEnemyDiagnostics))
                     {
@@ -663,6 +670,7 @@ namespace CoopSpectator.Infrastructure
                             suppliers,
                             playerSide,
                             firstPhaseEnemyCount,
+                            useNightHideoutController,
                             defenderTotal,
                             attackerTotal,
                             out string hideoutDiagnostics))
@@ -687,7 +695,9 @@ namespace CoopSpectator.Infrastructure
                     reason = "initialized";
 
                     ModLogger.Info(
-                        "ExactCampaignArmyBootstrap: initialized isolated day-hideout army bootstrap. " +
+                        "ExactCampaignArmyBootstrap: initialized isolated hideout army bootstrap. " +
+                        "Mode=" + (useNightHideoutController ? "NightAmbush" : "DayAssault") +
+                        " " +
                         "Scene=" + sceneName +
                         " PlayerSide=" + playerSide +
                         " ScenarioKind=" + (scenarioContext?.ScenarioKind ?? "Unknown") +
@@ -3098,6 +3108,7 @@ namespace CoopSpectator.Infrastructure
             IMissionTroopSupplier[] suppliers,
             BattleSideEnum playerSide,
             int firstPhaseEnemyCount,
+            bool useNightAmbushController,
             int defenderTotal,
             int attackerTotal,
             out string diagnostics)
@@ -3111,12 +3122,30 @@ namespace CoopSpectator.Infrastructure
             bool created = false;
             if (controller == null)
             {
-                controller = new CoopExactCampaignHideoutMissionController(
-                    suppliers,
-                    playerSide,
-                    firstPhaseEnemyCount);
+                controller = useNightAmbushController
+                    ? (CoopExactCampaignHideoutMissionController)
+                        new CoopExactCampaignHideoutAmbushMissionController(
+                            suppliers,
+                            playerSide,
+                            firstPhaseEnemyCount)
+                    : new CoopExactCampaignHideoutMissionController(
+                        suppliers,
+                        playerSide,
+                        firstPhaseEnemyCount);
                 mission.AddMissionBehavior(controller);
                 created = true;
+            }
+
+            bool existingControllerIsNight =
+                controller is CoopExactCampaignHideoutAmbushMissionController;
+            if (existingControllerIsNight != useNightAmbushController)
+            {
+                diagnostics =
+                    "hideout-controller-mode-mismatch Existing=" +
+                    (existingControllerIsNight ? "NightAmbush" : "DayAssault") +
+                    " Requested=" +
+                    (useNightAmbushController ? "NightAmbush" : "DayAssault");
+                return false;
             }
 
             if (controller.FirstPhaseEnemyTroopCount != firstPhaseEnemyCount)
@@ -3132,6 +3161,7 @@ namespace CoopSpectator.Infrastructure
             diagnostics =
                 "Created=" + created +
                 " Started=" + controller.HasStarted +
+                " Mode=" + (useNightAmbushController ? "NightAmbush" : "DayAssault") +
                 " PlayerSide=" + playerSide +
                 " FirstPhaseEnemy=" + firstPhaseEnemyCount +
                 " DefenderTotal=" + defenderTotal +
@@ -3141,6 +3171,7 @@ namespace CoopSpectator.Infrastructure
 
         private static bool TryResolveHideoutFirstPhaseEnemyCount(
             BattleSideEnum playerSide,
+            bool useNightAmbushController,
             out int firstPhaseEnemyCount,
             out string diagnostics)
         {
@@ -3165,10 +3196,15 @@ namespace CoopSpectator.Infrastructure
             diagnostics =
                 "EnemySide=" + enemySide +
                 " TotalHealthy=" + totalHealthyCount +
-                " MissionReady=" + firstPhaseEnemyCount;
-            return CoopHideoutBossPhaseContract.IsValidFirstPhaseParticipantCount(
-                totalHealthyCount,
-                firstPhaseEnemyCount);
+                " MissionReady=" + firstPhaseEnemyCount +
+                " Mode=" + (useNightAmbushController ? "NightAmbush" : "DayAssault");
+            return useNightAmbushController
+                ? CoopHideoutAmbushContract.IsValidNightFirstPhaseParticipantCount(
+                    totalHealthyCount,
+                    firstPhaseEnemyCount)
+                : CoopHideoutBossPhaseContract.IsValidFirstPhaseParticipantCount(
+                    totalHealthyCount,
+                    firstPhaseEnemyCount);
         }
 
         private static void LogBootstrapContractSnapshot(

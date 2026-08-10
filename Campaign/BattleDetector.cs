@@ -671,14 +671,28 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
                 if (isHideoutBattle || isHideoutSettlement || LooksLikeUnsupportedHideoutScene(missionScene))
                 {
-                    if (!TryValidateSupportedDayHideoutAssaultMission(mission, out string hideoutDiagnostics))
+                    bool dayHideoutValid =
+                        TryValidateSupportedDayHideoutAssaultMission(
+                            mission,
+                            out string dayHideoutDiagnostics);
+                    bool nightHideoutValid =
+                        HideoutAmbushCampaignBattleAdapter.TryValidateActiveMission(
+                            battle,
+                            encounterSettlement,
+                            mission,
+                            out string nightHideoutDiagnostics);
+                    if (!dayHideoutValid && !nightHideoutValid)
                     {
-                        reason = "hideout-not-supported-day-assault";
-                        summary += " HideoutDiagnostics={" + hideoutDiagnostics + "}";
+                        reason = "hideout-coop-contract-invalid";
+                        summary +=
+                            " DayHideoutDiagnostics={" + dayHideoutDiagnostics + "}" +
+                            " NightHideoutDiagnostics={" + nightHideoutDiagnostics + "}";
                         return true;
                     }
 
-                    summary += " HideoutMode=isolated-day-assault";
+                    summary += nightHideoutValid
+                        ? " HideoutMode=isolated-night-ambush"
+                        : " HideoutMode=isolated-day-assault";
                 }
 
                 if (isBlockadeBattle || isBlockadeSallyOutBattle)
@@ -3523,6 +3537,54 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             bool useNativeFinalLordsHallAftermath = ShouldUseNativeFinalLordsHallAftermath(result);
             bool useNativeFinalLandBattleAftermath = ShouldUseNativeFinalLandBattleAftermath(result);
             bool useNativeSiegeAmbushAftermath = ShouldUseNativeSiegeAmbushAftermath(result);
+            MapEvent currentBattle = PlayerEncounter.Battle;
+            Settlement currentSettlement =
+                PlayerEncounter.EncounterSettlement ??
+                currentBattle?.MapEventSettlement ??
+                MobileParty.MainParty?.CurrentSettlement;
+            BattleSnapshotMessage currentSnapshot =
+                BattleSnapshotRuntimeState.GetCurrent() ??
+                BattleSnapshotRuntimeState.GetState()?.Snapshot;
+            bool isFinalHideoutResult =
+                ExactHideoutNativeAftermathRuntime.IsFinalHideoutResult(
+                    currentBattle,
+                    result);
+            bool isNightHideoutMission =
+                HideoutAmbushCampaignBattleAdapter.IsCampaignStage(
+                    currentBattle,
+                    currentSettlement,
+                    mission);
+            bool isNightHideoutSnapshot =
+                CoopHideoutAmbushContract.IsHideoutAmbushScenario(
+                    currentSnapshot?.ScenarioContext?.ScenarioKind);
+            bool snapshotBattleInstanceMatches =
+                currentSnapshot != null &&
+                !string.IsNullOrWhiteSpace(currentSnapshot.BattleInstanceId) &&
+                !string.IsNullOrWhiteSpace(result.BattleInstanceId) &&
+                string.Equals(
+                    currentSnapshot.BattleInstanceId,
+                    result.BattleInstanceId,
+                    StringComparison.Ordinal);
+            bool suppressNightHideoutAftermath =
+                HideoutMannequinIsolation.ShouldSuppressAftermath(
+                    isCampaignHostProcess:
+                        TaleWorlds.CampaignSystem.Campaign.Current != null &&
+                        !GameNetwork.IsClient,
+                    isPlayerHideoutBattle:
+                        currentBattle?.IsHideoutBattle == true &&
+                        currentBattle.IsPlayerMapEvent,
+                    isNightHideoutMission: isNightHideoutMission,
+                    isNightHideoutSnapshot: isNightHideoutSnapshot,
+                    isFinalHideoutResult: isFinalHideoutResult,
+                    battleInstanceMatches: snapshotBattleInstanceMatches,
+                    out string hideoutMannequinIsolationDiagnostics);
+            if (suppressNightHideoutAftermath)
+            {
+                HideoutMannequinIsolation.LogSuppressionOnce(
+                    resultKey,
+                    result.BattleInstanceId,
+                    hideoutMannequinIsolationDiagnostics);
+            }
             bool useExactSiegeAssaultEngineResult =
                 ExactSiegeAssaultCampaignBattleAdapter
                     .IsCampaignResultCandidate(
@@ -3595,7 +3657,9 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
             if (!useNativeSiegeAmbushAftermath)
             {
-                TryInjectMainPartyBattleResultPreviewIntoLiveEncounter(result, resultKey);
+                if (!suppressNightHideoutAftermath)
+                    TryInjectMainPartyBattleResultPreviewIntoLiveEncounter(result, resultKey);
+
                 TryInjectFinalSiegeDefenderBattleResultPreviewIntoLiveEncounter(result, resultKey);
                 TryInjectFinalLandBattleDefeatedSideBattleResultPreviewIntoLiveEncounter(result, resultKey);
             }
@@ -3686,16 +3750,22 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
             bool hideoutNativeAftermathArmed = false;
             string hideoutNativeAftermathDiagnostics = "not-requested";
-            if (encounterPrepared &&
-                ExactHideoutNativeAftermathRuntime.IsFinalHideoutResult(
-                    PlayerEncounter.Battle,
-                    result))
+            if (encounterPrepared && isFinalHideoutResult)
             {
-                hideoutNativeAftermathArmed =
-                    ExactHideoutNativeAftermathRuntime.TryArm(
-                        PlayerEncounter.Battle,
-                        result,
-                        out hideoutNativeAftermathDiagnostics);
+                if (suppressNightHideoutAftermath)
+                {
+                    hideoutNativeAftermathDiagnostics =
+                        "suppressed-by-hideout-mannequin-isolation Mode=" +
+                        HideoutMannequinIsolation.RequestedModeName;
+                }
+                else
+                {
+                    hideoutNativeAftermathArmed =
+                        ExactHideoutNativeAftermathRuntime.TryArm(
+                            PlayerEncounter.Battle,
+                            result,
+                            out hideoutNativeAftermathDiagnostics);
+                }
             }
             bool exitRequested = TryRequestLocalMissionExit(mission, "campaign battle_result bridge");
             if (exitRequested)
@@ -5170,13 +5240,24 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 message.Snapshot.MultiplayerSceneResolverSource = message.MultiplayerSceneResolverSource;
                 message.Snapshot.PlayerTroopsReceivedDamageMultiplier = playerTroopsReceivedDamageMultiplier;
                 message.Snapshot.ScenarioContext = scenarioContext?.Clone();
-                if (CoopHideoutBossPhaseContract.IsHideoutScenario(scenarioContext?.ScenarioKind) &&
+                if ((CoopHideoutBossPhaseContract.IsHideoutScenario(scenarioContext?.ScenarioKind) ||
+                     CoopHideoutAmbushContract.IsHideoutAmbushScenario(scenarioContext?.ScenarioKind)) &&
                     !TryApplyVanillaHideoutSelectedRoster(message.Snapshot, message.PlayerSide, out string hideoutRosterDiagnostics))
                 {
                     ModLogger.Info(
-                        "BattleDetector: isolated day hideout start blocked because the vanilla selected roster could not be projected. " +
+                        "BattleDetector: isolated hideout start blocked because the vanilla selected roster could not be projected. " +
                         "Diagnostics={" + hideoutRosterDiagnostics + "}.");
                     message.Snapshot.Sides.Clear();
+                }
+                if (CoopHideoutAmbushContract.IsHideoutAmbushScenario(
+                        scenarioContext?.ScenarioKind))
+                {
+                    TryApplyNightHideoutMainHeroStealthEquipment(
+                        message.Snapshot,
+                        out string stealthEquipmentDiagnostics);
+                    ModLogger.Info(
+                        "BattleDetector: nighttime hideout main-hero equipment projection completed. " +
+                        "Diagnostics={" + stealthEquipmentDiagnostics + "}.");
                 }
                 PopulateCampaignTimeOfDayContext(message.Snapshot);
             }
@@ -5339,7 +5420,17 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 return "Siege";
 
             if (battle?.IsHideoutBattle == true || encounterSettlement?.IsHideout == true || LooksLikeUnsupportedHideoutScene(missionScene))
-                return "Hideout";
+            {
+                if (HideoutAmbushCampaignBattleAdapter.IsCampaignStage(
+                        battle,
+                        encounterSettlement,
+                        Mission.Current))
+                {
+                    return CoopHideoutAmbushContract.ScenarioKind;
+                }
+
+                return CoopHideoutBossPhaseContract.ScenarioKind;
+            }
 
             if (encounterSettlement?.IsVillage == true || SceneRuntimeClassifier.IsVillageBattleScene(missionScene))
                 return "VillageBattle";
@@ -9601,6 +9692,39 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     return exactOrderBuilt ? exactOrder : orderedEntryIds;
                 }
 
+                if (HideoutAmbushCampaignBattleAdapter.IsCampaignStage(
+                        battle,
+                        encounterSettlement,
+                        Mission.Current))
+                {
+                    BattleSideEnum side = string.Equals(sideId, "attacker", StringComparison.OrdinalIgnoreCase)
+                        ? BattleSideEnum.Attacker
+                        : string.Equals(sideId, "defender", StringComparison.OrdinalIgnoreCase)
+                            ? BattleSideEnum.Defender
+                            : BattleSideEnum.None;
+                    if (side == BattleSideEnum.None)
+                    {
+                        ModLogger.Info(
+                            "BattleDetector: rejected nighttime hideout participant order because side id is unknown. " +
+                            "SideId=" + (sideId ?? "null") + ".");
+                        return orderedEntryIds;
+                    }
+
+                    bool exactOrderBuilt =
+                        HideoutAmbushCampaignBattleAdapter.TryBuildInitialParticipantEntryOrder(
+                            Mission.Current,
+                            side,
+                            sideSnapshot,
+                            out List<string> exactOrder,
+                            out string exactOrderDiagnostics);
+                    ModLogger.Info(
+                        "BattleDetector: nighttime hideout native initial participant order resolved. " +
+                        "SideId=" + sideId +
+                        " Success=" + exactOrderBuilt +
+                        " Diagnostics={" + exactOrderDiagnostics + "}.");
+                    return exactOrderBuilt ? exactOrder : orderedEntryIds;
+                }
+
                 if (LordsHallCampaignBattleAdapter.IsCampaignStage(battle, encounterSettlement))
                 {
                     BattleSideEnum side = string.Equals(sideId, "attacker", StringComparison.OrdinalIgnoreCase)
@@ -11231,9 +11355,15 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     encounterSettlement?.IsHideout == true;
                 if (isHideoutEncounter)
                 {
-                    bool contractValid = TryValidateSupportedDayHideoutAssaultMission(
+                    bool dayContractValid = TryValidateSupportedDayHideoutAssaultMission(
                         mission,
-                        out string hideoutDiagnostics);
+                        out string dayHideoutDiagnostics);
+                    bool nightContractValid =
+                        HideoutAmbushCampaignBattleAdapter.TryValidateActiveMission(
+                            battle,
+                            encounterSettlement,
+                            mission,
+                            out string nightHideoutDiagnostics);
                     bool sceneValid =
                         CoopHideoutBossPhaseContract.TryNormalizeDayHideoutSceneName(
                             missionSceneName,
@@ -11241,11 +11371,14 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     context.BattleSceneName = sceneValid
                         ? normalizedHideoutScene
                         : missionSceneName;
-                    context.Source = contractValid && sceneValid
-                        ? "native-day-hideout-mission-scene"
-                        : "day-hideout-mission-scene-invalid:" +
-                          hideoutDiagnostics +
-                          " SceneValid=" + sceneValid;
+                    context.Source = nightContractValid && sceneValid
+                        ? "native-night-hideout-mission-scene"
+                        : dayContractValid && sceneValid
+                            ? "native-day-hideout-mission-scene"
+                            : "hideout-mission-scene-invalid:" +
+                              " Day={" + dayHideoutDiagnostics + "}" +
+                              " Night={" + nightHideoutDiagnostics + "}" +
+                              " SceneValid=" + sceneValid;
                     return context;
                 }
 
@@ -13000,6 +13133,66 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 return;
 
             ApplyCombatEquipmentSnapshot(troop, BuildCombatEquipmentVariantSnapshot(equipment, snapshot));
+        }
+
+        private static bool TryApplyNightHideoutMainHeroStealthEquipment(
+            BattleSnapshotMessage snapshot,
+            out string diagnostics)
+        {
+            diagnostics = "not-started";
+            Hero mainHero = Hero.MainHero;
+            object stealthEquipment = mainHero?.StealthEquipment;
+            if (snapshot?.Sides == null ||
+                mainHero == null ||
+                stealthEquipment == null ||
+                string.IsNullOrWhiteSpace(mainHero.StringId))
+            {
+                diagnostics =
+                    "contract-missing Snapshot=" + (snapshot?.Sides != null) +
+                    " MainHero=" + (mainHero != null) +
+                    " StealthEquipment=" + (stealthEquipment != null);
+                return false;
+            }
+
+            List<TroopStackInfo> matches = snapshot.Sides
+                .Where(side => side != null)
+                .SelectMany(side =>
+                    (side.Parties ?? new List<BattlePartySnapshotMessage>())
+                    .Where(party => party?.Troops != null)
+                    .SelectMany(party => party.Troops)
+                    .Concat(side.Troops ?? new List<TroopStackInfo>()))
+                .Where(troop =>
+                    troop != null &&
+                    troop.IsHero &&
+                    (troop.IsPlayerCharacter ||
+                     string.Equals(
+                         troop.HeroId,
+                         mainHero.StringId,
+                         StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+            if (matches.Count == 0)
+            {
+                diagnostics = "main-hero-entry-missing HeroId=" + mainHero.StringId;
+                return false;
+            }
+
+            var appliedEntries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (TroopStackInfo troop in matches)
+            {
+                ApplyCombatEquipmentSnapshot(
+                    troop,
+                    BuildCombatEquipmentVariantSnapshot(stealthEquipment, snapshot));
+                NormalizeMountedFlagFromCombatHorse(troop);
+                appliedEntries.Add(troop.EntryId ?? troop.HeroId ?? mainHero.StringId);
+            }
+
+            diagnostics =
+                "applied=" + appliedEntries.Count +
+                " HeroId=" + mainHero.StringId +
+                " Weapon0=" + (matches[0].CombatItem0Id ?? "empty") +
+                " Body=" + (matches[0].CombatBodyId ?? "empty") +
+                " Mounted=" + matches[0].IsMounted;
+            return appliedEntries.Count > 0;
         }
 
         private static void ApplyCombatEquipmentSnapshot(TroopStackInfo troop, CombatEquipmentVariantSnapshot equipment)

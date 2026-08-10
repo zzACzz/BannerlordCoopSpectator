@@ -20,6 +20,44 @@ namespace CoopSpectator.Infrastructure.Hideout
         public float PatrollingSpeed { get; set; } = -1f;
 
         public string LoopAction { get; set; } = string.Empty;
+
+        public string SpawnGroupTag { get; set; } = string.Empty;
+
+        public bool HasTorchTag { get; set; }
+    }
+
+    public sealed class CoopHideoutSceneFrameManifest
+    {
+        public float PositionX { get; set; }
+
+        public float PositionY { get; set; }
+
+        public float PositionZ { get; set; }
+
+        public float YawRadians { get; set; }
+    }
+
+    public sealed class CoopHideoutStealthAreaMarkerManifest
+    {
+        public string ReinforcementAllyGroupId { get; set; } = string.Empty;
+
+        public float AreaRadius { get; set; }
+
+        public CoopHideoutSceneFrameManifest MarkerFrame { get; set; }
+
+        public CoopHideoutSceneFrameManifest ReinforcementSpawnFrame { get; set; }
+
+        public CoopHideoutSceneFrameManifest WaitFrame { get; set; }
+
+        public bool Contains(float x, float y)
+        {
+            if (MarkerFrame == null || AreaRadius <= 0f)
+                return false;
+
+            float deltaX = x - MarkerFrame.PositionX;
+            float deltaY = y - MarkerFrame.PositionY;
+            return deltaX * deltaX + deltaY * deltaY <= AreaRadius * AreaRadius;
+        }
     }
 
     public sealed class CoopHideoutPatrolAreaManifest
@@ -34,11 +72,29 @@ namespace CoopSpectator.Infrastructure.Hideout
             Array.Empty<CoopHideoutPatrolPointManifest>();
     }
 
+    public sealed class CoopHideoutBossFightManifest
+    {
+        public CoopHideoutSceneFrameManifest Frame { get; set; }
+
+        public float InnerRadius { get; set; } = 2.5f;
+
+        public float OuterRadius { get; set; } = 6f;
+
+        public float WalkDistance { get; set; } = 3f;
+    }
+
     public sealed class CoopHideoutSceneManifest
     {
         private const string DynamicPatrolAreaEntityName = "dynamic_patrol_area";
         private const string PatrolPointEntityName = "patrol_point";
         private const string PatrolPointScriptName = "PatrolPoint";
+        private const string StealthAreaUsePointEntityName = "stealth_area_use_point";
+        private const string StealthAreaMarkerEntityName = "stealth_area_marker";
+        private const string StealthAreaMarkerScriptName = "StealthAreaMarker";
+        private const string ReinforcementSpawnPointTag = "reinforcement_ally_group_spawn_point_tag";
+        private const string ReinforcementWaitPointTag = "wait_point_tag";
+        private const string TorchTag = "torch";
+        private const string BossFightBehaviorScriptName = "HideoutBossFightBehavior";
 
         public string SceneName { get; set; }
 
@@ -47,10 +103,31 @@ namespace CoopSpectator.Infrastructure.Hideout
         public IReadOnlyList<CoopHideoutPatrolAreaManifest> PatrolAreas { get; set; } =
             Array.Empty<CoopHideoutPatrolAreaManifest>();
 
+        public CoopHideoutSceneFrameManifest StealthAreaUsePointFrame { get; set; }
+
+        public IReadOnlyList<CoopHideoutStealthAreaMarkerManifest> StealthAreaMarkers { get; set; } =
+            Array.Empty<CoopHideoutStealthAreaMarkerManifest>();
+
+        public CoopHideoutSceneFrameManifest CallTroopsCameraFrame { get; set; }
+
+        public CoopHideoutSceneFrameManifest CallTroopsArrowBarrelFrame { get; set; }
+
+        public CoopHideoutSceneFrameManifest CallTroopsArrowPathFrame { get; set; }
+
+        public CoopHideoutBossFightManifest BossFight { get; set; }
+
         public int PatrolPointCount => PatrolAreas.Sum(area => area?.PatrolPoints?.Count ?? 0);
 
         public int IdleActionCount => PatrolAreas.Sum(area =>
             area?.PatrolPoints?.Count(point => !string.IsNullOrWhiteSpace(point?.LoopAction)) ?? 0);
+
+        public bool HasNightAmbushContract =>
+            StealthAreaUsePointFrame != null &&
+            StealthAreaMarkers.Count > 0 &&
+            StealthAreaMarkers.All(marker =>
+                marker?.MarkerFrame != null &&
+                marker.ReinforcementSpawnFrame != null &&
+                marker.WaitFrame != null);
 
         public static bool TryLoad(
             string path,
@@ -173,7 +250,9 @@ namespace CoopSpectator.Infrastructure.Hideout
                         WaitDeviationSeconds = Math.Max(0, ReadInt(variablesNode, "WaitDeviation", 0)),
                         IsInfiniteWaitPoint = ReadBool(variablesNode, "IsInfiniteWaitPoint", false),
                         PatrollingSpeed = ReadFloat(variablesNode, "PatrollingSpeed", -1f),
-                        LoopAction = ReadString(variablesNode, "LoopAction")
+                        LoopAction = ReadString(variablesNode, "LoopAction"),
+                        SpawnGroupTag = ReadString(variablesNode, "SpawnGroupTag"),
+                        HasTorchTag = HasTagInAncestorChain(pointNode, TorchTag)
                     };
                     patrolPoints.Add(point);
                     fallbackIndex++;
@@ -196,17 +275,263 @@ namespace CoopSpectator.Infrastructure.Hideout
                 return false;
             }
 
+            CoopHideoutSceneFrameManifest usePointFrame = null;
+            var stealthAreaMarkers = new List<CoopHideoutStealthAreaMarkerManifest>();
+            XmlNode usePointNode = document.SelectSingleNode(
+                "//game_entity[@name='" + StealthAreaUsePointEntityName + "']");
+            if (TryParseLocalFrame(usePointNode, out usePointFrame))
+            {
+                XmlNodeList markerNodes = usePointNode.SelectNodes(
+                    ".//game_entity[@name='" + StealthAreaMarkerEntityName + "']");
+                foreach (XmlNode markerNode in markerNodes ?? EmptyNodeList.Instance)
+                {
+                    if (!TryParseLocalFrame(markerNode, out CoopHideoutSceneFrameManifest markerLocalFrame))
+                        continue;
+
+                    CoopHideoutSceneFrameManifest markerFrame = ComposeFrame(
+                        usePointFrame,
+                        markerLocalFrame);
+                    XmlNode markerVariables = markerNode.SelectSingleNode(
+                        "./scripts/script[@name='" + StealthAreaMarkerScriptName + "']/variables");
+                    XmlNode reinforcementNode = markerNode.SelectSingleNode(
+                        ".//game_entity[tags/tag[@name='" + ReinforcementSpawnPointTag + "']] | " +
+                        ".//game_entity[@name='" + ReinforcementSpawnPointTag + "']");
+                    XmlNode waitNode = markerNode.SelectSingleNode(
+                        ".//game_entity[tags/tag[@name='" + ReinforcementWaitPointTag + "']] | " +
+                        ".//game_entity[@name='" + ReinforcementWaitPointTag + "']");
+                    TryParseLocalFrame(
+                        reinforcementNode,
+                        out CoopHideoutSceneFrameManifest reinforcementLocalFrame);
+                    TryParseLocalFrame(waitNode, out CoopHideoutSceneFrameManifest waitLocalFrame);
+
+                    stealthAreaMarkers.Add(new CoopHideoutStealthAreaMarkerManifest
+                    {
+                        ReinforcementAllyGroupId = ReadString(
+                            markerVariables,
+                            "ReinforcementAllyGroupId"),
+                        AreaRadius = Math.Max(0f, ReadFloat(markerVariables, "AreaRadius", 0f)),
+                        MarkerFrame = markerFrame,
+                        ReinforcementSpawnFrame = reinforcementLocalFrame == null
+                            ? null
+                            : ComposeFrame(markerFrame, reinforcementLocalFrame),
+                        WaitFrame = waitLocalFrame == null
+                            ? null
+                            : ComposeFrame(markerFrame, waitLocalFrame)
+                    });
+                }
+            }
+
+            TryParseTaggedGlobalFrame(
+                document,
+                CoopHideoutAmbushContract.CallTroopsCameraTag,
+                out CoopHideoutSceneFrameManifest callTroopsCameraFrame);
+            TryParseTaggedGlobalFrame(
+                document,
+                CoopHideoutAmbushContract.CallTroopsArrowBarrelTag,
+                out CoopHideoutSceneFrameManifest callTroopsArrowBarrelFrame);
+            TryParseTaggedGlobalFrame(
+                document,
+                CoopHideoutAmbushContract.CallTroopsArrowPathTag,
+                out CoopHideoutSceneFrameManifest callTroopsArrowPathFrame);
+
+            CoopHideoutBossFightManifest bossFight = null;
+            XmlNode bossFightNode = document.SelectSingleNode(
+                "//game_entity[@prefab='" + CoopHideoutBossPhaseContract.BossFightEntityTag + "'] | " +
+                "//game_entity[@name='" + CoopHideoutBossPhaseContract.BossFightEntityTag + "'] | " +
+                "//game_entity[tags/tag[@name='" + CoopHideoutBossPhaseContract.BossFightEntityTag + "']]");
+            if (TryParseGlobalFrame(
+                    bossFightNode,
+                    out CoopHideoutSceneFrameManifest bossFightFrame))
+            {
+                XmlNode bossFightVariables = bossFightNode.SelectSingleNode(
+                    "./scripts/script[@name='" + BossFightBehaviorScriptName + "']/variables");
+                bossFight = new CoopHideoutBossFightManifest
+                {
+                    Frame = bossFightFrame,
+                    InnerRadius = Math.Max(
+                        0.1f,
+                        ReadFloat(bossFightVariables, "InnerRadius", 2.5f)),
+                    OuterRadius = Math.Max(
+                        0.1f,
+                        ReadFloat(bossFightVariables, "OuterRadius", 6f)),
+                    WalkDistance = Math.Max(
+                        0f,
+                        ReadFloat(bossFightVariables, "WalkDistance", 3f))
+                };
+            }
+
             manifest = new CoopHideoutSceneManifest
             {
                 SceneName = (sceneName ?? string.Empty).Trim(),
                 SourcePath = sourcePath,
-                PatrolAreas = patrolAreas.ToArray()
+                PatrolAreas = patrolAreas.ToArray(),
+                StealthAreaUsePointFrame = usePointFrame,
+                StealthAreaMarkers = stealthAreaMarkers.ToArray(),
+                CallTroopsCameraFrame = callTroopsCameraFrame,
+                CallTroopsArrowBarrelFrame = callTroopsArrowBarrelFrame,
+                CallTroopsArrowPathFrame = callTroopsArrowPathFrame,
+                BossFight = bossFight
             };
             diagnostics =
                 "loaded areas=" + manifest.PatrolAreas.Count +
                 " points=" + manifest.PatrolPointCount +
-                " idleActions=" + manifest.IdleActionCount;
+                " idleActions=" + manifest.IdleActionCount +
+                " torchPoints=" + manifest.PatrolAreas.Sum(area =>
+                    area?.PatrolPoints?.Count(point => point?.HasTorchTag == true) ?? 0) +
+                " stealthMarkers=" + manifest.StealthAreaMarkers.Count +
+                " cinematicResources=" +
+                (manifest.CallTroopsCameraFrame != null) + "/" +
+                (manifest.CallTroopsArrowBarrelFrame != null) + "/" +
+                (manifest.CallTroopsArrowPathFrame != null) +
+                " bossFight=" +
+                (manifest.BossFight != null
+                    ? manifest.BossFight.InnerRadius + "/" +
+                      manifest.BossFight.OuterRadius + "/" +
+                      manifest.BossFight.WalkDistance
+                    : "missing") +
+                " nightContract=" + manifest.HasNightAmbushContract;
             return true;
+        }
+
+        private static bool HasTag(XmlNode entityNode, string expectedTag)
+        {
+            if (entityNode == null || string.IsNullOrWhiteSpace(expectedTag))
+                return false;
+
+            XmlNodeList tags = entityNode.SelectNodes("./tags/tag");
+            foreach (XmlNode tag in tags ?? EmptyNodeList.Instance)
+            {
+                if (string.Equals(
+                        tag?.Attributes?["name"]?.Value,
+                        expectedTag,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool HasTagInAncestorChain(
+            XmlNode entityNode,
+            string expectedTag)
+        {
+            XmlNode current = entityNode;
+            while (current != null)
+            {
+                if (string.Equals(
+                        current.Name,
+                        "game_entity",
+                        StringComparison.OrdinalIgnoreCase) &&
+                    HasTag(current, expectedTag))
+                {
+                    return true;
+                }
+
+                current = current.ParentNode;
+            }
+
+            return false;
+        }
+
+        private static bool TryParseTaggedGlobalFrame(
+            XmlDocument document,
+            string tag,
+            out CoopHideoutSceneFrameManifest frame)
+        {
+            frame = null;
+            XmlNode entity = document?.SelectSingleNode(
+                "//game_entity[tags/tag[@name='" + tag + "']]");
+            if (entity == null)
+                return false;
+
+            return TryParseGlobalFrame(entity, out frame);
+        }
+
+        private static bool TryParseGlobalFrame(
+            XmlNode entity,
+            out CoopHideoutSceneFrameManifest frame)
+        {
+            frame = null;
+            if (entity == null)
+                return false;
+
+            var chain = new Stack<CoopHideoutSceneFrameManifest>();
+            XmlNode current = entity;
+            while (current != null)
+            {
+                if (string.Equals(current.Name, "game_entity", StringComparison.OrdinalIgnoreCase) &&
+                    TryParseLocalFrame(current, out CoopHideoutSceneFrameManifest localFrame))
+                {
+                    chain.Push(localFrame);
+                }
+                current = current.ParentNode;
+            }
+
+            while (chain.Count > 0)
+                frame = frame == null ? chain.Pop() : ComposeFrame(frame, chain.Pop());
+            return frame != null;
+        }
+
+        private static bool TryParseLocalFrame(
+            XmlNode entityNode,
+            out CoopHideoutSceneFrameManifest frame)
+        {
+            frame = null;
+            XmlNode transformNode = entityNode?.SelectSingleNode("./transform");
+            if (!TryParsePosition(
+                    transformNode?.Attributes?["position"]?.Value,
+                    out float x,
+                    out float y,
+                    out float z))
+            {
+                return false;
+            }
+
+            float yaw = 0f;
+            string[] rotationParts =
+                (transformNode?.Attributes?["rotation_euler"]?.Value ?? string.Empty)
+                .Split(',');
+            if (rotationParts.Length >= 3)
+            {
+                float.TryParse(
+                    rotationParts[2].Trim(),
+                    NumberStyles.Float,
+                    CultureInfo.InvariantCulture,
+                    out yaw);
+            }
+
+            frame = new CoopHideoutSceneFrameManifest
+            {
+                PositionX = x,
+                PositionY = y,
+                PositionZ = z,
+                YawRadians = yaw
+            };
+            return true;
+        }
+
+        private static CoopHideoutSceneFrameManifest ComposeFrame(
+            CoopHideoutSceneFrameManifest parent,
+            CoopHideoutSceneFrameManifest local)
+        {
+            if (parent == null)
+                return local;
+            if (local == null)
+                return null;
+
+            double cosine = Math.Cos(parent.YawRadians);
+            double sine = Math.Sin(parent.YawRadians);
+            return new CoopHideoutSceneFrameManifest
+            {
+                PositionX = parent.PositionX +
+                            (float)(local.PositionX * cosine - local.PositionY * sine),
+                PositionY = parent.PositionY +
+                            (float)(local.PositionX * sine + local.PositionY * cosine),
+                PositionZ = parent.PositionZ + local.PositionZ,
+                YawRadians = parent.YawRadians + local.YawRadians
+            };
         }
 
         private static bool TryParsePosition(

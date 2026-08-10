@@ -54,6 +54,7 @@
     <Compile Include="..\GameMode\MissionMultiplayerCoopHeroCreator.cs" Link="GameMode\MissionMultiplayerCoopHeroCreator.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopHeroCreatorClient.cs" Link="GameMode\MissionMultiplayerCoopHeroCreatorClient.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopHideoutDayMode.cs" Link="GameMode\MissionMultiplayerCoopHideoutDayMode.cs" />
+    <Compile Include="..\GameMode\MissionMultiplayerCoopHideoutNightMode.cs" Link="GameMode\MissionMultiplayerCoopHideoutNightMode.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerTdmCloneMode.cs" Link="GameMode\MissionMultiplayerTdmCloneMode.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerTdmClone.cs" Link="GameMode\MissionMultiplayerTdmClone.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerTdmCloneClient.cs" Link="GameMode\MissionMultiplayerTdmCloneClient.cs" />
@@ -64,6 +65,7 @@
     <Compile Include="..\Mission\CoopMissionBehaviors.cs" Link="Mission\CoopMissionBehaviors.cs" />
     <Compile Include="..\Mission\CoopExactCampaignLordsHallMissionController.cs" Link="Mission\CoopExactCampaignLordsHallMissionController.cs" />
     <Compile Include="..\Mission\CoopExactCampaignHideoutMissionController.cs" Link="Mission\CoopExactCampaignHideoutMissionController.cs" />
+    <Compile Include="..\Mission\CoopExactCampaignHideoutAmbushMissionController.cs" Link="Mission\CoopExactCampaignHideoutAmbushMissionController.cs" />
     <Compile Include="..\Mission\CoopHideoutSceneManifestRuntime.cs" Link="Mission\CoopHideoutSceneManifestRuntime.cs" />
     <Compile Include="..\Mission\LordsHall\LordsHallMissionRuntime.cs" Link="Mission\LordsHall\LordsHallMissionRuntime.cs" />
     <Compile Include="..\Mission\CoopExactCampaignReliefMissionController.cs" Link="Mission\CoopExactCampaignReliefMissionController.cs" />
@@ -71,6 +73,7 @@
     <Compile Include="..\Mission\CoopMissionNetworkBridge.cs" Link="Mission\CoopMissionNetworkBridge.cs" />
     <Compile Include="..\Mission\CoopHeroCreationMissionNetwork.cs" Link="Mission\CoopHeroCreationMissionNetwork.cs" />
     <Compile Include="..\Mission\CoopHideoutBossPhaseController.cs" Link="Mission\CoopHideoutBossPhaseController.cs" />
+    <Compile Include="..\Mission\CoopHideoutAmbushNetworkController.cs" Link="Mission\CoopHideoutAmbushNetworkController.cs" />
     <Compile Include="..\Mission\CoopSiegeAssaultFormationOrderRuntime.cs" Link="Mission\CoopSiegeAssaultFormationOrderRuntime.cs" />
     <Compile Include="..\MissionModels\CoopCampaignDerivedAgentStatCalculateModel.cs" Link="MissionModels\CoopCampaignDerivedAgentStatCalculateModel.cs" />
     <Compile Include="..\MissionModels\CoopCampaignDerivedStrikeMagnitudeCalculationModel.cs" Link="MissionModels\CoopCampaignDerivedStrikeMagnitudeCalculationModel.cs" />
@@ -86,6 +89,7 @@
     <Compile Include="..\Network\Messages\CoopBattleSelectionNetworkMessages.cs" Link="Network\Messages\CoopBattleSelectionNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopHeroCreationNetworkMessages.cs" Link="Network\Messages\CoopHeroCreationNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopHideoutBossPhaseNetworkMessages.cs" Link="Network\Messages\CoopHideoutBossPhaseNetworkMessages.cs" />
+    <Compile Include="..\Network\Messages\CoopHideoutAmbushNetworkMessages.cs" Link="Network\Messages\CoopHideoutAmbushNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopBattleAgentControlNetworkMessages.cs" Link="Network\Messages\CoopBattleAgentControlNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopSiegeAmbushOrderNetworkMessages.cs" Link="Network\Messages\CoopSiegeAmbushOrderNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopSiegeAssaultOrderNetworkMessages.cs" Link="Network\Messages\CoopSiegeAssaultOrderNetworkMessages.cs" />
@@ -154,6 +158,7 @@
     <Compile Include="..\Infrastructure\AtomicBridgeFileIO.cs" Link="Infrastructure\AtomicBridgeFileIO.cs" />
     <Compile Include="..\Infrastructure\CoopHeroCreationContract.cs" Link="Infrastructure\CoopHeroCreationContract.cs" />
     <Compile Include="..\Infrastructure\Hideout\CoopHideoutBossPhaseContract.cs" Link="Infrastructure\Hideout\CoopHideoutBossPhaseContract.cs" />
+    <Compile Include="..\Infrastructure\Hideout\CoopHideoutAmbushContract.cs" Link="Infrastructure\Hideout\CoopHideoutAmbushContract.cs" />
     <Compile Include="..\Infrastructure\Hideout\CoopHideoutSceneManifest.cs" Link="Infrastructure\Hideout\CoopHideoutSceneManifest.cs" />
     <Compile Include="..\Infrastructure\CoopHeroCreationChunkCodec.cs" Link="Infrastructure\CoopHeroCreationChunkCodec.cs" />
     <Compile Include="..\Infrastructure\CoopHeroCreationStateMachine.cs" Link="Infrastructure\CoopHeroCreationStateMachine.cs" />
@@ -190,6 +195,7 @@
     <Compile Include="..\Patches\ExactCampaignNetworkObjectBootstrapPatch.cs" Link="Patches\ExactCampaignNetworkObjectBootstrapPatch.cs" />
     <Compile Include="..\Patches\BattleMapSpawnHandoffPatch.cs" Link="Patches\BattleMapSpawnHandoffPatch.cs" />
     <Compile Include="..\Patches\CoopBotsControlledCountPatch.cs" Link="Patches\CoopBotsControlledCountPatch.cs" />
+    <Compile Include="..\Patches\CoopMissionLobbySpawnPeriodGuardPatch.cs" Link="Patches\CoopMissionLobbySpawnPeriodGuardPatch.cs" />
     <Compile Include="..\Patches\MissionItemUsageSetFlagsGuardPatch.cs" Link="Patches\MissionItemUsageSetFlagsGuardPatch.cs" />
     <Compile Include="..\Patches\CoopNetworkSafeAgentBlowPatch.cs" Link="Patches\CoopNetworkSafeAgentBlowPatch.cs" />
     <Compile Include="..\Patches\CommanderDeploymentMissionNetworkComponentPatch.cs" Link="Patches\CommanderDeploymentMissionNetworkComponentPatch.cs" />
@@ -199,6 +205,7 @@
     <Compile Include="..\Patches\MultiplayerCharacterClassFallbackPatch.cs" Link="Patches\MultiplayerCharacterClassFallbackPatch.cs" />
     <Compile Include="..\Patches\ServerChangeCultureCanonicalizationPatch.cs" Link="Patches\ServerChangeCultureCanonicalizationPatch.cs" />
     <Compile Include="..\Patches\CampaignCombatProfileAgentStatsPatch.cs" Link="Patches\CampaignCombatProfileAgentStatsPatch.cs" />
+    <Compile Include="..\Patches\HideoutAmbushArrowBarrelPatch.cs" Link="Patches\HideoutAmbushArrowBarrelPatch.cs" />
     <Compile Include="..\Network\CoopPreMissionTopologyNetworkComponent.cs" Link="Network\CoopPreMissionTopologyNetworkComponent.cs" />
   </ItemGroup>
 

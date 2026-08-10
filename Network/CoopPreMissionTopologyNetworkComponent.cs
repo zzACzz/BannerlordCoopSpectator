@@ -219,6 +219,10 @@ namespace CoopSpectator.Network
                 string.Equals(
                     gameType,
                     CoopGameModeIds.CoopHideoutDay,
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    gameType,
+                    CoopGameModeIds.CoopHideoutNight,
                     StringComparison.OrdinalIgnoreCase);
             return isCoopBattleRuntime ||
                    SceneRuntimeClassifier.IsCampaignBattleScene(runtimeScene) ||

@@ -99,6 +99,7 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                 TryRegisterCoopBattleForClient();
                 TryRegisterCoopHeroCreatorForClient();
                 TryRegisterCoopHideoutDayForClient();
+                TryRegisterCoopHideoutNightForClient();
                 if (ExperimentalFeatures.EnableTdmCloneExperiment)
                     TryRegisterTdmCloneForClient(); // Ð ÐµÑ”ÑÑ‚Ñ€ÑƒÑ”Ð¼Ð¾ TdmClone Ð»Ð¸ÑˆÐµ ÐºÐ¾Ð»Ð¸ ÐµÐºÑÐ¿ÐµÑ€Ð¸Ð¼ÐµÐ½Ñ‚Ð°Ð»ÑŒÐ½Ð¸Ð¹ path ÑÐ²Ð½Ð¾ ÑƒÐ²Ñ–Ð¼ÐºÐ½ÐµÐ½Ð¾.
                 else
@@ -196,6 +197,21 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
             }
         }
 
+        private static void TryRegisterCoopHideoutNightForClient()
+        {
+            try
+            {
+                if (TaleWorlds.MountAndBlade.Module.CurrentModule == null) return;
+                TaleWorlds.MountAndBlade.Module.CurrentModule.AddMultiplayerGameMode(
+                    new MissionMultiplayerCoopHideoutNightMode(CoopGameModeIds.CoopHideoutNight));
+                ModLogger.Info("[CoopSpectator] CoopHideoutNight client registration success.");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("[CoopSpectator] CoopHideoutNight client registration fail: " + ex.Message);
+            }
+        }
+
         /// <summary>Ð ÐµÑ”ÑÑ‚Ñ€ÑƒÑ”Ð¼Ð¾ TdmClone Ð½Ð° ÐºÐ»Ñ–Ñ”Ð½Ñ‚Ñ–, Ñ‰Ð¾Ð± Ð¿Ñ€Ð¸ Join Ð´Ð¾ ÑÐµÑ€Ð²ÐµÑ€Ð° Ð· GameType TdmClone Ð³Ñ€Ð° Ð·Ð½Ð°Ð¹ÑˆÐ»Ð° Ð½Ð°Ñˆ Ñ€ÐµÐ¶Ð¸Ð¼ (multiplayer_strings.TdmClone Ð²Ð¶Ðµ Ñ”).</summary>
         private static void TryRegisterTdmCloneForClient()
         {
@@ -233,6 +249,8 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                 {
                     ModLogger.Info("Startup isolation: skipped harmony.PatchAll() attribute patch registration.");
                 }
+
+                HideoutAmbushArrowBarrelPatch.Apply(harmony);
 
                 if (EnableManualHarmonyApply)
                 {

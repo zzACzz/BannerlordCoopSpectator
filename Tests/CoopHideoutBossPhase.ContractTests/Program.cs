@@ -10,10 +10,14 @@ internal static class Program
             ValidateCampaignBridgePolicy();
             ValidateScenePolicy();
             ValidatePreOpenMissionContractPolicy();
+            ValidateNightAmbushContractPolicy();
+            ValidateNightUseAuthorityPolicy();
+            ValidateNightBossIdentityAndPlacementPolicy();
             ValidateNativeTimerStartupPolicy();
             ValidateCommanderIdentityFallbackPolicy();
             ValidateCommanderOrderInputPolicy();
             ValidateSceneManifestParsing();
+            ValidateNightSceneManifestParsing();
             ValidateTriggerPolicy();
             ValidateMaterializationPolicy();
             ValidatePhaseTransitions();
@@ -138,6 +142,165 @@ internal static class Program
             "A day assault without the selected-roster contract must remain blocked.");
     }
 
+        private static void ValidateNightAmbushContractPolicy()
+    {
+        Assert(
+            CoopHideoutAmbushContract.IsMatchingNightHideoutMissionContract(
+                "bandit_forest_sv",
+                "BANDIT_FOREST_SV",
+                CoopHideoutAmbushContract.ScenarioKind),
+            "A matching nighttime hideout scene and ambush scenario must be accepted.");
+        Assert(
+            !CoopHideoutAmbushContract.IsMatchingNightHideoutMissionContract(
+                "bandit_forest_sv",
+                "bandit_forest_sv",
+                CoopHideoutBossPhaseContract.ScenarioKind),
+            "The nighttime mode must reject the daytime hideout scenario.");
+        Assert(
+            CoopHideoutAmbushContract.CanEnterNightHideoutCampaignBridge(
+                hasDayController: false,
+                hasAmbushController: true,
+                hasSelectedRosterContract: true),
+            "A native nighttime ambush with a selected roster must enter its isolated bridge.");
+        Assert(
+            !CoopHideoutAmbushContract.CanEnterNightHideoutCampaignBridge(
+                hasDayController: true,
+                hasAmbushController: true,
+                hasSelectedRosterContract: true),
+            "A mixed day/night native controller stack must fail closed.");
+        Assert(
+            !CoopHideoutAmbushContract.CanEnterNightHideoutCampaignBridge(
+                hasDayController: false,
+                hasAmbushController: true,
+                hasSelectedRosterContract: false),
+            "A nighttime ambush without the current native roster fields must fail closed.");
+        Assert(
+            CoopHideoutAmbushContract.ShouldUseMissingSpawnComponentFallback(
+                isServer: true,
+                hasNightHideoutController: true,
+                hasSpawnComponent: false) &&
+            !CoopHideoutAmbushContract.ShouldUseMissingSpawnComponentFallback(
+                isServer: false,
+                hasNightHideoutController: true,
+                hasSpawnComponent: false) &&
+            !CoopHideoutAmbushContract.ShouldUseMissingSpawnComponentFallback(
+                isServer: true,
+                hasNightHideoutController: false,
+                hasSpawnComponent: false) &&
+            !CoopHideoutAmbushContract.ShouldUseMissingSpawnComponentFallback(
+                isServer: true,
+                hasNightHideoutController: true,
+                hasSpawnComponent: true),
+            "Only an isolated server-side night hideout without SpawnComponent may use the zero-period fallback.");
+        Assert(
+            !CoopHideoutAmbushContract.ShouldKeepAlarmFailureCounterRunning(0) &&
+            CoopHideoutAmbushContract.ShouldKeepAlarmFailureCounterRunning(1) &&
+            CoopHideoutAmbushContract.ShouldKeepAlarmFailureCounterRunning(2),
+            "The stealth failure counter must run only while at least one active alarmed defender remains.");
+
+        Assert(
+            CoopHideoutAmbushContract.ResolveBossBodyguardCount(29) == 14 &&
+            CoopHideoutAmbushContract.ResolveBossGroupCount(
+                29,
+                hasSeparateBossOrigin: true) == 15 &&
+            CoopHideoutAmbushContract.ResolveSyntheticInitialEnemyCount(
+                29,
+                liveInitialEnemyCount: 29,
+                hasSeparateBossOrigin: true) == 1,
+            "A twenty-nine-bandit ambush must create twenty-nine initial enemies and a separate boss plus fourteen bodyguards.");
+        Assert(
+            CoopHideoutAmbushContract.ResolveBossBodyguardCount(5) == 4 &&
+            CoopHideoutAmbushContract.ResolveBossGroupCount(
+                5,
+                hasSeparateBossOrigin: true) == 5 &&
+            CoopHideoutAmbushContract.ResolveSyntheticInitialEnemyCount(
+                5,
+                liveInitialEnemyCount: 26,
+                hasSeparateBossOrigin: true) == 22,
+            "A small ambush must synthesize authored initial enemies without consuming its separate boss origin.");
+        Assert(
+            CoopHideoutAmbushContract.IsValidNativeInitialEnemyContract(
+                initialHideoutPopulation: 29,
+                liveInitialEnemyCount: 29,
+                nativeSentryCount: 8) &&
+            !CoopHideoutAmbushContract.IsValidNativeInitialEnemyContract(
+                initialHideoutPopulation: 29,
+                liveInitialEnemyCount: 7,
+                nativeSentryCount: 8),
+            "The native sentry count must be treated as a subset of all live initial enemies.");
+        Assert(
+            CoopHideoutAmbushContract.IsValidNightFirstPhaseParticipantCount(
+                totalTroopCount: 5,
+                liveInitialEnemyCount: 26),
+            "A nighttime hideout must allow native-generated initial enemies beyond the persistent roster.");
+        Assert(
+            CoopHideoutAmbushContract.ResolveBossBodyguardCount(1) == 0 &&
+            CoopHideoutAmbushContract.ResolveBossGroupCount(
+                1,
+                hasSeparateBossOrigin: true) == 1,
+            "A one-bandit edge case must retain its separate boss without inventing bodyguard templates.");
+        Assert(
+            CoopHideoutAmbushContract.IsSentrySpawnGroup("stealth_agent") &&
+            CoopHideoutAmbushContract.IsSentrySpawnGroup("STEALTH_AGENT_FORCED") &&
+            !CoopHideoutAmbushContract.IsSentrySpawnGroup("bandit"),
+            "Only the two native stealth spawn-group tags may classify sentries.");
+        }
+
+        private static void ValidateNightUseAuthorityPolicy()
+        {
+            Assert(
+                CoopHideoutAmbushContract.ResolveOptionalSentryRouteCount(29, 11) == 3 &&
+                CoopHideoutAmbushContract.ResolveOptionalSentryRouteCount(7, 11) == 0 &&
+                CoopHideoutAmbushContract.ResolveOptionalSentryRouteCount(24, 2) == 2,
+                "Optional night routes must follow the native one-per-eight population rule and available-route cap.");
+            Assert(
+                CoopHideoutAmbushContract.CompressSuspicion(-1f) == 0 &&
+                CoopHideoutAmbushContract.CompressSuspicion(0.5f) == 500 &&
+                CoopHideoutAmbushContract.CompressSuspicion(2f) == 1000,
+                "Awareness compression must clamp the authoritative value to a stable permille contract.");
+
+            Assert(
+                CoopHideoutAmbushContract.TryValidateHostUseRequest(
+                    senderIsHost: true,
+                    CoopHideoutAmbushPhase.Stealth,
+                    requestRevision: 4,
+                    currentRevision: 4,
+                    out bool idempotent,
+                    out string rejection) &&
+                !idempotent,
+                "A current host request emitted after the engine accepted the authored use point must be allowed to call troops: " + rejection);
+            Assert(
+                !CoopHideoutAmbushContract.TryValidateHostUseRequest(
+                    senderIsHost: false,
+                    CoopHideoutAmbushPhase.Stealth,
+                    requestRevision: 4,
+                    currentRevision: 4,
+                    out _,
+                    out rejection) &&
+                rejection == "call-troops-sender-not-host",
+                "A non-host client must not trigger the campaign-authoritative transition.");
+            Assert(
+                !CoopHideoutAmbushContract.TryValidateHostUseRequest(
+                    senderIsHost: true,
+                    CoopHideoutAmbushPhase.Stealth,
+                    requestRevision: 3,
+                    currentRevision: 4,
+                    out _,
+                    out rejection) &&
+                rejection == "call-troops-revision-stale",
+                "A stale use command must fail closed.");
+            Assert(
+                CoopHideoutAmbushContract.TryValidateHostUseRequest(
+                    senderIsHost: true,
+                    CoopHideoutAmbushPhase.CallTroops,
+                    requestRevision: 3,
+                    currentRevision: 4,
+                    out idempotent,
+                    out rejection) &&
+                idempotent,
+                "A duplicated command after the committed transition must be accepted idempotently.");
+        }
+
     private static void ValidateNativeTimerStartupPolicy()
     {
         Assert(
@@ -165,6 +328,99 @@ internal static class Program
                 hasHideoutDayRuntimeMarker: true,
                 null),
             "A missing native battle shell source must remain suppressed.");
+    }
+
+    private static void ValidateNightBossIdentityAndPlacementPolicy()
+    {
+        int bossPriority = CoopHideoutAmbushContract.ResolveBossIdentityPriority(
+            "defender|forest_bandits_1051|forest_bandits_boss|mp_light_ranged_battania_troop");
+        int leaderPriority = CoopHideoutAmbushContract.ResolveBossIdentityPriority(
+            "forest_bandits_leader");
+        int chiefPriority = CoopHideoutAmbushContract.ResolveBossIdentityPriority(
+            "forest_bandits_chief");
+        Assert(
+            bossPriority > leaderPriority &&
+            leaderPriority > chiefPriority &&
+            chiefPriority > 0,
+            "A true boss identity must outrank leader and chief fallback identities.");
+        Assert(
+            CoopHideoutAmbushContract.ResolveBossIdentityPriority("bossman") == 0,
+            "Boss identity matching must require a complete identifier token.");
+
+        CoopHideoutBossPrincipalPlacement placement =
+            CoopHideoutBossPhaseContract.ResolvePrincipalPlacement(
+                innerRadius: 1.5f,
+                walkDistance: 3f);
+        Assert(
+            Math.Abs(placement.PlayerInitialForwardOffset - -4.5f) < 0.001f &&
+            Math.Abs(placement.PlayerTargetForwardOffset - -1.5f) < 0.001f &&
+            Math.Abs(placement.BossInitialForwardOffset - 4.5f) < 0.001f &&
+            Math.Abs(placement.BossTargetForwardOffset - 1.5f) < 0.001f,
+            "Player and boss approach frames must begin on opposite outer sides and end at the inner radius.");
+
+        Assert(
+            CoopHideoutBossPhaseContract.ResolveNativeCompanionSpineTroopCount(27) == 5,
+            "The native triangular layout must allocate five spine rows for 27 companions.");
+        CoopHideoutBossCompanionPlacement playerCenter =
+            CoopHideoutBossPhaseContract.ResolveNativeCompanionPlacement(
+                isPlayerSide: true,
+                totalTroopCount: 27,
+                zeroBasedIndex: 0);
+        CoopHideoutBossCompanionPlacement playerLeft =
+            CoopHideoutBossPhaseContract.ResolveNativeCompanionPlacement(
+                isPlayerSide: true,
+                totalTroopCount: 27,
+                zeroBasedIndex: 1);
+        CoopHideoutBossCompanionPlacement playerRight =
+            CoopHideoutBossPhaseContract.ResolveNativeCompanionPlacement(
+                isPlayerSide: true,
+                totalTroopCount: 27,
+                zeroBasedIndex: 2);
+        Assert(
+            playerCenter != null &&
+            Math.Abs(playerCenter.InitialOffsetX) < 0.001f &&
+            Math.Abs(playerCenter.InitialOffsetY - -1.3f) < 0.001f &&
+            Math.Abs(playerCenter.TargetOffsetY - -1.8f) < 0.001f &&
+            playerLeft != null &&
+            Math.Abs(playerLeft.InitialOffsetX - -1f) < 0.001f &&
+            playerRight != null &&
+            Math.Abs(playerRight.InitialOffsetX - 1f) < 0.001f,
+            "The first native player row must contain its center, left, and right slots with the authored half-meter target shift.");
+
+        for (int i = 0; i < 27; i++)
+        {
+            CoopHideoutBossCompanionPlacement playerRow =
+                CoopHideoutBossPhaseContract.ResolveNativeCompanionPlacement(
+                    isPlayerSide: true,
+                    totalTroopCount: 27,
+                    zeroBasedIndex: i);
+            CoopHideoutBossCompanionPlacement bossRow =
+                CoopHideoutBossPhaseContract.ResolveNativeCompanionPlacement(
+                    isPlayerSide: false,
+                    totalTroopCount: 27,
+                    zeroBasedIndex: i);
+            Assert(
+                playerRow != null &&
+                bossRow != null &&
+                playerRow.InitialOffsetY < 0f &&
+                playerRow.TargetOffsetY < 0f &&
+                bossRow.InitialOffsetY > 0f &&
+                bossRow.TargetOffsetY > 0f,
+                "Every generated night slot must remain on its own side of the encounter center.");
+        }
+
+        Assert(
+            !CoopHideoutAmbushContract.ShouldReleaseUsePointRequestPending(
+                CoopHideoutAmbushPhase.Stealth,
+                "global-alarm-changed") &&
+            CoopHideoutAmbushContract.ShouldReleaseUsePointRequestPending(
+                CoopHideoutAmbushPhase.CallTroops,
+                "phase:CallTroops") &&
+            CoopHideoutAmbushContract.ShouldReleaseUsePointRequestPending(
+                CoopHideoutAmbushPhase.Stealth,
+                CoopHideoutAmbushContract.CallTroopsRequestResponseReasonPrefix +
+                "call-troops-revision-stale"),
+            "A pending use request must survive unrelated updates but clear on acceptance or an explicit response.");
     }
 
     private static void ValidateCommanderIdentityFallbackPolicy()
@@ -306,6 +562,111 @@ internal static class Program
                 out diagnostics) &&
             diagnostics == "scene-manifest-dynamic-patrol-areas-missing",
             "A scene without dynamic patrol areas must fail closed.");
+    }
+
+    private static void ValidateNightSceneManifestParsing()
+    {
+        const string xml = @"
+<scene>
+  <entities>
+    <game_entity name=""dynamic_patrol_area"">
+      <transform position=""1, 2, 3"" />
+      <children><game_entity name=""torch_group"">
+        <tags><tag name=""Torch"" /></tags>
+        <children><game_entity name=""route_wrapper""><children>
+          <game_entity name=""night_spawn_wrapper""><children>
+            <game_entity name=""patrol_point""><scripts>
+              <script name=""PatrolPoint""><variables>
+                <variable name=""Index"" value=""0"" />
+                <variable name=""SpawnGroupTag"" value=""stealth_agent_forced"" />
+              </variables></script>
+            </scripts></game_entity>
+          </children></game_entity>
+        </children></game_entity></children>
+      </game_entity></children>
+    </game_entity>
+    <game_entity name=""stealth_area_use_point"">
+      <transform position=""10, 20, 2"" rotation_euler=""0, 0, 1.57079632679"" />
+      <children>
+        <game_entity name=""stealth_area_marker"">
+          <transform position=""2, 0, 1"" rotation_euler=""0, 0, 0"" />
+          <scripts><script name=""StealthAreaMarker""><variables>
+            <variable name=""ReinforcementAllyGroupId"" value=""allies_a"" />
+            <variable name=""AreaRadius"" value=""6"" />
+          </variables></script></scripts>
+          <children>
+            <game_entity name=""reinforcement"">
+              <transform position=""1, 0, 0"" />
+              <tags><tag name=""reinforcement_ally_group_spawn_point_tag"" /></tags>
+            </game_entity>
+            <game_entity name=""wait"">
+              <transform position=""0, 1, 0"" />
+              <tags><tag name=""wait_point_tag"" /></tags>
+            </game_entity>
+          </children>
+        </game_entity>
+      </children>
+    </game_entity>
+    <game_entity name=""call_camera""><transform position=""30, 40, 5"" /><tags><tag name=""hideout_ambush_cutscene_camera"" /></tags></game_entity>
+    <game_entity name=""call_barrel""><transform position=""31, 41, 5"" /><tags><tag name=""hideout_ambush_cutscene_arrow_barrel"" /></tags></game_entity>
+    <game_entity name=""call_arrow""><transform position=""32, 42, 5"" /><tags><tag name=""hideout_ambush_cutscene_arrow_path"" /></tags></game_entity>
+    <game_entity prefab=""hideout_boss_fight"">
+      <transform position=""50, 60, 7"" rotation_euler=""0, 0, 0.75"" />
+      <scripts><script name=""HideoutBossFightBehavior""><variables>
+        <variable name=""InnerRadius"" value=""1.5"" />
+        <variable name=""OuterRadius"" value=""6.5"" />
+        <variable name=""WalkDistance"" value=""3.25"" />
+      </variables></script></scripts>
+    </game_entity>
+  </entities>
+</scene>";
+
+        Assert(
+            CoopHideoutSceneManifest.TryParse(
+                xml,
+                "bandit_forest_sv",
+                out CoopHideoutSceneManifest manifest,
+                out string diagnostics),
+            "A nighttime hideout scene manifest must parse: " + diagnostics);
+        Assert(manifest.HasNightAmbushContract,
+            "A use point, marker, reinforcement frame, and wait frame must form a complete nighttime contract.");
+        Assert(
+            manifest.PatrolAreas[0].PatrolPoints[0].SpawnGroupTag ==
+            CoopHideoutAmbushContract.ForcedSentrySpawnGroupTag,
+            "The native sentry spawn-group tag must survive scene parsing.");
+        Assert(
+            manifest.PatrolAreas[0].PatrolPoints[0].HasTorchTag,
+            "The authored Torch wrapper tag must be projected onto the patrol point.");
+        Assert(
+            manifest.CallTroopsCameraFrame != null &&
+            manifest.CallTroopsArrowBarrelFrame != null &&
+            manifest.CallTroopsArrowPathFrame != null,
+            "All three authored call-troops cinematic resources must survive scene parsing.");
+        Assert(
+            manifest.BossFight?.Frame != null &&
+            Math.Abs(manifest.BossFight.Frame.PositionX - 50f) < 0.001f &&
+            Math.Abs(manifest.BossFight.Frame.YawRadians - 0.75f) < 0.001f &&
+            Math.Abs(manifest.BossFight.InnerRadius - 1.5f) < 0.001f &&
+            Math.Abs(manifest.BossFight.OuterRadius - 6.5f) < 0.001f &&
+            Math.Abs(manifest.BossFight.WalkDistance - 3.25f) < 0.001f,
+            "The authored boss-fight frame and approach dimensions must survive scene parsing.");
+
+        CoopHideoutStealthAreaMarkerManifest marker = manifest.StealthAreaMarkers[0];
+        Assert(
+            Math.Abs(marker.MarkerFrame.PositionX - 10f) < 0.001f &&
+            Math.Abs(marker.MarkerFrame.PositionY - 22f) < 0.001f &&
+            Math.Abs(marker.MarkerFrame.PositionZ - 3f) < 0.001f,
+            "The nested marker frame must be composed into global scene coordinates.");
+        Assert(
+            Math.Abs(marker.ReinforcementSpawnFrame.PositionX - 10f) < 0.001f &&
+            Math.Abs(marker.ReinforcementSpawnFrame.PositionY - 23f) < 0.001f,
+            "The reinforcement frame must inherit both parent transforms.");
+        Assert(
+            Math.Abs(marker.WaitFrame.PositionX - 9f) < 0.001f &&
+            Math.Abs(marker.WaitFrame.PositionY - 22f) < 0.001f,
+            "The wait frame must inherit the marker's global yaw.");
+        Assert(marker.Contains(10f, 22f) && !marker.Contains(30f, 22f),
+            "The marker radius must classify positions in global coordinates.");
     }
 
     private static void ValidateTriggerPolicy()

@@ -419,6 +419,7 @@ namespace CoopSpectator
                     TryApplyExactCampaignPreSpawnLoadoutPatch();
                     TryApplyExactCampaignNetworkObjectBootstrapPatch();
                     TryApplyBattleMapSpawnHandoffPatch();
+                    TryApplyHideoutAmbushInteractionPatch();
                     TryApplyMissionItemUsageSetFlagsGuardPatch();
                     TryApplyCoopNetworkSafeAgentBlowPatch();
                     TryApplyCommanderDeploymentMissionNetworkComponentPatch();
@@ -652,6 +653,20 @@ namespace CoopSpectator
             catch (Exception ex)
             {
                 ModLogger.Info("CoopSpectatorDedicated: BattleMapSpawnHandoff patch apply failed: " + ex.Message);
+            }
+        }
+
+        private static void TryApplyHideoutAmbushInteractionPatch()
+        {
+            try
+            {
+                if (_harmony == null)
+                    _harmony = new Harmony("com.coopspectator.dedicated");
+                HideoutAmbushArrowBarrelPatch.Apply(_harmony);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopSpectatorDedicated: hideout ambush interaction patch apply failed: " + ex.Message);
             }
         }
 
@@ -1058,6 +1073,9 @@ namespace CoopSpectator
                 ModLogger.Info("[GameModeReg] add CoopHideoutDay id=" + MissionMultiplayerCoopHideoutDayMode.GameModeId);
                 TaleWorlds.MountAndBlade.Module.CurrentModule.AddMultiplayerGameMode(
                     new MissionMultiplayerCoopHideoutDayMode(CoopGameModeIds.CoopHideoutDay));
+                ModLogger.Info("[GameModeReg] add CoopHideoutNight id=" + MissionMultiplayerCoopHideoutNightMode.GameModeId);
+                TaleWorlds.MountAndBlade.Module.CurrentModule.AddMultiplayerGameMode(
+                    new MissionMultiplayerCoopHideoutNightMode(CoopGameModeIds.CoopHideoutNight));
                 if (ExperimentalFeatures.EnableTdmCloneExperiment)
                 {
                     ModLogger.Info("[GameModeReg] add TdmClone id=" + MissionMultiplayerTdmCloneMode.GameModeId);

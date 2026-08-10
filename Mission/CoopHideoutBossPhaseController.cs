@@ -16,14 +16,17 @@ namespace CoopSpectator.MissionBehaviors
     {
         private const float InitialAssaultGraceSeconds = 4f;
         private const float ServerPumpIntervalSeconds = 0.1f;
-        private const float InnerRadius = 2.5f;
-        private const float OuterRadius = 6f;
-        private const float PlacementAngleStep = 0.15707964f;
+        private const float DefaultInnerRadius = 2.5f;
+        private const float DefaultOuterRadius = 6f;
+        private const float DefaultWalkDistance = 3f;
+        private const float NativeApproachSpeedLimit = 0.65f;
 
         private readonly HashSet<int> _requiredReadyPeerIndices = new HashSet<int>();
         private readonly HashSet<int> _readyPeerIndices = new HashSet<int>();
         private readonly Dictionary<int, FrozenAgentState> _frozenAgentStates =
             new Dictionary<int, FrozenAgentState>();
+        private readonly Dictionary<int, BossFightParticipantPlacement> _targetPlacements =
+            new Dictionary<int, BossFightParticipantPlacement>();
 
         private CoopHideoutBossPhaseSession _session;
         private Team _playerTeam;
@@ -36,6 +39,7 @@ namespace CoopSpectator.MissionBehaviors
         private int _initialEnemyCount;
         private bool _bossFightEntityMissingLogged;
         private bool _phaseCompletionLogged;
+        private bool _nightStagedPlacementActive;
 
         public static event Action<CoopHideoutBossPhaseSession, int> ClientStateChanged;
         public static CoopHideoutBossPhaseSession CurrentClientState { get; private set; }
@@ -332,6 +336,9 @@ namespace CoopSpectator.MissionBehaviors
 
             CoopExactCampaignHideoutMissionController hideoutController =
                 Mission.GetMissionBehavior<CoopExactCampaignHideoutMissionController>();
+            if (hideoutController != null && !hideoutController.IsBossPhaseEligible)
+                return;
+
             List<Agent> activeEnemies = GetActiveHumanAgents(enemyTeam);
             _initialEnemyCount = Math.Max(
                 _initialEnemyCount,
@@ -357,7 +364,34 @@ namespace CoopSpectator.MissionBehaviors
 
             int activeInitialAssaultEnemies = activeEnemies.Count;
             Agent bossAgent;
-            if (hideoutController?.HasReservedBossGroup == true)
+            CoopExactCampaignHideoutAmbushMissionController nightAmbushController =
+                hideoutController as CoopExactCampaignHideoutAmbushMissionController;
+            if (nightAmbushController?.HasNightReservedBossGroup == true)
+            {
+                if (!CoopHideoutBossPhaseContract.ShouldSpawnReservedBossGroup(
+                        _initialEnemyCount,
+                        activeInitialAssaultEnemies,
+                        hostAgent.IsActive(),
+                        bossFightEntity != null))
+                {
+                    return;
+                }
+
+                if (!nightAmbushController.TrySpawnNightReservedBossGroup(
+                        out bossAgent,
+                        out int spawnedBossGroupCount))
+                {
+                    return;
+                }
+
+                activeEnemies = GetActiveHumanAgents(enemyTeam);
+                ModLogger.Info(
+                    "CoopHideoutBossPhaseController: native-shaped night boss group entered the encounter. " +
+                    "InitialAssaultEnemiesActive=" + activeInitialAssaultEnemies +
+                    " SpawnedBossGroup=" + spawnedBossGroupCount +
+                    " EnemyAgentsAfterSpawn=" + activeEnemies.Count + ".");
+            }
+            else if (hideoutController?.HasReservedBossGroup == true)
             {
                 if (!CoopHideoutBossPhaseContract.ShouldSpawnReservedBossGroup(
                         _initialEnemyCount,
@@ -458,6 +492,8 @@ namespace CoopSpectator.MissionBehaviors
                 StartAllBattle("host-unavailable-before-choice");
                 return;
             }
+
+            FinalizeNightBossFightApproach();
 
             string rejection;
             if (!CoopHideoutBossPhaseContract.TryTransition(
@@ -578,6 +614,8 @@ namespace CoopSpectator.MissionBehaviors
         private void FreezeCombatantsForCinematic()
         {
             _frozenAgentStates.Clear();
+            _targetPlacements.Clear();
+            _nightStagedPlacementActive = false;
             foreach (Agent agent in Mission.Agents)
             {
                 if (agent?.IsActive() != true || !agent.IsHuman)
@@ -586,6 +624,7 @@ namespace CoopSpectator.MissionBehaviors
                 _frozenAgentStates[agent.Index] = new FrozenAgentState(
                     agent,
                     agent.Team,
+                    agent.Formation,
                     agent.CurrentMortalityState);
                 agent.SetMortalityState(Agent.MortalityState.Invulnerable);
                 ScriptAgentAtCurrentPosition(agent);
@@ -619,38 +658,105 @@ namespace CoopSpectator.MissionBehaviors
             playerFacingDirection.Normalize();
             Vec2 enemyFacingDirection = playerFacingDirection * -1f;
 
+            CoopExactCampaignHideoutAmbushMissionController nightController =
+                Mission.GetMissionBehavior<CoopExactCampaignHideoutAmbushMissionController>();
+            CoopHideoutBossFightManifest bossFightManifest =
+                nightController?.SceneManifest?.BossFight;
+            _nightStagedPlacementActive = nightController != null;
+            float innerRadius = bossFightManifest?.InnerRadius ?? DefaultInnerRadius;
+            float outerRadius = bossFightManifest?.OuterRadius ?? DefaultOuterRadius;
+            float walkDistance = bossFightManifest?.WalkDistance ?? DefaultWalkDistance;
+            CoopHideoutBossPrincipalPlacement principal =
+                CoopHideoutBossPhaseContract.ResolvePrincipalPlacement(
+                    innerRadius,
+                    _nightStagedPlacementActive ? walkDistance : 0f);
+
+            Vec3 playerPrincipalInitialPosition = BuildForwardOffsetPosition(
+                anchor,
+                principal.PlayerInitialForwardOffset);
+            Vec3 playerPrincipalTargetPosition = BuildForwardOffsetPosition(
+                anchor,
+                principal.PlayerTargetForwardOffset);
+            Vec3 bossPrincipalInitialPosition = BuildForwardOffsetPosition(
+                anchor,
+                principal.BossInitialForwardOffset);
+            Vec3 bossPrincipalTargetPosition = BuildForwardOffsetPosition(
+                anchor,
+                principal.BossTargetForwardOffset);
+
             var placements = new List<BossFightParticipantPlacement>
             {
                 CreateParticipantPlacement(
                     _hostAgent,
-                    BuildRadialPosition(anchor, (float)Math.PI, InnerRadius),
+                    playerPrincipalInitialPosition,
+                    playerPrincipalTargetPosition,
                     playerFacingDirection),
                 CreateParticipantPlacement(
                     _bossAgent,
-                    BuildRadialPosition(anchor, 0f, InnerRadius),
+                    bossPrincipalInitialPosition,
+                    bossPrincipalTargetPosition,
                     enemyFacingDirection)
             };
-            AppendAgentArcPlacements(
-                placements,
-                playerAgents.Where(agent => !ReferenceEquals(agent, _hostAgent)).ToList(),
-                anchor,
-                (float)Math.PI,
-                OuterRadius,
-                playerFacingDirection);
-            AppendAgentArcPlacements(
-                placements,
-                enemyAgents.Where(agent => !ReferenceEquals(agent, _bossAgent)).ToList(),
-                anchor,
-                0f,
-                OuterRadius,
-                enemyFacingDirection);
+            List<Agent> playerCompanions = playerAgents
+                .Where(agent => !ReferenceEquals(agent, _hostAgent))
+                .ToList();
+            List<Agent> bossCompanions = enemyAgents
+                .Where(agent => !ReferenceEquals(agent, _bossAgent))
+                .ToList();
+            if (_nightStagedPlacementActive)
+            {
+                AppendNativeNightCompanionPlacements(
+                    placements,
+                    playerCompanions,
+                    playerPrincipalInitialPosition,
+                    isPlayerSide: true,
+                    playerFacingDirection);
+                AppendNativeNightCompanionPlacements(
+                    placements,
+                    bossCompanions,
+                    bossPrincipalInitialPosition,
+                    isPlayerSide: false,
+                    enemyFacingDirection);
+            }
+            else
+            {
+                AppendAgentArcPlacements(
+                    placements,
+                    playerCompanions,
+                    anchor,
+                    (float)Math.PI,
+                    outerRadius,
+                    initialForwardOffset: 0f,
+                    playerFacingDirection);
+                AppendAgentArcPlacements(
+                    placements,
+                    bossCompanions,
+                    anchor,
+                    0f,
+                    outerRadius,
+                    initialForwardOffset: 0f,
+                    enemyFacingDirection);
+            }
 
             bool previousTeleportingAgents = Mission.IsTeleportingAgents;
             try
             {
                 Mission.IsTeleportingAgents = true;
                 foreach (BossFightParticipantPlacement placement in placements)
+                {
+                    _targetPlacements[placement.Agent.Index] = placement;
                     PlaceAgent(placement);
+                }
+                ModLogger.Info(
+                    "CoopHideoutBossPhaseController: placed boss-fight participants. " +
+                    "NightStaged=" + _nightStagedPlacementActive +
+                    " InnerRadius=" + innerRadius +
+                    " OuterRadius=" + outerRadius +
+                    " WalkDistance=" +
+                    (_nightStagedPlacementActive ? walkDistance : 0f) +
+                    " Layout=" +
+                    (_nightStagedPlacementActive ? "native-triangular-rows" : "day-radial-arc") +
+                    " Count=" + placements.Count + ".");
                 return true;
             }
             catch (Exception ex)
@@ -671,6 +777,7 @@ namespace CoopSpectator.MissionBehaviors
             MatrixFrame anchor,
             float baseAngle,
             float radius,
+            float initialForwardOffset,
             Vec2 facingDirection)
         {
             if (placements == null || agents == null)
@@ -678,24 +785,69 @@ namespace CoopSpectator.MissionBehaviors
 
             for (int i = 0; i < agents.Count; i++)
             {
-                int step = i / 2 + 1;
-                float sign = i % 2 == 0 ? 1f : -1f;
-                float angle = baseAngle + sign * step * PlacementAngleStep;
+                float angle = CoopHideoutBossPhaseContract.ResolveCompanionPlacementAngle(
+                    i,
+                    baseAngle,
+                    CoopHideoutBossPhaseContract.NativeCompanionPlacementAngleStep);
+                Vec3 targetPosition = BuildRadialPosition(anchor, angle, radius);
+                Vec3 initialPosition = AddForwardOffset(
+                    anchor,
+                    targetPosition,
+                    initialForwardOffset);
                 placements.Add(CreateParticipantPlacement(
                     agents[i],
-                    BuildRadialPosition(anchor, angle, radius),
+                    initialPosition,
+                    targetPosition,
+                    facingDirection));
+            }
+        }
+
+        private void AppendNativeNightCompanionPlacements(
+            List<BossFightParticipantPlacement> placements,
+            List<Agent> agents,
+            Vec3 principalInitialPosition,
+            bool isPlayerSide,
+            Vec2 facingDirection)
+        {
+            if (placements == null || agents == null)
+                return;
+
+            for (int i = 0; i < agents.Count; i++)
+            {
+                CoopHideoutBossCompanionPlacement companionPlacement =
+                    CoopHideoutBossPhaseContract.ResolveNativeCompanionPlacement(
+                        isPlayerSide,
+                        agents.Count,
+                        i);
+                if (companionPlacement == null)
+                    continue;
+
+                Vec3 initialPosition = principalInitialPosition + new Vec3(
+                    companionPlacement.InitialOffsetX,
+                    companionPlacement.InitialOffsetY,
+                    0f);
+                Vec3 targetPosition = principalInitialPosition + new Vec3(
+                    companionPlacement.TargetOffsetX,
+                    companionPlacement.TargetOffsetY,
+                    0f);
+                placements.Add(CreateParticipantPlacement(
+                    agents[i],
+                    initialPosition,
+                    targetPosition,
                     facingDirection));
             }
         }
 
         private BossFightParticipantPlacement CreateParticipantPlacement(
             Agent agent,
-            Vec3 position,
+            Vec3 initialPosition,
+            Vec3 targetPosition,
             Vec2 facingDirection)
         {
             return new BossFightParticipantPlacement(
                 agent,
-                ResolveGroundPosition(position),
+                ResolveGroundPosition(initialPosition),
+                ResolveGroundPosition(targetPosition),
                 facingDirection);
         }
 
@@ -705,7 +857,12 @@ namespace CoopSpectator.MissionBehaviors
             if (agent?.IsActive() != true)
                 return;
 
-            Vec3 groundPosition = placement.GroundPosition;
+            bool shouldApproach =
+                _nightStagedPlacementActive &&
+                agent.IsAIControlled;
+            Vec3 groundPosition = shouldApproach
+                ? placement.InitialGroundPosition
+                : placement.TargetGroundPosition;
             agent.MountAgent?.TeleportToPosition(groundPosition);
             agent.TeleportToPosition(groundPosition);
             Vec2 direction = placement.FacingDirection;
@@ -714,9 +871,30 @@ namespace CoopSpectator.MissionBehaviors
             direction.Normalize();
             agent.LookDirection = new Vec3(direction.x, direction.y, 0f);
             agent.SetMovementDirection(in direction);
-            var worldPosition = new WorldPosition(Mission.Scene, UIntPtr.Zero, groundPosition, hasValidZ: false);
-            if (agent.IsAIControlled)
+            if (shouldApproach)
             {
+                if (agent.Formation != null)
+                    agent.Formation = null;
+                agent.SetMaximumSpeedLimit(NativeApproachSpeedLimit, isMultiplier: false);
+                Vec3 targetGroundPosition = placement.TargetGroundPosition;
+                var targetWorldPosition = new WorldPosition(
+                    Mission.Scene,
+                    UIntPtr.Zero,
+                    targetGroundPosition,
+                    hasValidZ: false);
+                agent.SetScriptedPositionAndDirection(
+                    ref targetWorldPosition,
+                    direction.RotationInRadians,
+                    addHumanLikeDelay: false,
+                    additionalFlags: Agent.AIScriptedFrameFlags.DoNotRun);
+            }
+            else if (agent.IsAIControlled)
+            {
+                var worldPosition = new WorldPosition(
+                    Mission.Scene,
+                    UIntPtr.Zero,
+                    groundPosition,
+                    hasValidZ: false);
                 agent.SetScriptedPositionAndDirection(
                     ref worldPosition,
                     direction.RotationInRadians,
@@ -727,18 +905,41 @@ namespace CoopSpectator.MissionBehaviors
         private sealed class BossFightParticipantPlacement
         {
             internal Agent Agent { get; }
-            internal Vec3 GroundPosition { get; }
+            internal Vec3 InitialGroundPosition { get; }
+            internal Vec3 TargetGroundPosition { get; }
             internal Vec2 FacingDirection { get; }
 
             internal BossFightParticipantPlacement(
                 Agent agent,
-                Vec3 groundPosition,
+                Vec3 initialGroundPosition,
+                Vec3 targetGroundPosition,
                 Vec2 facingDirection)
             {
                 Agent = agent;
-                GroundPosition = groundPosition;
+                InitialGroundPosition = initialGroundPosition;
+                TargetGroundPosition = targetGroundPosition;
                 FacingDirection = facingDirection;
             }
+        }
+
+        private Vec3 BuildForwardOffsetPosition(MatrixFrame anchor, float forwardOffset)
+        {
+            return AddForwardOffset(anchor, anchor.origin, forwardOffset);
+        }
+
+        private static Vec3 AddForwardOffset(
+            MatrixFrame anchor,
+            Vec3 position,
+            float forwardOffset)
+        {
+            Vec2 forward = anchor.rotation.f.AsVec2;
+            if (forward.LengthSquared < 0.0001f)
+                forward = new Vec2(0f, 1f);
+            forward.Normalize();
+            return position + new Vec3(
+                forward.x * forwardOffset,
+                forward.y * forwardOffset,
+                0f);
         }
 
         private Vec3 BuildRadialPosition(MatrixFrame anchor, float angle, float radius)
@@ -760,6 +961,49 @@ namespace CoopSpectator.MissionBehaviors
             float height = Mission.Scene.GetTerrainHeight(point);
             Mission.Scene.GetHeightAtPoint(point, BodyFlags.None, ref height);
             return new Vec3(point, height);
+        }
+
+        private void FinalizeNightBossFightApproach()
+        {
+            if (!_nightStagedPlacementActive || _targetPlacements.Count == 0)
+                return;
+
+            bool previousTeleportingAgents = Mission.IsTeleportingAgents;
+            try
+            {
+                Mission.IsTeleportingAgents = true;
+                foreach (BossFightParticipantPlacement placement in
+                         _targetPlacements.Values)
+                {
+                    Agent agent = placement?.Agent;
+                    if (agent?.IsActive() != true)
+                        continue;
+
+                    Vec3 target = placement.TargetGroundPosition;
+                    agent.MountAgent?.TeleportToPosition(target);
+                    agent.TeleportToPosition(target);
+                    agent.SetMaximumSpeedLimit(-1f, isMultiplier: false);
+                    agent.DisableScriptedMovement();
+
+                    Vec2 direction = placement.FacingDirection;
+                    if (direction.LengthSquared < 0.0001f)
+                        direction = new Vec2(0f, 1f);
+                    direction.Normalize();
+                    agent.LookDirection = new Vec3(direction.x, direction.y, 0f);
+                    agent.SetMovementDirection(in direction);
+                    ScriptAgentAtCurrentPosition(agent);
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopHideoutBossPhaseController: final boss approach snap failed. Error=" +
+                    ex.Message + ".");
+            }
+            finally
+            {
+                Mission.IsTeleportingAgents = previousTeleportingAgents;
+            }
         }
 
         private void ScriptAgentAtCurrentPosition(Agent agent)
@@ -792,7 +1036,10 @@ namespace CoopSpectator.MissionBehaviors
 
             if (restoreTeam && frozen.OriginalTeam != null && agent.Team != frozen.OriginalTeam)
                 agent.SetTeam(frozen.OriginalTeam, sync: true);
+            if (!ReferenceEquals(agent.Formation, frozen.OriginalFormation))
+                agent.Formation = frozen.OriginalFormation;
             agent.SetMortalityState(frozen.OriginalMortalityState);
+            agent.SetMaximumSpeedLimit(-1f, isMultiplier: false);
             agent.DisableScriptedMovement();
             agent.SetLookAgent(null);
             agent.SetWatchState(Agent.WatchState.Alarmed);
@@ -1038,15 +1285,18 @@ namespace CoopSpectator.MissionBehaviors
             public FrozenAgentState(
                 Agent agent,
                 Team originalTeam,
+                Formation originalFormation,
                 Agent.MortalityState originalMortalityState)
             {
                 Agent = agent;
                 OriginalTeam = originalTeam;
+                OriginalFormation = originalFormation;
                 OriginalMortalityState = originalMortalityState;
             }
 
             public Agent Agent { get; }
             public Team OriginalTeam { get; }
+            public Formation OriginalFormation { get; }
             public Agent.MortalityState OriginalMortalityState { get; }
         }
     }

@@ -88,15 +88,28 @@ namespace CoopSpectator.Infrastructure
                     return true;
                 }
 
+                if (CoopHideoutAmbushContract.IsMatchingNightHideoutMissionContract(
+                        sceneName,
+                        snapshotScene,
+                        snapshot?.ScenarioContext?.ScenarioKind))
+                {
+                    return true;
+                }
+
                 if (CoopPreMissionTopologyRuntimeState.TryGetActive(
                         sceneName,
                         out CoopPreMissionTopologyContract topology,
                         out _))
                 {
-                    return CoopHideoutBossPhaseContract.IsMatchingDayHideoutMissionContract(
-                        sceneName,
-                        topology?.RuntimeScene,
-                        topology?.ScenarioContext?.ScenarioKind);
+                    return
+                        CoopHideoutBossPhaseContract.IsMatchingDayHideoutMissionContract(
+                            sceneName,
+                            topology?.RuntimeScene,
+                            topology?.ScenarioContext?.ScenarioKind) ||
+                        CoopHideoutAmbushContract.IsMatchingNightHideoutMissionContract(
+                            sceneName,
+                            topology?.RuntimeScene,
+                            topology?.ScenarioContext?.ScenarioKind);
                 }
             }
             catch

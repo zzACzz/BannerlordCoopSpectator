@@ -10,7 +10,12 @@
   <string id="str_multiplayer_game_type.CoopHeroCreator" text="{=*}Coop Hero Creator" />
   <string id="str_multiplayer_official_game_type_name.CoopHideoutDay" text="{=*}Coop Hideout Assault" />
   <string id="str_multiplayer_game_type.CoopHideoutDay" text="{=*}Coop Hideout Assault" />
+  <string id="str_multiplayer_official_game_type_name.CoopHideoutNight" text="{=*}Coop Hideout Ambush" />
+  <string id="str_multiplayer_game_type.CoopHideoutNight" text="{=*}Coop Hideout Ambush" />
   <string id="CoopDelegateControlToAi" text="{=*}Delegate control to AI" />
   <string id="CoopReturnControlHint" text="{=*}H — Return control" />
   <string id="CoopAttackSiegeEngines" text="{=*}Attack Siege Engines" />
+  <string id="str_call_troops" text="{=*}Call Troops {KEY}" />
+  <string id="str_coop_hideout_ambush_objective" text="{=*}Reach the signal point and call your troops" />
+  <string id="str_coop_hideout_call_troops_waiting" text="{=*}Calling troops. Waiting for the server..." />
 </strings>

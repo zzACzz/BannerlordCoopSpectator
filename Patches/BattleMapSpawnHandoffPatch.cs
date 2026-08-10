@@ -724,6 +724,7 @@ namespace CoopSpectator.Patches
         public static void Apply(Harmony harmony)
         {
             TryApplyPatchStep(nameof(CoopBotsControlledCountPatch), () => CoopBotsControlledCountPatch.Apply(harmony));
+            TryApplyPatchStep(nameof(CoopMissionLobbySpawnPeriodGuardPatch), () => CoopMissionLobbySpawnPeriodGuardPatch.Apply(harmony));
             TryApplyPatchStep(nameof(PatchBattleSnapshotRuntimeStateFiveModeWeaponUsageProtocol), () => PatchBattleSnapshotRuntimeStateFiveModeWeaponUsageProtocol(harmony));
             TryApplyPatchStep(nameof(PatchMissionPeerFollowedAgent), () => PatchMissionPeerFollowedAgent(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentCreateAgent), () => PatchMissionNetworkComponentCreateAgent(harmony));
