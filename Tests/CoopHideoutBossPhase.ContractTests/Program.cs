@@ -12,6 +12,7 @@ internal static class Program
             ValidatePreOpenMissionContractPolicy();
             ValidateNightAmbushContractPolicy();
             ValidateCallTroopsCinematicPolicy();
+            ValidateNightBossAgentChoreographyPolicy();
             ValidateNightUseAuthorityPolicy();
             ValidateNightBossIdentityAndPlacementPolicy();
             ValidateNativeTimerStartupPolicy();
@@ -476,6 +477,346 @@ internal static class Program
                 " ",
                 null),
             "A non-call-troops phase or missing battle identity must not start the cinematic.");
+    }
+
+    private static void ValidateNightBossAgentChoreographyPolicy()
+    {
+        int authoredArrivalMilliseconds =
+            CoopHideoutBossPhaseContract.ResolveNightApproachHoldMilliseconds(3f);
+        Assert(
+            authoredArrivalMilliseconds == 4616 &&
+            authoredArrivalMilliseconds <
+                CoopHideoutBossPhaseContract.NightCinematicDurationMilliseconds &&
+            CoopHideoutBossPhaseContract.ResolveNightApproachHoldMilliseconds(0f) == 0,
+            "Night agents must enter their synchronized hold when the authored three-meter approach completes at the native cinematic speed.");
+        Assert(
+            CoopHideoutBossPhaseContract.ShouldApplyAgentChoreographyMessage(
+                "battle-a",
+                "battle-a",
+                lastAppliedSequence: 1,
+                messageSequence: 2) &&
+            !CoopHideoutBossPhaseContract.ShouldApplyAgentChoreographyMessage(
+                "battle-a",
+                "battle-b",
+                lastAppliedSequence: 1,
+                messageSequence: 2) &&
+            !CoopHideoutBossPhaseContract.ShouldApplyAgentChoreographyMessage(
+                "battle-a",
+                "battle-a",
+                lastAppliedSequence: 2,
+                messageSequence: 2) &&
+            !CoopHideoutBossPhaseContract.ShouldApplyAgentChoreographyMessage(
+                "battle-a",
+                "battle-a",
+                lastAppliedSequence: 3,
+                messageSequence: 2),
+            "Client choreography must accept only a newer sequence for the active battle instance.");
+        Assert(
+            CoopHideoutBossPhaseContract.ShouldReleaseAgentForBossChoice(
+                CoopHideoutBossPhase.Duel,
+                isBossAgent: true) &&
+            !CoopHideoutBossPhaseContract.ShouldReleaseAgentForBossChoice(
+                CoopHideoutBossPhase.Duel,
+                isBossAgent: false) &&
+            CoopHideoutBossPhaseContract.ShouldReleaseAgentForBossChoice(
+                CoopHideoutBossPhase.AllBattle,
+                isBossAgent: false) &&
+            !CoopHideoutBossPhaseContract.ShouldReleaseAgentForBossChoice(
+                CoopHideoutBossPhase.AwaitingHostChoice,
+                isBossAgent: true),
+            "A duel may release only the boss while a full battle releases every staged AI participant.");
+
+        float authoredNightRadius = CoopHideoutBossPhaseContract.ResolveBossDialogueInnerRadius(
+            authoredInnerRadius: 1.5f,
+            isNightStagedPlacementActive: true);
+        CoopHideoutBossPrincipalPlacement authoredNightPlacement =
+            CoopHideoutBossPhaseContract.ResolvePrincipalPlacement(
+                authoredNightRadius,
+                walkDistance: 3f);
+        Assert(
+            Math.Abs(authoredNightRadius - 1.5f) < 0.001f &&
+            Math.Abs(authoredNightPlacement.PlayerInitialForwardOffset - -4.5f) < 0.001f &&
+            Math.Abs(authoredNightPlacement.PlayerTargetForwardOffset - -1.5f) < 0.001f &&
+            Math.Abs(authoredNightPlacement.BossInitialForwardOffset - 4.5f) < 0.001f,
+            "Night boss dialogue staging must preserve the authored radius, initial frames, and player placement.");
+        Assert(
+            CoopHideoutBossPhaseContract.ResolveCinematicDurationMilliseconds(
+                isNightStagedPlacementActive: true) == 6000 &&
+            CoopHideoutBossPhaseContract.ResolveCinematicDurationMilliseconds(
+                isNightStagedPlacementActive: false) == 8000,
+            "Only the night boss cinematic must use the shortened six-second duration.");
+        Assert(
+            Math.Abs(CoopHideoutBossPhaseContract.ResolveNightEnemyApproachDistance(3f) - 3f) < 0.001f &&
+            Math.Abs(CoopHideoutBossPhaseContract.ResolveNightEnemyApproachDistance(0.4f) - 0.4f) < 0.001f,
+            "The night boss approach must preserve the authored walk distance.");
+        CoopHideoutBossPlanarOffset rotatedEnemyApproach =
+            CoopHideoutBossPhaseContract.ResolveNightEnemyApproachOffset(
+                directionX: -3f,
+                directionY: 4f,
+                authoredWalkDistance: 3f);
+        CoopHideoutBossPlanarOffset forwardFallbackApproach =
+            CoopHideoutBossPhaseContract.ResolveNightEnemyApproachOffset(
+                directionX: 0f,
+                directionY: 0f,
+                authoredWalkDistance: 3f);
+        Assert(
+            Math.Abs(rotatedEnemyApproach.X - -1.8f) < 0.001f &&
+            Math.Abs(rotatedEnemyApproach.Y - 2.4f) < 0.001f &&
+            Math.Abs(
+                Math.Sqrt(
+                    rotatedEnemyApproach.X * rotatedEnemyApproach.X +
+                    rotatedEnemyApproach.Y * rotatedEnemyApproach.Y) - 3f) < 0.001f &&
+            Math.Abs(forwardFallbackApproach.X) < 0.001f &&
+            Math.Abs(forwardFallbackApproach.Y - 3f) < 0.001f,
+            "Every night boss target offset must follow its normalized facing direction for the full authored distance.");
+        Assert(
+            Math.Abs(CoopHideoutBossPhaseContract.ResolveBossDialogueInnerRadius(
+                authoredInnerRadius: -1f,
+                isNightStagedPlacementActive: true)) < 0.001f &&
+            Math.Abs(CoopHideoutBossPhaseContract.ResolveBossDialogueInnerRadius(
+                authoredInnerRadius: 1.5f,
+                isNightStagedPlacementActive: false) - 1.5f) < 0.001f,
+            "Boss dialogue placement must preserve non-negative authored radii without a night-only distance floor.");
+
+        CoopHideoutBossPrincipalPerturbation playerPerturbation =
+            CoopHideoutBossPhaseContract.ResolveNativePrincipalPerturbation(
+                seedOffset: 0,
+                perturbAmount:
+                    CoopHideoutBossPhaseContract.NativePrincipalPlacementPerturbation);
+        CoopHideoutBossPrincipalPerturbation repeatedPlayerPerturbation =
+            CoopHideoutBossPhaseContract.ResolveNativePrincipalPerturbation(
+                seedOffset: 0,
+                perturbAmount:
+                    CoopHideoutBossPhaseContract.NativePrincipalPlacementPerturbation);
+        CoopHideoutBossPrincipalPerturbation bossPerturbation =
+            CoopHideoutBossPhaseContract.ResolveNativePrincipalPerturbation(
+                seedOffset: 1,
+                perturbAmount:
+                    CoopHideoutBossPhaseContract.NativePrincipalPlacementPerturbation);
+        Assert(
+            Math.Abs(playerPerturbation.SideOffset - repeatedPlayerPerturbation.SideOffset) < 0.0001f &&
+            Math.Abs(playerPerturbation.ForwardOffset - repeatedPlayerPerturbation.ForwardOffset) < 0.0001f &&
+            Math.Abs(
+                playerPerturbation.SideOffset * playerPerturbation.SideOffset +
+                playerPerturbation.ForwardOffset * playerPerturbation.ForwardOffset -
+                0.0625f) < 0.0001f &&
+            Math.Abs(
+                bossPerturbation.SideOffset * bossPerturbation.SideOffset +
+                bossPerturbation.ForwardOffset * bossPerturbation.ForwardOffset -
+                0.0625f) < 0.0001f &&
+            (Math.Abs(playerPerturbation.SideOffset - bossPerturbation.SideOffset) > 0.0001f ||
+             Math.Abs(playerPerturbation.ForwardOffset - bossPerturbation.ForwardOffset) > 0.0001f),
+            "Campaign principal perturbation must be deterministic, use the native quarter-meter radius, and differ by seed offset.");
+        Assert(
+            CoopHideoutBossPhaseContract.ShouldStopFormationsForNightBossCinematic(
+                isNightStagedPlacementActive: true) &&
+            !CoopHideoutBossPhaseContract.ShouldStopFormationsForNightBossCinematic(
+                isNightStagedPlacementActive: false),
+            "Only a staged night boss cinematic may stop the existing formation movement orders.");
+        Assert(
+            CoopHideoutBossPhaseContract.ShouldLockFormationAiForNightBossCinematic(
+                isNightStagedPlacementActive: true) &&
+            !CoopHideoutBossPhaseContract.ShouldLockFormationAiForNightBossCinematic(
+                isNightStagedPlacementActive: false),
+            "Only staged night boss choreography may suspend formation AI while its stop order must remain authoritative.");
+        Assert(
+            CoopHideoutBossPhaseContract.ShouldRestoreFormationAiForBossPhase(
+                CoopHideoutBossPhase.AllBattle) &&
+            !CoopHideoutBossPhaseContract.ShouldRestoreFormationAiForBossPhase(
+                CoopHideoutBossPhase.AwaitingHostChoice) &&
+            !CoopHideoutBossPhaseContract.ShouldRestoreFormationAiForBossPhase(
+                CoopHideoutBossPhase.Duel),
+            "Formation AI control must return for the all-battle branch but remain suspended during the conversation and duel isolation.");
+        Assert(
+            CoopHideoutBossPhaseContract.ShouldDetachAgentForNightBossCinematic(
+                isNightStagedPlacementActive: true,
+                isAiControlled: true) &&
+            !CoopHideoutBossPhaseContract.ShouldDetachAgentForNightBossCinematic(
+                isNightStagedPlacementActive: true,
+                isAiControlled: false) &&
+            !CoopHideoutBossPhaseContract.ShouldDetachAgentForNightBossCinematic(
+                isNightStagedPlacementActive: false,
+                isAiControlled: true),
+            "Night choreography must detach AI participants without touching player-controlled or day-hideout agents.");
+        Assert(
+            CoopHideoutBossPhaseContract.ShouldPauseAiForNightBossChoreography(
+                isNightStagedPlacementActive: true,
+                isAiControlled: true,
+                kind: CoopHideoutBossAgentChoreographyKind.HoldAtTarget) &&
+            !CoopHideoutBossPhaseContract.ShouldPauseAiForNightBossChoreography(
+                isNightStagedPlacementActive: true,
+                isAiControlled: true,
+                kind: CoopHideoutBossAgentChoreographyKind.StartApproach) &&
+            !CoopHideoutBossPhaseContract.ShouldPauseAiForNightBossChoreography(
+                isNightStagedPlacementActive: true,
+                isAiControlled: true,
+                kind: CoopHideoutBossAgentChoreographyKind.Release) &&
+            !CoopHideoutBossPhaseContract.ShouldPauseAiForNightBossChoreography(
+                isNightStagedPlacementActive: false,
+                isAiControlled: true,
+                kind: CoopHideoutBossAgentChoreographyKind.HoldAtTarget) &&
+            !CoopHideoutBossPhaseContract.ShouldPauseAiForNightBossChoreography(
+                isNightStagedPlacementActive: true,
+                isAiControlled: false,
+                kind: CoopHideoutBossAgentChoreographyKind.HoldAtTarget),
+            "Only staged night AI participants must be paused after reaching the synchronized hold target.");
+        Assert(
+            CoopHideoutBossPhaseContract.ShouldDetachNativeControllerForNightBossHold(
+                isNightStagedPlacementActive: true,
+                isAiControlled: true,
+                hasMissionPeer: false,
+                isHostAgent: false) &&
+            !CoopHideoutBossPhaseContract.ShouldDetachNativeControllerForNightBossHold(
+                isNightStagedPlacementActive: false,
+                isAiControlled: true,
+                hasMissionPeer: false,
+                isHostAgent: false) &&
+            !CoopHideoutBossPhaseContract.ShouldDetachNativeControllerForNightBossHold(
+                isNightStagedPlacementActive: true,
+                isAiControlled: false,
+                hasMissionPeer: false,
+                isHostAgent: false) &&
+            !CoopHideoutBossPhaseContract.ShouldDetachNativeControllerForNightBossHold(
+                isNightStagedPlacementActive: true,
+                isAiControlled: true,
+                hasMissionPeer: true,
+                isHostAgent: false) &&
+            !CoopHideoutBossPhaseContract.ShouldDetachNativeControllerForNightBossHold(
+                isNightStagedPlacementActive: true,
+                isAiControlled: true,
+                hasMissionPeer: false,
+                isHostAgent: true),
+            "Native AI controller detachment must target only unowned night-hideout bots and must never touch a peer-owned or host agent.");
+        Assert(
+            CoopHideoutBossPhaseContract.ShouldRestoreDetachedNativeControllerForChoreography(
+                wasNativeControllerDetached: true,
+                kind: CoopHideoutBossAgentChoreographyKind.Release) &&
+            !CoopHideoutBossPhaseContract.ShouldRestoreDetachedNativeControllerForChoreography(
+                wasNativeControllerDetached: true,
+                kind: CoopHideoutBossAgentChoreographyKind.HoldAtTarget) &&
+            !CoopHideoutBossPhaseContract.ShouldRestoreDetachedNativeControllerForChoreography(
+                wasNativeControllerDetached: true,
+                kind: CoopHideoutBossAgentChoreographyKind.StartApproach) &&
+            !CoopHideoutBossPhaseContract.ShouldRestoreDetachedNativeControllerForChoreography(
+                wasNativeControllerDetached: false,
+                kind: CoopHideoutBossAgentChoreographyKind.Release),
+            "Only an explicit release may restore a native AI controller that this choreography detached.");
+        Assert(
+            CoopHideoutBossPhaseContract.ShouldPreserveNightBossFormationDetachment(
+                isNightStagedPlacementActive: true,
+                phase: CoopHideoutBossPhase.PreparingCinematic,
+                isAiControlled: true,
+                isBossFightParticipant: true) &&
+            CoopHideoutBossPhaseContract.ShouldPreserveNightBossFormationDetachment(
+                isNightStagedPlacementActive: true,
+                phase: CoopHideoutBossPhase.Cinematic,
+                isAiControlled: true,
+                isBossFightParticipant: true),
+            "Night AI participants must remain detached only while the cinematic movement is active.");
+        Assert(
+            !CoopHideoutBossPhaseContract.ShouldPreserveNightBossFormationDetachment(
+                isNightStagedPlacementActive: false,
+                phase: CoopHideoutBossPhase.Cinematic,
+                isAiControlled: true,
+                isBossFightParticipant: true) &&
+            !CoopHideoutBossPhaseContract.ShouldPreserveNightBossFormationDetachment(
+                isNightStagedPlacementActive: true,
+                phase: CoopHideoutBossPhase.Cinematic,
+                isAiControlled: false,
+                isBossFightParticipant: true) &&
+            !CoopHideoutBossPhaseContract.ShouldPreserveNightBossFormationDetachment(
+                isNightStagedPlacementActive: true,
+                phase: CoopHideoutBossPhase.Cinematic,
+                isAiControlled: true,
+                isBossFightParticipant: false) &&
+            !CoopHideoutBossPhaseContract.ShouldPreserveNightBossFormationDetachment(
+                isNightStagedPlacementActive: true,
+                phase: CoopHideoutBossPhase.AwaitingHostChoice,
+                isAiControlled: true,
+                isBossFightParticipant: true) &&
+            !CoopHideoutBossPhaseContract.ShouldPreserveNightBossFormationDetachment(
+                isNightStagedPlacementActive: true,
+                phase: CoopHideoutBossPhase.Duel,
+                isAiControlled: true,
+                isBossFightParticipant: true) &&
+            !CoopHideoutBossPhaseContract.ShouldPreserveNightBossFormationDetachment(
+                isNightStagedPlacementActive: true,
+                phase: CoopHideoutBossPhase.AllBattle,
+                isAiControlled: true,
+                isBossFightParticipant: true),
+            "Night formation detachment must end when the authored movement is finalized, before the host conversation.");
+        Assert(
+            !CoopHideoutBossPhaseContract.ShouldFallbackFromAwaitingHostChoice(
+                isHostAvailable: true) &&
+            CoopHideoutBossPhaseContract.ShouldFallbackFromAwaitingHostChoice(
+                isHostAvailable: false),
+            "The campaign-style host conversation must wait indefinitely and fall back only when the host is unavailable.");
+        Assert(
+            Math.Abs(
+                CoopHideoutBossPhaseContract.NativeCompanionApproachDistance - 0.5f) < 0.001f,
+            "Night companions must use the native half-meter approach instead of the removed one-meter clamp.");
+        Assert(
+            CoopHideoutBossPhaseContract.ShouldMaintainLocalHostFacingBoss(
+                isLocalHost: true,
+                phase: CoopHideoutBossPhase.Cinematic) &&
+            CoopHideoutBossPhaseContract.ShouldMaintainLocalHostFacingBoss(
+                isLocalHost: true,
+                phase: CoopHideoutBossPhase.AwaitingHostChoice) &&
+            !CoopHideoutBossPhaseContract.ShouldMaintainLocalHostFacingBoss(
+                isLocalHost: false,
+                phase: CoopHideoutBossPhase.Cinematic) &&
+            !CoopHideoutBossPhaseContract.ShouldMaintainLocalHostFacingBoss(
+                isLocalHost: true,
+                phase: CoopHideoutBossPhase.Duel),
+            "Only the local host visual must face the boss during the cinematic and host choice.");
+        Assert(
+            CoopHideoutBossPhaseContract.ShouldShowBossConversation(
+                CoopHideoutBossPhase.AwaitingHostChoice) &&
+            !CoopHideoutBossPhaseContract.ShouldShowBossConversation(
+                CoopHideoutBossPhase.Cinematic) &&
+            !CoopHideoutBossPhaseContract.ShouldShowBossConversation(
+                CoopHideoutBossPhase.Duel),
+            "Every client must show the synchronized boss conversation only while the host choice is pending.");
+        Assert(
+            CoopHideoutBossPhaseContract.ShouldEnableBossConversationChoices(
+                isLocalHost: true,
+                phase: CoopHideoutBossPhase.AwaitingHostChoice) &&
+            !CoopHideoutBossPhaseContract.ShouldEnableBossConversationChoices(
+                isLocalHost: false,
+                phase: CoopHideoutBossPhase.AwaitingHostChoice) &&
+            !CoopHideoutBossPhaseContract.ShouldEnableBossConversationChoices(
+                isLocalHost: true,
+                phase: CoopHideoutBossPhase.Duel),
+            "Only the local campaign host may submit a choice from the synchronized boss conversation.");
+        Assert(
+            !CoopHideoutBossPhaseContract.ShouldCorrectNightBossCinematicTarget(
+                isNightStagedPlacementActive: true,
+                distanceSquared: 0.25f) &&
+            CoopHideoutBossPhaseContract.ShouldCorrectNightBossCinematicTarget(
+                isNightStagedPlacementActive: true,
+                distanceSquared: 0.251f) &&
+            !CoopHideoutBossPhaseContract.ShouldCorrectNightBossCinematicTarget(
+                isNightStagedPlacementActive: false,
+                distanceSquared: 100f),
+            "The campaign-style final snap may run once only beyond the half-meter target threshold in the staged night cinematic.");
+        Assert(
+            CoopHideoutBossPhaseContract.ShouldReactivateAgentAfterNightBossChoice(
+                isNightStagedPlacementActive: true,
+                isAiControlled: true,
+                isBossFightParticipant: true) &&
+            !CoopHideoutBossPhaseContract.ShouldReactivateAgentAfterNightBossChoice(
+                isNightStagedPlacementActive: true,
+                isAiControlled: false,
+                isBossFightParticipant: true) &&
+            !CoopHideoutBossPhaseContract.ShouldReactivateAgentAfterNightBossChoice(
+                isNightStagedPlacementActive: true,
+                isAiControlled: true,
+                isBossFightParticipant: false) &&
+            !CoopHideoutBossPhaseContract.ShouldReactivateAgentAfterNightBossChoice(
+                isNightStagedPlacementActive: false,
+                isAiControlled: true,
+                isBossFightParticipant: true),
+            "Forced AI behavior selection must remain isolated to night boss-fight AI participants.");
     }
 
     private static void ValidateCommanderIdentityFallbackPolicy()

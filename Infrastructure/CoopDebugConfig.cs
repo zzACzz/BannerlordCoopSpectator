@@ -18,6 +18,8 @@ namespace CoopSpectator.Infrastructure
         private const string EnvPossessionDiagnostics = "COOPSPECTATOR_POSSESSION_DIAGNOSTICS";
         private const string EnvMoraleDiagnostics = "COOPSPECTATOR_MORALE_DIAGNOSTICS";
         private const string EnvCombatModelDiagnostics = "COOPSPECTATOR_COMBAT_MODEL_DIAGNOSTICS";
+        private const string EnvHideoutBossChoreographyDiagnostics =
+            "COOPSPECTATOR_HIDEOUT_BOSS_CHOREOGRAPHY_DIAGNOSTICS";
         private const double SharedDebugOverrideCacheSeconds = 1.0d;
         private const string SharedPossessionDiagnosticsKey = "possession";
         private const string SharedMoraleDiagnosticsKey = "morale";
@@ -67,6 +69,10 @@ namespace CoopSpectator.Infrastructure
         /// <summary>Enable per-agent combat-model damage and projectile samples.</summary>
         public static bool CombatModelDiagnostics =>
             VerboseDiagnostics && GetEnvBool(EnvCombatModelDiagnostics);
+
+        /// <summary>Enable focused, bounded hideout boss choreography state snapshots.</summary>
+        public static bool HideoutBossChoreographyDiagnostics =>
+            VerboseDiagnostics && GetEnvBool(EnvHideoutBossChoreographyDiagnostics);
 
         public static void SetPossessionDiagnosticsRuntimeOverride(bool? enabled)
         {

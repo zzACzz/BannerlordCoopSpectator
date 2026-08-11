@@ -13776,6 +13776,11 @@ namespace CoopSpectator.MissionBehaviors
             if (agent?.Mission == null || agent.Team == null || entryState == null)
                 return false;
 
+            CoopHideoutBossPhaseController bossPhaseController =
+                agent.Mission.GetMissionBehavior<CoopHideoutBossPhaseController>();
+            if (bossPhaseController?.ShouldPreserveNightBossFormationDetachment(agent) == true)
+                return false;
+
             int formationIndex = ResolveExactCampaignFormationIndex(
                 entryState,
                 agent.Mission,

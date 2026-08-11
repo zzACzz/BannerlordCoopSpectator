@@ -1,5 +1,6 @@
 using CoopSpectator.Infrastructure.Hideout;
 using TaleWorlds.Core;
+using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.Network.Messages;
 
@@ -60,6 +61,113 @@ namespace CoopSpectator.Network.Messages
             return "CoopHideoutBossPhaseClientCommand Battle=" + BattleInstanceId +
                    " Revision=" + Revision +
                    " Kind=" + CommandKind;
+        }
+    }
+
+    [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromServer)]
+    public sealed class CoopHideoutBossAgentChoreographyMessage : GameNetworkMessage
+    {
+        private static readonly CompressionInfo.Integer ProtocolCompression =
+            new CompressionInfo.Integer(0, 15, maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer SequenceCompression =
+            new CompressionInfo.Integer(0, int.MaxValue, maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer KindCompression =
+            new CompressionInfo.Integer(0, 2, maximumValueGiven: true);
+
+        public CoopHideoutBossAgentChoreographyMessage(
+            string battleInstanceId,
+            int sequence,
+            CoopHideoutBossAgentChoreographyKind kind,
+            int agentIndex,
+            Vec3 initialPosition,
+            Vec3 targetPosition,
+            Vec2 direction)
+        {
+            ProtocolVersion = CoopHideoutBossPhaseContract.ProtocolVersion;
+            BattleInstanceId = CoopHideoutBossPhaseContract.Bound(
+                battleInstanceId,
+                CoopHideoutBossPhaseContract.MaximumBattleInstanceIdCharacters);
+            Sequence = sequence;
+            Kind = kind;
+            AgentIndex = agentIndex;
+            InitialPosition = initialPosition;
+            TargetPosition = targetPosition;
+            Direction = direction.LengthSquared < 0.0001f
+                ? new Vec2(0f, 1f)
+                : direction.Normalized();
+        }
+
+        public CoopHideoutBossAgentChoreographyMessage()
+        {
+            BattleInstanceId = string.Empty;
+            Direction = new Vec2(0f, 1f);
+        }
+
+        public int ProtocolVersion { get; private set; }
+        public string BattleInstanceId { get; private set; }
+        public int Sequence { get; private set; }
+        public CoopHideoutBossAgentChoreographyKind Kind { get; private set; }
+        public int AgentIndex { get; private set; }
+        public Vec3 InitialPosition { get; private set; }
+        public Vec3 TargetPosition { get; private set; }
+        public Vec2 Direction { get; private set; }
+
+        protected override bool OnRead()
+        {
+            bool valid = true;
+            ProtocolVersion = ReadIntFromPacket(ProtocolCompression, ref valid);
+            BattleInstanceId = ReadStringFromPacket(ref valid) ?? string.Empty;
+            Sequence = ReadIntFromPacket(SequenceCompression, ref valid);
+            Kind = (CoopHideoutBossAgentChoreographyKind)ReadIntFromPacket(
+                KindCompression,
+                ref valid);
+            AgentIndex = GameNetworkMessage.ReadAgentIndexFromPacket(ref valid);
+            InitialPosition = GameNetworkMessage.ReadVec3FromPacket(
+                CompressionBasic.PositionCompressionInfo,
+                ref valid);
+            TargetPosition = GameNetworkMessage.ReadVec3FromPacket(
+                CompressionBasic.PositionCompressionInfo,
+                ref valid);
+            Direction = GameNetworkMessage.ReadVec2FromPacket(
+                CompressionBasic.UnitVectorCompressionInfo,
+                ref valid);
+            return valid &&
+                   BattleInstanceId.Length <=
+                       CoopHideoutBossPhaseContract.MaximumBattleInstanceIdCharacters;
+        }
+
+        protected override void OnWrite()
+        {
+            WriteIntToPacket(ProtocolVersion, ProtocolCompression);
+            WriteStringToPacket(CoopHideoutBossPhaseContract.Bound(
+                BattleInstanceId,
+                CoopHideoutBossPhaseContract.MaximumBattleInstanceIdCharacters));
+            WriteIntToPacket(Sequence, SequenceCompression);
+            WriteIntToPacket((int)Kind, KindCompression);
+            GameNetworkMessage.WriteAgentIndexToPacket(AgentIndex);
+            GameNetworkMessage.WriteVec3ToPacket(
+                InitialPosition,
+                CompressionBasic.PositionCompressionInfo);
+            GameNetworkMessage.WriteVec3ToPacket(
+                TargetPosition,
+                CompressionBasic.PositionCompressionInfo);
+            GameNetworkMessage.WriteVec2ToPacket(
+                Direction,
+                CompressionBasic.UnitVectorCompressionInfo);
+        }
+
+        protected override MultiplayerMessageFilter OnGetLogFilter() =>
+            MultiplayerMessageFilter.Mission;
+
+        protected override string OnGetLogFormat()
+        {
+            return "CoopHideoutBossAgentChoreography Battle=" + BattleInstanceId +
+                   " Sequence=" + Sequence +
+                   " Kind=" + Kind +
+                   " Agent=" + AgentIndex +
+                   " Initial=" + InitialPosition +
+                   " Target=" + TargetPosition +
+                   " Direction=" + Direction;
         }
     }
 

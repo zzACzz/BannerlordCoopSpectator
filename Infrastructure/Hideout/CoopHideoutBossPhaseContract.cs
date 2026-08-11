@@ -27,6 +27,13 @@ namespace CoopSpectator.Infrastructure.Hideout
         ChooseAllBattle = 2
     }
 
+    public enum CoopHideoutBossAgentChoreographyKind
+    {
+        StartApproach = 0,
+        HoldAtTarget = 1,
+        Release = 2
+    }
+
     public sealed class CoopHideoutBossPhaseSession
     {
         public string BattleInstanceId { get; set; }
@@ -64,12 +71,24 @@ namespace CoopSpectator.Infrastructure.Hideout
         public float BossTargetForwardOffset { get; set; }
     }
 
+    public sealed class CoopHideoutBossPrincipalPerturbation
+    {
+        public float SideOffset { get; set; }
+        public float ForwardOffset { get; set; }
+    }
+
     public sealed class CoopHideoutBossCompanionPlacement
     {
         public float InitialOffsetX { get; set; }
         public float InitialOffsetY { get; set; }
         public float TargetOffsetX { get; set; }
         public float TargetOffsetY { get; set; }
+    }
+
+    public sealed class CoopHideoutBossPlanarOffset
+    {
+        public float X { get; set; }
+        public float Y { get; set; }
     }
 
     public static class CoopHideoutBossPhaseContract
@@ -86,9 +105,20 @@ namespace CoopSpectator.Infrastructure.Hideout
         public const int MaximumReasonCharacters = 128;
         public const int CinematicReadyTimeoutMilliseconds = 2500;
         public const int CinematicDurationMilliseconds = 8000;
-        public const int HostChoiceTimeoutMilliseconds = 20000;
+        public const int NightCinematicDurationMilliseconds = 6000;
+        public const float NativeAgentMaxSpeedCinematicOverride = 0.65f;
+        public const float NativeCompanionApproachDistance = 0.5f;
+        public const float NativeAgentTargetProximityThreshold = 0.5f;
+        public const float NativePrincipalPlacementPerturbation = 0.25f;
         public static readonly float NativeCompanionPlacementAngleStep =
-            (float)(Math.PI / 20d);
+            (float)(Math.PI / 15d);
+
+        public static float ResolveBossDialogueInnerRadius(
+            float authoredInnerRadius,
+            bool isNightStagedPlacementActive)
+        {
+            return Math.Max(0f, authoredInnerRadius);
+        }
 
         public static CoopHideoutBossPrincipalPlacement ResolvePrincipalPlacement(
             float innerRadius,
@@ -102,6 +132,88 @@ namespace CoopSpectator.Infrastructure.Hideout
                 PlayerTargetForwardOffset = -safeInnerRadius,
                 BossInitialForwardOffset = safeInnerRadius + safeWalkDistance,
                 BossTargetForwardOffset = safeInnerRadius
+            };
+        }
+
+        public static int ResolveCinematicDurationMilliseconds(
+            bool isNightStagedPlacementActive)
+        {
+            return isNightStagedPlacementActive
+                ? NightCinematicDurationMilliseconds
+                : CinematicDurationMilliseconds;
+        }
+
+        public static bool ShouldApplyAgentChoreographyMessage(
+            string currentBattleInstanceId,
+            string messageBattleInstanceId,
+            int lastAppliedSequence,
+            int messageSequence)
+        {
+            return !string.IsNullOrWhiteSpace(currentBattleInstanceId) &&
+                   string.Equals(
+                       currentBattleInstanceId,
+                       messageBattleInstanceId,
+                       StringComparison.Ordinal) &&
+                   messageSequence > lastAppliedSequence;
+        }
+
+        public static bool ShouldReleaseAgentForBossChoice(
+            CoopHideoutBossPhase phase,
+            bool isBossAgent)
+        {
+            return phase == CoopHideoutBossPhase.AllBattle ||
+                   (phase == CoopHideoutBossPhase.Duel && isBossAgent);
+        }
+
+        public static float ResolveNightEnemyApproachDistance(float authoredWalkDistance)
+        {
+            return Math.Max(0f, authoredWalkDistance);
+        }
+
+        public static int ResolveNightApproachHoldMilliseconds(float authoredWalkDistance)
+        {
+            float distance = ResolveNightEnemyApproachDistance(authoredWalkDistance);
+            if (distance <= 0f || NativeAgentMaxSpeedCinematicOverride <= 0f)
+                return 0;
+
+            int arrivalMilliseconds = (int)Math.Ceiling(
+                distance / NativeAgentMaxSpeedCinematicOverride * 1000f);
+            return Math.Min(NightCinematicDurationMilliseconds, arrivalMilliseconds);
+        }
+
+        public static CoopHideoutBossPlanarOffset ResolveNightEnemyApproachOffset(
+            float directionX,
+            float directionY,
+            float authoredWalkDistance)
+        {
+            float length = (float)Math.Sqrt(
+                directionX * directionX + directionY * directionY);
+            if (length < 0.0001f)
+            {
+                directionX = 0f;
+                directionY = 1f;
+                length = 1f;
+            }
+
+            float distance = ResolveNightEnemyApproachDistance(authoredWalkDistance);
+            return new CoopHideoutBossPlanarOffset
+            {
+                X = directionX / length * distance,
+                Y = directionY / length * distance
+            };
+        }
+
+        public static CoopHideoutBossPrincipalPerturbation ResolveNativePrincipalPerturbation(
+            int seedOffset,
+            float perturbAmount)
+        {
+            var random = new Random(seedOffset);
+            float angle = (float)(Math.PI * 2d * random.NextDouble());
+            float safePerturbAmount = Math.Abs(perturbAmount);
+            return new CoopHideoutBossPrincipalPerturbation
+            {
+                SideOffset = safePerturbAmount * (float)Math.Cos(angle),
+                ForwardOffset = safePerturbAmount * (float)Math.Sin(angle)
             };
         }
 
@@ -176,11 +288,125 @@ namespace CoopSpectator.Infrastructure.Hideout
                     InitialOffsetX = offsetX,
                     InitialOffsetY = offsetY,
                     TargetOffsetX = offsetX,
-                    TargetOffsetY = offsetY - 0.5f
+                    TargetOffsetY = offsetY - NativeCompanionApproachDistance
                 };
             }
 
             return null;
+        }
+
+        public static bool ShouldStopFormationsForNightBossCinematic(
+            bool isNightStagedPlacementActive)
+        {
+            return isNightStagedPlacementActive;
+        }
+
+        public static bool ShouldLockFormationAiForNightBossCinematic(
+            bool isNightStagedPlacementActive)
+        {
+            return isNightStagedPlacementActive;
+        }
+
+        public static bool ShouldRestoreFormationAiForBossPhase(
+            CoopHideoutBossPhase phase)
+        {
+            return phase == CoopHideoutBossPhase.AllBattle;
+        }
+
+        public static bool ShouldDetachAgentForNightBossCinematic(
+            bool isNightStagedPlacementActive,
+            bool isAiControlled)
+        {
+            return isNightStagedPlacementActive && isAiControlled;
+        }
+
+        public static bool ShouldPauseAiForNightBossChoreography(
+            bool isNightStagedPlacementActive,
+            bool isAiControlled,
+            CoopHideoutBossAgentChoreographyKind kind)
+        {
+            return isNightStagedPlacementActive &&
+                   isAiControlled &&
+                   kind == CoopHideoutBossAgentChoreographyKind.HoldAtTarget;
+        }
+
+        public static bool ShouldDetachNativeControllerForNightBossHold(
+            bool isNightStagedPlacementActive,
+            bool isAiControlled,
+            bool hasMissionPeer,
+            bool isHostAgent)
+        {
+            return isNightStagedPlacementActive &&
+                   isAiControlled &&
+                   !hasMissionPeer &&
+                   !isHostAgent;
+        }
+
+        public static bool ShouldRestoreDetachedNativeControllerForChoreography(
+            bool wasNativeControllerDetached,
+            CoopHideoutBossAgentChoreographyKind kind)
+        {
+            return wasNativeControllerDetached &&
+                   kind == CoopHideoutBossAgentChoreographyKind.Release;
+        }
+
+        public static bool ShouldPreserveNightBossFormationDetachment(
+            bool isNightStagedPlacementActive,
+            CoopHideoutBossPhase phase,
+            bool isAiControlled,
+            bool isBossFightParticipant)
+        {
+            return isNightStagedPlacementActive &&
+                   isAiControlled &&
+                   isBossFightParticipant &&
+                   (phase == CoopHideoutBossPhase.PreparingCinematic ||
+                    phase == CoopHideoutBossPhase.Cinematic);
+        }
+
+        public static bool ShouldFallbackFromAwaitingHostChoice(bool isHostAvailable)
+        {
+            return !isHostAvailable;
+        }
+
+        public static bool ShouldMaintainLocalHostFacingBoss(
+            bool isLocalHost,
+            CoopHideoutBossPhase phase)
+        {
+            return isLocalHost &&
+                   (phase == CoopHideoutBossPhase.Cinematic ||
+                    phase == CoopHideoutBossPhase.AwaitingHostChoice);
+        }
+
+        public static bool ShouldShowBossConversation(CoopHideoutBossPhase phase)
+        {
+            return phase == CoopHideoutBossPhase.AwaitingHostChoice;
+        }
+
+        public static bool ShouldEnableBossConversationChoices(
+            bool isLocalHost,
+            CoopHideoutBossPhase phase)
+        {
+            return isLocalHost && ShouldShowBossConversation(phase);
+        }
+
+        public static bool ShouldCorrectNightBossCinematicTarget(
+            bool isNightStagedPlacementActive,
+            float distanceSquared)
+        {
+            return isNightStagedPlacementActive &&
+                   distanceSquared >
+                   NativeAgentTargetProximityThreshold *
+                   NativeAgentTargetProximityThreshold;
+        }
+
+        public static bool ShouldReactivateAgentAfterNightBossChoice(
+            bool isNightStagedPlacementActive,
+            bool isAiControlled,
+            bool isBossFightParticipant)
+        {
+            return isNightStagedPlacementActive &&
+                   isAiControlled &&
+                   isBossFightParticipant;
         }
 
         public static bool IsHideoutScenario(string scenarioKind)
