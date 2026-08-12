@@ -272,6 +272,7 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
             }
 
             list.Add(new CoopMissionNetworkBridge());
+            list.Add(new CoopBattlePowerNetworkController());
             if (isDedicated)
             {
                 ModLogger.Info(
@@ -394,6 +395,7 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
 
             list.Add(new MissionBehaviorDiagnostic());
             list.Add(new CoopMissionNetworkBridge());
+            list.Add(new CoopBattlePowerNetworkController());
             if (minimalBattleMapRuntime && !isDedicated)
             {
                 AddOptional(list, TryCreateMissionAgentLabelUiHandler(mission), "MissionAgentLabelUIHandler");
@@ -413,6 +415,7 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 ModLogger.Info("CoopBattle client: skipped CoopMissionClientLogic for battle-map crash isolation.");
             }
 #if !COOPSPECTATOR_DEDICATED
+            list.Add(new CoopSpectator.UI.CoopBattlePowerScoreView());
             if (ExperimentalFeatures.EnableCustomCoopSelectionOverlay)
             {
                 list.Add(new CoopSpectator.UI.CoopMissionSelectionView());

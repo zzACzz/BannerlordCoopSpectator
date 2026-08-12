@@ -1,0 +1,28 @@
+<Prefab>
+  <Constants>
+    <Constant Name="Scoreboard.PowerLevelComparer.Background.Width" BrushLayer="Default" BrushName="Scoreboard.PowerLevelComparer.Background" BrushValueType="Width" />
+    <Constant Name="Scoreboard.PowerLevelComparer.Background.Height" BrushLayer="Default" BrushName="Scoreboard.PowerLevelComparer.Background" BrushValueType="Height" />
+  </Constants>
+  <Window>
+    <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" IsVisible="@IsVisible" DoNotAcceptEvents="true">
+      <Children>
+        <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="!Scoreboard.PowerLevelComparer.Background.Width" SuggestedHeight="!Scoreboard.PowerLevelComparer.Background.Height" HorizontalAlignment="Center" VerticalAlignment="Top">
+          <Children>
+            <CoopBattlePowerComparer DataSource="{PowerComparer}" WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" HorizontalAlignment="Center" MarginLeft="7" MarginRight="7" MarginBottom="3" Parameter.IsCenterSeperatorEnabled="true" />
+            <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Sprite="power_bar_frame_9" />
+            <Widget DoNotAcceptEvents="true" WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="32" SuggestedHeight="32" HorizontalAlignment="Left" PositionXOffset="-50" Sprite="BlankWhiteSquare_9" AlphaFactor="0.6" Color="#89762A99">
+              <Children>
+                <ImageIdentifierWidget DataSource="{Attackers\BannerVisualSmall}" DoNotAcceptEvents="true" WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginLeft="2" MarginRight="2" MarginTop="2" MarginBottom="2" Sprite="BlankWhiteSquare_9" AdditionalArgs="@AdditionalArgs" ImageId="@Id" TextureProviderName="@TextureProviderName" MaterialAlphaFactor="0.6" />
+              </Children>
+            </Widget>
+            <Widget DoNotAcceptEvents="true" WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="32" SuggestedHeight="32" HorizontalAlignment="Right" PositionXOffset="50" Sprite="BlankWhiteSquare_9" Color="#89762A99">
+              <Children>
+                <ImageIdentifierWidget DataSource="{Defenders\BannerVisualSmall}" DoNotAcceptEvents="true" WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginLeft="2" MarginRight="2" MarginTop="2" MarginBottom="2" Sprite="BlankWhiteSquare_9" AdditionalArgs="@AdditionalArgs" ImageId="@Id" TextureProviderName="@TextureProviderName" MaterialAlphaFactor="0.6" />
+              </Children>
+            </Widget>
+          </Children>
+        </Widget>
+      </Children>
+    </Widget>
+  </Window>
+</Prefab>

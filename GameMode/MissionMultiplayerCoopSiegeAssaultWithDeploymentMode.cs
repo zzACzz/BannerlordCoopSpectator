@@ -123,6 +123,7 @@ namespace CoopSpectator.GameMode
                 includeCampaignSiegeStateHandler: true);
 
             list.Add(new CoopMissionNetworkBridge());
+            list.Add(new CoopBattlePowerNetworkController());
             if (isDedicated)
             {
                 ModLogger.Info(
@@ -207,6 +208,7 @@ namespace CoopSpectator.GameMode
 
             list.Add(new MissionBehaviorDiagnostic());
             list.Add(new CoopMissionNetworkBridge());
+            list.Add(new CoopBattlePowerNetworkController());
             AddOptional(list, MissionBehaviorHelpers.TryCreateMissionAgentLabelUiParityView(mission), "MissionAgentLabelUIHandler");
             AddOptional(list, MissionBehaviorHelpers.TryCreateMissionMultiplayerMarkerUiHandler(), "MissionMultiplayerMarkerUIHandler");
             AddOptional(
@@ -219,6 +221,7 @@ namespace CoopSpectator.GameMode
                 MissionBehaviorHelpers.TryCreateMissionFormationMarkerUiParityView(mission),
                 "MissionFormationMarkerUIHandler");
 #if !COOPSPECTATOR_DEDICATED
+            list.Add(new CoopSpectator.UI.CoopBattlePowerScoreView());
             if (ExperimentalFeatures.EnableCustomCoopSelectionOverlay &&
                 ExperimentalFeatures.EnableSiegeReplayCustomCoopSelectionOverlay)
             {

@@ -74,6 +74,7 @@
     <Compile Include="..\Mission\CoopHeroCreationMissionNetwork.cs" Link="Mission\CoopHeroCreationMissionNetwork.cs" />
     <Compile Include="..\Mission\CoopHideoutBossPhaseController.cs" Link="Mission\CoopHideoutBossPhaseController.cs" />
     <Compile Include="..\Mission\CoopHideoutAmbushNetworkController.cs" Link="Mission\CoopHideoutAmbushNetworkController.cs" />
+    <Compile Include="..\Mission\CoopBattlePowerNetworkController.cs" Link="Mission\CoopBattlePowerNetworkController.cs" />
     <Compile Include="..\Mission\CoopSiegeAssaultFormationOrderRuntime.cs" Link="Mission\CoopSiegeAssaultFormationOrderRuntime.cs" />
     <Compile Include="..\MissionModels\CoopCampaignDerivedAgentStatCalculateModel.cs" Link="MissionModels\CoopCampaignDerivedAgentStatCalculateModel.cs" />
     <Compile Include="..\MissionModels\CoopCampaignDerivedStrikeMagnitudeCalculationModel.cs" Link="MissionModels\CoopCampaignDerivedStrikeMagnitudeCalculationModel.cs" />
@@ -90,6 +91,7 @@
     <Compile Include="..\Network\Messages\CoopHeroCreationNetworkMessages.cs" Link="Network\Messages\CoopHeroCreationNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopHideoutBossPhaseNetworkMessages.cs" Link="Network\Messages\CoopHideoutBossPhaseNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopHideoutAmbushNetworkMessages.cs" Link="Network\Messages\CoopHideoutAmbushNetworkMessages.cs" />
+    <Compile Include="..\Network\Messages\CoopBattlePowerNetworkMessages.cs" Link="Network\Messages\CoopBattlePowerNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopBattleAgentControlNetworkMessages.cs" Link="Network\Messages\CoopBattleAgentControlNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopSiegeAmbushOrderNetworkMessages.cs" Link="Network\Messages\CoopSiegeAmbushOrderNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopSiegeAssaultOrderNetworkMessages.cs" Link="Network\Messages\CoopSiegeAssaultOrderNetworkMessages.cs" />
@@ -150,6 +152,7 @@
     <Compile Include="..\Infrastructure\CoopBattlePhaseBridgeFile.cs" Link="Infrastructure\CoopBattlePhaseBridgeFile.cs" />
     <Compile Include="..\Infrastructure\CoopBattlePhaseRuntimeState.cs" Link="Infrastructure\CoopBattlePhaseRuntimeState.cs" />
     <Compile Include="..\Infrastructure\BattleSnapshotRuntimeState.cs" Link="Infrastructure\BattleSnapshotRuntimeState.cs" />
+    <Compile Include="..\Infrastructure\CoopBattlePowerContract.cs" Link="Infrastructure\CoopBattlePowerContract.cs" />
     <Compile Include="..\Infrastructure\BattleAgentCapacityPolicy.cs" Link="Infrastructure\BattleAgentCapacityPolicy.cs" />
     <Compile Include="..\Infrastructure\GlobalCaptainPerkRuntimeState.cs" Link="Infrastructure\GlobalCaptainPerkRuntimeState.cs" />
     <Compile Include="..\Infrastructure\ExactSiegeMoraleDiagnostics.cs" Link="Infrastructure\ExactSiegeMoraleDiagnostics.cs" />
