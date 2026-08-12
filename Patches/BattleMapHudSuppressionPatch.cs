@@ -2,7 +2,11 @@ using System;
 using System.Reflection;
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.MissionBehaviors;
 using HarmonyLib;
+using TaleWorlds.Engine.GauntletUI;
+using TaleWorlds.GauntletUI.BaseTypes;
+using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
 
 namespace CoopSpectator.Patches
@@ -17,6 +21,9 @@ namespace CoopSpectator.Patches
         private const string HudVmTypeName = "TaleWorlds.MountAndBlade.Multiplayer.ViewModelCollection.HUDExtensions.MissionMultiplayerHUDExtensionVM";
         private static readonly BindingFlags InstanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
         private static string _lastSuppressionLogKey = string.Empty;
+        private static string _lastBannerSuppressionLogKey = string.Empty;
+        private static string _lastBannerLayoutFailureLogKey = string.Empty;
+        private static bool _gauntletLayerLoadMoviePatchApplied;
 
         private static Type _hudVmType;
         private static FieldInfo _missionField;
@@ -34,6 +41,7 @@ namespace CoopSpectator.Patches
             try
             {
                 _hudVmType = AccessTools.TypeByName(HudVmTypeName);
+                TryPatchGauntletLayerLoadMovie(harmony);
                 if (_hudVmType == null)
                 {
                     ModLogger.Info("BattleMapHudSuppressionPatch: MissionMultiplayerHUDExtensionVM type not found. Skip.");
@@ -92,6 +100,30 @@ namespace CoopSpectator.Patches
             }
         }
 
+        private static void TryPatchGauntletLayerLoadMovie(Harmony harmony)
+        {
+            if (_gauntletLayerLoadMoviePatchApplied || harmony == null)
+                return;
+
+            MethodInfo loadMovie = AccessTools.Method(
+                typeof(GauntletLayer),
+                nameof(GauntletLayer.LoadMovie),
+                new[] { typeof(string), typeof(ViewModel) });
+
+            MethodInfo postfix = typeof(BattleMapHudSuppressionPatch).GetMethod(
+                nameof(GauntletLayer_LoadMovie_Postfix),
+                BindingFlags.Static | BindingFlags.NonPublic);
+            if (loadMovie == null || postfix == null)
+            {
+                ModLogger.Info("BattleMapHudSuppressionPatch: GauntletLayer.LoadMovie(string, ViewModel) not found. Native team-banner suppression skipped.");
+                return;
+            }
+
+            harmony.Patch(loadMovie, postfix: new HarmonyMethod(postfix));
+            _gauntletLayerLoadMoviePatchApplied = true;
+            ModLogger.Info("BattleMapHudSuppressionPatch: postfix applied to GauntletLayer.LoadMovie(string, ViewModel).");
+        }
+
         private static void CacheMembers()
         {
             if (_hudVmType == null)
@@ -121,6 +153,119 @@ namespace CoopSpectator.Patches
         private static void MissionMultiplayerHudExtensionVM_Tick_Postfix(object __instance, float dt)
         {
             TryApplySuppression(__instance, "tick");
+        }
+
+        private static void GauntletLayer_LoadMovie_Postfix(
+            string movieName,
+            ViewModel dataSource,
+            GauntletMovieIdentifier __result)
+        {
+            try
+            {
+                Mission mission = ResolveMission(dataSource);
+                bool isNativeHudViewModel =
+                    dataSource != null &&
+                    string.Equals(
+                        dataSource.GetType().FullName,
+                        HudVmTypeName,
+                        StringComparison.Ordinal);
+                bool isCoopBattlePowerMission =
+                    mission?.GetMissionBehavior<CoopBattlePowerNetworkController>() != null;
+                if (!CoopMultiplayerHudContract.ShouldSuppressNativeTeamBanners(
+                        movieName,
+                        isNativeHudViewModel,
+                        isCoopBattlePowerMission))
+                {
+                    return;
+                }
+
+                TryHideNativeTeamBannerWidgets(__result, mission);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "BattleMapHudSuppressionPatch: native team-banner suppression failed: " +
+                    ex.GetType().Name + ":" + ex.Message + ".");
+            }
+        }
+
+        private static void TryHideNativeTeamBannerWidgets(
+            GauntletMovieIdentifier movieIdentifier,
+            Mission mission)
+        {
+            object movie = GetPropertyValue(movieIdentifier, "Movie");
+            Widget rootWidget = GetPropertyValue(movie, "RootWidget") as Widget;
+            Widget headerWidget = rootWidget?.GetChild(0);
+            Widget allyBannerWidget = headerWidget?.GetChild(1);
+            Widget enemyBannerWidget = headerWidget?.GetChild(3);
+
+            bool layoutMatches =
+                headerWidget is ListPanel &&
+                CoopMultiplayerHudContract.IsExpectedNativeTeamBannerLayout(
+                    headerIsListPanel: true,
+                    headerChildCount: headerWidget.ChildCount,
+                    allyBannerChildCount: allyBannerWidget?.ChildCount ?? -1,
+                    allyBannerWidth: allyBannerWidget?.SuggestedWidth ?? float.NaN,
+                    allyBannerHeight: allyBannerWidget?.SuggestedHeight ?? float.NaN,
+                    enemyBannerChildCount: enemyBannerWidget?.ChildCount ?? -1,
+                    enemyBannerWidth: enemyBannerWidget?.SuggestedWidth ?? float.NaN,
+                    enemyBannerHeight: enemyBannerWidget?.SuggestedHeight ?? float.NaN);
+            if (!layoutMatches)
+            {
+                LogBannerLayoutFailureOnce(mission);
+                return;
+            }
+
+            allyBannerWidget.IsVisible = false;
+            enemyBannerWidget.IsVisible = false;
+
+            string sceneName = mission?.SceneName ?? "unknown";
+            if (string.Equals(
+                    _lastBannerSuppressionLogKey,
+                    sceneName,
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _lastBannerSuppressionLogKey = sceneName;
+            ModLogger.Info(
+                "BattleMapHudSuppressionPatch: suppressed native ally/enemy banner circles for coop combat HUD. " +
+                "Scene=" + sceneName + ".");
+        }
+
+        private static void LogBannerLayoutFailureOnce(Mission mission)
+        {
+            string sceneName = mission?.SceneName ?? "unknown";
+            if (string.Equals(
+                    _lastBannerLayoutFailureLogKey,
+                    sceneName,
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _lastBannerLayoutFailureLogKey = sceneName;
+            ModLogger.Info(
+                "BattleMapHudSuppressionPatch: native HUDExtension team-banner layout did not match the validated contract; no widgets were hidden. " +
+                "Scene=" + sceneName + ".");
+        }
+
+        private static object GetPropertyValue(object instance, string propertyName)
+        {
+            if (instance == null || string.IsNullOrEmpty(propertyName))
+                return null;
+
+            try
+            {
+                return instance.GetType()
+                    .GetProperty(propertyName, InstanceFlags)
+                    ?.GetValue(instance, null);
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private static void TryApplySuppression(object instance, string source)

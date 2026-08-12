@@ -7,5 +7,6 @@
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="..\..\Infrastructure\CoopBattlePowerContract.cs" Link="CoopBattlePowerContract.cs" />
+    <Compile Include="..\..\Infrastructure\CoopMultiplayerHudContract.cs" Link="CoopMultiplayerHudContract.cs" />
   </ItemGroup>
 </Project>

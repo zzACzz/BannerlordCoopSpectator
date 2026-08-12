@@ -11,6 +11,7 @@ internal static class Program
             ValidateAvailableStackPower();
             ValidateRemovalPolicy();
             ValidateRenderPolicy();
+            ValidateNativeHudBannerSuppressionPolicy();
             Console.WriteLine("Coop battle power contract tests passed.");
             return 0;
         }
@@ -119,6 +120,61 @@ internal static class Program
                 CurrentDefenderPower = 1200
             }),
             "Unavailable authoritative state must fail closed.");
+    }
+
+    private static void ValidateNativeHudBannerSuppressionPolicy()
+    {
+        Assert(
+            CoopMultiplayerHudContract.ShouldSuppressNativeTeamBanners(
+                "HUDExtension",
+                isNativeHudViewModel: true,
+                isCoopBattlePowerMission: true),
+            "The native team banners must be suppressed in a coop combat HUD.");
+        Assert(
+            !CoopMultiplayerHudContract.ShouldSuppressNativeTeamBanners(
+                "HUDExtension",
+                isNativeHudViewModel: true,
+                isCoopBattlePowerMission: false),
+            "Official multiplayer missions must keep their native team banners.");
+        Assert(
+            !CoopMultiplayerHudContract.ShouldSuppressNativeTeamBanners(
+                "OtherMovie",
+                isNativeHudViewModel: true,
+                isCoopBattlePowerMission: true),
+            "Unrelated Gauntlet movies must never be modified.");
+        Assert(
+            CoopMultiplayerHudContract.IsExpectedNativeTeamBannerLayout(
+                headerIsListPanel: true,
+                headerChildCount: 5,
+                allyBannerChildCount: 1,
+                allyBannerWidth: 50f,
+                allyBannerHeight: 50f,
+                enemyBannerChildCount: 1,
+                enemyBannerWidth: 50f,
+                enemyBannerHeight: 50f),
+            "The Bannerlord 1.4.8 native team-banner layout must be recognized.");
+        Assert(
+            !CoopMultiplayerHudContract.IsExpectedNativeTeamBannerLayout(
+                headerIsListPanel: true,
+                headerChildCount: 6,
+                allyBannerChildCount: 1,
+                allyBannerWidth: 50f,
+                allyBannerHeight: 50f,
+                enemyBannerChildCount: 1,
+                enemyBannerWidth: 50f,
+                enemyBannerHeight: 50f),
+            "A changed native layout must fail closed instead of hiding an unrelated widget.");
+        Assert(
+            !CoopMultiplayerHudContract.IsExpectedNativeTeamBannerLayout(
+                headerIsListPanel: true,
+                headerChildCount: 5,
+                allyBannerChildCount: 1,
+                allyBannerWidth: 48f,
+                allyBannerHeight: 50f,
+                enemyBannerChildCount: 1,
+                enemyBannerWidth: 50f,
+                enemyBannerHeight: 50f),
+            "Unexpected banner dimensions must fail closed.");
     }
 
     private static void AssertEqual(int expected, int actual, string message)
