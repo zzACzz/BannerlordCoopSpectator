@@ -21,15 +21,12 @@ namespace CoopSpectator.UI
     {
         private const string NativeAlarmMovieName = "AgentAlarmStateMissionView";
         private const string NativeFailCounterMovieName = "MissionStealthFailCounter";
-        private const string ObjectiveMovieName = "CoopHideoutAmbushStealth";
         private const int UseGameKeyIndex = 13;
 
         private GauntletLayer _alarmLayer;
         private GauntletLayer _failCounterLayer;
-        private GauntletLayer _objectiveLayer;
         private GauntletMovieIdentifier _alarmMovie;
         private GauntletMovieIdentifier _failCounterMovie;
-        private GauntletMovieIdentifier _objectiveMovie;
         private CoopHideoutAmbushStealthVM _viewModel;
         private CoopHideoutAmbushFailCounterVM _failCounterViewModel;
         private UsableMissionObject _focusedCallTroopsUsePoint;
@@ -148,22 +145,14 @@ namespace CoopSpectator.UI
                     "CoopHideoutAmbushFailCounterLayer",
                     10,
                     false);
-                _objectiveLayer = new GauntletLayer(
-                    "CoopHideoutAmbushObjectiveLayer",
-                    ViewOrderPriority + 1,
-                    false);
                 MissionScreen.AddLayer(_alarmLayer);
                 MissionScreen.AddLayer(_failCounterLayer);
-                MissionScreen.AddLayer(_objectiveLayer);
                 _alarmMovie = _alarmLayer.LoadMovie(
                     NativeAlarmMovieName,
                     _viewModel);
                 _failCounterMovie = _failCounterLayer.LoadMovie(
                     NativeFailCounterMovieName,
                     _failCounterViewModel);
-                _objectiveMovie = _objectiveLayer.LoadMovie(
-                    ObjectiveMovieName,
-                    _viewModel);
             }
             catch (Exception ex)
             {
@@ -182,14 +171,10 @@ namespace CoopSpectator.UI
                     _alarmLayer.ReleaseMovie(_alarmMovie);
                 if (_failCounterLayer != null && _failCounterMovie != null)
                     _failCounterLayer.ReleaseMovie(_failCounterMovie);
-                if (_objectiveLayer != null && _objectiveMovie != null)
-                    _objectiveLayer.ReleaseMovie(_objectiveMovie);
                 if (_alarmLayer != null)
                     MissionScreen?.RemoveLayer(_alarmLayer);
                 if (_failCounterLayer != null)
                     MissionScreen?.RemoveLayer(_failCounterLayer);
-                if (_objectiveLayer != null)
-                    MissionScreen?.RemoveLayer(_objectiveLayer);
                 _viewModel?.OnFinalize();
                 _failCounterViewModel?.OnFinalize();
             }
@@ -200,10 +185,8 @@ namespace CoopSpectator.UI
             {
                 _alarmMovie = null;
                 _failCounterMovie = null;
-                _objectiveMovie = null;
                 _alarmLayer = null;
                 _failCounterLayer = null;
-                _objectiveLayer = null;
                 _viewModel = null;
                 _failCounterViewModel = null;
             }
@@ -244,15 +227,10 @@ namespace CoopSpectator.UI
         private readonly List<StealthBox> _stealthBoxes = new List<StealthBox>();
         private bool _stealthBoxesResolved;
         private bool _isMainAgentInSafeArea;
-        private bool _isObjectiveVisible;
-        private Vec2 _objectivePosition;
-        private string _objectiveText = string.Empty;
 
         public CoopHideoutAmbushStealthVM()
         {
             Targets = new MBBindingList<CoopHideoutAmbushAlarmTargetVM>();
-            ObjectiveText = GameTexts.FindText(
-                "str_coop_hideout_ambush_objective").ToString();
         }
 
         [DataSourceProperty]
@@ -271,46 +249,6 @@ namespace CoopSpectator.UI
             }
         }
 
-        [DataSourceProperty]
-        public bool IsObjectiveVisible
-        {
-            get => _isObjectiveVisible;
-            private set
-            {
-                if (value == _isObjectiveVisible)
-                    return;
-                _isObjectiveVisible = value;
-                OnPropertyChangedWithValue(value, nameof(IsObjectiveVisible));
-            }
-        }
-
-        [DataSourceProperty]
-        public Vec2 ObjectivePosition
-        {
-            get => _objectivePosition;
-            private set
-            {
-                if (value == _objectivePosition)
-                    return;
-                _objectivePosition = value;
-                OnPropertyChangedWithValue(value, nameof(ObjectivePosition));
-            }
-        }
-
-        [DataSourceProperty]
-        public string ObjectiveText
-        {
-            get => _objectiveText;
-            private set
-            {
-                string normalized = value ?? string.Empty;
-                if (string.Equals(normalized, _objectiveText, StringComparison.Ordinal))
-                    return;
-                _objectiveText = normalized;
-                OnPropertyChangedWithValue(normalized, nameof(ObjectiveText));
-            }
-        }
-
         public void Update(Camera camera)
         {
             CoopHideoutAmbushState global =
@@ -319,11 +257,6 @@ namespace CoopSpectator.UI
                 global?.Phase == CoopHideoutAmbushPhase.Stealth;
             SyncTargets(camera, stealthActive);
             IsMainAgentInSafeArea = stealthActive && IsMainAgentInsideStealthBox();
-            UpdateObjective(
-                camera,
-                stealthActive &&
-                global.IsUsePointAvailable &&
-                !CoopHideoutAmbushNetworkController.IsUsePointRequestPending);
         }
 
         private void SyncTargets(Camera camera, bool stealthActive)
@@ -350,35 +283,6 @@ namespace CoopSpectator.UI
                 CoopHideoutAmbushAlarmTargetVM target = _targetsByAgentIndex[agentIndex];
                 Targets.Remove(target);
                 _targetsByAgentIndex.Remove(agentIndex);
-            }
-        }
-
-        private void UpdateObjective(Camera camera, bool show)
-        {
-            if (!show || camera == null)
-            {
-                IsObjectiveVisible = false;
-                return;
-            }
-
-            try
-            {
-                GameEntity entity = Mission.Current?.Scene?.FindEntityWithTag(
-                    CoopHideoutAmbushContract.CallTroopsArrowBarrelTag);
-                if (entity == null)
-                {
-                    IsObjectiveVisible = false;
-                    return;
-                }
-
-                Vec3 worldPosition = entity.GlobalPosition + Vec3.Up * 0.9f;
-                IsObjectiveVisible = TryProject(camera, worldPosition, out Vec2 position);
-                if (IsObjectiveVisible)
-                    ObjectivePosition = position;
-            }
-            catch
-            {
-                IsObjectiveVisible = false;
             }
         }
 

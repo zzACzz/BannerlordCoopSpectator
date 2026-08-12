@@ -8,6 +8,7 @@ using CoopSpectator.MissionBehaviors;
 using CoopSpectator.Network.Messages;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
+using TaleWorlds.MountAndBlade.Missions.MissionLogics;
 using TaleWorlds.MountAndBlade.Multiplayer;
 
 namespace CoopSpectator.GameMode
@@ -183,9 +184,38 @@ namespace CoopSpectator.GameMode
 
 #if !COOPSPECTATOR_DEDICATED
             if (!GameNetwork.IsServer &&
+                !list.Any(behavior => behavior is MissionObjectiveLogic))
+            {
+                list.Add(new MissionObjectiveLogic());
+            }
+
+            if (!GameNetwork.IsServer &&
+                !list.Any(behavior => behavior is CoopSpectator.UI.CoopHideoutMissionObjectiveController))
+            {
+                list.Add(new CoopSpectator.UI.CoopHideoutMissionObjectiveController(
+                    isNight: true));
+            }
+
+            if (!GameNetwork.IsServer &&
+                !list.Any(behavior =>
+                    behavior is TaleWorlds.MountAndBlade.View.MissionViews.MissionObjectiveView))
+            {
+                MissionBehavior objectiveView =
+                    TaleWorlds.MountAndBlade.View.ViewCreator.CreateMissionObjectiveView();
+                if (objectiveView != null)
+                    list.Add(objectiveView);
+            }
+
+            if (!GameNetwork.IsServer &&
                 !list.Any(behavior => behavior is CoopSpectator.UI.CoopHideoutAmbushStealthView))
             {
                 list.Add(new CoopSpectator.UI.CoopHideoutAmbushStealthView());
+            }
+
+            if (!GameNetwork.IsServer &&
+                !list.Any(behavior => behavior is CoopSpectator.UI.CoopHideoutCallTroopsNameMarkerView))
+            {
+                list.Add(new CoopSpectator.UI.CoopHideoutCallTroopsNameMarkerView());
             }
 
             if (!GameNetwork.IsServer &&

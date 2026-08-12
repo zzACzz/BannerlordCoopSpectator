@@ -17,6 +17,7 @@ internal static class Program
             ValidateCampaignBossAgentChoreographyPolicy();
             ValidateNightUseAuthorityPolicy();
             ValidateNightBossIdentityAndPlacementPolicy();
+            ValidateMissionObjectivePolicy();
             ValidateNativeTimerStartupPolicy();
             ValidateCommanderIdentityFallbackPolicy();
             ValidateCommanderOrderInputPolicy();
@@ -1543,6 +1544,74 @@ internal static class Program
         Assert(
             !CoopHideoutBossPhaseContract.IsValidFirstPhaseParticipantCount(29, 0),
             "A missing exact first-phase count must fail closed instead of materializing the full roster.");
+    }
+
+    private static void ValidateMissionObjectivePolicy()
+    {
+        Assert(
+            CoopHideoutBossPhaseContract.ResolveHideoutObjectiveStage(
+                isNight: true,
+                CoopHideoutAmbushPhase.Stealth,
+                hasBossState: true,
+                CoopHideoutBossPhase.InitialAssault) ==
+                CoopHideoutObjectiveStage.LocateMainCamp,
+            "The nighttime infiltration must show the native locate-main-camp objective.");
+        Assert(
+            CoopHideoutBossPhaseContract.ResolveHideoutObjectiveStage(
+                isNight: true,
+                CoopHideoutAmbushPhase.CallTroops,
+                hasBossState: true,
+                CoopHideoutBossPhase.InitialAssault) ==
+                CoopHideoutObjectiveStage.Hidden,
+            "The objective must be hidden during the call-troops cinematic.");
+        Assert(
+            CoopHideoutBossPhaseContract.ResolveHideoutObjectiveStage(
+                isNight: true,
+                CoopHideoutAmbushPhase.MainCampBattle,
+                hasBossState: true,
+                CoopHideoutBossPhase.InitialAssault) ==
+                CoopHideoutObjectiveStage.ClearMainCamp,
+            "The nighttime main-camp battle must show the clear-main-camp objective.");
+        Assert(
+            CoopHideoutBossPhaseContract.ResolveHideoutObjectiveStage(
+                isNight: false,
+                CoopHideoutAmbushPhase.WaitingForMaterialization,
+                hasBossState: true,
+                CoopHideoutBossPhase.InitialAssault) ==
+                CoopHideoutObjectiveStage.ClearMainCamp,
+            "The daytime initial assault must show the clear-main-camp objective.");
+        Assert(
+            CoopHideoutBossPhaseContract.ResolveHideoutObjectiveStage(
+                isNight: false,
+                CoopHideoutAmbushPhase.WaitingForMaterialization,
+                hasBossState: true,
+                CoopHideoutBossPhase.Cinematic) ==
+                CoopHideoutObjectiveStage.Hidden,
+            "The objective must be hidden during the boss cinematic.");
+        Assert(
+            CoopHideoutBossPhaseContract.ResolveHideoutObjectiveStage(
+                isNight: false,
+                CoopHideoutAmbushPhase.WaitingForMaterialization,
+                hasBossState: true,
+                CoopHideoutBossPhase.Duel) ==
+                CoopHideoutObjectiveStage.WinDuel,
+            "The accepted duel must show the native win-the-duel objective.");
+        Assert(
+            CoopHideoutBossPhaseContract.ResolveHideoutObjectiveStage(
+                isNight: true,
+                CoopHideoutAmbushPhase.MainCampBattle,
+                hasBossState: true,
+                CoopHideoutBossPhase.AllBattle) ==
+                CoopHideoutObjectiveStage.WinFight,
+            "The cooperative boss battle must show the native win-the-fight objective.");
+        Assert(
+            CoopHideoutBossPhaseContract.ResolveHideoutObjectiveStage(
+                isNight: true,
+                CoopHideoutAmbushPhase.Completed,
+                hasBossState: true,
+                CoopHideoutBossPhase.Completed) ==
+                CoopHideoutObjectiveStage.Hidden,
+            "A completed hideout must not retain an objective panel.");
     }
 
     private static void ValidatePhaseTransitions()

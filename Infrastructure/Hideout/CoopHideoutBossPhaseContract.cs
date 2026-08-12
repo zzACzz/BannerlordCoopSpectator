@@ -20,6 +20,15 @@ namespace CoopSpectator.Infrastructure.Hideout
         AllBattle = 2
     }
 
+    public enum CoopHideoutObjectiveStage
+    {
+        Hidden = 0,
+        LocateMainCamp = 1,
+        ClearMainCamp = 2,
+        WinDuel = 3,
+        WinFight = 4
+    }
+
     public enum CoopHideoutBossClientCommandKind
     {
         ReadyForCinematic = 0,
@@ -445,6 +454,40 @@ namespace CoopSpectator.Infrastructure.Hideout
         public static bool ShouldShowBossConversation(CoopHideoutBossPhase phase)
         {
             return phase == CoopHideoutBossPhase.AwaitingHostChoice;
+        }
+
+        public static CoopHideoutObjectiveStage ResolveHideoutObjectiveStage(
+            bool isNight,
+            CoopHideoutAmbushPhase ambushPhase,
+            bool hasBossState,
+            CoopHideoutBossPhase bossPhase)
+        {
+            if (hasBossState && bossPhase != CoopHideoutBossPhase.InitialAssault)
+            {
+                if (bossPhase == CoopHideoutBossPhase.Duel)
+                    return CoopHideoutObjectiveStage.WinDuel;
+                if (bossPhase == CoopHideoutBossPhase.AllBattle)
+                    return CoopHideoutObjectiveStage.WinFight;
+                return CoopHideoutObjectiveStage.Hidden;
+            }
+
+            if (!isNight)
+            {
+                return hasBossState
+                    ? CoopHideoutObjectiveStage.ClearMainCamp
+                    : CoopHideoutObjectiveStage.Hidden;
+            }
+
+            switch (ambushPhase)
+            {
+                case CoopHideoutAmbushPhase.Stealth:
+                    return CoopHideoutObjectiveStage.LocateMainCamp;
+                case CoopHideoutAmbushPhase.MainCampBattle:
+                case CoopHideoutAmbushPhase.BossBattle:
+                    return CoopHideoutObjectiveStage.ClearMainCamp;
+                default:
+                    return CoopHideoutObjectiveStage.Hidden;
+            }
         }
 
         public static bool ShouldEnableBossConversationChoices(
