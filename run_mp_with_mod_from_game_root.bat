@@ -8,6 +8,7 @@ set "GAME_EXE=%GAME_ROOT%\bin\Win64_Shipping_Client\Bannerlord.exe"
 set "COOP_MODULE=%GAME_ROOT%\Modules\CoopSpectator\SubModule.xml"
 set "COOP_DLL=%GAME_ROOT%\Modules\CoopSpectator\bin\Win64_Shipping_Client\CoopSpectator.dll"
 set "COOP_HARMONY_DLL=%GAME_ROOT%\Modules\CoopSpectator\bin\Win64_Shipping_Client\0Harmony.dll"
+set "SHADER_CACHE_SWITCH=%GAME_ROOT%\Modules\CoopSpectator\CoopShaderCacheModeSwitch.ps1"
 set "HARMONY_MODULE=%GAME_ROOT%\Modules\Bannerlord.Harmony\SubModule.xml"
 set "HARMONY_DLL=%GAME_ROOT%\Modules\Bannerlord.Harmony\bin\Win64_Shipping_Client\Bannerlord.Harmony.dll"
 set "HARMONY_CORE_DLL=%GAME_ROOT%\Modules\Bannerlord.Harmony\bin\Win64_Shipping_Client\0Harmony.dll"
@@ -88,8 +89,14 @@ if "%USE_EXTERNAL_HARMONY%"=="1" if exist "%HARMONY_MODULE%" if exist "%HARMONY_
 )
 
 pushd "%GAME_ROOT%\bin\Win64_Shipping_Client"
-"%GAME_EXE%" /multiplayer %MODULES_ARG%
-set "EXIT_CODE=%ERRORLEVEL%"
+if exist "%SHADER_CACHE_SWITCH%" (
+  powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%SHADER_CACHE_SWITCH%" -Phase RunMultiplayer -GameExecutable "%GAME_EXE%" -GameArguments "/multiplayer %MODULES_ARG%" -GameWorkingDirectory "%GAME_ROOT%\bin\Win64_Shipping_Client"
+  set "EXIT_CODE=%ERRORLEVEL%"
+) else (
+  echo [WARN] Shader-cache mode-switch helper not found: "%SHADER_CACHE_SWITCH%"
+  "%GAME_EXE%" /multiplayer %MODULES_ARG%
+  set "EXIT_CODE=%ERRORLEVEL%"
+)
 popd
 
 if not "%EXIT_CODE%"=="0" (

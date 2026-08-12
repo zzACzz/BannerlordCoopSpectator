@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="..\..\Module\CoopSpectator\CoopShaderCacheModeSwitch.ps1"
+          Link="CoopShaderCacheModeSwitch.ps1"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\run_mp_with_mod_from_game_root.bat"
+          Link="run_mp_with_mod_from_game_root.bat"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\run_mp_with_mod.bat"
+          Link="run_mp_with_mod.bat"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
