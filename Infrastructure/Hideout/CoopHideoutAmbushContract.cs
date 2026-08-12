@@ -154,6 +154,38 @@ namespace CoopSpectator.Infrastructure.Hideout
             return priority;
         }
 
+        public static bool ShouldDeferReservedBossVisualOverlayAssignment(
+            string scenarioKind,
+            string entryId,
+            string reservedBossEntryId)
+        {
+            return IsHideoutAmbushScenario(scenarioKind) &&
+                   !string.IsNullOrWhiteSpace(entryId) &&
+                   !string.IsNullOrWhiteSpace(reservedBossEntryId) &&
+                   string.Equals(
+                       entryId,
+                       reservedBossEntryId,
+                       StringComparison.Ordinal);
+        }
+
+        public static string ResolveBossConversationDisplayName(
+            string exactDisplayName,
+            string nativeDisplayName)
+        {
+            return !string.IsNullOrWhiteSpace(exactDisplayName)
+                ? exactDisplayName
+                : nativeDisplayName;
+        }
+
+        public static bool ShouldReplaceExactDisplayNameCache(
+            string cachedEntryId,
+            string currentEntryId)
+        {
+            return !string.IsNullOrWhiteSpace(currentEntryId) &&
+                   (string.IsNullOrWhiteSpace(cachedEntryId) ||
+                    !string.Equals(cachedEntryId, currentEntryId, StringComparison.OrdinalIgnoreCase));
+        }
+
         public static bool ShouldReleaseUsePointRequestPending(
             CoopHideoutAmbushPhase phase,
             string reason)

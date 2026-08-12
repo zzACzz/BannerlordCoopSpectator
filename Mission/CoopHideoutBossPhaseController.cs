@@ -29,7 +29,11 @@ namespace CoopSpectator.MissionBehaviors
             0.25f,
             0.5f,
             1f,
-            2f
+            2f,
+            3f,
+            5f,
+            8f,
+            12f
         };
 
         private readonly HashSet<int> _requiredReadyPeerIndices = new HashSet<int>();
@@ -65,10 +69,10 @@ namespace CoopSpectator.MissionBehaviors
         private int _initialEnemyCount;
         private bool _bossFightEntityMissingLogged;
         private bool _phaseCompletionLogged;
-        private bool _nightStagedPlacementActive;
-        private bool _nightApproachHeld;
-        private DateTime _nightApproachHoldDeadlineUtc;
-        private float _nightAuthoredWalkDistance;
+        private bool _campaignStagedPlacementActive;
+        private bool _campaignApproachHeld;
+        private DateTime _campaignApproachHoldDeadlineUtc;
+        private float _campaignAuthoredWalkDistance;
         private int _choreographySequence;
 
         public static event Action<CoopHideoutBossPhaseSession, int> ClientStateChanged;
@@ -90,8 +94,8 @@ namespace CoopSpectator.MissionBehaviors
             bool wasAiControlled =
                 frozen.OriginalController == AgentControllerType.AI ||
                 _nativeControllerDetachedAgentIndices.Contains(agent.Index);
-            return CoopHideoutBossPhaseContract.ShouldPreserveNightBossFormationDetachment(
-                _nightStagedPlacementActive,
+            return CoopHideoutBossPhaseContract.ShouldPreserveCampaignBossFormationDetachment(
+                _campaignStagedPlacementActive,
                 _session.Phase,
                 wasAiControlled,
                 isBossFightParticipant);
@@ -110,7 +114,7 @@ namespace CoopSpectator.MissionBehaviors
                 CurrentClientState = null;
                 CurrentClientPhaseDurationMilliseconds = 0;
                 _clientChoreographySequenceByAgent.Clear();
-                _nightStagedPlacementActive = false;
+                _campaignStagedPlacementActive = false;
             }
 
             if (!GameNetwork.IsServer)
@@ -133,7 +137,7 @@ namespace CoopSpectator.MissionBehaviors
             };
 
             ModLogger.Info(
-                "CoopHideoutBossPhaseController: isolated day hideout controller initialized. " +
+                "CoopHideoutBossPhaseController: isolated campaign hideout controller initialized. " +
                 "BattleInstanceId=" + _session.BattleInstanceId +
                 " Scene=" + (Mission?.SceneName ?? "null") + ".");
         }
@@ -322,6 +326,7 @@ namespace CoopSpectator.MissionBehaviors
 
             CurrentClientState = message.ToSession();
             CurrentClientPhaseDurationMilliseconds = message.PhaseDurationMilliseconds;
+            ApplyClientBossTargetPolicy(CurrentClientState);
             if (CoopDebugConfig.HideoutBossChoreographyDiagnostics &&
                 CurrentClientState.Phase == CoopHideoutBossPhase.Duel &&
                 previous?.Phase != CoopHideoutBossPhase.Duel)
@@ -380,7 +385,7 @@ namespace CoopSpectator.MissionBehaviors
             try
             {
                 _choreographySequence = Math.Max(_choreographySequence, message.Sequence);
-                _nightStagedPlacementActive = true;
+                _campaignStagedPlacementActive = true;
                 TrackClientChoreographyDiagnosticAgent(agent, message, clientState);
                 ApplyAgentChoreographyLocally(
                     agent,
@@ -422,11 +427,11 @@ namespace CoopSpectator.MissionBehaviors
 
             if (_session.Phase == CoopHideoutBossPhase.Cinematic)
             {
-                if (_nightStagedPlacementActive &&
-                    !_nightApproachHeld &&
-                    nowUtc >= _nightApproachHoldDeadlineUtc)
+                if (_campaignStagedPlacementActive &&
+                    !_campaignApproachHeld &&
+                    nowUtc >= _campaignApproachHoldDeadlineUtc)
                 {
-                    HoldNightBossFightApproachAtTargets();
+                    HoldCampaignBossFightApproachAtTargets();
                 }
 
                 if (nowUtc >= _session.DeadlineUtc)
@@ -609,8 +614,8 @@ namespace CoopSpectator.MissionBehaviors
 
         private void BeginCinematic(DateTime nowUtc)
         {
-            _nightApproachHeld = false;
-            _nightApproachHoldDeadlineUtc = DateTime.MaxValue;
+            _campaignApproachHeld = false;
+            _campaignApproachHoldDeadlineUtc = DateTime.MaxValue;
             if (!TryPlaceBossFightParticipants())
             {
                 StartAllBattle("boss-placement-failed-fallback");
@@ -619,12 +624,12 @@ namespace CoopSpectator.MissionBehaviors
 
             int cinematicDurationMilliseconds =
                 CoopHideoutBossPhaseContract.ResolveCinematicDurationMilliseconds(
-                    _nightStagedPlacementActive);
-            if (_nightStagedPlacementActive)
+                    _campaignStagedPlacementActive);
+            if (_campaignStagedPlacementActive)
             {
-                _nightApproachHoldDeadlineUtc = nowUtc.AddMilliseconds(
-                    CoopHideoutBossPhaseContract.ResolveNightApproachHoldMilliseconds(
-                        _nightAuthoredWalkDistance));
+                _campaignApproachHoldDeadlineUtc = nowUtc.AddMilliseconds(
+                    CoopHideoutBossPhaseContract.ResolveCampaignBossApproachHoldMilliseconds(
+                        _campaignAuthoredWalkDistance));
             }
             string rejection;
             if (!CoopHideoutBossPhaseContract.TryTransition(
@@ -654,7 +659,7 @@ namespace CoopSpectator.MissionBehaviors
                 return;
             }
 
-            FinalizeNightBossFightApproach();
+            FinalizeCampaignBossFightApproach();
 
             string rejection;
             if (!CoopHideoutBossPhaseContract.TryTransition(
@@ -708,11 +713,11 @@ namespace CoopSpectator.MissionBehaviors
                 if (agent.Team != Team.Invalid)
                     agent.SetTeam(Team.Invalid, sync: true);
                 agent.SetLookAgent(frozen.OriginalTeam == _playerTeam ? _hostAgent : _bossAgent);
-                FreezeAgentAfterNightBossApproach(agent);
+                FreezeAgentAfterCampaignBossApproach(agent);
             }
 
-            ReactivateReleasedNightBossFightAi(_bossAgent);
-            _bossAgent.SetAlarmState(Agent.AIStateFlag.Alarmed);
+            ReactivateReleasedCampaignBossFightAi(_bossAgent);
+            ApplyDuelBossPreferredTarget(_bossAgent, _hostAgent);
             string rejection;
             if (!CoopHideoutBossPhaseContract.TryTransition(
                     _session,
@@ -752,7 +757,8 @@ namespace CoopSpectator.MissionBehaviors
             OrderTeamToCharge(_playerTeam);
             OrderTeamToCharge(_enemyTeam);
             foreach (FrozenAgentState frozen in _frozenAgentStates.Values)
-                ReactivateReleasedNightBossFightAi(frozen?.Agent);
+                ReactivateReleasedCampaignBossFightAi(frozen?.Agent);
+            ClearDuelBossPreferredTarget(_bossAgent);
 
             string rejection;
             if (!CoopHideoutBossPhaseContract.TryTransition(
@@ -802,10 +808,10 @@ namespace CoopSpectator.MissionBehaviors
             _frozenAgentStates.Clear();
             _frozenFormationStates.Clear();
             _targetPlacements.Clear();
-            _nightStagedPlacementActive =
-                Mission.GetMissionBehavior<CoopExactCampaignHideoutAmbushMissionController>() != null;
-            if (CoopHideoutBossPhaseContract.ShouldStopFormationsForNightBossCinematic(
-                    _nightStagedPlacementActive))
+            _campaignStagedPlacementActive =
+                Mission.GetMissionBehavior<CoopExactCampaignHideoutMissionController>() != null;
+            if (CoopHideoutBossPhaseContract.ShouldStopFormationsForCampaignBossCinematic(
+                    _campaignStagedPlacementActive))
             {
                 StopTeamFormationsForCinematic(_playerTeam);
                 StopTeamFormationsForCinematic(_enemyTeam);
@@ -827,14 +833,14 @@ namespace CoopSpectator.MissionBehaviors
                 bool isBossFightParticipant =
                     ReferenceEquals(agent.Team, _playerTeam) ||
                     ReferenceEquals(agent.Team, _enemyTeam);
-                if (CoopHideoutBossPhaseContract.ShouldDetachAgentForNightBossCinematic(
-                        _nightStagedPlacementActive,
+                if (CoopHideoutBossPhaseContract.ShouldDetachAgentForCampaignBossCinematic(
+                        _campaignStagedPlacementActive,
                         agent.IsAIControlled && isBossFightParticipant) &&
                     agent.Formation != null)
                 {
                     agent.Formation = null;
                 }
-                if (!_nightStagedPlacementActive || !isBossFightParticipant)
+                if (!_campaignStagedPlacementActive || !isBossFightParticipant)
                     ScriptAgentAtCurrentPosition(agent);
             }
 
@@ -866,34 +872,36 @@ namespace CoopSpectator.MissionBehaviors
             playerFacingDirection.Normalize();
             Vec2 enemyFacingDirection = playerFacingDirection * -1f;
 
-            CoopExactCampaignHideoutAmbushMissionController nightController =
-                Mission.GetMissionBehavior<CoopExactCampaignHideoutAmbushMissionController>();
-            CoopHideoutBossFightManifest bossFightManifest =
-                nightController?.SceneManifest?.BossFight;
-            _nightStagedPlacementActive = nightController != null;
+            CoopHideoutSceneManifestRuntime.TryResolve(
+                Mission.SceneName,
+                out CoopHideoutSceneManifest sceneManifest,
+                out string manifestDiagnostics);
+            CoopHideoutBossFightManifest bossFightManifest = sceneManifest?.BossFight;
+            _campaignStagedPlacementActive =
+                Mission.GetMissionBehavior<CoopExactCampaignHideoutMissionController>() != null;
             float authoredInnerRadius = bossFightManifest?.InnerRadius ?? DefaultInnerRadius;
             float innerRadius = CoopHideoutBossPhaseContract.ResolveBossDialogueInnerRadius(
                 authoredInnerRadius,
-                _nightStagedPlacementActive);
+                _campaignStagedPlacementActive);
             float outerRadius = bossFightManifest?.OuterRadius ?? DefaultOuterRadius;
             float walkDistance = bossFightManifest?.WalkDistance ?? DefaultWalkDistance;
-            _nightAuthoredWalkDistance = _nightStagedPlacementActive
+            _campaignAuthoredWalkDistance = _campaignStagedPlacementActive
                 ? Math.Max(0f, walkDistance)
                 : 0f;
             CoopHideoutBossPrincipalPlacement principal =
                 CoopHideoutBossPhaseContract.ResolvePrincipalPlacement(
                     innerRadius,
-                    _nightStagedPlacementActive ? walkDistance : 0f);
+                    _campaignStagedPlacementActive ? walkDistance : 0f);
 
             CoopHideoutBossPrincipalPerturbation playerPerturbation =
-                _nightStagedPlacementActive
+                _campaignStagedPlacementActive
                     ? CoopHideoutBossPhaseContract.ResolveNativePrincipalPerturbation(
                         seedOffset: 0,
                         perturbAmount:
                             CoopHideoutBossPhaseContract.NativePrincipalPlacementPerturbation)
                     : new CoopHideoutBossPrincipalPerturbation();
             CoopHideoutBossPrincipalPerturbation bossPerturbation =
-                _nightStagedPlacementActive
+                _campaignStagedPlacementActive
                     ? CoopHideoutBossPhaseContract.ResolveNativePrincipalPerturbation(
                         seedOffset: 1,
                         perturbAmount:
@@ -936,15 +944,15 @@ namespace CoopSpectator.MissionBehaviors
             List<Agent> bossCompanions = enemyAgents
                 .Where(agent => !ReferenceEquals(agent, _bossAgent))
                 .ToList();
-            if (_nightStagedPlacementActive)
+            if (_campaignStagedPlacementActive)
             {
-                AppendNativeNightCompanionPlacements(
+                AppendNativeCampaignCompanionPlacements(
                     placements,
                     playerCompanions,
                     playerPrincipalInitialPosition,
                     isPlayerSide: true,
                     facingDirection: playerFacingDirection);
-                AppendNativeNightCompanionPlacements(
+                AppendNativeCampaignCompanionPlacements(
                     placements,
                     bossCompanions,
                     bossPrincipalInitialPosition,
@@ -976,7 +984,7 @@ namespace CoopSpectator.MissionBehaviors
             bool previousTeleportingAgents = Mission.IsTeleportingAgents;
             try
             {
-                if (!TryAssignHostControllerForNightBossCinematic())
+                if (!TryAssignHostControllerForCampaignBossCinematic())
                     return false;
 
                 Mission.IsTeleportingAgents = true;
@@ -986,7 +994,7 @@ namespace CoopSpectator.MissionBehaviors
                     PlaceAgentAtInitialPosition(placement);
                 }
                 Mission.IsTeleportingAgents = false;
-                int choreographySequence = _nightStagedPlacementActive
+                int choreographySequence = _campaignStagedPlacementActive
                     ? NextChoreographySequence()
                     : 0;
                 foreach (BossFightParticipantPlacement placement in placements)
@@ -1002,27 +1010,28 @@ namespace CoopSpectator.MissionBehaviors
                 }
                 ModLogger.Info(
                     "CoopHideoutBossPhaseController: placed boss-fight participants. " +
-                    "NightStaged=" + _nightStagedPlacementActive +
+                    "CampaignStaged=" + _campaignStagedPlacementActive +
                     " AuthoredInnerRadius=" + authoredInnerRadius +
                     " EffectiveInnerRadius=" + innerRadius +
                     " OuterRadius=" + outerRadius +
                     " AuthoredWalkDistance=" +
-                    (_nightStagedPlacementActive ? walkDistance : 0f) +
+                    (_campaignStagedPlacementActive ? walkDistance : 0f) +
                     " BossApproachDistance=" +
-                    (_nightStagedPlacementActive
-                        ? CoopHideoutBossPhaseContract.ResolveNightEnemyApproachDistance(walkDistance)
+                    (_campaignStagedPlacementActive
+                        ? CoopHideoutBossPhaseContract.ResolveCampaignBossApproachDistance(walkDistance)
                         : 0f) +
                     " CinematicDurationMilliseconds=" +
                     CoopHideoutBossPhaseContract.ResolveCinematicDurationMilliseconds(
-                        _nightStagedPlacementActive) +
+                        _campaignStagedPlacementActive) +
                     " ApproachHoldMilliseconds=" +
-                    (_nightStagedPlacementActive
-                        ? CoopHideoutBossPhaseContract.ResolveNightApproachHoldMilliseconds(
+                    (_campaignStagedPlacementActive
+                        ? CoopHideoutBossPhaseContract.ResolveCampaignBossApproachHoldMilliseconds(
                             walkDistance)
                         : 0) +
                     " Layout=" +
-                    (_nightStagedPlacementActive ? "native-triangular-rows" : "day-radial-arc") +
-                    " Count=" + placements.Count + ".");
+                    (_campaignStagedPlacementActive ? "native-triangular-rows" : "fallback-radial-arc") +
+                    " Count=" + placements.Count +
+                    " Manifest={" + manifestDiagnostics + "}.");
                 return true;
             }
             catch (Exception ex)
@@ -1068,7 +1077,7 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        private void AppendNativeNightCompanionPlacements(
+        private void AppendNativeCampaignCompanionPlacements(
             List<BossFightParticipantPlacement> placements,
             List<Agent> agents,
             Vec3 principalInitialPosition,
@@ -1124,7 +1133,7 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             bool shouldApproach =
-                _nightStagedPlacementActive &&
+                _campaignStagedPlacementActive &&
                 agent.IsAIControlled;
             Vec3 groundPosition = shouldApproach
                 ? placement.InitialGroundPosition
@@ -1137,8 +1146,8 @@ namespace CoopSpectator.MissionBehaviors
             direction.Normalize();
             agent.LookDirection = new Vec3(direction.x, direction.y, 0f);
             agent.SetMovementDirection(in direction);
-            if (CoopHideoutBossPhaseContract.ShouldDetachAgentForNightBossCinematic(
-                    _nightStagedPlacementActive,
+            if (CoopHideoutBossPhaseContract.ShouldDetachAgentForCampaignBossCinematic(
+                    _campaignStagedPlacementActive,
                     agent.IsAIControlled) &&
                 agent.Formation != null)
             {
@@ -1157,7 +1166,7 @@ namespace CoopSpectator.MissionBehaviors
                 "server-start-approach-before",
                 _choreographySequence,
                 placement);
-            bool shouldApproach = _nightStagedPlacementActive;
+            bool shouldApproach = _campaignStagedPlacementActive;
             Vec2 direction = placement.FacingDirection;
             if (direction.LengthSquared < 0.0001f)
                 direction = new Vec2(0f, 1f);
@@ -1194,7 +1203,7 @@ namespace CoopSpectator.MissionBehaviors
         private bool IsNetworkChoreographyAgent(BossFightParticipantPlacement placement)
         {
             Agent agent = placement?.Agent;
-            if (!_nightStagedPlacementActive ||
+            if (!_campaignStagedPlacementActive ||
                 agent?.IsActive() != true ||
                 ReferenceEquals(agent, _hostAgent) ||
                 agent.MissionPeer != null ||
@@ -1285,7 +1294,7 @@ namespace CoopSpectator.MissionBehaviors
                 agent.SetMovementDirection(in direction);
                 agent.MovementInputVector = Vec2.Zero;
                 agent.MovementFlags = Agent.MovementControlFlag.None;
-                FreezeAgentAfterNightBossApproach(agent);
+                FreezeAgentAfterCampaignBossApproach(agent);
                 LogChoreographyDiagnosticSnapshot(
                     agent,
                     kind + "-apply-after",
@@ -1327,7 +1336,7 @@ namespace CoopSpectator.MissionBehaviors
                 _choreographySequence);
         }
 
-        private void FreezeAgentAfterNightBossApproach(Agent agent)
+        private void FreezeAgentAfterCampaignBossApproach(Agent agent)
         {
             if (agent?.IsActive() != true)
                 return;
@@ -1337,13 +1346,13 @@ namespace CoopSpectator.MissionBehaviors
             agent.SetMaximumSpeedLimit(-1f, isMultiplier: false);
 
             bool shouldPause =
-                CoopHideoutBossPhaseContract.ShouldPauseAiForNightBossChoreography(
-                    _nightStagedPlacementActive,
+                CoopHideoutBossPhaseContract.ShouldPauseAiForCampaignBossChoreography(
+                    _campaignStagedPlacementActive,
                     agent.IsAIControlled,
                     CoopHideoutBossAgentChoreographyKind.HoldAtTarget);
             bool shouldDetachNativeController =
-                CoopHideoutBossPhaseContract.ShouldDetachNativeControllerForNightBossHold(
-                    _nightStagedPlacementActive,
+                CoopHideoutBossPhaseContract.ShouldDetachNativeControllerForCampaignBossHold(
+                    _campaignStagedPlacementActive,
                     agent.IsAIControlled,
                     agent.MissionPeer != null,
                     ReferenceEquals(agent, _hostAgent));
@@ -1491,7 +1500,7 @@ namespace CoopSpectator.MissionBehaviors
 
         private void SendCurrentAgentChoreography(NetworkCommunicator peer)
         {
-            if (!_nightStagedPlacementActive ||
+            if (!_campaignStagedPlacementActive ||
                 peer == null ||
                 _session == null ||
                 _targetPlacements.Count == 0)
@@ -1506,7 +1515,7 @@ namespace CoopSpectator.MissionBehaviors
                     continue;
 
                 CoopHideoutBossAgentChoreographyKind kind;
-                if (_session.Phase == CoopHideoutBossPhase.Cinematic && !_nightApproachHeld)
+                if (_session.Phase == CoopHideoutBossPhase.Cinematic && !_campaignApproachHeld)
                 {
                     kind = CoopHideoutBossAgentChoreographyKind.StartApproach;
                 }
@@ -1605,10 +1614,10 @@ namespace CoopSpectator.MissionBehaviors
             return new Vec3(point, height);
         }
 
-        private void HoldNightBossFightApproachAtTargets()
+        private void HoldCampaignBossFightApproachAtTargets()
         {
-            if (_nightApproachHeld ||
-                !_nightStagedPlacementActive ||
+            if (_campaignApproachHeld ||
+                !_campaignStagedPlacementActive ||
                 _targetPlacements.Count == 0)
             {
                 return;
@@ -1632,7 +1641,7 @@ namespace CoopSpectator.MissionBehaviors
                 foreach (BossFightParticipantPlacement placement in _targetPlacements.Values)
                 {
                     Agent agent = placement?.Agent;
-                    if (!_nightStagedPlacementActive ||
+                    if (!_campaignStagedPlacementActive ||
                         agent?.IsActive() != true ||
                         !agent.IsAIControlled)
                     {
@@ -1704,7 +1713,7 @@ namespace CoopSpectator.MissionBehaviors
             finally
             {
                 Mission.IsTeleportingAgents = previousTeleportingAgents;
-                _nightApproachHeld = true;
+                _campaignApproachHeld = true;
             }
 
             LockFrozenFormationsForBossConversation();
@@ -1715,7 +1724,7 @@ namespace CoopSpectator.MissionBehaviors
                 ? enemyRemainingTotal / enemyAgentCount
                 : 0f;
             ModLogger.Info(
-                "CoopHideoutBossPhaseController: synchronized night boss approach hold applied. " +
+                "CoopHideoutBossPhaseController: synchronized campaign boss approach hold applied. " +
                 "Sequence=" + sequence +
                 " HeldAgents=" + heldAgentCount +
                 " FailedAgents=" + failedAgentCount +
@@ -1733,13 +1742,13 @@ namespace CoopSpectator.MissionBehaviors
                     : string.Empty) + ".");
         }
 
-        private void FinalizeNightBossFightApproach()
+        private void FinalizeCampaignBossFightApproach()
         {
-            if (!_nightStagedPlacementActive || _targetPlacements.Count == 0)
+            if (!_campaignStagedPlacementActive || _targetPlacements.Count == 0)
                 return;
 
-            if (!_nightApproachHeld)
-                HoldNightBossFightApproachAtTargets();
+            if (!_campaignApproachHeld)
+                HoldCampaignBossFightApproachAtTargets();
 
             int finalizedAgentCount = 0;
             try
@@ -1751,7 +1760,7 @@ namespace CoopSpectator.MissionBehaviors
                 }
                 LockFrozenFormationsForBossConversation();
                 ModLogger.Info(
-                    "CoopHideoutBossPhaseController: finalized night boss approach. " +
+                    "CoopHideoutBossPhaseController: finalized campaign boss approach. " +
                     "PositionHeldAgents=" + finalizedAgentCount +
                     " FormationsRestored=True.");
             }
@@ -1779,7 +1788,7 @@ namespace CoopSpectator.MissionBehaviors
             agent.SetMovementDirection(in direction);
             agent.MovementInputVector = Vec2.Zero;
             agent.MovementFlags = Agent.MovementControlFlag.None;
-            FreezeAgentAfterNightBossApproach(agent);
+            FreezeAgentAfterCampaignBossApproach(agent);
             return true;
         }
 
@@ -1864,9 +1873,9 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        private bool TryAssignHostControllerForNightBossCinematic()
+        private bool TryAssignHostControllerForCampaignBossCinematic()
         {
-            if (!_nightStagedPlacementActive)
+            if (!_campaignStagedPlacementActive)
                 return true;
             if (_hostAgent?.IsActive() != true ||
                 !_frozenAgentStates.TryGetValue(
@@ -2014,14 +2023,14 @@ namespace CoopSpectator.MissionBehaviors
             agent.SetLookAgent(null);
         }
 
-        private void ReactivateReleasedNightBossFightAi(Agent agent)
+        private void ReactivateReleasedCampaignBossFightAi(Agent agent)
         {
             bool isBossFightParticipant =
                 ReferenceEquals(agent?.Team, _playerTeam) ||
                 ReferenceEquals(agent?.Team, _enemyTeam);
             if (agent?.IsActive() != true ||
-                !CoopHideoutBossPhaseContract.ShouldReactivateAgentAfterNightBossChoice(
-                    _nightStagedPlacementActive,
+                !CoopHideoutBossPhaseContract.ShouldReactivateAgentAfterCampaignBossChoice(
+                    _campaignStagedPlacementActive,
                     agent.IsAIControlled,
                     isBossFightParticipant))
             {
@@ -2040,9 +2049,68 @@ namespace CoopSpectator.MissionBehaviors
             agent.ForceAiBehaviorSelection();
         }
 
+        private void ApplyClientBossTargetPolicy(CoopHideoutBossPhaseSession state)
+        {
+            if (!GameNetwork.IsClient || state == null)
+                return;
+
+            Agent bossAgent = TaleWorlds.MountAndBlade.Mission.MissionNetworkHelper.GetAgentFromIndex(
+                state.BossAgentIndex,
+                canBeNull: true);
+            if (CoopHideoutBossPhaseContract.ShouldClearBossPreferredTarget(state.Phase))
+            {
+                ClearDuelBossPreferredTarget(bossAgent);
+                return;
+            }
+            if (state.Phase != CoopHideoutBossPhase.Duel)
+                return;
+
+            Agent hostAgent = TaleWorlds.MountAndBlade.Mission.MissionNetworkHelper.GetAgentFromIndex(
+                state.HostAgentIndex,
+                canBeNull: true);
+            ApplyDuelBossPreferredTarget(bossAgent, hostAgent);
+        }
+
+        private void ApplyDuelBossPreferredTarget(Agent bossAgent, Agent hostAgent)
+        {
+            if (!CoopHideoutBossPhaseContract.ShouldPrimeBossPreferredTargetForDuel(
+                    CoopHideoutBossPhase.Duel,
+                    isBossAgent: bossAgent != null,
+                    isAiControlled: bossAgent?.IsAIControlled == true,
+                    hostAgentActive: hostAgent?.IsActive() == true,
+                    bossAgentActive: bossAgent?.IsActive() == true))
+            {
+                return;
+            }
+
+            bossAgent.Formation = null;
+            bossAgent.ClearTargetFrame();
+            bossAgent.DisableScriptedMovement();
+            bossAgent.SetMaximumSpeedLimit(-1f, isMultiplier: false);
+            bossAgent.SetIsAIPaused(false);
+            bossAgent.ResetEnemyCaches();
+            bossAgent.SetAutomaticTargetSelection(true);
+            bossAgent.SetTargetAgent(hostAgent);
+            bossAgent.SetAlarmState(Agent.AIStateFlag.Alarmed);
+            bossAgent.SetWatchState(Agent.WatchState.Alarmed);
+            bossAgent.HumanAIComponent?.SyncBehaviorParamsIfNecessary();
+            bossAgent.ForceAiBehaviorSelection();
+        }
+
+        private static void ClearDuelBossPreferredTarget(Agent bossAgent)
+        {
+            if (bossAgent?.IsActive() != true || !bossAgent.IsAIControlled)
+                return;
+
+            bossAgent.SetTargetAgent(null);
+            bossAgent.SetAutomaticTargetSelection(true);
+            bossAgent.ResetEnemyCaches();
+            bossAgent.ForceAiBehaviorSelection();
+        }
+
         private void BroadcastReleasedAgentChoreography(CoopHideoutBossPhase phase)
         {
-            if (!_nightStagedPlacementActive || _targetPlacements.Count == 0)
+            if (!_campaignStagedPlacementActive || _targetPlacements.Count == 0)
                 return;
 
             int sequence = NextChoreographySequence();
@@ -2065,7 +2133,7 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             ModLogger.Info(
-                "CoopHideoutBossPhaseController: synchronized night boss agents released. " +
+                "CoopHideoutBossPhaseController: synchronized campaign boss agents released. " +
                 "Phase=" + phase +
                 " Sequence=" + sequence +
                 " ReleasedAgents=" + releasedAgentCount + ".");
@@ -2099,8 +2167,8 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             bool lockFormationAi =
-                CoopHideoutBossPhaseContract.ShouldLockFormationAiForNightBossCinematic(
-                    _nightStagedPlacementActive);
+                CoopHideoutBossPhaseContract.ShouldLockFormationAiForCampaignBossCinematic(
+                    _campaignStagedPlacementActive);
             foreach (Formation formation in team.FormationsIncludingEmpty)
             {
                 if (formation == null || formation.CountOfUnits <= 0)
@@ -2147,8 +2215,8 @@ namespace CoopSpectator.MissionBehaviors
 
         private void LockFrozenFormationsForBossConversation()
         {
-            if (!CoopHideoutBossPhaseContract.ShouldLockFormationAiForNightBossCinematic(
-                    _nightStagedPlacementActive))
+            if (!CoopHideoutBossPhaseContract.ShouldLockFormationAiForCampaignBossCinematic(
+                    _campaignStagedPlacementActive))
             {
                 return;
             }
@@ -2383,7 +2451,7 @@ namespace CoopSpectator.MissionBehaviors
             if (phase == CoopHideoutBossPhase.Cinematic)
             {
                 return CoopHideoutBossPhaseContract.ResolveCinematicDurationMilliseconds(
-                    _nightStagedPlacementActive);
+                    _campaignStagedPlacementActive);
             }
             return 0;
         }
@@ -2602,6 +2670,42 @@ namespace CoopSpectator.MissionBehaviors
                     _lastSynchedTargetPositionField?.GetValue(agent);
                 object checkIfTargetFrameIsChanged =
                     _checkIfTargetFrameIsChangedField?.GetValue(agent);
+                Agent combatTargetAgent = agent.GetTargetAgent();
+                Agent referenceHostAgent = ResolveChoreographyDiagnosticHostAgent();
+                Vec3 referenceHostPosition =
+                    referenceHostAgent?.IsActive() == true
+                        ? referenceHostAgent.Position
+                        : Vec3.Zero;
+                Vec3 referenceHostVisualPosition =
+                    referenceHostAgent?.IsActive() == true
+                        ? referenceHostAgent.VisualPosition
+                        : Vec3.Zero;
+                Vec2 movementDirection = agent.GetMovementDirection();
+                Vec2 directionToHost = referenceHostPosition.AsVec2 - actualPosition.AsVec2;
+                float planarDistanceToHost = directionToHost.Length;
+                float movementAlignmentToHost = 0f;
+                float lookAlignmentToHost = 0f;
+                if (planarDistanceToHost > 0.0001f)
+                {
+                    directionToHost /= planarDistanceToHost;
+                    if (movementDirection.LengthSquared > 0.0001f)
+                    {
+                        Vec2 normalizedMovementDirection = movementDirection;
+                        normalizedMovementDirection.Normalize();
+                        movementAlignmentToHost =
+                            normalizedMovementDirection.x * directionToHost.x +
+                            normalizedMovementDirection.y * directionToHost.y;
+                    }
+
+                    Vec2 lookDirection = agent.LookDirection.AsVec2;
+                    if (lookDirection.LengthSquared > 0.0001f)
+                    {
+                        lookDirection.Normalize();
+                        lookAlignmentToHost =
+                            lookDirection.x * directionToHost.x +
+                            lookDirection.y * directionToHost.y;
+                    }
+                }
                 ModLogger.Info(
                     "CoopHideoutBossPhaseController: choreography diagnostic snapshot. " +
                     "Runtime=" + ResolveChoreographyDiagnosticRuntimeRole() +
@@ -2630,10 +2734,44 @@ namespace CoopSpectator.MissionBehaviors
                     (checkIfTargetFrameIsChanged?.ToString() ?? "unavailable") +
                     " LookDirection=" + agent.LookDirection +
                     " MovementInput=" + agent.MovementInputVector +
+                    " MovementDirection=" + movementDirection +
+                    " MovementAlignmentToHost=" + movementAlignmentToHost +
+                    " LookAlignmentToHost=" + lookAlignmentToHost +
                     " MovementFlags=" + agent.MovementFlags +
                     " Controller=" + agent.Controller +
                     " IsAIControlled=" + agent.IsAIControlled +
                     " IsPaused=" + agent.IsPaused +
+                    " TargetAgent=" + (combatTargetAgent?.Index.ToString() ?? "null") +
+                    " TargetDistance=" +
+                    (combatTargetAgent?.IsActive() == true
+                        ? actualPosition.Distance(combatTargetAgent.Position).ToString()
+                        : "unavailable") +
+                    " ReferenceHostAgent=" +
+                    (referenceHostAgent?.IsActive() == true
+                        ? referenceHostAgent.Index.ToString()
+                        : "unavailable") +
+                    " ReferenceHostPosition=" +
+                    (referenceHostAgent?.IsActive() == true
+                        ? referenceHostPosition.ToString()
+                        : "unavailable") +
+                    " ReferenceHostVisualPosition=" +
+                    (referenceHostAgent?.IsActive() == true
+                        ? referenceHostVisualPosition.ToString()
+                        : "unavailable") +
+                    " PlanarDistanceToHost=" +
+                    (referenceHostAgent?.IsActive() == true
+                        ? planarDistanceToHost.ToString()
+                        : "unavailable") +
+                    " AgentEnemyOfHost=" +
+                    (referenceHostAgent?.IsActive() == true
+                        ? agent.IsEnemyOf(referenceHostAgent).ToString()
+                        : "unavailable") +
+                    " HostEnemyOfAgent=" +
+                    (referenceHostAgent?.IsActive() == true
+                        ? referenceHostAgent.IsEnemyOf(agent).ToString()
+                        : "unavailable") +
+                    " WieldedItem=" +
+                    (agent.WieldedWeapon.Item?.StringId ?? "none") +
                     " TeamSide=" + (agent.Team?.Side.ToString() ?? "null") +
                     " Formation=" + (agent.Formation?.Index.ToString() ?? "null") +
                     " MissionIsTeleportingAgents=" + (Mission?.IsTeleportingAgents ?? false) + ".");
@@ -2647,6 +2785,20 @@ namespace CoopSpectator.MissionBehaviors
                     " Agent=" + agent.Index +
                     " Error=" + ex.GetType().Name + ":" + ex.Message + ".");
             }
+        }
+
+        private Agent ResolveChoreographyDiagnosticHostAgent()
+        {
+            if (_hostAgent?.IsActive() == true)
+                return _hostAgent;
+
+            CoopHideoutBossPhaseSession clientState = CurrentClientState;
+            if (clientState == null)
+                return null;
+
+            return TaleWorlds.MountAndBlade.Mission.MissionNetworkHelper.GetAgentFromIndex(
+                clientState.HostAgentIndex,
+                canBeNull: true);
         }
 
         private void StartAllTrackedChoreographyDiagnosticSampleWindows(

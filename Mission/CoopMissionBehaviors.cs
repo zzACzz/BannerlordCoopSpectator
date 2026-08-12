@@ -13813,6 +13813,13 @@ namespace CoopSpectator.MissionBehaviors
             if (runtimeState?.Sides == null || runtimeState.Sides.Count == 0)
                 return;
 
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                runtimeState.ScenarioContext;
+            string reservedNightBossEntryId =
+                ResolveReservedNightBossVisualOverlayEntryId(runtimeState, scenarioContext);
+
             string snapshotKey = BuildClientExactCampaignVisualOverlayQueueSnapshotKey(runtimeState);
             if (_exactNativeClientVisualOverlayEntryQueuesByAssignmentKey.Count > 0)
             {
@@ -13846,6 +13853,14 @@ namespace CoopSpectator.MissionBehaviors
                     if (entryState == null)
                         continue;
 
+                    if (CoopHideoutAmbushContract.ShouldDeferReservedBossVisualOverlayAssignment(
+                            scenarioContext?.ScenarioKind,
+                            entryState.EntryId,
+                            reservedNightBossEntryId))
+                    {
+                        continue;
+                    }
+
                     int availableCount = Math.Max(0, entryState.Count - entryState.WoundedCount);
                     if (availableCount <= 0)
                         continue;
@@ -13878,7 +13893,50 @@ namespace CoopSpectator.MissionBehaviors
                 "CoopMissionSpawnLogic: built client exact visual overlay assignment queues. " +
                 "SnapshotKey=" + (_exactNativeClientVisualOverlayQueueSnapshotKey ?? "null") +
                 " QueueCount=" + _exactNativeClientVisualOverlayEntryQueuesByAssignmentKey.Count +
-                " EntryCount=" + (runtimeState.EntriesById?.Count ?? 0));
+                " EntryCount=" + (runtimeState.EntriesById?.Count ?? 0) +
+                " ReservedNightBossEntryId=" + (reservedNightBossEntryId ?? "none"));
+        }
+
+        private static string ResolveReservedNightBossVisualOverlayEntryId(
+            BattleRuntimeState runtimeState,
+            BattleScenarioContextMessage scenarioContext)
+        {
+            if (runtimeState?.Sides == null ||
+                !CoopHideoutAmbushContract.IsHideoutAmbushScenario(
+                    scenarioContext?.ScenarioKind))
+            {
+                return null;
+            }
+
+            BattleSideState defenderSide = runtimeState.Sides.FirstOrDefault(
+                sideState => ResolveBattleSideFromState(sideState) == BattleSideEnum.Defender);
+            if (defenderSide?.Entries == null)
+                return null;
+
+            return defenderSide.Entries
+                .Select((entryState, index) => new
+                {
+                    Entry = entryState,
+                    Index = index,
+                    Priority = entryState == null
+                        ? 0
+                        : CoopHideoutAmbushContract.ResolveBossIdentityPriority(
+                            entryState.EntryId,
+                            entryState.CharacterId,
+                            entryState.OriginalCharacterId,
+                            entryState.HeroTemplateId,
+                            entryState.SpawnTemplateId,
+                            entryState.TroopName,
+                            ResolveEntrySpawnTemplateId(entryState))
+                })
+                .Where(candidate =>
+                    candidate.Entry != null &&
+                    !string.IsNullOrWhiteSpace(candidate.Entry.EntryId) &&
+                    candidate.Priority > 0)
+                .OrderByDescending(candidate => candidate.Priority)
+                .ThenBy(candidate => candidate.Index)
+                .Select(candidate => candidate.Entry.EntryId)
+                .FirstOrDefault();
         }
 
         private static string BuildClientExactCampaignVisualOverlayQueueSnapshotKey(BattleRuntimeState runtimeState)
@@ -42792,33 +42850,45 @@ namespace CoopSpectator.MissionBehaviors
             if (agent == null)
                 return false;
 
-            if (_removedAgentExactDisplayNames.TryGetValue(agent, out RemovedAgentExactDisplayNameState removedState) &&
+            bool hasPreservedExactName =
+                _removedAgentExactDisplayNames.TryGetValue(agent, out RemovedAgentExactDisplayNameState removedState) &&
                 removedState != null &&
                 !string.IsNullOrWhiteSpace(removedState.EntryId) &&
-                !string.IsNullOrWhiteSpace(removedState.ExactName))
+                !string.IsNullOrWhiteSpace(removedState.ExactName);
+
+            if (TryResolveSelectableEntryId(agent, out string currentEntryId) &&
+                !string.IsNullOrWhiteSpace(currentEntryId))
             {
-                entryId = removedState.EntryId;
-                exactName = new TextObject(removedState.ExactName);
-                return true;
+                entryId = currentEntryId;
+                RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
+                string resolvedDisplayName = BattleSnapshotRuntimeState.ResolveEntryDisplayName(entryState, entryId);
+                if (!string.IsNullOrWhiteSpace(resolvedDisplayName) &&
+                    !string.Equals(resolvedDisplayName, "Unknown Unit", StringComparison.Ordinal))
+                {
+                    exactName = new TextObject(resolvedDisplayName);
+                    CacheExactDisplayNameForAgent(
+                        agent,
+                        entryId,
+                        entryState,
+                        resolvedDisplayName);
+                    return true;
+                }
+
+                if (hasPreservedExactName &&
+                    string.Equals(removedState.EntryId, entryId, StringComparison.OrdinalIgnoreCase))
+                {
+                    exactName = new TextObject(removedState.ExactName);
+                    return true;
+                }
+
+                return false;
             }
 
-            if (!TryResolveSelectableEntryId(agent, out entryId) || string.IsNullOrWhiteSpace(entryId))
+            if (!hasPreservedExactName)
                 return false;
 
-            RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
-            string resolvedDisplayName = BattleSnapshotRuntimeState.ResolveEntryDisplayName(entryState, entryId);
-            if (string.IsNullOrWhiteSpace(resolvedDisplayName) ||
-                string.Equals(resolvedDisplayName, "Unknown Unit", StringComparison.Ordinal))
-            {
-                return false;
-            }
-
-            exactName = new TextObject(resolvedDisplayName);
-            CacheExactDisplayNameForAgent(
-                agent,
-                entryId,
-                entryState,
-                resolvedDisplayName);
+            entryId = removedState.EntryId;
+            exactName = new TextObject(removedState.ExactName);
             return true;
         }
 
@@ -42831,8 +42901,16 @@ namespace CoopSpectator.MissionBehaviors
             if (!GameNetwork.IsClient ||
                 agent == null ||
                 agent.IsMount ||
-                string.IsNullOrWhiteSpace(entryId) ||
-                _removedAgentExactDisplayNames.ContainsKey(agent))
+                string.IsNullOrWhiteSpace(entryId))
+            {
+                return;
+            }
+
+            if (_removedAgentExactDisplayNames.TryGetValue(agent, out RemovedAgentExactDisplayNameState cachedState) &&
+                cachedState != null &&
+                !CoopHideoutAmbushContract.ShouldReplaceExactDisplayNameCache(
+                    cachedState.EntryId,
+                    entryId))
             {
                 return;
             }

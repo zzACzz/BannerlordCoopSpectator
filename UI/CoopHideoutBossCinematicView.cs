@@ -57,6 +57,10 @@ namespace CoopSpectator.UI
         private MissionMainAgentController _mainAgentController;
         private Vec3 _customLookDirectionBeforeConversation = Vec3.Zero;
         private bool _customLookDirectionCaptured;
+        private Agent _conversationFocusedHostAgent;
+        private Agent _conversationFocusedBossAgent;
+        private bool _combatCameraAlignmentPending;
+        private int _combatCameraAlignmentDelayTicks;
         private readonly List<MissionLayerActivationSnapshot> _missionLayerActivationSnapshots =
             new List<MissionLayerActivationSnapshot>();
         private ScreenLayer _focusedLayerBeforeConversation;
@@ -105,14 +109,15 @@ namespace CoopSpectator.UI
                 MaintainLocalHostFacingBoss();
             }
 
-            if (_activeState.Phase == CoopHideoutBossPhase.Cinematic ||
-                (_activeState.Phase == CoopHideoutBossPhase.Duel && !IsLocalHost(_activeState)))
+            if (_activeState.Phase == CoopHideoutBossPhase.Cinematic)
             {
                 _cinematicElapsed += dt;
                 if (_camera == null)
                     TrySetupCamera();
                 UpdateCamera();
             }
+
+            TickPendingCombatCameraAlignment();
         }
 
         public override void OnMissionScreenFinalize()
@@ -120,6 +125,8 @@ namespace CoopSpectator.UI
             CoopHideoutBossPhaseController.ClientStateChanged -= OnClientStateChanged;
             CloseBossConversation();
             ReleaseLocalHostFacingOverride();
+            _combatCameraAlignmentPending = false;
+            _combatCameraAlignmentDelayTicks = 0;
             ReleaseCamera();
             RestoreMissionMode();
             base.OnMissionScreenFinalize();
@@ -151,7 +158,10 @@ namespace CoopSpectator.UI
                     IsLocalHost(state),
                     state.Phase))
             {
-                ReleaseLocalHostFacingOverride();
+                ReleaseLocalHostFacingOverride(
+                    CoopHideoutBossPhaseContract.ShouldClearBossConversationLookDirection(
+                        IsLocalHost(state),
+                        state.Phase));
             }
             if (!CoopHideoutBossPhaseContract.ShouldShowBossConversation(state.Phase))
                 CloseBossConversation();
@@ -187,34 +197,41 @@ namespace CoopSpectator.UI
             {
                 CaptureMissionMode();
                 Mission.SetMissionMode(MissionMode.Conversation, false);
-                if (_camera == null)
+                bool isLocalHost = IsLocalHost(state);
+                if (CoopHideoutBossPhaseContract.ShouldReleaseCinematicCameraForBossConversation(
+                        state.Phase))
                 {
-                    _cinematicElapsed =
-                        _activeCinematicDurationMilliseconds / 1000f;
-                    TrySetupCamera();
+                    ReleaseCamera(preserveCameraFrame: false);
                 }
-                MaintainLocalHostFacingBoss();
+                if (CoopHideoutBossPhaseContract.ShouldUseObserverCameraForBossConversation(
+                        isLocalHost,
+                        state.Phase))
+                {
+                    TrySetupObserverConversationCamera();
+                }
+                if (CoopHideoutBossPhaseContract.ShouldMaintainLocalHostFacingBoss(
+                        isLocalHost,
+                        state.Phase))
+                {
+                    MaintainLocalHostFacingBoss();
+                }
                 ShowBossConversation(state);
                 return;
             }
 
             if (state.Phase == CoopHideoutBossPhase.Duel)
             {
+                ReleaseCamera(preserveCameraFrame: false);
+                RestoreMissionMode();
+                ScheduleCombatCameraAlignment(state);
+                ScreenFadeController.BeginFadeIn(0.3f);
                 if (IsLocalHost(state))
                 {
-                    ReleaseCamera();
-                    RestoreMissionMode();
-                    ScreenFadeController.BeginFadeIn(0.3f);
                     InformationManager.DisplayMessage(
                         new InformationMessage("Defeat the bandit leader in single combat."));
                 }
                 else
                 {
-                    CaptureMissionMode();
-                    Mission.SetMissionMode(MissionMode.CutScene, false);
-                    _cinematicElapsed = 0f;
-                    TrySetupCamera();
-                    ScreenFadeController.BeginFadeIn(0.3f);
                     InformationManager.DisplayMessage(
                         new InformationMessage("The campaign host accepted the duel."));
                 }
@@ -223,8 +240,9 @@ namespace CoopSpectator.UI
 
             if (state.Phase == CoopHideoutBossPhase.AllBattle)
             {
-                ReleaseCamera();
+                ReleaseCamera(preserveCameraFrame: false);
                 RestoreMissionMode();
+                ScheduleCombatCameraAlignment(state);
                 ScreenFadeController.BeginFadeIn(0.3f);
                 InformationManager.DisplayMessage(
                     new InformationMessage("Fight together and defeat the bandit leader."));
@@ -233,7 +251,7 @@ namespace CoopSpectator.UI
 
             if (state.Phase == CoopHideoutBossPhase.Completed)
             {
-                ReleaseCamera();
+                ReleaseCamera(preserveCameraFrame: false);
                 RestoreMissionMode();
             }
         }
@@ -258,7 +276,7 @@ namespace CoopSpectator.UI
                         IsLocalHost(state),
                         state.Phase);
                 _conversationViewModel = new CoopHideoutBossConversationVM(
-                    bossAgent?.Name?.ToString(),
+                    ResolveBossConversationDisplayName(bossAgent),
                     choicesEnabled,
                     SendHostChoiceWithConfirmation);
                 _conversationSpriteCategory =
@@ -439,6 +457,23 @@ namespace CoopSpectator.UI
             }
         }
 
+        private static string ResolveBossConversationDisplayName(Agent bossAgent)
+        {
+            string exactDisplayName = null;
+            if (bossAgent != null &&
+                CoopMissionSpawnLogic.TryResolveExactDisplayNameForAgent(
+                    bossAgent,
+                    out _,
+                    out var exactName))
+            {
+                exactDisplayName = exactName?.ToString();
+            }
+
+            return CoopHideoutAmbushContract.ResolveBossConversationDisplayName(
+                exactDisplayName,
+                bossAgent?.Name?.ToString());
+        }
+
         private void RegisterConversationInputCategories()
         {
             if (_conversationLayer == null)
@@ -482,7 +517,7 @@ namespace CoopSpectator.UI
 
         private void MaintainLocalHostFacingBoss()
         {
-            if (_activeState == null)
+            if (_activeState == null || !IsLocalHost(_activeState))
                 return;
 
             Agent hostAgent = ResolveAgent(_activeState.HostAgentIndex);
@@ -507,30 +542,152 @@ namespace CoopSpectator.UI
                     _customLookDirectionCaptured = true;
                 }
                 _mainAgentController.CustomLookDir = lookDirection;
+                if (_activeState.Phase == CoopHideoutBossPhase.AwaitingHostChoice)
+                {
+                    try
+                    {
+                        _mainAgentController.InteractionComponent.SetCurrentFocusedObject(
+                            (IFocusable)(object)bossAgent,
+                            null,
+                            -1,
+                            true);
+                        _conversationFocusedHostAgent = hostAgent;
+                        _conversationFocusedBossAgent = bossAgent;
+                    }
+                    catch
+                    {
+                    }
+                }
             }
             hostAgent.LookDirection = lookDirection;
+            if (_activeState.Phase == CoopHideoutBossPhase.AwaitingHostChoice)
+            {
+                try
+                {
+                    hostAgent.SetLookAgent(bossAgent);
+                    _conversationFocusedHostAgent = hostAgent;
+                    _conversationFocusedBossAgent = bossAgent;
+                }
+                catch
+                {
+                }
+            }
             hostAgent.SetMovementDirection(in direction);
         }
 
-        private void ReleaseLocalHostFacingOverride()
+        private void ReleaseLocalHostFacingOverride(bool clearConversationLookDirection = true)
         {
-            if (!_customLookDirectionCaptured)
+            if (!_customLookDirectionCaptured &&
+                _conversationFocusedHostAgent == null &&
+                _conversationFocusedBossAgent == null)
+            {
                 return;
+            }
 
             try
             {
                 if (_mainAgentController != null)
                 {
                     _mainAgentController.CustomLookDir =
-                        _customLookDirectionBeforeConversation;
+                        clearConversationLookDirection
+                            ? Vec3.Zero
+                            : _customLookDirectionBeforeConversation;
                 }
+            }
+            catch
+            {
+            }
+            try
+            {
+                if (_conversationFocusedHostAgent != null &&
+                    _conversationFocusedHostAgent.GetLookAgent() == _conversationFocusedBossAgent)
+                {
+                    _conversationFocusedHostAgent.SetLookAgent(null);
+                }
+            }
+            catch
+            {
+            }
+            try
+            {
+                _mainAgentController?.InteractionComponent.SetCurrentFocusedObject(
+                    null,
+                    null,
+                    -1,
+                    true);
             }
             catch
             {
             }
             _customLookDirectionBeforeConversation = Vec3.Zero;
             _customLookDirectionCaptured = false;
+            _conversationFocusedHostAgent = null;
+            _conversationFocusedBossAgent = null;
             _mainAgentController = null;
+        }
+
+        private bool TrySetupObserverConversationCamera()
+        {
+            if (_camera != null || MissionScreen == null || _activeState == null)
+                return _camera != null;
+
+            Agent hostAgent = ResolveAgent(_activeState.HostAgentIndex);
+            Agent bossAgent = ResolveAgent(_activeState.BossAgentIndex);
+            if (hostAgent?.IsActive() != true || bossAgent?.IsActive() != true)
+                return false;
+
+            try
+            {
+                Vec3 bossPosition = bossAgent.Position;
+                Vec3 hostPosition = hostAgent.Position;
+                Vec3 cameraPositionFromBoss = hostPosition - bossPosition;
+                cameraPositionFromBoss.RotateAboutZ(-MathF.PI / 3f);
+                cameraPositionFromBoss += bossPosition;
+
+                Vec3 cameraPositionFromHost = bossPosition - hostPosition;
+                cameraPositionFromHost.RotateAboutZ(-MathF.PI / 3f);
+                cameraPositionFromHost += hostPosition;
+
+                Vec3 observerPosition = Agent.Main?.Position ?? hostPosition;
+                Vec3 cameraPosition =
+                    (cameraPositionFromBoss - observerPosition).LengthSquared <=
+                    (cameraPositionFromHost - observerPosition).LengthSquared
+                        ? cameraPositionFromBoss
+                        : cameraPositionFromHost;
+                cameraPosition.z += Agent.Main?.GetEyeGlobalHeight() ?? 1.6f;
+
+                Vec3 focusPosition =
+                    (hostPosition - bossPosition) * 0.5f + bossPosition;
+                Vec3 direction = focusPosition - cameraPosition;
+                if (direction.LengthSquared < 0.0001f)
+                    direction = Vec3.Forward;
+                direction.Normalize();
+
+                _camera = Camera.CreateCamera();
+                Camera combatCamera = MissionScreen.CombatCamera;
+                if ((NativeObject)(object)combatCamera != (NativeObject)null)
+                    _camera.FillParametersFrom(combatCamera);
+                _camera.SetFovHorizontal(
+                    MathF.PI / 2f,
+                    Screen.AspectRatio,
+                    0.1f,
+                    2000f);
+                SetCameraFrame(cameraPosition, direction, out _cameraFrame);
+                _camera.Frame = _cameraFrame;
+                _cameraPathReady = false;
+                MissionScreen.CustomCamera = _camera;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopHideoutBossCinematicView: observer conversation camera setup failed. Error=" +
+                    ex.Message);
+                try { _camera?.ReleaseCamera(); } catch { }
+                _camera = null;
+                _cameraPathReady = false;
+                return false;
+            }
         }
 
         private bool TrySetupCamera()
@@ -755,7 +912,7 @@ namespace CoopSpectator.UI
             cameraFrame.rotation.Orthonormalize();
         }
 
-        private void ReleaseCamera()
+        private void ReleaseCamera(bool preserveCameraFrame = true)
         {
             if (_camera == null)
                 return;
@@ -764,7 +921,8 @@ namespace CoopSpectator.UI
             {
                 if (MissionScreen?.CustomCamera == _camera)
                 {
-                    MissionScreen.UpdateFreeCamera(_camera.Frame);
+                    if (preserveCameraFrame)
+                        MissionScreen.UpdateFreeCamera(_camera.Frame);
                     MissionScreen.CustomCamera = null;
                 }
             }
@@ -774,6 +932,66 @@ namespace CoopSpectator.UI
             try { _camera.ReleaseCamera(); } catch { }
             _camera = null;
             _cameraPathReady = false;
+        }
+
+        private void ScheduleCombatCameraAlignment(CoopHideoutBossPhaseSession state)
+        {
+            if (state == null ||
+                !CoopHideoutBossPhaseContract.ShouldAlignLocalHostCombatCameraWithBoss(
+                    IsLocalHost(state),
+                    state.Phase))
+            {
+                return;
+            }
+
+            _combatCameraAlignmentPending = true;
+            _combatCameraAlignmentDelayTicks = 1;
+        }
+
+        private void TickPendingCombatCameraAlignment()
+        {
+            if (!_combatCameraAlignmentPending)
+                return;
+            if (_combatCameraAlignmentDelayTicks > 0)
+            {
+                _combatCameraAlignmentDelayTicks--;
+                return;
+            }
+
+            _combatCameraAlignmentPending = false;
+            if (MissionScreen == null || _activeState == null ||
+                !CoopHideoutBossPhaseContract.ShouldAlignLocalHostCombatCameraWithBoss(
+                    IsLocalHost(_activeState),
+                    _activeState.Phase))
+            {
+                return;
+            }
+
+            Agent hostAgent = ResolveAgent(_activeState.HostAgentIndex);
+            Agent bossAgent = ResolveAgent(_activeState.BossAgentIndex);
+            if (hostAgent?.IsActive() != true || bossAgent?.IsActive() != true)
+                return;
+
+            Vec2 direction = (bossAgent.VisualPosition - hostAgent.VisualPosition).AsVec2;
+            if (direction.LengthSquared < 0.0001f)
+                return;
+
+            float previousBearing = MissionScreen.CameraBearing;
+            direction.Normalize();
+            float alignedBearing = new Vec3(direction.x, direction.y, 0f).RotationZ;
+            MissionScreen.CameraBearing = alignedBearing;
+            if (CoopDebugConfig.HideoutBossChoreographyDiagnostics)
+            {
+                ModLogger.Info(
+                    "CoopHideoutBossCinematicView: aligned local host combat camera with boss. " +
+                    "Battle=" + (_activeState?.BattleInstanceId ?? "none") +
+                    " Phase=" + (_activeState?.Phase.ToString() ?? "none") +
+                    " PreviousBearing=" + previousBearing +
+                    " AlignedBearing=" + alignedBearing +
+                    " HostVisualPosition=" + hostAgent.VisualPosition +
+                    " BossVisualPosition=" + bossAgent.VisualPosition +
+                    " Direction=" + direction + ".");
+            }
         }
 
         private void CaptureMissionMode()
