@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.Infrastructure.Hideout;
 using CoopSpectator.MissionBehaviors;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
@@ -371,7 +372,45 @@ namespace CoopSpectator.MissionModels
 
         public override bool CanWeaponDealSneakAttack(in AttackInformation attackInformation, WeaponComponentData weapon)
         {
-            return _baseModel.CanWeaponDealSneakAttack(attackInformation, weapon);
+            if (_baseModel.CanWeaponDealSneakAttack(attackInformation, weapon))
+                return true;
+
+            if (Mission.Current?.GetMissionBehavior<
+                    CoopExactCampaignHideoutAmbushMissionController>() == null)
+            {
+                return false;
+            }
+
+            bool isEligibleWeapon =
+                weapon != null &&
+                (weapon.IsMeleeWeapon || weapon.WeaponClass == WeaponClass.ThrowingKnife);
+            bool victimCanGetAlarmed =
+                (attackInformation.VictimAgentFlags & AgentFlag.CanGetAlarmed) !=
+                AgentFlag.None;
+            float attackerDirectionDotVictimForward = 1f;
+            if (!attackInformation.IsAttackerAgentNull)
+            {
+                Vec2 attackerDirection =
+                    (attackInformation.AttackerAgentPosition -
+                     attackInformation.VictimAgentPosition).AsVec2;
+                if (attackerDirection.LengthSquared > 0.0001f)
+                {
+                    attackerDirection.Normalize();
+                    Vec2 victimForward = attackInformation.VictimAgentMovementDirection;
+                    attackerDirectionDotVictimForward =
+                        attackerDirection.x * victimForward.x +
+                        attackerDirection.y * victimForward.y;
+                }
+            }
+
+            return CoopHideoutAmbushContract.CanDealNightSneakAttack(
+                isEligibleWeapon,
+                attackInformation.IsVictimAgentHuman,
+                attackInformation.IsVictimPlayer,
+                victimCanGetAlarmed,
+                (int)attackInformation.VictimAgentAIStateFlags,
+                !attackInformation.IsAttackerAgentNull,
+                attackerDirectionDotVictimForward);
         }
 
         public override bool CanWeaponDismount(Agent attackerAgent, WeaponComponentData attackerWeapon, in Blow blow, in AttackCollisionData collisionData)

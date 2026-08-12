@@ -117,6 +117,10 @@ namespace CoopSpectator.MissionBehaviors
         private bool _reinforcementsSpawned;
         private float _callTroopsTransitionEndsAt;
         private float _alarmStartedAt = -1f;
+        private bool _alarmFailureTriggered;
+        private Agent _authoritativeMainHeroAgent;
+        private bool _mainHeroWasDefeated;
+        private bool _mainHeroDefeatTriggered;
         private int _stateRevision = 1;
 
         public CoopExactCampaignHideoutAmbushMissionController(
@@ -130,6 +134,32 @@ namespace CoopSpectator.MissionBehaviors
         public CoopHideoutAmbushPhase Phase => _phase;
 
         internal int StateRevision => _stateRevision;
+
+        internal bool IsAlarmFailureCounterActive
+        {
+            get
+            {
+                if (_alarmStartedAt < 0f || _alarmFailureTriggered)
+                    return false;
+
+                Agent mainHeroAgent = ResolveHostAgent();
+                CoopHideoutStealthPatrolController stealthController =
+                    Mission?.GetMissionBehavior<CoopHideoutStealthPatrolController>();
+                return CoopHideoutAmbushContract.ShouldRunMainHeroAlarmFailureCounter(
+                    _phase == CoopHideoutAmbushPhase.Stealth,
+                    mainHeroAgent?.IsActive() == true,
+                    mainHeroAgent != null &&
+                    stealthController?.HasAlarmedDefenderForTarget(
+                        mainHeroAgent.Index) == true);
+            }
+        }
+
+        internal int AlarmFailureRemainingMilliseconds =>
+            IsAlarmFailureCounterActive
+                ? CoopHideoutAmbushContract.ResolveAlarmFailureRemainingMilliseconds(
+                    Mission?.CurrentTime ?? 0f,
+                    _alarmStartedAt)
+                : 0;
 
         internal bool IsUsePointAvailable =>
             _phase == CoopHideoutAmbushPhase.Stealth &&
@@ -265,6 +295,8 @@ namespace CoopSpectator.MissionBehaviors
                 return;
             }
 
+            TrackAuthoritativeMainHeroAgent();
+
             if (!_stealthActivated)
                 ActivateStealthPhase();
 
@@ -299,7 +331,58 @@ namespace CoopSpectator.MissionBehaviors
         {
             if (affectedAgent != null)
                 _sentryAgentIndices.Remove(affectedAgent.Index);
+
+            bool isDefeatingAgentState =
+                agentState == AgentState.Killed ||
+                agentState == AgentState.Unconscious;
+            if (ReferenceEquals(affectedAgent, _authoritativeMainHeroAgent) &&
+                isDefeatingAgentState)
+            {
+                _mainHeroWasDefeated = true;
+            }
+
+            if (!_mainHeroDefeatTriggered &&
+                CoopHideoutAmbushContract.ShouldFailNightHideoutAfterMainHeroDefeated(
+                    _phase,
+                    _mainHeroWasDefeated,
+                    _reinforcementsSpawned,
+                    CountActive(_spawnedPlayerAgents)))
+            {
+                _mainHeroDefeatTriggered = true;
+                BattleSideEnum winnerSide = OpposingSide(_playerSide);
+                bool failedBeforeReinforcements = !_reinforcementsSpawned;
+                string completionReason = failedBeforeReinforcements
+                    ? CoopHideoutAmbushContract.MainHeroDefeatCompletionReason
+                    : CoopHideoutBossPhaseContract.PlayerSideEliminatedCompletionReason;
+                bool completed = CoopMissionSpawnLogic.TryForceAuthoritativeBattleCompletion(
+                    Mission,
+                    winnerSide,
+                    completionReason,
+                    failedBeforeReinforcements
+                        ? "night hideout main hero defeated before reinforcements"
+                        : "night hideout player side eliminated after reinforcements");
+                ModLogger.Info(
+                    "CoopExactCampaignHideoutAmbushMissionController: main hero defeat resolved. " +
+                    "Agent=" + affectedAgent.Index +
+                    " AgentState=" + agentState +
+                    " Phase=" + _phase +
+                    " ReinforcementsSpawned=" + _reinforcementsSpawned +
+                    " ActivePlayerAgents=" + CountActive(_spawnedPlayerAgents) +
+                    " CompletionReason=" + completionReason +
+                    " WinnerSide=" + winnerSide +
+                    " Completed=" + completed + ".");
+            }
             base.OnAgentRemoved(affectedAgent, affectorAgent, agentState, blow);
+        }
+
+        private void TrackAuthoritativeMainHeroAgent()
+        {
+            if (_authoritativeMainHeroAgent != null)
+                return;
+
+            Agent hostAgent = ResolveHostAgent();
+            if (hostAgent?.IsActive() == true)
+                _authoritativeMainHeroAgent = hostAgent;
         }
 
         private void TryMaterializeNightAmbush()
@@ -534,28 +617,67 @@ namespace CoopSpectator.MissionBehaviors
         {
             CoopHideoutStealthPatrolController stealthController =
                 Mission.GetMissionBehavior<CoopHideoutStealthPatrolController>();
-            if (stealthController?.HasGlobalAlarm != true)
+            Agent mainHeroAgent = ResolveHostAgent();
+            bool shouldRunCounter =
+                CoopHideoutAmbushContract.ShouldRunMainHeroAlarmFailureCounter(
+                    _phase == CoopHideoutAmbushPhase.Stealth,
+                    mainHeroAgent?.IsActive() == true,
+                    mainHeroAgent != null &&
+                    stealthController?.HasAlarmedDefenderForTarget(
+                        mainHeroAgent.Index) == true);
+            if (!shouldRunCounter)
             {
+                if (_alarmStartedAt >= 0f && !_alarmFailureTriggered)
+                {
+                    ModLogger.Info(
+                        "CoopExactCampaignHideoutAmbushMissionController: stealth alarm counter cancelled because the main hero is no longer compromised.");
+                }
                 _alarmStartedAt = -1f;
+                _alarmFailureTriggered = false;
                 return;
             }
 
             if (_alarmStartedAt < 0f)
             {
                 _alarmStartedAt = Mission.CurrentTime;
+                _alarmFailureTriggered = false;
                 ModLogger.Info(
                     "CoopExactCampaignHideoutAmbushMissionController: stealth alarm counter started. " +
+                    "MainHeroAgent=" + mainHeroAgent.Index + " " +
                     "FailureWindowSeconds=" + CoopHideoutAmbushContract.AlarmFailureSeconds + ".");
                 return;
             }
 
-            if (_phase == CoopHideoutAmbushPhase.Stealth &&
-                Mission.CurrentTime - _alarmStartedAt >= CoopHideoutAmbushContract.AlarmFailureSeconds)
+            int remainingMilliseconds =
+                CoopHideoutAmbushContract.ResolveAlarmFailureRemainingMilliseconds(
+                    Mission.CurrentTime,
+                    _alarmStartedAt);
+            if (!_alarmFailureTriggered &&
+                CoopHideoutAmbushContract.HasAlarmFailureCounterExpired(
+                    isCounterActive: true,
+                    remainingMilliseconds: remainingMilliseconds))
             {
-                ModLogger.Verbose(
-                    "CoopExactCampaignHideoutAmbushMissionController: native-compatible alarm failure boundary reached; " +
-                    "mission failure writeback remains disabled in the first nighttime vertical slice.");
-                _alarmStartedAt = float.MaxValue;
+                _alarmFailureTriggered = true;
+                BattleSideEnum winnerSide = OpposingSide(_playerSide);
+                bool completed = CoopMissionSpawnLogic.TryForceAuthoritativeBattleCompletion(
+                    Mission,
+                    winnerSide,
+                    CoopHideoutAmbushContract.AlarmFailureCompletionReason,
+                    "night hideout alarm failure counter expired");
+                if (completed)
+                {
+                    ModLogger.Info(
+                        "CoopExactCampaignHideoutAmbushMissionController: stealth alarm counter expired and the battle was failed authoritatively. " +
+                        "MainHeroAgent=" + mainHeroAgent.Index +
+                        " WinnerSide=" + winnerSide + ".");
+                }
+                else
+                {
+                    ModLogger.Info(
+                        "CoopExactCampaignHideoutAmbushMissionController: stealth alarm counter expired but authoritative battle failure was rejected. " +
+                        "MainHeroAgent=" + mainHeroAgent.Index +
+                        " WinnerSide=" + winnerSide + ".");
+                }
             }
         }
 

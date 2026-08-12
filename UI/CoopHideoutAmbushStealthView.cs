@@ -10,6 +10,7 @@ using TaleWorlds.Engine;
 using TaleWorlds.Engine.GauntletUI;
 using TaleWorlds.GauntletUI;
 using TaleWorlds.Library;
+using TaleWorlds.Localization;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.Objects;
 using TaleWorlds.MountAndBlade.View.MissionViews;
@@ -19,14 +20,18 @@ namespace CoopSpectator.UI
     public sealed class CoopHideoutAmbushStealthView : MissionView
     {
         private const string NativeAlarmMovieName = "AgentAlarmStateMissionView";
+        private const string NativeFailCounterMovieName = "MissionStealthFailCounter";
         private const string ObjectiveMovieName = "CoopHideoutAmbushStealth";
         private const int UseGameKeyIndex = 13;
 
         private GauntletLayer _alarmLayer;
+        private GauntletLayer _failCounterLayer;
         private GauntletLayer _objectiveLayer;
         private GauntletMovieIdentifier _alarmMovie;
+        private GauntletMovieIdentifier _failCounterMovie;
         private GauntletMovieIdentifier _objectiveMovie;
         private CoopHideoutAmbushStealthVM _viewModel;
+        private CoopHideoutAmbushFailCounterVM _failCounterViewModel;
         private UsableMissionObject _focusedCallTroopsUsePoint;
 
         public override void OnMissionScreenInitialize()
@@ -45,6 +50,8 @@ namespace CoopSpectator.UI
             if (_viewModel == null)
                 TryCreateLayers();
             _viewModel?.Update(MissionScreen.CombatCamera);
+            _failCounterViewModel?.Update(
+                CoopHideoutAmbushNetworkController.CurrentClientState);
 
             if (_focusedCallTroopsUsePoint != null &&
                 MissionScreen.SceneLayer.Input.IsGameKeyPressed(UseGameKeyIndex))
@@ -132,19 +139,28 @@ namespace CoopSpectator.UI
             try
             {
                 _viewModel = new CoopHideoutAmbushStealthVM();
+                _failCounterViewModel = new CoopHideoutAmbushFailCounterVM();
                 _alarmLayer = new GauntletLayer(
                     "CoopHideoutAmbushAlarmLayer",
                     ViewOrderPriority,
+                    false);
+                _failCounterLayer = new GauntletLayer(
+                    "CoopHideoutAmbushFailCounterLayer",
+                    10,
                     false);
                 _objectiveLayer = new GauntletLayer(
                     "CoopHideoutAmbushObjectiveLayer",
                     ViewOrderPriority + 1,
                     false);
                 MissionScreen.AddLayer(_alarmLayer);
+                MissionScreen.AddLayer(_failCounterLayer);
                 MissionScreen.AddLayer(_objectiveLayer);
                 _alarmMovie = _alarmLayer.LoadMovie(
                     NativeAlarmMovieName,
                     _viewModel);
+                _failCounterMovie = _failCounterLayer.LoadMovie(
+                    NativeFailCounterMovieName,
+                    _failCounterViewModel);
                 _objectiveMovie = _objectiveLayer.LoadMovie(
                     ObjectiveMovieName,
                     _viewModel);
@@ -164,13 +180,18 @@ namespace CoopSpectator.UI
             {
                 if (_alarmLayer != null && _alarmMovie != null)
                     _alarmLayer.ReleaseMovie(_alarmMovie);
+                if (_failCounterLayer != null && _failCounterMovie != null)
+                    _failCounterLayer.ReleaseMovie(_failCounterMovie);
                 if (_objectiveLayer != null && _objectiveMovie != null)
                     _objectiveLayer.ReleaseMovie(_objectiveMovie);
                 if (_alarmLayer != null)
                     MissionScreen?.RemoveLayer(_alarmLayer);
+                if (_failCounterLayer != null)
+                    MissionScreen?.RemoveLayer(_failCounterLayer);
                 if (_objectiveLayer != null)
                     MissionScreen?.RemoveLayer(_objectiveLayer);
                 _viewModel?.OnFinalize();
+                _failCounterViewModel?.OnFinalize();
             }
             catch
             {
@@ -178,10 +199,13 @@ namespace CoopSpectator.UI
             finally
             {
                 _alarmMovie = null;
+                _failCounterMovie = null;
                 _objectiveMovie = null;
                 _alarmLayer = null;
+                _failCounterLayer = null;
                 _objectiveLayer = null;
                 _viewModel = null;
+                _failCounterViewModel = null;
             }
         }
 
@@ -436,6 +460,96 @@ namespace CoopSpectator.UI
         }
     }
 
+    public sealed class CoopHideoutAmbushFailCounterVM : ViewModel
+    {
+        private readonly TextObject _countDownTextObject =
+            new TextObject("{=pY8lnL11}Mission will fail in: {SEC}");
+        private string _countDownText = string.Empty;
+        private float _failCounterElapsedTime;
+        private float _failCounterMaxTime =
+            CoopHideoutAmbushContract.AlarmFailureSeconds;
+        private bool _isCounterActive;
+
+        [DataSourceProperty]
+        public string CountDownText
+        {
+            get => _countDownText;
+            private set
+            {
+                string normalized = value ?? string.Empty;
+                if (string.Equals(normalized, _countDownText, StringComparison.Ordinal))
+                    return;
+                _countDownText = normalized;
+                OnPropertyChangedWithValue(normalized, nameof(CountDownText));
+            }
+        }
+
+        [DataSourceProperty]
+        public float FailCounterElapsedTime
+        {
+            get => _failCounterElapsedTime;
+            private set
+            {
+                if (Math.Abs(value - _failCounterElapsedTime) < 0.0001f)
+                    return;
+                _failCounterElapsedTime = value;
+                OnPropertyChangedWithValue(value, nameof(FailCounterElapsedTime));
+            }
+        }
+
+        [DataSourceProperty]
+        public float FailCounterMaxTime
+        {
+            get => _failCounterMaxTime;
+            private set
+            {
+                if (Math.Abs(value - _failCounterMaxTime) < 0.0001f)
+                    return;
+                _failCounterMaxTime = value;
+                OnPropertyChangedWithValue(value, nameof(FailCounterMaxTime));
+            }
+        }
+
+        [DataSourceProperty]
+        public bool IsCounterActive
+        {
+            get => _isCounterActive;
+            private set
+            {
+                if (value == _isCounterActive)
+                    return;
+                _isCounterActive = value;
+                OnPropertyChangedWithValue(value, nameof(IsCounterActive));
+            }
+        }
+
+        public void Update(CoopHideoutAmbushState state)
+        {
+            FailCounterMaxTime = CoopHideoutAmbushContract.AlarmFailureSeconds;
+            float remainingSeconds = Math.Max(
+                0f,
+                Math.Min(
+                    FailCounterMaxTime,
+                    (state?.AlarmFailureRemainingMilliseconds ?? 0) / 1000f));
+            bool counterActive =
+                state?.Phase == CoopHideoutAmbushPhase.Stealth &&
+                state.IsAlarmFailureCounterActive &&
+                remainingSeconds > 0f;
+            IsCounterActive =
+                !BannerlordConfig.HideBattleUI &&
+                !MBCommon.IsPaused &&
+                counterActive;
+            FailCounterElapsedTime = remainingSeconds;
+            if (!IsCounterActive)
+                return;
+
+            _countDownTextObject.SetTextVariable(
+                "SEC",
+                (int)Math.Ceiling(remainingSeconds));
+            CountDownText = _countDownTextObject.ToString();
+        }
+    }
+
     public sealed class CoopHideoutAmbushAlarmTargetVM : ViewModel
     {
         private readonly int _agentIndex;
@@ -597,7 +711,7 @@ namespace CoopSpectator.UI
             AlarmProgress = Math.Max(0, Math.Min(100, state.SuspicionPermille / 10));
             AlarmState = state.IsAlarmed
                 ? "Alarmed"
-                : AlarmProgress >= 28
+                : AlarmProgress >= 100
                     ? "Cautious"
                     : "Default";
             Vec3 worldPosition = agent.Position;

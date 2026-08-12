@@ -577,6 +577,7 @@ namespace CoopSpectator.Infrastructure
                 AddSkillValue(DefaultSkills.Throwing, entryState.SkillThrowing);
                 AddSkillValue(DefaultSkills.Riding, entryState.SkillRiding);
                 AddSkillValue(DefaultSkills.Athletics, entryState.SkillAthletics);
+                AddSkillValue(DefaultSkills.Roguery, entryState.SkillRoguery);
             }
 
             private void AddSkillValue(SkillObject skill, int value)

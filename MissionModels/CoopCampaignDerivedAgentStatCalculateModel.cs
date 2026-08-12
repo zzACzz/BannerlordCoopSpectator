@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Threading;
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.Infrastructure.Hideout;
 using CoopSpectator.MissionBehaviors;
 using CoopSpectator.Patches;
 using TaleWorlds.Core;
@@ -233,7 +234,21 @@ namespace CoopSpectator.MissionModels
 
         public override float GetSneakAttackMultiplier(Agent agent, WeaponComponentData weapon)
         {
-            return _baseModel.GetSneakAttackMultiplier(agent, weapon);
+            if (agent == null ||
+                weapon == null ||
+                Mission.Current?.GetMissionBehavior<
+                    CoopExactCampaignHideoutAmbushMissionController>() == null)
+            {
+                return _baseModel.GetSneakAttackMultiplier(agent, weapon);
+            }
+
+            int effectiveRoguery = GetEffectiveSkill(agent, DefaultSkills.Roguery);
+            bool isDaggerOrThrowingKnife =
+                weapon.WeaponClass == WeaponClass.Dagger ||
+                weapon.WeaponClass == WeaponClass.ThrowingKnife;
+            return CoopHideoutAmbushContract.ResolveCampaignSneakAttackMultiplier(
+                effectiveRoguery,
+                isDaggerOrThrowingKnife);
         }
 
         public override float GetKnockBackResistance(Agent agent)

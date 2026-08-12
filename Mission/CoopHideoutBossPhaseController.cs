@@ -62,7 +62,9 @@ namespace CoopSpectator.MissionBehaviors
         private Team _playerTeam;
         private Team _enemyTeam;
         private Agent _hostAgent;
+        private Agent _authoritativeMainHeroAgent;
         private Agent _bossAgent;
+        private int _authoritativeHostPeerIndex = -1;
         private MissionMode _missionModeBeforeBossPhase;
         private DateTime _missionStartedUtc;
         private float _nextServerPumpMissionTime;
@@ -71,6 +73,8 @@ namespace CoopSpectator.MissionBehaviors
         private bool _phaseCompletionLogged;
         private bool _campaignStagedPlacementActive;
         private bool _campaignApproachHeld;
+        private bool _autoStartAllBattleAfterCinematic;
+        private bool _playerSideEliminationTriggered;
         private DateTime _campaignApproachHoldDeadlineUtc;
         private float _campaignAuthoredWalkDistance;
         private int _choreographySequence;
@@ -188,6 +192,13 @@ namespace CoopSpectator.MissionBehaviors
             _readyPeerIndices.Remove(networkPeer.Index);
             if (networkPeer.Index != _session.HostPeerIndex)
                 return;
+
+            if (_autoStartAllBattleAfterCinematic &&
+                (_session.Phase == CoopHideoutBossPhase.PreparingCinematic ||
+                 _session.Phase == CoopHideoutBossPhase.Cinematic))
+            {
+                return;
+            }
 
             if (_session.Phase == CoopHideoutBossPhase.PreparingCinematic ||
                 _session.Phase == CoopHideoutBossPhase.Cinematic ||
@@ -469,23 +480,62 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             NetworkCommunicator hostPeer = ResolveHostPeer();
-            Agent hostAgent = ResolveControlledAgent(hostPeer);
-            if (hostPeer == null || hostAgent?.IsActive() != true || hostAgent.Team == null)
+            Agent currentHostAgent = ResolveControlledAgent(hostPeer);
+            if (_authoritativeMainHeroAgent == null && currentHostAgent?.IsActive() == true)
+                _authoritativeMainHeroAgent = currentHostAgent;
+
+            CoopExactCampaignHideoutMissionController hideoutController =
+                Mission.GetMissionBehavior<CoopExactCampaignHideoutMissionController>();
+            Team playerTeam = _authoritativeMainHeroAgent?.IsActive() == true
+                ? _authoritativeMainHeroAgent.Team
+                : _playerTeam;
+            if ((playerTeam == null || playerTeam == Team.Invalid) && hideoutController != null)
+            {
+                playerTeam = Mission.Teams.FirstOrDefault(team =>
+                    team != null &&
+                    team != Team.Invalid &&
+                    team.Side == hideoutController.PlayerSide);
+            }
+            if (playerTeam == null || playerTeam == Team.Invalid)
                 return;
 
-            Team enemyTeam = ResolveEnemyTeam(hostAgent.Team);
+            Team enemyTeam = ResolveEnemyTeam(playerTeam);
             if (enemyTeam == null)
                 return;
 
             // Keep the authoritative team identities before the last initial defender is removed.
             // The reserved boss group must still be able to resolve its team when that team has
             // no active agents left in Mission.Agents.
-            _playerTeam = hostAgent.Team;
+            _playerTeam = playerTeam;
             _enemyTeam = enemyTeam;
 
-            CoopExactCampaignHideoutMissionController hideoutController =
-                Mission.GetMissionBehavior<CoopExactCampaignHideoutMissionController>();
+            List<Agent> activePlayerAgents = GetActiveHumanAgents(playerTeam);
+            if (!_playerSideEliminationTriggered &&
+                CoopHideoutBossPhaseContract.ShouldFailHideoutWhenPlayerSideEliminated(
+                    hideoutController?.HasInitialAssaultMaterialized == true,
+                    activePlayerAgents.Count))
+            {
+                _playerSideEliminationTriggered = true;
+                bool completed = CoopMissionSpawnLogic.TryForceAuthoritativeBattleCompletion(
+                    Mission,
+                    enemyTeam.Side,
+                    CoopHideoutBossPhaseContract.PlayerSideEliminatedCompletionReason,
+                    "hideout player side eliminated before boss phase");
+                ModLogger.Info(
+                    "CoopHideoutBossPhaseController: player-side elimination resolved. " +
+                    "WinnerSide=" + enemyTeam.Side +
+                    " Completed=" + completed + ".");
+                return;
+            }
+
             if (hideoutController != null && !hideoutController.IsBossPhaseEligible)
+                return;
+
+            bool mainHeroActive = _authoritativeMainHeroAgent?.IsActive() == true;
+            Agent cinematicPrincipal = mainHeroActive
+                ? _authoritativeMainHeroAgent
+                : SelectBossCinematicPrincipal(activePlayerAgents);
+            if (cinematicPrincipal?.IsActive() != true)
                 return;
 
             List<Agent> activeEnemies = GetActiveHumanAgents(enemyTeam);
@@ -520,7 +570,7 @@ namespace CoopSpectator.MissionBehaviors
                 if (!CoopHideoutBossPhaseContract.ShouldSpawnReservedBossGroup(
                         _initialEnemyCount,
                         activeInitialAssaultEnemies,
-                        hostAgent.IsActive(),
+                        cinematicPrincipal.IsActive(),
                         bossFightEntity != null))
                 {
                     return;
@@ -545,7 +595,7 @@ namespace CoopSpectator.MissionBehaviors
                 if (!CoopHideoutBossPhaseContract.ShouldSpawnReservedBossGroup(
                         _initialEnemyCount,
                         activeInitialAssaultEnemies,
-                        hostAgent.IsActive(),
+                        cinematicPrincipal.IsActive(),
                         bossFightEntity != null))
                 {
                     return;
@@ -570,7 +620,7 @@ namespace CoopSpectator.MissionBehaviors
                 if (!CoopHideoutBossPhaseContract.ShouldPrepareBossPhase(
                         _initialEnemyCount,
                         activeEnemies.Count,
-                        hostAgent.IsActive(),
+                        cinematicPrincipal.IsActive(),
                         bossFightEntity != null))
                 {
                     return;
@@ -581,14 +631,18 @@ namespace CoopSpectator.MissionBehaviors
             if (bossAgent == null)
                 return;
 
-            _playerTeam = hostAgent.Team;
+            _playerTeam = playerTeam;
             _enemyTeam = enemyTeam;
-            _hostAgent = hostAgent;
+            _hostAgent = cinematicPrincipal;
             _bossAgent = bossAgent;
-            _session.HostPeerIndex = hostPeer.Index;
-            _session.HostAgentIndex = hostAgent.Index;
+            _session.HostPeerIndex = _authoritativeHostPeerIndex;
+            _session.HostAgentIndex = cinematicPrincipal.Index;
             _session.BossAgentIndex = bossAgent.Index;
             _missionModeBeforeBossPhase = Mission.Mode;
+            _autoStartAllBattleAfterCinematic =
+                CoopHideoutBossPhaseContract.ShouldAutoStartAllBattleAfterBossCinematic(
+                    mainHeroActive,
+                    cinematicPrincipal.IsActive());
 
             FreezeCombatantsForCinematic();
             CaptureRequiredReadyPeers();
@@ -606,8 +660,10 @@ namespace CoopSpectator.MissionBehaviors
                 " ActiveInitialAssaultEnemyCount=" + activeInitialAssaultEnemies +
                 " ActiveEnemyCountAfterReserve=" + activeEnemies.Count +
                 " ReservedTriggerCount=" + CoopHideoutBossPhaseContract.ResolveReservedBossTriggerCount(_initialEnemyCount) +
-                " HostPeer=" + hostPeer.Index +
-                " HostAgent=" + hostAgent.Index +
+                " HostPeer=" + _session.HostPeerIndex +
+                " MainHeroActive=" + mainHeroActive +
+                " CinematicPrincipal=" + cinematicPrincipal.Index +
+                " AutoAllBattle=" + _autoStartAllBattleAfterCinematic +
                 " BossAgent=" + bossAgent.Index +
                 " RequiredReadyPeers=" + _requiredReadyPeerIndices.Count + ".");
         }
@@ -647,6 +703,13 @@ namespace CoopSpectator.MissionBehaviors
 
         private void BeginAwaitingHostChoice()
         {
+            if (_autoStartAllBattleAfterCinematic)
+            {
+                FinalizeCampaignBossFightApproach();
+                StartAllBattle("main-hero-unavailable-auto-all-battle");
+                return;
+            }
+
             if (!IsHostPeerAvailable())
             {
                 StartAllBattle("host-unavailable-before-choice");
@@ -2276,19 +2339,37 @@ namespace CoopSpectator.MissionBehaviors
             if (GameNetwork.NetworkPeers == null)
                 return null;
 
+            if (_authoritativeHostPeerIndex >= 0)
+            {
+                return GameNetwork.NetworkPeers.FirstOrDefault(peer =>
+                    IsEligibleSynchronizedPeer(peer) &&
+                    peer.Index == _authoritativeHostPeerIndex);
+            }
+
             if (HostSelfJoinRedirectState.TryResolvePersistedHostedPeerUserName(out string hostUserName) &&
                 !string.IsNullOrWhiteSpace(hostUserName))
             {
                 NetworkCommunicator markedHost = GameNetwork.NetworkPeers.FirstOrDefault(peer =>
                     IsEligibleSynchronizedPeer(peer) &&
                     string.Equals(peer.UserName, hostUserName, StringComparison.OrdinalIgnoreCase));
-                if (ResolveControlledAgent(markedHost)?.IsActive() == true)
+                if (markedHost != null)
+                {
+                    _authoritativeHostPeerIndex = markedHost.Index;
                     return markedHost;
+                }
             }
 
-            return GameNetwork.NetworkPeers.FirstOrDefault(peer =>
-                IsEligibleSynchronizedPeer(peer) &&
-                ResolveControlledAgent(peer)?.IsActive() == true);
+            NetworkCommunicator resolved = GameNetwork.NetworkPeers
+                .Where(IsEligibleSynchronizedPeer)
+                .OrderBy(peer => peer.Index)
+                .FirstOrDefault(peer => ResolveControlledAgent(peer)?.IsActive() == true) ??
+                GameNetwork.NetworkPeers
+                    .Where(IsEligibleSynchronizedPeer)
+                    .OrderBy(peer => peer.Index)
+                    .FirstOrDefault();
+            if (resolved != null)
+                _authoritativeHostPeerIndex = resolved.Index;
+            return resolved;
         }
 
         private bool IsHostPeerAvailable()
@@ -2374,6 +2455,19 @@ namespace CoopSpectator.MissionBehaviors
             });
             return namedBoss ?? active
                 .OrderByDescending(agent => agent.Character?.Level ?? 0)
+                .ThenBy(agent => agent.Index)
+                .FirstOrDefault();
+        }
+
+        private static Agent SelectBossCinematicPrincipal(IEnumerable<Agent> candidates)
+        {
+            return (candidates ?? Enumerable.Empty<Agent>())
+                .Where(agent => agent?.IsActive() == true && agent.IsHuman)
+                .OrderByDescending(agent =>
+                    CoopHideoutBossPhaseContract.ResolveBossCinematicPrincipalPriority(
+                        agent.Character?.IsHero == true,
+                        agent.MissionPeer != null || agent.IsPlayerControlled,
+                        agent.Character?.Level ?? 0))
                 .ThenBy(agent => agent.Index)
                 .FirstOrDefault();
         }

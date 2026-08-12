@@ -388,6 +388,7 @@ namespace CoopSpectator.Network.Messages
         public int SkillThrowing { get; set; }
         public int SkillRiding { get; set; }
         public int SkillAthletics { get; set; }
+        public int SkillRoguery { get; set; }
         public int BaseHitPoints { get; set; }
         public int CurrentHitPoints { get; set; }
         public List<string> PerkIds { get; set; } = new List<string>();

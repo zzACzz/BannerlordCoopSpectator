@@ -91,6 +91,8 @@ namespace CoopSpectator.MissionBehaviors
             _spawnedPlayerAgents.Any(agent => agent?.IsActive() == true) &&
             _spawnedEnemyAgents.Any(agent => agent?.IsActive() == true);
 
+        public bool HasInitialAssaultMaterialized => _initialAssaultMaterialized;
+
         public bool HasReservedBossGroup =>
             !_reservedBossGroupSpawned && ReservedEnemyCount > 0;
 
@@ -1420,6 +1422,9 @@ namespace CoopSpectator.MissionBehaviors
 
             internal int ObservedAgentIndex { get; set; } = -1;
 
+            internal HashSet<int> AlarmedTargetAgentIndices { get; } =
+                new HashSet<int>();
+
             internal float NextRouteAt { get; set; }
 
             internal float NextCommandAt { get; set; }
@@ -1452,6 +1457,15 @@ namespace CoopSpectator.MissionBehaviors
                         state?.Agent?.IsActive() == true && state.IsAlarmed))
                 : _globalAlarm;
 
+        internal bool HasAlarmedDefenderForTarget(int targetAgentIndex)
+        {
+            return targetAgentIndex >= 0 &&
+                   _defenders.Values.Any(state =>
+                       state?.Agent?.IsActive() == true &&
+                       state.IsAlarmed &&
+                       state.AlarmedTargetAgentIndices.Contains(targetAgentIndex));
+        }
+
         internal IReadOnlyList<CoopHideoutAmbushAwarenessSnapshot> GetAwarenessSnapshots()
         {
             return _defenders.Values
@@ -1461,7 +1475,10 @@ namespace CoopSpectator.MissionBehaviors
                 {
                     GuardAgentIndex = state.Agent.Index,
                     ObservedAgentIndex = state.ObservedAgentIndex,
-                    Suspicion01 = Math.Max(0f, Math.Min(1f, state.Suspicion / AlarmThreshold)),
+                    Suspicion01 = _useNightAmbushAlarmSemantics
+                        ? CoopHideoutAmbushContract.NormalizeNightAwarenessForUi(
+                            state.Suspicion)
+                        : Math.Max(0f, Math.Min(1f, state.Suspicion / AlarmThreshold)),
                     IsAlarmed = state.IsAlarmed
                 })
                 .ToArray();
@@ -1573,8 +1590,12 @@ namespace CoopSpectator.MissionBehaviors
             float now = Mission.CurrentTime;
             foreach (DefenderState state in _defenders.Values.ToArray())
             {
-                if (state.Agent?.IsActive() != true || state.IsAlarmed)
+                if (state.Agent?.IsActive() != true ||
+                    state.IsAlarmed ||
+                    (_useNightAmbushAlarmSemantics && state.IsCautious))
+                {
                     continue;
+                }
                 TickPatrol(state, now);
             }
 
@@ -1617,7 +1638,14 @@ namespace CoopSpectator.MissionBehaviors
                 affectedAgent.IsActive())
             {
                 if (_useNightAmbushAlarmSemantics)
-                    AlarmDefender(affectedState, "defender-hit");
+                {
+                    if (CoopHideoutAmbushContract.ShouldAlarmNightDefenderAfterHit(
+                            affectedAgent.IsActive(),
+                            affectedAgent.Health))
+                    {
+                        AlarmDefender(affectedState, "defender-hit", affectorAgent);
+                    }
+                }
                 else
                     AlarmWithPropagation(affectedState, "defender-hit");
             }
@@ -1652,6 +1680,7 @@ namespace CoopSpectator.MissionBehaviors
                     removedState.IsCautious = false;
                     removedState.Suspicion = 0f;
                     removedState.ObservedAgentIndex = -1;
+                    removedState.AlarmedTargetAgentIndices.Clear();
                     if (!HasGlobalAlarm)
                         _globalAlarm = false;
                 }
@@ -1678,6 +1707,14 @@ namespace CoopSpectator.MissionBehaviors
             agent.SetWatchState(state.IsCautious
                 ? Agent.WatchState.Cautious
                 : Agent.WatchState.Patrolling);
+            if (_useNightAmbushAlarmSemantics)
+            {
+                agent.SetAlarmState(state.IsCautious
+                    ? Agent.AIStateFlag.Cautious
+                    : Agent.AIStateFlag.None);
+            }
+            if (_useNightAmbushAlarmSemantics && state.IsCautious)
+                return;
             if (issueMovement)
                 IssuePatrolTarget(state);
         }
@@ -1954,6 +1991,12 @@ namespace CoopSpectator.MissionBehaviors
             if (visibleTarget != null)
             {
                 state.ObservedAgentIndex = visibleTarget.Index;
+                if (_useNightAmbushAlarmSemantics)
+                {
+                    TickNightAwareness(state, guard, visibleTarget, strongestRate, dt);
+                    return;
+                }
+
                 state.Suspicion = Math.Min(AlarmThreshold, state.Suspicion + strongestRate * dt);
                 if (!state.IsCautious && state.Suspicion >= CautiousThreshold)
                 {
@@ -1965,7 +2008,7 @@ namespace CoopSpectator.MissionBehaviors
                 if (state.Suspicion >= AlarmThreshold)
                 {
                     if (_useNightAmbushAlarmSemantics)
-                        AlarmDefender(state, "visual-detection");
+                        AlarmDefender(state, "visual-detection", visibleTarget);
                     else
                         AlarmWithPropagation(state, "visual-detection");
                 }
@@ -1974,12 +2017,109 @@ namespace CoopSpectator.MissionBehaviors
 
             state.ObservedAgentIndex = -1;
             state.Suspicion = Math.Max(0f, state.Suspicion - dt * 0.3f);
-            if (state.IsCautious && state.Suspicion < CautiousThreshold * 0.4f)
+            float cautiousThreshold = _useNightAmbushAlarmSemantics
+                ? CoopHideoutAmbushContract.CautiousAwarenessThreshold
+                : CautiousThreshold;
+            if (state.IsCautious && state.Suspicion < cautiousThreshold * 0.4f)
             {
-                state.IsCautious = false;
-                guard.SetLookAgent(null);
-                guard.SetWatchState(Agent.WatchState.Patrolling);
+                if (_useNightAmbushAlarmSemantics)
+                    ExitNightCautiousState(state);
+                else
+                {
+                    state.IsCautious = false;
+                    guard.SetLookAgent(null);
+                    guard.SetWatchState(Agent.WatchState.Patrolling);
+                }
             }
+        }
+
+        private void TickNightAwareness(
+            DefenderState state,
+            Agent guard,
+            Agent visibleTarget,
+            float detectionRate,
+            float dt)
+        {
+            state.Suspicion = CoopHideoutAmbushContract.AdvanceNightAwareness(
+                state.Suspicion,
+                detectionRate * Math.Max(0f, dt),
+                state.IsCautious);
+
+            if (CoopHideoutAmbushContract.ShouldEnterNightCautiousState(
+                    state.IsCautious,
+                    state.IsAlarmed,
+                    state.Suspicion))
+            {
+                EnterNightCautiousState(state, visibleTarget);
+                return;
+            }
+
+            if (state.IsCautious)
+                guard.SetLookAgent(visibleTarget);
+
+            if (CoopHideoutAmbushContract.ShouldEnterNightAlarmedState(
+                    state.IsCautious,
+                    state.IsAlarmed,
+                    state.Suspicion))
+            {
+                AlarmDefender(state, "continued-visual-detection", visibleTarget);
+            }
+        }
+
+        private void EnterNightCautiousState(
+            DefenderState state,
+            Agent visibleTarget)
+        {
+            Agent guard = state?.Agent;
+            if (guard?.IsActive() != true || state.IsAlarmed)
+                return;
+
+            if (!TryPrimeNightSuspiciousPosition(guard, visibleTarget))
+            {
+                state.Suspicion = Math.Min(
+                    state.Suspicion,
+                    CoopHideoutAmbushContract.CautiousAwarenessThreshold - 0.001f);
+                return;
+            }
+
+            state.IsCautious = true;
+            state.Suspicion = CoopHideoutAmbushContract.CautiousAwarenessThreshold;
+            EndPatrolPointWait(state);
+            try
+            {
+                guard.SetMaximumSpeedLimit(0f, isMultiplier: false);
+            }
+            catch
+            {
+            }
+            guard.DisableScriptedMovement();
+            guard.SetAutomaticTargetSelection(false);
+            guard.SetFiringOrder(FiringOrder.RangedWeaponUsageOrderEnum.HoldYourFire);
+            guard.SetWatchState(Agent.WatchState.Cautious);
+            guard.SetAlarmState(Agent.AIStateFlag.Cautious);
+            guard.SetLookAgent(visibleTarget);
+        }
+
+        private void ExitNightCautiousState(DefenderState state)
+        {
+            Agent guard = state?.Agent;
+            if (guard?.IsActive() != true || state.IsAlarmed)
+                return;
+
+            state.IsCautious = false;
+            guard.SetLookAgent(null);
+            guard.SetWatchState(Agent.WatchState.Patrolling);
+            guard.SetAlarmState(Agent.AIStateFlag.None);
+            guard.SetAutomaticTargetSelection(false);
+            guard.SetFiringOrder(FiringOrder.RangedWeaponUsageOrderEnum.HoldYourFire);
+            float sceneSpeed = state.Route != null && state.Route.Count > 0
+                ? state.Route[state.RouteIndex % state.Route.Count].PatrollingSpeed
+                : -1f;
+            ApplyPatrollingSpeed(guard, sceneSpeed);
+            state.PreviousPosition = guard.Position.AsVec2;
+            state.LastProgressAt = Mission?.CurrentTime ?? state.LastProgressAt;
+            state.NextCommandAt = state.LastProgressAt;
+            IssuePatrolTarget(state);
         }
 
         private float ResolveDetectionRate(Agent guard, Agent target)
@@ -2003,9 +2143,14 @@ namespace CoopSpectator.MissionBehaviors
                 look = new Vec2(0f, 1f);
             look.Normalize();
             float frontDot = look.x * toTarget.x + look.y * toTarget.y;
-            if (distance > CloseAwarenessRange &&
-                frontDot < MinimumFrontDot &&
-                distance > RearAwarenessRange)
+            if (_useNightAmbushAlarmSemantics)
+            {
+                if (!CoopHideoutAmbushContract.IsInsideNightGuardVisionCone(frontDot))
+                    return 0f;
+            }
+            else if (distance > CloseAwarenessRange &&
+                     frontDot < MinimumFrontDot &&
+                     distance > RearAwarenessRange)
             {
                 return 0f;
             }
@@ -2013,7 +2158,7 @@ namespace CoopSpectator.MissionBehaviors
             if (!HasLineOfSight(guardEye, targetEye, distance))
                 return 0f;
 
-            if (distance <= CloseAwarenessRange)
+            if (!_useNightAmbushAlarmSemantics && distance <= CloseAwarenessRange)
                 return AlarmThreshold / DetectionInterval;
 
             float proximity = Math.Max(0f, (effectiveRange - distance) / effectiveRange);
@@ -2090,16 +2235,42 @@ namespace CoopSpectator.MissionBehaviors
                 "Reason=" + reason + ".");
         }
 
-        private void AlarmDefender(DefenderState state, string reason)
+        private void AlarmDefender(
+            DefenderState state,
+            string reason,
+            Agent suspectedTarget = null)
         {
             Agent agent = state?.Agent;
-            if (agent?.IsActive() != true || state.IsAlarmed)
+            if (agent?.IsActive() != true)
                 return;
+
+            int suspectedTargetAgentIndex =
+                suspectedTarget?.IsActive() == true &&
+                suspectedTarget.Mission == agent.Mission
+                    ? suspectedTarget.Index
+                    : -1;
+            if (state.IsAlarmed)
+            {
+                if (_useNightAmbushAlarmSemantics && suspectedTargetAgentIndex >= 0)
+                    state.AlarmedTargetAgentIndices.Add(suspectedTargetAgentIndex);
+                return;
+            }
+
+            if (_useNightAmbushAlarmSemantics &&
+                !TryPrimeNightSuspiciousPosition(agent, suspectedTarget))
+            {
+                return;
+            }
 
             state.IsAlarmed = true;
             state.IsCautious = false;
-            state.Suspicion = AlarmThreshold;
+            state.Suspicion = _useNightAmbushAlarmSemantics
+                ? CoopHideoutAmbushContract.AlarmedAwarenessThreshold
+                : AlarmThreshold;
             state.ObservedAgentIndex = -1;
+            state.AlarmedTargetAgentIndices.Clear();
+            if (_useNightAmbushAlarmSemantics && suspectedTargetAgentIndex >= 0)
+                state.AlarmedTargetAgentIndices.Add(suspectedTargetAgentIndex);
             EndPatrolPointWait(state);
             CoopExactCampaignHideoutMissionController.TryRemoveNightTorch(agent);
             try
@@ -2128,6 +2299,41 @@ namespace CoopSpectator.MissionBehaviors
                     "CoopHideoutStealthPatrolController: hideout alarm started. " +
                     "Agent=" + agent.Index +
                     " Reason=" + reason + ".");
+            }
+        }
+
+        private static bool TryPrimeNightSuspiciousPosition(
+            Agent guard,
+            Agent suspectedTarget)
+        {
+            if (guard?.IsActive() != true)
+                return false;
+
+            try
+            {
+                WorldPosition suspiciousPosition =
+                    suspectedTarget?.IsActive() == true && suspectedTarget.Mission == guard.Mission
+                        ? suspectedTarget.GetWorldPosition()
+                        : guard.GetWorldPosition();
+                guard.SetAILastSuspiciousPosition(
+                    suspiciousPosition,
+                    checkNavMeshForCorrection: false);
+                return true;
+            }
+            catch
+            {
+                try
+                {
+                    WorldPosition fallbackPosition = guard.GetWorldPosition();
+                    guard.SetAILastSuspiciousPosition(
+                        fallbackPosition,
+                        checkNavMeshForCorrection: false);
+                    return true;
+                }
+                catch
+                {
+                    return false;
+                }
             }
         }
     }

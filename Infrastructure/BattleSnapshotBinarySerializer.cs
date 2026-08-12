@@ -8,7 +8,7 @@ namespace CoopSpectator.Infrastructure
     internal static class BattleSnapshotBinarySerializer
     {
         private const int Magic = 0x43534231; // "CSB1"
-        private const int SchemaVersion = 18;
+        private const int SchemaVersion = 19;
 
         public static bool TrySerialize(BattleSnapshotMessage snapshot, out byte[] payloadBytes)
         {
@@ -76,6 +76,7 @@ namespace CoopSpectator.Infrastructure
                         schemaVersion != 15 &&
                         schemaVersion != 16 &&
                         schemaVersion != 17 &&
+                        schemaVersion != 18 &&
                         schemaVersion != SchemaVersion)
                     {
                         ModLogger.Info(
@@ -660,6 +661,7 @@ namespace CoopSpectator.Infrastructure
             writer.Write(troop?.SkillThrowing ?? 0);
             writer.Write(troop?.SkillRiding ?? 0);
             writer.Write(troop?.SkillAthletics ?? 0);
+            writer.Write(troop?.SkillRoguery ?? 0);
             writer.Write(troop?.BaseHitPoints ?? 0);
             WriteList(writer, troop?.PerkIds, WriteString);
             WriteString(writer, troop?.CombatItem0Id);
@@ -746,6 +748,7 @@ namespace CoopSpectator.Infrastructure
                 SkillThrowing = reader.ReadInt32(),
                 SkillRiding = reader.ReadInt32(),
                 SkillAthletics = reader.ReadInt32(),
+                SkillRoguery = schemaVersion >= 19 ? reader.ReadInt32() : 0,
                 BaseHitPoints = reader.ReadInt32(),
                 PerkIds = ReadList(reader, ReadString) ?? new List<string>(),
                 CombatItem0Id = ReadString(reader),

@@ -8,9 +8,9 @@ using TaleWorlds.MountAndBlade;
 namespace CoopSpectator.Patches
 {
     /// <summary>
-    /// Keeps the native lobby death bookkeeping available in the isolated nighttime
-    /// hideout while supplying the spawn-period value that its minimal mission stack
-    /// deliberately cannot obtain from a native SpawnComponent.
+    /// Keeps the native lobby death bookkeeping available in isolated daytime and
+    /// nighttime hideouts while supplying the spawn-period value that their minimal
+    /// mission stacks deliberately cannot obtain from a native SpawnComponent.
     /// </summary>
     public static class CoopMissionLobbySpawnPeriodGuardPatch
     {
@@ -37,7 +37,7 @@ namespace CoopSpectator.Patches
                 if (target == null || prefix == null)
                 {
                     throw new MissingMethodException(
-                        "Unable to resolve the isolated night-hideout spawn-period guard target.");
+                        "Unable to resolve the isolated hideout spawn-period guard target.");
                 }
 
                 harmony.Patch(target, prefix: new HarmonyMethod(prefix));
@@ -49,12 +49,12 @@ namespace CoopSpectator.Patches
             ref int __result)
         {
             Mission mission = Mission.Current;
-            bool hasNightHideoutController =
-                mission?.GetMissionBehavior<CoopExactCampaignHideoutAmbushMissionController>() != null;
+            bool hasIsolatedHideoutController =
+                mission?.GetMissionBehavior<CoopExactCampaignHideoutMissionController>() != null;
             bool hasSpawnComponent = mission?.GetMissionBehavior<SpawnComponent>() != null;
             if (!CoopHideoutAmbushContract.ShouldUseMissingSpawnComponentFallback(
                     GameNetwork.IsServer,
-                    hasNightHideoutController,
+                    hasIsolatedHideoutController,
                     hasSpawnComponent))
             {
                 return true;

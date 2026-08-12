@@ -4377,6 +4377,7 @@ namespace CoopSpectator.MissionBehaviors
             public int SkillThrowing { get; set; }
             public int SkillRiding { get; set; }
             public int SkillAthletics { get; set; }
+            public int SkillRoguery { get; set; }
             public int BaseHitPoints { get; set; }
             public List<string> PerkIds { get; set; } = new List<string>();
             public int PerkMeleeCount { get; set; }
@@ -6918,7 +6919,7 @@ namespace CoopSpectator.MissionBehaviors
             base.OnMissionResultReady(missionResult);
         }
 
-        private void TryBeginDedicatedLobbyEndTransition()
+        internal void TryBeginDedicatedLobbyEndTransition()
         {
             if (!GameNetwork.IsServer ||
                 !GameNetwork.IsDedicatedServer ||
@@ -16958,6 +16959,64 @@ namespace CoopSpectator.MissionBehaviors
                 " Source=" + (source ?? "unknown"));
         }
 
+        internal static bool TryForceAuthoritativeBattleCompletion(
+            Mission mission,
+            BattleSideEnum winnerSide,
+            string completionReason,
+            string source)
+        {
+            if (mission == null ||
+                !GameNetwork.IsServer ||
+                winnerSide == BattleSideEnum.None)
+            {
+                return false;
+            }
+
+            CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+            if (currentPhase < CoopBattlePhase.BattleActive ||
+                currentPhase >= CoopBattlePhase.BattleEnded ||
+                _hasTriggeredAuthoritativeBattleCompletion)
+            {
+                return false;
+            }
+
+            string normalizedReason = string.IsNullOrWhiteSpace(completionReason)
+                ? "forced-authoritative-completion"
+                : completionReason.Trim();
+            string normalizedSource = string.IsNullOrWhiteSpace(source)
+                ? "unknown"
+                : source.Trim();
+
+            _hasTriggeredAuthoritativeBattleCompletion = true;
+            _authoritativeBattleWinnerSide = winnerSide.ToString();
+            _authoritativeBattleCompletionReason = normalizedReason;
+
+            CoopBattlePhaseRuntimeState.SetPhase(
+                CoopBattlePhase.BattleEnded,
+                "forced authoritative battle completion from " + normalizedSource,
+                mission,
+                allowRegression: false);
+
+            ExactCampaignArmyBootstrap.TryStopNativeReinforcementSpawnersAtBattleEnd(
+                mission,
+                "forced authoritative battle completion from " + normalizedSource);
+
+            TryWriteBattleResultSnapshot(
+                mission,
+                "forced authoritative battle completion | " +
+                normalizedReason + " | " + normalizedSource);
+
+            ModLogger.Info(
+                "CoopMissionSpawnLogic: forced authoritative battle completion. " +
+                "WinnerSide=" + _authoritativeBattleWinnerSide +
+                " Reason=" + _authoritativeBattleCompletionReason +
+                " Source=" + normalizedSource + ".");
+
+            mission.GetMissionBehavior<CoopMissionSpawnLogic>()?
+                .TryBeginDedicatedLobbyEndTransition();
+            return true;
+        }
+
         private static void TryCompleteBattleIfResolved(Mission mission, string source, bool force = false)
         {
             if (mission == null || !GameNetwork.IsServer)
@@ -18689,6 +18748,7 @@ namespace CoopSpectator.MissionBehaviors
                 SkillThrowing = template.SkillThrowing,
                 SkillRiding = definition.IsMounted ? Math.Max(template.SkillRiding, 120) : template.SkillRiding,
                 SkillAthletics = template.SkillAthletics,
+                SkillRoguery = template.SkillRoguery,
                 BaseHitPoints = template.BaseHitPoints,
                 PerkIds = template.PerkIds != null ? new List<string>(template.PerkIds) : new List<string>(),
                 CombatItem0Id = definition.ItemIds != null && definition.ItemIds.Length > 0 ? definition.ItemIds[0] : null,
@@ -18763,6 +18823,7 @@ namespace CoopSpectator.MissionBehaviors
                 SkillThrowing = template.SkillThrowing,
                 SkillRiding = template.SkillRiding,
                 SkillAthletics = template.SkillAthletics,
+                SkillRoguery = template.SkillRoguery,
                 BaseHitPoints = template.BaseHitPoints,
                 CurrentHitPoints = template.CurrentHitPoints,
                 PerkIds = template.PerkIds != null ? new List<string>(template.PerkIds) : new List<string>(),
@@ -25410,6 +25471,7 @@ namespace CoopSpectator.MissionBehaviors
                 SkillThrowing = entryState.SkillThrowing,
                 SkillRiding = entryState.SkillRiding,
                 SkillAthletics = entryState.SkillAthletics,
+                SkillRoguery = entryState.SkillRoguery,
                 BaseHitPoints = entryState.BaseHitPoints,
                 SideMorale = sideState?.SideMorale ?? 0f,
                 PartyMorale = partyState?.Modifiers?.Morale ?? 0f,
@@ -28604,6 +28666,8 @@ namespace CoopSpectator.MissionBehaviors
                     return profile.SkillRiding > 0 ? profile.SkillRiding : fallback;
                 case "Athletics":
                     return profile.SkillAthletics > 0 ? profile.SkillAthletics : fallback;
+                case "Roguery":
+                    return profile.SkillRoguery > 0 ? profile.SkillRoguery : fallback;
                 default:
                     return fallback;
             }
@@ -36812,6 +36876,7 @@ namespace CoopSpectator.MissionBehaviors
                 entry.SkillThrowing > 0 ||
                 entry.SkillRiding > 0 ||
                 entry.SkillAthletics > 0 ||
+                entry.SkillRoguery > 0 ||
                 entry.BaseHitPoints > 0 ||
                 (entry.PerkIds != null && entry.PerkIds.Count > 0);
 
@@ -36829,7 +36894,8 @@ namespace CoopSpectator.MissionBehaviors
                     entry.SkillCrossbow,
                     entry.SkillThrowing,
                     entry.SkillRiding,
-                    entry.SkillAthletics),
+                    entry.SkillAthletics,
+                    entry.SkillRoguery),
                 "Hp=" + entry.BaseHitPoints
             };
 

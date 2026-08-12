@@ -106,6 +106,8 @@ namespace CoopSpectator.Infrastructure.Hideout
         public const int CinematicReadyTimeoutMilliseconds = 2500;
         public const int CinematicDurationMilliseconds = 8000;
         public const int CampaignBossCinematicDurationMilliseconds = 6000;
+        public const string PlayerSideEliminatedCompletionReason =
+            "hideout-player-side-eliminated";
         public const float NativeAgentMaxSpeedCinematicOverride = 0.65f;
         public const float NativeCompanionApproachDistance = 0.5f;
         public const float NativeAgentTargetProximityThreshold = 0.5f;
@@ -368,6 +370,30 @@ namespace CoopSpectator.Infrastructure.Hideout
             return !isHostAvailable;
         }
 
+        public static bool ShouldAutoStartAllBattleAfterBossCinematic(
+            bool mainHeroActive,
+            bool cinematicPrincipalActive)
+        {
+            return !mainHeroActive && cinematicPrincipalActive;
+        }
+
+        public static int ResolveBossCinematicPrincipalPriority(
+            bool isHero,
+            bool isPlayerControlled,
+            int characterLevel)
+        {
+            return (isHero ? 2000000 : 0) +
+                   (!isPlayerControlled ? 1000000 : 0) +
+                   Math.Max(0, Math.Min(999999, characterLevel));
+        }
+
+        public static bool ShouldFailHideoutWhenPlayerSideEliminated(
+            bool initialAssaultMaterialized,
+            int activePlayerAgentCount)
+        {
+            return initialAssaultMaterialized && activePlayerAgentCount <= 0;
+        }
+
         public static bool ShouldMaintainLocalHostFacingBoss(
             bool isLocalHost,
             CoopHideoutBossPhase phase)
@@ -577,12 +603,12 @@ namespace CoopSpectator.Infrastructure.Hideout
         public static bool ShouldSpawnReservedBossGroup(
             int initialEnemyCount,
             int activeInitialEnemyCount,
-            bool hostAgentActive,
+            bool cinematicPrincipalActive,
             bool bossFightEntityAvailable)
         {
             return initialEnemyCount > 0 &&
                    activeInitialEnemyCount == ResolveReservedBossTriggerCount(initialEnemyCount) &&
-                   hostAgentActive &&
+                   cinematicPrincipalActive &&
                    bossFightEntityAvailable;
         }
 
@@ -611,14 +637,14 @@ namespace CoopSpectator.Infrastructure.Hideout
         public static bool ShouldPrepareBossPhase(
             int initialEnemyCount,
             int activeEnemyCount,
-            bool hostAgentActive,
+            bool cinematicPrincipalActive,
             bool bossFightEntityAvailable)
         {
             int triggerCount = ResolveBossTriggerCount(initialEnemyCount);
             return triggerCount > 0 &&
                    activeEnemyCount > 0 &&
                    activeEnemyCount <= triggerCount &&
-                   hostAgentActive &&
+                   cinematicPrincipalActive &&
                    bossFightEntityAvailable;
         }
 

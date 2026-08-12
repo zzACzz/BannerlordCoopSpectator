@@ -1,3 +1,4 @@
+using System;
 using CoopSpectator.Infrastructure.Hideout;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
@@ -81,6 +82,11 @@ namespace CoopSpectator.Network.Messages
             new CompressionInfo.Integer(-1, 4095, maximumValueGiven: true);
         private static readonly CompressionInfo.Integer SuspicionCompression =
             new CompressionInfo.Integer(0, 1000, maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer AlarmFailureRemainingCompression =
+            new CompressionInfo.Integer(
+                0,
+                CoopHideoutAmbushContract.AlarmFailureMilliseconds,
+                maximumValueGiven: true);
 
         public CoopHideoutAmbushStateMessage(CoopHideoutAmbushState state)
         {
@@ -95,6 +101,13 @@ namespace CoopSpectator.Network.Messages
             SuspicionPermille = state?.SuspicionPermille ?? 0;
             IsAlarmed = state?.IsAlarmed ?? false;
             HasGlobalAlarm = state?.HasGlobalAlarm ?? false;
+            IsAlarmFailureCounterActive =
+                state?.IsAlarmFailureCounterActive ?? false;
+            AlarmFailureRemainingMilliseconds = Math.Max(
+                0,
+                Math.Min(
+                    CoopHideoutAmbushContract.AlarmFailureMilliseconds,
+                    state?.AlarmFailureRemainingMilliseconds ?? 0));
             IsUsePointAvailable = state?.IsUsePointAvailable ?? false;
             Reason = CoopHideoutAmbushContract.Bound(
                 state?.Reason,
@@ -125,6 +138,10 @@ namespace CoopSpectator.Network.Messages
 
         public bool HasGlobalAlarm { get; private set; }
 
+        public bool IsAlarmFailureCounterActive { get; private set; }
+
+        public int AlarmFailureRemainingMilliseconds { get; private set; }
+
         public bool IsUsePointAvailable { get; private set; }
 
         public string Reason { get; private set; }
@@ -141,6 +158,9 @@ namespace CoopSpectator.Network.Messages
                 SuspicionPermille = SuspicionPermille,
                 IsAlarmed = IsAlarmed,
                 HasGlobalAlarm = HasGlobalAlarm,
+                IsAlarmFailureCounterActive = IsAlarmFailureCounterActive,
+                AlarmFailureRemainingMilliseconds =
+                    AlarmFailureRemainingMilliseconds,
                 IsUsePointAvailable = IsUsePointAvailable,
                 Reason = Reason
             };
@@ -159,6 +179,10 @@ namespace CoopSpectator.Network.Messages
             SuspicionPermille = ReadIntFromPacket(SuspicionCompression, ref valid);
             IsAlarmed = ReadBoolFromPacket(ref valid);
             HasGlobalAlarm = ReadBoolFromPacket(ref valid);
+            IsAlarmFailureCounterActive = ReadBoolFromPacket(ref valid);
+            AlarmFailureRemainingMilliseconds = ReadIntFromPacket(
+                AlarmFailureRemainingCompression,
+                ref valid);
             IsUsePointAvailable = ReadBoolFromPacket(ref valid);
             Reason = ReadStringFromPacket(ref valid) ?? string.Empty;
             return valid &&
@@ -180,6 +204,10 @@ namespace CoopSpectator.Network.Messages
             WriteIntToPacket(SuspicionPermille, SuspicionCompression);
             WriteBoolToPacket(IsAlarmed);
             WriteBoolToPacket(HasGlobalAlarm);
+            WriteBoolToPacket(IsAlarmFailureCounterActive);
+            WriteIntToPacket(
+                AlarmFailureRemainingMilliseconds,
+                AlarmFailureRemainingCompression);
             WriteBoolToPacket(IsUsePointAvailable);
             WriteStringToPacket(CoopHideoutAmbushContract.Bound(
                 Reason,
@@ -195,7 +223,9 @@ namespace CoopSpectator.Network.Messages
                    " Revision=" + Revision +
                    " Phase=" + Phase +
                    " Guard=" + GuardAgentIndex +
-                   " Suspicion=" + SuspicionPermille;
+                   " Suspicion=" + SuspicionPermille +
+                   " AlarmCounter=" + IsAlarmFailureCounterActive +
+                   ":" + AlarmFailureRemainingMilliseconds;
         }
     }
 }

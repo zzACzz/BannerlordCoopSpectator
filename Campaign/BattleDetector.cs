@@ -7014,6 +7014,9 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     case "athletics":
                         seed.SkillAthletics = value;
                         break;
+                    case "roguery":
+                        seed.SkillRoguery = value;
+                        break;
                 }
             }
         }
@@ -7871,6 +7874,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             troop.SkillThrowing = Math.Max(0, seed?.SkillThrowing ?? 50);
             troop.SkillRiding = Math.Max(0, seed?.SkillRiding ?? (troop.IsMounted ? 120 : 40));
             troop.SkillAthletics = Math.Max(0, seed?.SkillAthletics ?? 80);
+            troop.SkillRoguery = Math.Max(0, seed?.SkillRoguery ?? 0);
             BackfillDerivedCombatAttributes(troop);
             troop.BaseHitPoints = 100;
             troop.PerkIds = new List<string>();
@@ -8741,6 +8745,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 SkillThrowing = troop.SkillThrowing,
                 SkillRiding = troop.SkillRiding,
                 SkillAthletics = troop.SkillAthletics,
+                SkillRoguery = troop.SkillRoguery,
                 BaseHitPoints = troop.BaseHitPoints,
                 PerkIds = troop.PerkIds != null ? new List<string>(troop.PerkIds) : new List<string>(),
                 CaptainPerkEffects = troop.CaptainPerkEffects != null
@@ -10488,6 +10493,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             public int SkillThrowing { get; set; }
             public int SkillRiding { get; set; }
             public int SkillAthletics { get; set; }
+            public int SkillRoguery { get; set; }
             public CombatEquipmentVariantSnapshot ArmorSeed { get; set; }
             public List<CombatEquipmentVariantSnapshot> EquipmentVariants { get; set; } = new List<CombatEquipmentVariantSnapshot>();
             public string Source { get; set; }
@@ -12468,6 +12474,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             troop.SkillThrowing = TryGetCharacterSkillValue(characterObject, "Throwing");
             troop.SkillRiding = TryGetCharacterSkillValue(characterObject, "Riding");
             troop.SkillAthletics = TryGetCharacterSkillValue(characterObject, "Athletics");
+            troop.SkillRoguery = TryGetCharacterSkillValue(characterObject, "Roguery");
             BackfillDerivedCombatAttributes(troop);
             troop.BaseHitPoints = TryGetCharacterBaseHitPoints(characterObject);
             troop.CharacterLevel = TryGetIntProperty(characterObject, "Level");
@@ -13829,6 +13836,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 troop.SkillThrowing > 0 ||
                 troop.SkillRiding > 0 ||
                 troop.SkillAthletics > 0 ||
+                troop.SkillRoguery > 0 ||
                 troop.BaseHitPoints > 0 ||
                 (troop.PerkIds != null && troop.PerkIds.Count > 0);
 
@@ -13846,7 +13854,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     troop.SkillCrossbow,
                     troop.SkillThrowing,
                     troop.SkillRiding,
-                    troop.SkillAthletics),
+                    troop.SkillAthletics,
+                    troop.SkillRoguery),
                 "hp=" + troop.BaseHitPoints
             };
 

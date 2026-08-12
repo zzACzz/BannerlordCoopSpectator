@@ -11,6 +11,8 @@ internal static class Program
             ValidateScenePolicy();
             ValidatePreOpenMissionContractPolicy();
             ValidateNightAmbushContractPolicy();
+            ValidateNightAlarmFailureCounterPolicy();
+            ValidateNightMainHeroDefeatPolicy();
             ValidateCallTroopsCinematicPolicy();
             ValidateCampaignBossAgentChoreographyPolicy();
             ValidateNightUseAuthorityPolicy();
@@ -21,6 +23,7 @@ internal static class Program
             ValidateSceneManifestParsing();
             ValidateNightSceneManifestParsing();
             ValidateTriggerPolicy();
+            ValidateCooperativeMainHeroFallbackPolicy();
             ValidateMaterializationPolicy();
             ValidatePhaseTransitions();
             ValidateHostChoiceAuthority();
@@ -179,21 +182,21 @@ internal static class Program
         Assert(
             CoopHideoutAmbushContract.ShouldUseMissingSpawnComponentFallback(
                 isServer: true,
-                hasNightHideoutController: true,
+                hasIsolatedHideoutController: true,
                 hasSpawnComponent: false) &&
             !CoopHideoutAmbushContract.ShouldUseMissingSpawnComponentFallback(
                 isServer: false,
-                hasNightHideoutController: true,
+                hasIsolatedHideoutController: true,
                 hasSpawnComponent: false) &&
             !CoopHideoutAmbushContract.ShouldUseMissingSpawnComponentFallback(
                 isServer: true,
-                hasNightHideoutController: false,
+                hasIsolatedHideoutController: false,
                 hasSpawnComponent: false) &&
             !CoopHideoutAmbushContract.ShouldUseMissingSpawnComponentFallback(
                 isServer: true,
-                hasNightHideoutController: true,
+                hasIsolatedHideoutController: true,
                 hasSpawnComponent: true),
-            "Only an isolated server-side night hideout without SpawnComponent may use the zero-period fallback.");
+            "Only an isolated server-side day or night hideout without SpawnComponent may use the zero-period fallback.");
         Assert(
             !CoopHideoutAmbushContract.ShouldKeepAlarmFailureCounterRunning(0) &&
             CoopHideoutAmbushContract.ShouldKeepAlarmFailureCounterRunning(1) &&
@@ -268,6 +271,247 @@ internal static class Program
             CoopHideoutAmbushContract.IsSentrySpawnGroup("STEALTH_AGENT_FORCED") &&
             !CoopHideoutAmbushContract.IsSentrySpawnGroup("bandit"),
             "Only the two native stealth spawn-group tags may classify sentries.");
+
+        float cautiousAwareness = CoopHideoutAmbushContract.AdvanceNightAwareness(
+            currentAwareness: 0.9f,
+            awarenessIncrease: 5f,
+            isCautious: false);
+        float alarmedAwareness = CoopHideoutAmbushContract.AdvanceNightAwareness(
+            currentAwareness: cautiousAwareness,
+            awarenessIncrease: 5f,
+            isCautious: true);
+        Assert(
+            Math.Abs(
+                cautiousAwareness -
+                CoopHideoutAmbushContract.CautiousAwarenessThreshold) < 0.001f &&
+            CoopHideoutAmbushContract.ShouldEnterNightCautiousState(
+                isCautious: false,
+                isAlarmed: false,
+                awareness: cautiousAwareness) &&
+            !CoopHideoutAmbushContract.ShouldEnterNightAlarmedState(
+                isCautious: false,
+                isAlarmed: false,
+                awareness: cautiousAwareness),
+            "One awareness update may fill the indicator and enter cautious state, but it must not skip directly to alarmed state.");
+        Assert(
+            Math.Abs(
+                alarmedAwareness -
+                CoopHideoutAmbushContract.AlarmedAwarenessThreshold) < 0.001f &&
+            CoopHideoutAmbushContract.ShouldEnterNightAlarmedState(
+                isCautious: true,
+                isAlarmed: false,
+                awareness: alarmedAwareness),
+            "Continued visual detection after the cautious threshold must be required to enter alarmed state.");
+        Assert(
+            CoopHideoutAmbushContract.ShouldAlarmNightDefenderAfterHit(
+                defenderIsActive: true,
+                remainingHealth: 1f) &&
+            !CoopHideoutAmbushContract.ShouldAlarmNightDefenderAfterHit(
+                defenderIsActive: true,
+                remainingHealth: 0f) &&
+            !CoopHideoutAmbushContract.ShouldAlarmNightDefenderAfterHit(
+                defenderIsActive: false,
+                remainingHealth: 100f) &&
+            !CoopHideoutAmbushContract.ShouldAlarmNightDefenderAfterHit(
+                defenderIsActive: true,
+                remainingHealth: float.NaN),
+            "Only an active nighttime defender that survived the hit may enter combat AI from OnScoreHit.");
+        Assert(
+            Math.Abs(CoopHideoutAmbushContract.NormalizeNightAwarenessForUi(0.5f) - 0.5f) < 0.001f &&
+            Math.Abs(CoopHideoutAmbushContract.NormalizeNightAwarenessForUi(1f) - 1f) < 0.001f &&
+            Math.Abs(CoopHideoutAmbushContract.NormalizeNightAwarenessForUi(2f) - 1f) < 0.001f,
+            "The indicator must remain full while the defender is in the hidden second awareness stage.");
+        Assert(
+            CoopHideoutAmbushContract.IsInsideNightGuardVisionCone(0.2f) &&
+            !CoopHideoutAmbushContract.IsInsideNightGuardVisionCone(-0.2f),
+            "A nighttime guard must not detect a target behind its authored viewing direction.");
+
+        Assert(
+            CoopHideoutAmbushContract.CanDealNightSneakAttack(
+                isEligibleWeapon: true,
+                victimIsHuman: true,
+                victimIsPlayer: false,
+                victimCanGetAlarmed: true,
+                victimAlarmState: 0,
+                attackerExists: true,
+                attackerDirectionDotVictimForward: 1f) &&
+            CoopHideoutAmbushContract.CanDealNightSneakAttack(
+                isEligibleWeapon: true,
+                victimIsHuman: true,
+                victimIsPlayer: false,
+                victimCanGetAlarmed: true,
+                victimAlarmState: 1,
+                attackerExists: true,
+                attackerDirectionDotVictimForward: -1f) &&
+            !CoopHideoutAmbushContract.CanDealNightSneakAttack(
+                isEligibleWeapon: true,
+                victimIsHuman: true,
+                victimIsPlayer: false,
+                victimCanGetAlarmed: true,
+                victimAlarmState: 1,
+                attackerExists: true,
+                attackerDirectionDotVictimForward: 1f) &&
+            !CoopHideoutAmbushContract.CanDealNightSneakAttack(
+                isEligibleWeapon: true,
+                victimIsHuman: true,
+                victimIsPlayer: false,
+                victimCanGetAlarmed: true,
+                victimAlarmState: 3,
+                attackerExists: true,
+                attackerDirectionDotVictimForward: -1f),
+            "Nighttime sneak attacks must match campaign normal, cautious-behind, and alarmed victim rules.");
+        Assert(
+            Math.Abs(
+                CoopHideoutAmbushContract.ResolveCampaignSneakAttackMultiplier(
+                    effectiveRoguery: 100,
+                    isDaggerOrThrowingKnife: false) - 1.7f) < 0.001f &&
+            Math.Abs(
+                CoopHideoutAmbushContract.ResolveCampaignSneakAttackMultiplier(
+                    effectiveRoguery: 100,
+                    isDaggerOrThrowingKnife: true) - 3.7f) < 0.001f,
+            "Nighttime sneak-attack multipliers must match the Bannerlord 1.4.8 campaign formula.");
+        }
+
+        private static void ValidateNightAlarmFailureCounterPolicy()
+        {
+            Assert(
+                CoopHideoutAmbushContract.ProtocolVersion == 2,
+                "The timer fields require the second night-hideout network protocol version.");
+            Assert(
+                CoopHideoutAmbushContract.ShouldRunMainHeroAlarmFailureCounter(
+                    isStealthPhase: true,
+                    mainHeroIsActive: true,
+                    hasAlarmedDefenderForMainHero: true) &&
+                !CoopHideoutAmbushContract.ShouldRunMainHeroAlarmFailureCounter(
+                    isStealthPhase: false,
+                    mainHeroIsActive: true,
+                    hasAlarmedDefenderForMainHero: true) &&
+                !CoopHideoutAmbushContract.ShouldRunMainHeroAlarmFailureCounter(
+                    isStealthPhase: true,
+                    mainHeroIsActive: false,
+                    hasAlarmedDefenderForMainHero: true) &&
+                !CoopHideoutAmbushContract.ShouldRunMainHeroAlarmFailureCounter(
+                    isStealthPhase: true,
+                    mainHeroIsActive: true,
+                    hasAlarmedDefenderForMainHero: false),
+                "Only a live main hero compromised during stealth may arm the failure counter.");
+
+            Assert(
+                CoopHideoutAmbushContract.ResolveAlarmFailureRemainingMilliseconds(
+                    currentTime: 10f,
+                    alarmStartedAt: 10f) == 15000 &&
+                CoopHideoutAmbushContract.ResolveAlarmFailureRemainingMilliseconds(
+                    currentTime: 17.25f,
+                    alarmStartedAt: 10f) == 7750 &&
+                CoopHideoutAmbushContract.ResolveAlarmFailureRemainingMilliseconds(
+                    currentTime: 25f,
+                    alarmStartedAt: 10f) == 0 &&
+                CoopHideoutAmbushContract.ResolveAlarmFailureRemainingMilliseconds(
+                    currentTime: 9f,
+                    alarmStartedAt: 10f) == 15000,
+                "The authoritative counter must begin at fifteen seconds, decrease monotonically, and clamp at both boundaries.");
+            Assert(
+                CoopHideoutAmbushContract.ResolveAlarmFailureRemainingMilliseconds(
+                    float.NaN,
+                    alarmStartedAt: 10f) == 0 &&
+                CoopHideoutAmbushContract.ResolveAlarmFailureRemainingMilliseconds(
+                    currentTime: 10f,
+                    float.PositiveInfinity) == 0 &&
+                CoopHideoutAmbushContract.ResolveAlarmFailureRemainingMilliseconds(
+                    currentTime: 10f,
+                    alarmStartedAt: -1f) == 0,
+                "Invalid counter timestamps must fail closed without creating an infinite or negative timer.");
+            Assert(
+                CoopHideoutAmbushContract.HasAlarmFailureCounterExpired(
+                    isCounterActive: true,
+                    remainingMilliseconds: 0) &&
+                CoopHideoutAmbushContract.HasAlarmFailureCounterExpired(
+                    isCounterActive: true,
+                    remainingMilliseconds: -1) &&
+                !CoopHideoutAmbushContract.HasAlarmFailureCounterExpired(
+                    isCounterActive: true,
+                    remainingMilliseconds: 1) &&
+                !CoopHideoutAmbushContract.HasAlarmFailureCounterExpired(
+                    isCounterActive: false,
+                    remainingMilliseconds: 0),
+                "Only an active counter at or below zero may fail the battle.");
+            Assert(
+                CoopHideoutAmbushContract.AlarmFailureCompletionReason ==
+                    "night-hideout-main-hero-compromised",
+                "The campaign bridge requires a stable main-hero-compromised completion reason.");
+        }
+
+        private static void ValidateNightMainHeroDefeatPolicy()
+        {
+            Assert(
+                CoopHideoutAmbushContract.ShouldFailNightHideoutAfterMainHeroDefeated(
+                    CoopHideoutAmbushPhase.Stealth,
+                    mainHeroIsDefeated: true,
+                    reinforcementsSpawned: false,
+                    activePlayerAgentCount: 1),
+                "A defeated main hero must fail the night hideout before reinforcements arrive.");
+            Assert(
+                !CoopHideoutAmbushContract.ShouldFailNightHideoutAfterMainHeroDefeated(
+                    CoopHideoutAmbushPhase.CallTroops,
+                    mainHeroIsDefeated: true,
+                    reinforcementsSpawned: true,
+                    activePlayerAgentCount: 1) &&
+                !CoopHideoutAmbushContract.ShouldFailNightHideoutAfterMainHeroDefeated(
+                    CoopHideoutAmbushPhase.MainCampBattle,
+                    mainHeroIsDefeated: true,
+                    reinforcementsSpawned: true,
+                    activePlayerAgentCount: 3),
+                "Surviving reinforcements must continue after the main hero is defeated.");
+            Assert(
+                CoopHideoutAmbushContract.ShouldFailNightHideoutAfterMainHeroDefeated(
+                    CoopHideoutAmbushPhase.CallTroops,
+                    mainHeroIsDefeated: true,
+                    reinforcementsSpawned: true,
+                    activePlayerAgentCount: 0) &&
+                CoopHideoutAmbushContract.ShouldFailNightHideoutAfterMainHeroDefeated(
+                    CoopHideoutAmbushPhase.MainCampBattle,
+                    mainHeroIsDefeated: true,
+                    reinforcementsSpawned: true,
+                    activePlayerAgentCount: 0),
+                "After reinforcements arrive, defeat requires elimination of the whole player side.");
+            Assert(
+                !CoopHideoutAmbushContract.ShouldFailNightHideoutAfterMainHeroDefeated(
+                    CoopHideoutAmbushPhase.Stealth,
+                    mainHeroIsDefeated: false,
+                    reinforcementsSpawned: false,
+                    activePlayerAgentCount: 0) &&
+                !CoopHideoutAmbushContract.ShouldFailNightHideoutAfterMainHeroDefeated(
+                    CoopHideoutAmbushPhase.CallTroops,
+                    mainHeroIsDefeated: true,
+                    reinforcementsSpawned: false,
+                    activePlayerAgentCount: 0),
+                "A live main hero or an unmaterialized reinforcement group must not use the post-signal loss rule.");
+            Assert(
+                !CoopHideoutAmbushContract.ShouldFailNightHideoutAfterMainHeroDefeated(
+                    CoopHideoutAmbushPhase.WaitingForMaterialization,
+                    mainHeroIsDefeated: true,
+                    reinforcementsSpawned: true,
+                    activePlayerAgentCount: 0) &&
+                !CoopHideoutAmbushContract.ShouldFailNightHideoutAfterMainHeroDefeated(
+                    CoopHideoutAmbushPhase.BossBattle,
+                    mainHeroIsDefeated: true,
+                    reinforcementsSpawned: true,
+                    activePlayerAgentCount: 0) &&
+                !CoopHideoutAmbushContract.ShouldFailNightHideoutAfterMainHeroDefeated(
+                    CoopHideoutAmbushPhase.Completed,
+                    mainHeroIsDefeated: true,
+                    reinforcementsSpawned: true,
+                    activePlayerAgentCount: 0) &&
+                !CoopHideoutAmbushContract.ShouldFailNightHideoutAfterMainHeroDefeated(
+                    CoopHideoutAmbushPhase.Faulted,
+                    mainHeroIsDefeated: true,
+                    reinforcementsSpawned: true,
+                    activePlayerAgentCount: 0),
+                "Main-hero defeat must not override materialization, boss-fight, completed, or faulted phase rules.");
+            Assert(
+                CoopHideoutAmbushContract.MainHeroDefeatCompletionReason ==
+                    "night-hideout-main-hero-defeated",
+                "The campaign bridge requires a stable main-hero-defeated completion reason.");
         }
 
         private static void ValidateNightUseAuthorityPolicy()
@@ -1204,28 +1448,79 @@ internal static class Program
             CoopHideoutBossPhaseContract.ShouldSpawnReservedBossGroup(
                 20,
                 activeInitialEnemyCount: 0,
-                hostAgentActive: true,
+                cinematicPrincipalActive: true,
                 bossFightEntityAvailable: true),
             "A reserved boss group must start after the initial group is depleted.");
         Assert(
             !CoopHideoutBossPhaseContract.ShouldSpawnReservedBossGroup(
                 20,
                 activeInitialEnemyCount: 1,
-                hostAgentActive: true,
+                cinematicPrincipalActive: true,
                 bossFightEntityAvailable: true),
             "A reserved boss group must not overlap the last initial defender.");
         Assert(
-            CoopHideoutBossPhaseContract.ShouldPrepareBossPhase(20, 5, hostAgentActive: true, bossFightEntityAvailable: true),
+            CoopHideoutBossPhaseContract.ShouldPrepareBossPhase(20, 5, cinematicPrincipalActive: true, bossFightEntityAvailable: true),
             "A valid five-enemy boss threshold must start preparation.");
         Assert(
-            !CoopHideoutBossPhaseContract.ShouldPrepareBossPhase(20, 6, hostAgentActive: true, bossFightEntityAvailable: true),
+            !CoopHideoutBossPhaseContract.ShouldPrepareBossPhase(20, 6, cinematicPrincipalActive: true, bossFightEntityAvailable: true),
             "Preparation must not start above the threshold.");
         Assert(
-            !CoopHideoutBossPhaseContract.ShouldPrepareBossPhase(20, 5, hostAgentActive: false, bossFightEntityAvailable: true),
-            "Preparation must require an active host agent.");
+            !CoopHideoutBossPhaseContract.ShouldPrepareBossPhase(20, 5, cinematicPrincipalActive: false, bossFightEntityAvailable: true),
+            "Preparation must require an active cinematic principal.");
         Assert(
-            !CoopHideoutBossPhaseContract.ShouldPrepareBossPhase(20, 5, hostAgentActive: true, bossFightEntityAvailable: false),
+            !CoopHideoutBossPhaseContract.ShouldPrepareBossPhase(20, 5, cinematicPrincipalActive: true, bossFightEntityAvailable: false),
             "Preparation must require the scene anchor.");
+    }
+
+    private static void ValidateCooperativeMainHeroFallbackPolicy()
+    {
+        Assert(
+            CoopHideoutBossPhaseContract.ShouldAutoStartAllBattleAfterBossCinematic(
+                mainHeroActive: false,
+                cinematicPrincipalActive: true) &&
+            !CoopHideoutBossPhaseContract.ShouldAutoStartAllBattleAfterBossCinematic(
+                mainHeroActive: true,
+                cinematicPrincipalActive: true) &&
+            !CoopHideoutBossPhaseContract.ShouldAutoStartAllBattleAfterBossCinematic(
+                mainHeroActive: false,
+                cinematicPrincipalActive: false),
+            "Only a surviving substitute principal with a defeated main hero may skip the choice and start the full battle.");
+
+        int aiHero = CoopHideoutBossPhaseContract.ResolveBossCinematicPrincipalPriority(
+            isHero: true,
+            isPlayerControlled: false,
+            characterLevel: 10);
+        int playerHero = CoopHideoutBossPhaseContract.ResolveBossCinematicPrincipalPriority(
+            isHero: true,
+            isPlayerControlled: true,
+            characterLevel: 50);
+        int aiTroop = CoopHideoutBossPhaseContract.ResolveBossCinematicPrincipalPriority(
+            isHero: false,
+            isPlayerControlled: false,
+            characterLevel: 30);
+        int playerTroop = CoopHideoutBossPhaseContract.ResolveBossCinematicPrincipalPriority(
+            isHero: false,
+            isPlayerControlled: true,
+            characterLevel: 50);
+        Assert(
+            aiHero > playerHero &&
+            playerHero > aiTroop &&
+            aiTroop > playerTroop,
+            "The cinematic substitute must prefer an AI hero, then another hero, then an AI troop, without transferring the choice.");
+
+        Assert(
+            CoopHideoutBossPhaseContract.ShouldFailHideoutWhenPlayerSideEliminated(
+                initialAssaultMaterialized: true,
+                activePlayerAgentCount: 0) &&
+            !CoopHideoutBossPhaseContract.ShouldFailHideoutWhenPlayerSideEliminated(
+                initialAssaultMaterialized: true,
+                activePlayerAgentCount: 1) &&
+            !CoopHideoutBossPhaseContract.ShouldFailHideoutWhenPlayerSideEliminated(
+                initialAssaultMaterialized: false,
+                activePlayerAgentCount: 0) &&
+            CoopHideoutBossPhaseContract.PlayerSideEliminatedCompletionReason ==
+                "hideout-player-side-eliminated",
+            "A materialized hideout must fail only after the complete player side is eliminated.");
     }
 
     private static void ValidateMaterializationPolicy()

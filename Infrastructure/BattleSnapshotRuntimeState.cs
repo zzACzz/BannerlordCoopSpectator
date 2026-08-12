@@ -144,6 +144,7 @@ namespace CoopSpectator.Infrastructure
         public int SkillThrowing { get; set; }
         public int SkillRiding { get; set; }
         public int SkillAthletics { get; set; }
+        public int SkillRoguery { get; set; }
         public int BaseHitPoints { get; set; }
         public int CurrentHitPoints { get; set; }
         public List<string> PerkIds { get; set; } = new List<string>();
@@ -291,6 +292,7 @@ namespace CoopSpectator.Infrastructure
         public int SkillThrowing { get; set; }
         public int SkillRiding { get; set; }
         public int SkillAthletics { get; set; }
+        public int SkillRoguery { get; set; }
         public int BaseHitPoints { get; set; }
         public int CurrentHitPoints { get; set; }
         public List<string> PerkIds { get; set; } = new List<string>();
@@ -1761,6 +1763,7 @@ namespace CoopSpectator.Infrastructure
                         SkillThrowing = entryProjection.SkillThrowing,
                         SkillRiding = entryProjection.SkillRiding,
                         SkillAthletics = entryProjection.SkillAthletics,
+                        SkillRoguery = entryProjection.SkillRoguery,
                         BaseHitPoints = entryProjection.BaseHitPoints,
                         CurrentHitPoints = entryProjection.CurrentHitPoints,
                         PerkIds = entryProjection.PerkIds != null ? new List<string>(entryProjection.PerkIds) : new List<string>(),
@@ -1884,6 +1887,7 @@ namespace CoopSpectator.Infrastructure
                 SkillThrowing = troop.SkillThrowing,
                 SkillRiding = troop.SkillRiding,
                 SkillAthletics = troop.SkillAthletics,
+                SkillRoguery = troop.SkillRoguery,
                 BaseHitPoints = troop.BaseHitPoints,
                 CurrentHitPoints = troop.CurrentHitPoints,
                 PerkIds = troop.PerkIds != null ? new List<string>(troop.PerkIds) : new List<string>(),

@@ -316,20 +316,38 @@ namespace CoopSpectator.MissionBehaviors
             bool phaseChanged = _lastRuntimeRevision != controller.StateRevision;
             bool globalAlarmChanged =
                 _serverState.HasGlobalAlarm != (stealthController?.HasGlobalAlarm == true);
+            bool alarmFailureCounterActive =
+                controller.IsAlarmFailureCounterActive;
+            int alarmFailureRemainingMilliseconds =
+                controller.AlarmFailureRemainingMilliseconds;
+            bool alarmFailureCounterChanged =
+                _serverState.IsAlarmFailureCounterActive !=
+                    alarmFailureCounterActive ||
+                _serverState.AlarmFailureRemainingMilliseconds !=
+                    alarmFailureRemainingMilliseconds;
             bool usePointChanged =
                 _serverState.IsUsePointAvailable != controller.IsUsePointAvailable;
-            if (phaseChanged || globalAlarmChanged || usePointChanged)
+            if (phaseChanged ||
+                globalAlarmChanged ||
+                alarmFailureCounterChanged ||
+                usePointChanged)
             {
                 _lastRuntimeRevision = controller.StateRevision;
                 _serverState.Revision++;
                 _serverState.Phase = controller.Phase;
                 _serverState.HasGlobalAlarm = stealthController?.HasGlobalAlarm == true;
+                _serverState.IsAlarmFailureCounterActive =
+                    alarmFailureCounterActive;
+                _serverState.AlarmFailureRemainingMilliseconds =
+                    alarmFailureRemainingMilliseconds;
                 _serverState.IsUsePointAvailable = controller.IsUsePointAvailable;
                 _serverState.Reason = phaseChanged
                     ? "phase:" + controller.Phase
                     : globalAlarmChanged
                         ? "global-alarm-changed"
-                        : "use-point-availability-changed";
+                        : alarmFailureCounterChanged
+                            ? "alarm-failure-counter-changed"
+                            : "use-point-availability-changed";
                 BroadcastState(BuildGlobalState());
             }
 
@@ -382,6 +400,10 @@ namespace CoopSpectator.MissionBehaviors
                     awareness?.Suspicion01 ?? 0f),
                 IsAlarmed = awareness?.IsAlarmed ?? false,
                 HasGlobalAlarm = _serverState.HasGlobalAlarm,
+                IsAlarmFailureCounterActive =
+                    _serverState.IsAlarmFailureCounterActive,
+                AlarmFailureRemainingMilliseconds =
+                    _serverState.AlarmFailureRemainingMilliseconds,
                 IsUsePointAvailable = _serverState.IsUsePointAvailable,
                 Reason = "guard-awareness"
             };

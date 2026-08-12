@@ -37,6 +37,10 @@ namespace CoopSpectator.Infrastructure.Hideout
 
         public bool HasGlobalAlarm { get; set; }
 
+        public bool IsAlarmFailureCounterActive { get; set; }
+
+        public int AlarmFailureRemainingMilliseconds { get; set; }
+
         public bool IsUsePointAvailable { get; set; }
 
         public string Reason { get; set; } = string.Empty;
@@ -76,12 +80,21 @@ namespace CoopSpectator.Infrastructure.Hideout
         public const string CallTroopsArrowBarrelTag = "hideout_ambush_cutscene_arrow_barrel";
         public const string CallTroopsArrowPathTag = "hideout_ambush_cutscene_arrow_path";
         public const string CallTroopsRequestResponseReasonPrefix = "call-troops-response:";
-        public const int ProtocolVersion = 1;
+        public const string AlarmFailureCompletionReason =
+            "night-hideout-main-hero-compromised";
+        public const string MainHeroDefeatCompletionReason =
+            "night-hideout-main-hero-defeated";
+        public const int ProtocolVersion = 2;
         public const int MaximumBattleInstanceIdCharacters = 96;
         public const int MaximumReasonCharacters = 128;
         public const int AlarmFailureSeconds = 15;
+        public const int AlarmFailureMilliseconds = AlarmFailureSeconds * 1000;
         public const int CallTroopsTransitionSeconds = 10;
         public const float HostUsePointFallbackRadius = 2.75f;
+        public const float CautiousAwarenessThreshold = 1f;
+        public const float AlarmedAwarenessThreshold = 2f;
+        public const float MinimumDetectionFrontDot = 0.15f;
+        public const float CautiousSneakAttackBackDot = 0.174f;
 
         public static bool IsHideoutAmbushScenario(string scenarioKind)
         {
@@ -125,11 +138,11 @@ namespace CoopSpectator.Infrastructure.Hideout
 
         public static bool ShouldUseMissingSpawnComponentFallback(
             bool isServer,
-            bool hasNightHideoutController,
+            bool hasIsolatedHideoutController,
             bool hasSpawnComponent)
         {
             return isServer &&
-                   hasNightHideoutController &&
+                   hasIsolatedHideoutController &&
                    !hasSpawnComponent;
         }
 
@@ -137,6 +150,162 @@ namespace CoopSpectator.Infrastructure.Hideout
             int activeAlarmedDefenderCount)
         {
             return activeAlarmedDefenderCount > 0;
+        }
+
+        public static bool ShouldRunMainHeroAlarmFailureCounter(
+            bool isStealthPhase,
+            bool mainHeroIsActive,
+            bool hasAlarmedDefenderForMainHero)
+        {
+            return isStealthPhase &&
+                   mainHeroIsActive &&
+                   hasAlarmedDefenderForMainHero;
+        }
+
+        public static int ResolveAlarmFailureRemainingMilliseconds(
+            float currentTime,
+            float alarmStartedAt)
+        {
+            if (float.IsNaN(currentTime) ||
+                float.IsInfinity(currentTime) ||
+                float.IsNaN(alarmStartedAt) ||
+                float.IsInfinity(alarmStartedAt) ||
+                alarmStartedAt < 0f)
+            {
+                return 0;
+            }
+
+            double elapsedSeconds = Math.Max(0d, currentTime - alarmStartedAt);
+            double remainingMilliseconds =
+                AlarmFailureMilliseconds - elapsedSeconds * 1000d;
+            return Math.Max(
+                0,
+                Math.Min(
+                    AlarmFailureMilliseconds,
+                    (int)Math.Ceiling(remainingMilliseconds)));
+        }
+
+        public static bool HasAlarmFailureCounterExpired(
+            bool isCounterActive,
+            int remainingMilliseconds)
+        {
+            return isCounterActive && remainingMilliseconds <= 0;
+        }
+
+        public static bool ShouldFailNightHideoutAfterMainHeroDefeated(
+            CoopHideoutAmbushPhase phase,
+            bool mainHeroIsDefeated,
+            bool reinforcementsSpawned,
+            int activePlayerAgentCount)
+        {
+            if (!mainHeroIsDefeated)
+                return false;
+
+            if (phase == CoopHideoutAmbushPhase.Stealth)
+                return true;
+
+            return reinforcementsSpawned &&
+                   activePlayerAgentCount <= 0 &&
+                   (phase == CoopHideoutAmbushPhase.CallTroops ||
+                    phase == CoopHideoutAmbushPhase.MainCampBattle);
+        }
+
+        public static float AdvanceNightAwareness(
+            float currentAwareness,
+            float awarenessIncrease,
+            bool isCautious)
+        {
+            if (float.IsNaN(currentAwareness) || float.IsInfinity(currentAwareness))
+                currentAwareness = 0f;
+            if (float.IsNaN(awarenessIncrease) || float.IsInfinity(awarenessIncrease))
+                awarenessIncrease = 0f;
+
+            float ceiling = isCautious
+                ? AlarmedAwarenessThreshold
+                : CautiousAwarenessThreshold;
+            return Math.Max(
+                0f,
+                Math.Min(ceiling, currentAwareness + Math.Max(0f, awarenessIncrease)));
+        }
+
+        public static bool ShouldEnterNightCautiousState(
+            bool isCautious,
+            bool isAlarmed,
+            float awareness)
+        {
+            return !isCautious &&
+                   !isAlarmed &&
+                   awareness >= CautiousAwarenessThreshold;
+        }
+
+        public static bool ShouldEnterNightAlarmedState(
+            bool isCautious,
+            bool isAlarmed,
+            float awareness)
+        {
+            return isCautious &&
+                   !isAlarmed &&
+                   awareness >= AlarmedAwarenessThreshold;
+        }
+
+        public static bool ShouldAlarmNightDefenderAfterHit(
+            bool defenderIsActive,
+            float remainingHealth)
+        {
+            return defenderIsActive &&
+                   !float.IsNaN(remainingHealth) &&
+                   !float.IsInfinity(remainingHealth) &&
+                   remainingHealth >= 1f;
+        }
+
+        public static float NormalizeNightAwarenessForUi(float awareness)
+        {
+            if (float.IsNaN(awareness) || float.IsInfinity(awareness))
+                return 0f;
+
+            return Math.Max(
+                0f,
+                Math.Min(1f, awareness / CautiousAwarenessThreshold));
+        }
+
+        public static bool IsInsideNightGuardVisionCone(float frontDot)
+        {
+            return !float.IsNaN(frontDot) &&
+                   !float.IsInfinity(frontDot) &&
+                   frontDot >= MinimumDetectionFrontDot;
+        }
+
+        public static bool CanDealNightSneakAttack(
+            bool isEligibleWeapon,
+            bool victimIsHuman,
+            bool victimIsPlayer,
+            bool victimCanGetAlarmed,
+            int victimAlarmState,
+            bool attackerExists,
+            float attackerDirectionDotVictimForward)
+        {
+            if (!isEligibleWeapon || !victimIsHuman || victimIsPlayer)
+                return false;
+
+            int alarmState = victimAlarmState & 3;
+            if (alarmState == 0 && victimCanGetAlarmed)
+                return true;
+
+            return alarmState != 3 &&
+                   attackerExists &&
+                   !float.IsNaN(attackerDirectionDotVictimForward) &&
+                   !float.IsInfinity(attackerDirectionDotVictimForward) &&
+                   attackerDirectionDotVictimForward < CautiousSneakAttackBackDot;
+        }
+
+        public static float ResolveCampaignSneakAttackMultiplier(
+            int effectiveRoguery,
+            bool isDaggerOrThrowingKnife)
+        {
+            float multiplier = 1.5f + Math.Max(0, effectiveRoguery) * 0.002f;
+            if (isDaggerOrThrowingKnife)
+                multiplier += 2f;
+            return multiplier;
         }
 
         public static int ResolveBossIdentityPriority(params string[] identifiers)
