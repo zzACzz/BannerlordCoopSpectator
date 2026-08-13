@@ -121,6 +121,7 @@ namespace CoopSpectator.Patches
         private static string _lastEstablishedCommanderStateBypassKey;
         private static string _lastDeferredNonCommanderSuppressionKey;
         private static string _lastAutoSelectedAllLocalCommanderFormationsKey;
+        private static string _lastRefreshedLocalCommanderFormationUniverseKey;
         private static string _lastPreFormationCommanderPromotionKey;
         private static string _lastForcedCampaignCommanderOrderUiKey;
         private static string _lastExactCommanderOrderVmStateKey;
@@ -946,6 +947,7 @@ namespace CoopSpectator.Patches
             _lastEstablishedCommanderStateBypassKey = null;
             _lastDeferredNonCommanderSuppressionKey = null;
             _lastAutoSelectedAllLocalCommanderFormationsKey = null;
+            _lastRefreshedLocalCommanderFormationUniverseKey = null;
             _lastPreFormationCommanderPromotionKey = null;
             _lastForcedCampaignCommanderOrderUiKey = null;
             _lastExactCommanderOrderVmStateKey = null;
@@ -21761,7 +21763,7 @@ namespace CoopSpectator.Patches
                 mission == null ||
                 team == null ||
                 !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
-                !SceneRuntimeClassifier.IsCampaignOrCurrentSiegeScene(mission.SceneName ?? string.Empty))
+                !SceneRuntimeClassifier.IsExactCommanderOrderControlScene(mission.SceneName ?? string.Empty))
             {
                 return false;
             }
@@ -21819,7 +21821,12 @@ namespace CoopSpectator.Patches
 
             bool hasCommanderIdentity = !string.IsNullOrWhiteSpace(commanderEntryId);
             bool hasCommanderControlCounts = myMissionPeer.BotsUnderControlTotal > 1 || myMissionPeer.BotsUnderControlAlive > 0;
-            if (isExactCommander || hasDelegatedOrderAuthority || (!hasCommanderIdentity && hasCommanderControlCounts))
+            bool shouldSuppressOrderControls =
+                CoopHideoutBossPhaseContract.ShouldSuppressCommanderOrderControls(
+                    authorityGuardsApply: true,
+                    isExactCommander: isExactCommander,
+                    hasDelegatedOrderAuthority: hasDelegatedOrderAuthority);
+            if (!shouldSuppressOrderControls || (!hasCommanderIdentity && hasCommanderControlCounts))
                 return false;
 
             string suppressionStateKey =
@@ -22771,7 +22778,7 @@ namespace CoopSpectator.Patches
             if (myMissionPeer == null || mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
                 return false;
 
-            if (!SceneRuntimeClassifier.IsCampaignOrCurrentSiegeScene(mission.SceneName ?? string.Empty))
+            if (!SceneRuntimeClassifier.IsExactCommanderOrderControlScene(mission.SceneName ?? string.Empty))
                 return false;
 
             int botsUnderControlTotal = myMissionPeer.BotsUnderControlTotal;
@@ -22838,7 +22845,7 @@ namespace CoopSpectator.Patches
             if (mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
                 return false;
 
-            if (!SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty))
+            if (!SceneRuntimeClassifier.IsExactCommanderOrderControlScene(mission.SceneName ?? string.Empty))
                 return false;
 
             MissionPeer missionPeer = networkPeer.GetComponent<MissionPeer>();
@@ -22875,7 +22882,10 @@ namespace CoopSpectator.Patches
                 return false;
             }
 
-            if (!isExactCommander && !hasExactOrderAuthority)
+            if (CoopHideoutBossPhaseContract.ShouldSuppressCommanderOrderControls(
+                    authorityGuardsApply: true,
+                    isExactCommander: isExactCommander,
+                    hasDelegatedOrderAuthority: hasExactOrderAuthority))
             {
                 logKey =
                     networkPeer.Index + "|" +
@@ -22895,6 +22905,13 @@ namespace CoopSpectator.Patches
                     " SuppressionReason=non-commander" +
                     " Mission=" + (mission.SceneName ?? "null");
                 return true;
+            }
+
+            if (CoopHideoutBossPhaseContract.ShouldBypassSpawnHandshakeSelectAllSuppression(
+                    isExactCommander,
+                    hasExactOrderAuthority))
+            {
+                return false;
             }
 
             if (!CoopBattleSpawnRuntimeState.TryGetState(missionPeer, out PeerSpawnRuntimeState spawnState) ||
@@ -22954,7 +22971,7 @@ namespace CoopSpectator.Patches
             if (myMissionPeer == null || mission == null || !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName))
                 return false;
 
-            if (!SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty))
+            if (!SceneRuntimeClassifier.IsExactCommanderOrderControlScene(mission.SceneName ?? string.Empty))
                 return false;
 
             Agent controlledAgent = myMissionPeer.ControlledAgent;
@@ -22989,6 +23006,9 @@ namespace CoopSpectator.Patches
                     out string delegatedAuthorityRole) &&
                 delegatedAuthorizedFormationIndices.Count > 0 &&
                 string.Equals(delegatedAuthorityRole, "delegated-captain", StringComparison.Ordinal);
+            bool hasExactCommanderOrderAuthority =
+                isExactCommander &&
+                delegatedAuthorizedFormationIndices.Count > 0;
             if (!isExactCommander && !hasDelegatedOrderAuthority &&
                 string.IsNullOrWhiteSpace(controlledEntryId) &&
                 TryBypassNonCommanderSuppressionFromEstablishedLocalCommanderState(
@@ -23017,7 +23037,10 @@ namespace CoopSpectator.Patches
                 return false;
             }
 
-            if (!isExactCommander && !hasDelegatedOrderAuthority)
+            if (CoopHideoutBossPhaseContract.ShouldSuppressCommanderOrderControls(
+                    authorityGuardsApply: true,
+                    isExactCommander: isExactCommander,
+                    hasDelegatedOrderAuthority: hasDelegatedOrderAuthority))
             {
                 logKey =
                     myPeer.Index + "|" +
@@ -23047,6 +23070,13 @@ namespace CoopSpectator.Patches
 
             if (selectorAgent != null && !ReferenceEquals(selectorAgent, controlledAgent))
                 return false;
+
+            if (CoopHideoutBossPhaseContract.ShouldBypassSpawnHandshakeSelectAllSuppression(
+                    isExactCommander,
+                    hasExactCommanderOrderAuthority))
+            {
+                return false;
+            }
 
             bool shouldAllowEstablishedExactSiegeCommanderSelection =
                 ShouldRunLocalExactSiegeCommanderControlFromOrderTroopPlacer(mission) &&
@@ -23130,7 +23160,7 @@ namespace CoopSpectator.Patches
                 mission == null ||
                 team == null ||
                 !MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(mission.SceneName) ||
-                !SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty))
+                !SceneRuntimeClassifier.IsExactCommanderOrderControlScene(mission.SceneName ?? string.Empty))
             {
                 return false;
             }
@@ -23187,7 +23217,10 @@ namespace CoopSpectator.Patches
                 isExactCommander = true;
             }
 
-            if (!isExactCommander && !hasDelegatedOrderAuthority)
+            if (CoopHideoutBossPhaseContract.ShouldSuppressCommanderOrderControls(
+                    authorityGuardsApply: true,
+                    isExactCommander: isExactCommander,
+                    hasDelegatedOrderAuthority: hasDelegatedOrderAuthority))
             {
                 logKey =
                     myPeer.Index + "|" +
@@ -24208,6 +24241,31 @@ namespace CoopSpectator.Patches
             bool updateTroopsInvoked = false;
             bool autoSelectAllInvoked = false;
 
+            string formationUniverseKey =
+                myPeer.Index + "|" +
+                team.TeamIndex + "|" +
+                mainAgent.Index + "|" +
+                string.Join(",", team.FormationsIncludingEmpty
+                    .Where(formation =>
+                        formation != null &&
+                        ReferenceEquals(formation.Team, team) &&
+                        formation.CountOfUnits > 0 &&
+                        authorizedFormationIndices.Contains(formation.Index))
+                    .Select(formation => formation.Index)
+                    .OrderBy(index => index));
+            bool formationUniverseChanged =
+                !string.Equals(
+                    _lastRefreshedLocalCommanderFormationUniverseKey,
+                    formationUniverseKey,
+                    StringComparison.Ordinal);
+            if (formationUniverseChanged)
+            {
+                afterInitializeInvoked = TryInvokeParameterlessMethod(dataSource, "AfterInitialize");
+                updateTroopsInvoked = TryInvokeParameterlessMethod(troopController, "UpdateTroops");
+                _lastRefreshedLocalCommanderFormationUniverseKey = formationUniverseKey;
+                selectedFormationCount = playerOrderController.SelectedFormations?.Count ?? selectedFormationCount;
+            }
+
             string autoSelectKey =
                 myPeer.Index + "|" +
                 team.TeamIndex + "|" +
@@ -24238,7 +24296,7 @@ namespace CoopSpectator.Patches
 
                 selectedFormationCount = playerOrderController.SelectedFormations?.Count ?? selectedFormationCount;
             }
-            else if (formationsWithUnits > ownedFormationsWithUnits)
+            else if (!formationUniverseChanged && formationsWithUnits > ownedFormationsWithUnits)
             {
                 afterInitializeInvoked = TryInvokeParameterlessMethod(dataSource, "AfterInitialize");
                 updateTroopsInvoked = TryInvokeParameterlessMethod(troopController, "UpdateTroops");

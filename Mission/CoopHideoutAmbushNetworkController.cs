@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.Infrastructure.Hideout;
 using CoopSpectator.Network.Messages;
@@ -206,9 +205,10 @@ namespace CoopSpectator.MissionBehaviors
 
             CoopExactCampaignHideoutAmbushMissionController controller =
                 Mission.GetMissionBehavior<CoopExactCampaignHideoutAmbushMissionController>();
-            bool senderIsHost = IsHostPeer(peer);
-            if (!CoopHideoutAmbushContract.TryValidateHostUseRequest(
-                    senderIsHost,
+            bool senderControlsMainHero =
+                controller?.DoesPeerControlAuthoritativeMainHero(peer) == true;
+            if (!CoopHideoutAmbushContract.TryValidateMainHeroUseRequest(
+                    senderControlsMainHero,
                     controller?.Phase ?? CoopHideoutAmbushPhase.WaitingForMaterialization,
                     message.Revision,
                     _serverState.Revision,
@@ -407,36 +407,6 @@ namespace CoopSpectator.MissionBehaviors
                 IsUsePointAvailable = _serverState.IsUsePointAvailable,
                 Reason = "guard-awareness"
             };
-        }
-
-        private static bool IsHostPeer(NetworkCommunicator peer)
-        {
-            if (peer == null ||
-                peer.IsServerPeer ||
-                !peer.IsConnectionActive ||
-                !peer.IsSynchronized)
-            {
-                return false;
-            }
-
-            if (HostSelfJoinRedirectState.TryResolvePersistedHostedPeerUserName(
-                    out string hostUserName) &&
-                !string.IsNullOrWhiteSpace(hostUserName))
-            {
-                return string.Equals(
-                    peer.UserName,
-                    hostUserName,
-                    StringComparison.OrdinalIgnoreCase);
-            }
-
-            return GameNetwork.NetworkPeers?
-                .Where(candidate =>
-                    candidate != null &&
-                    !candidate.IsServerPeer &&
-                    candidate.IsConnectionActive &&
-                    candidate.IsSynchronized)
-                .OrderBy(candidate => candidate.Index)
-                .FirstOrDefault()?.Index == peer.Index;
         }
 
         private static Agent ResolveControlledAgent(NetworkCommunicator peer)

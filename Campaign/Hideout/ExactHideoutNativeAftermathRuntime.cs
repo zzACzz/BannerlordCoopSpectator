@@ -17,6 +17,7 @@ namespace CoopSpectator.Campaign.Hideout
         private static MapEvent _pendingBattle;
         private static string _pendingResultId;
         private static ExactLandBattleNativeAftermathBridge.Preparation _pendingPreparation;
+        private static ExactLandBattleNativeAftermathBridge.Preparation _pendingEffectiveRosterPreparation;
         private static string _lastCommittedResultId;
 
         internal static bool IsFinalHideoutResult(
@@ -51,11 +52,13 @@ namespace CoopSpectator.Campaign.Hideout
 
                 if (ReferenceEquals(_pendingBattle, battle) &&
                     string.Equals(_pendingResultId, resultId, StringComparison.Ordinal) &&
-                    _pendingPreparation != null)
+                    _pendingPreparation != null &&
+                    _pendingEffectiveRosterPreparation != null)
                 {
                     diagnostics =
                         "already-armed ResultId=" + resultId +
-                        " NativeAftermath={" + _pendingPreparation.Diagnostics + "}";
+                        " NativeAftermath={" + _pendingPreparation.Diagnostics + "}" +
+                        " EffectiveRoster={" + _pendingEffectiveRosterPreparation.Diagnostics + "}";
                     return true;
                 }
 
@@ -73,13 +76,28 @@ namespace CoopSpectator.Campaign.Hideout
                     return false;
                 }
 
+                if (!ExactLandBattleNativeAftermathBridge.TryPrepareEffectiveDefeatedMemberRoster(
+                        battle,
+                        result,
+                        out ExactLandBattleNativeAftermathBridge.Preparation effectiveRosterPreparation,
+                        out string effectiveRosterDiagnostics))
+                {
+                    preparation.Rollback();
+                    diagnostics =
+                        "effective-roster-prepare-failed ResultId=" + resultId +
+                        " Diagnostics={" + effectiveRosterDiagnostics + "}";
+                    return false;
+                }
+
                 _pendingBattle = battle;
                 _pendingResultId = resultId;
                 _pendingPreparation = preparation;
+                _pendingEffectiveRosterPreparation = effectiveRosterPreparation;
                 diagnostics =
                     "armed ResultId=" + resultId +
                     " Entries=" + (result.Entries?.Count ?? 0) +
-                    " NativeAftermath={" + preparation.Diagnostics + "}";
+                    " NativeAftermath={" + preparation.Diagnostics + "}" +
+                    " EffectiveRoster={" + effectiveRosterPreparation.Diagnostics + "}";
                 return true;
             }
         }
@@ -89,7 +107,9 @@ namespace CoopSpectator.Campaign.Hideout
             diagnostics = "not-pending";
             lock (Sync)
             {
-                if (_pendingBattle == null || _pendingPreparation == null)
+                if (_pendingBattle == null ||
+                    _pendingPreparation == null ||
+                    _pendingEffectiveRosterPreparation == null)
                     return false;
                 if (!ReferenceEquals(_pendingBattle, battle))
                 {
@@ -99,12 +119,15 @@ namespace CoopSpectator.Campaign.Hideout
 
                 string resultId = _pendingResultId;
                 string preparationDiagnostics = _pendingPreparation.Diagnostics;
+                string effectiveRosterDiagnostics = _pendingEffectiveRosterPreparation.Diagnostics;
                 _pendingPreparation.Commit();
+                _pendingEffectiveRosterPreparation.Commit();
                 _lastCommittedResultId = resultId;
                 ClearPendingNoLock(rollback: false);
                 diagnostics =
                     "committed ResultId=" + resultId +
-                    " NativeAftermath={" + preparationDiagnostics + "}";
+                    " NativeAftermath={" + preparationDiagnostics + "}" +
+                    " EffectiveRoster={" + effectiveRosterDiagnostics + "}";
                 return true;
             }
         }
@@ -117,7 +140,9 @@ namespace CoopSpectator.Campaign.Hideout
             diagnostics = "not-pending";
             lock (Sync)
             {
-                if (_pendingBattle == null || _pendingPreparation == null)
+                if (_pendingBattle == null ||
+                    _pendingPreparation == null ||
+                    _pendingEffectiveRosterPreparation == null)
                     return false;
                 if (!ReferenceEquals(_pendingBattle, battle) ||
                     (!string.IsNullOrWhiteSpace(resultId) &&
@@ -128,6 +153,7 @@ namespace CoopSpectator.Campaign.Hideout
                 }
 
                 string pendingResultId = _pendingResultId;
+                _pendingEffectiveRosterPreparation.Rollback();
                 _pendingPreparation.Rollback();
                 ClearPendingNoLock(rollback: false);
                 diagnostics = "rolled-back ResultId=" + pendingResultId;
@@ -138,11 +164,15 @@ namespace CoopSpectator.Campaign.Hideout
         private static void ClearPendingNoLock(bool rollback)
         {
             if (rollback)
+            {
+                _pendingEffectiveRosterPreparation?.Rollback();
                 _pendingPreparation?.Rollback();
+            }
 
             _pendingBattle = null;
             _pendingResultId = null;
             _pendingPreparation = null;
+            _pendingEffectiveRosterPreparation = null;
         }
 
         private static bool IsResolvedWinner(string winnerSide)

@@ -6414,10 +6414,23 @@ namespace CoopSpectator.UI
                 !hasLocalControlledAgent &&
                 _localSpawnPending &&
                 _localSpawnPendingWaitsForDeployment;
-            if (!hasLocalControlledAgent && !isAutoDeploymentRequest)
-                return;
-
             bool canStartBattleNow = snapshot != null && snapshot.CanStartBattle;
+            bool isDeferredHostReinforcementRequest =
+                CoopHideoutAmbushContract.ShouldAllowDeferredHostStartHotkey(
+                    hasLocalControlledAgent: hasLocalControlledAgent,
+                    canStartBattle: canStartBattleNow,
+                    snapshotHasAgent: snapshot?.HasAgent ?? false,
+                    isSpawnQueued: string.Equals(
+                        snapshot?.LifecycleState,
+                        "SpawnQueued",
+                        StringComparison.OrdinalIgnoreCase));
+            if (!hasLocalControlledAgent &&
+                !isAutoDeploymentRequest &&
+                !isDeferredHostReinforcementRequest)
+            {
+                return;
+            }
+
             if (!canStartBattleNow)
             {
                 _startBattleHotkeyCooldown = StartBattleHotkeyCooldownSeconds;
@@ -6433,19 +6446,26 @@ namespace CoopSpectator.UI
 
             string requestSource = isAutoDeploymentRequest
                 ? "Battle-map host H hotkey auto-deploy via CoopMissionSelectionView"
-                : "Battle-map client H hotkey via CoopMissionSelectionView";
+                : isDeferredHostReinforcementRequest
+                    ? "Night-hideout host H hotkey with pending reinforcement via CoopMissionSelectionView"
+                    : "Battle-map client H hotkey via CoopMissionSelectionView";
             if (CoopBattlePhaseBridgeFile.WriteStartBattleRequest(requestSource))
             {
                 _startBattleHotkeyCooldown = StartBattleHotkeyCooldownSeconds;
+                _reopenSelectionHotkeyCooldown = ReopenSelectionHotkeyCooldownSeconds;
                 InformationManager.DisplayMessage(
                     new InformationMessage(
                         isAutoDeploymentRequest
                             ? "Coop Battle: automatic deployment of both armies requested"
-                            : "Coop Battle: start requested"));
+                            : isDeferredHostReinforcementRequest
+                                ? "Coop Battle: start requested; reinforcement selection remains queued"
+                                : "Coop Battle: start requested"));
                 ModLogger.Info(
                     isAutoDeploymentRequest
                         ? "CoopMissionSelectionView: wrote both-armies auto-deployment request from host H hotkey."
-                        : "CoopMissionSelectionView: wrote start battle request from H hotkey.");
+                        : isDeferredHostReinforcementRequest
+                            ? "CoopMissionSelectionView: wrote start battle request from host H hotkey while reinforcement selection is pending."
+                            : "CoopMissionSelectionView: wrote start battle request from H hotkey.");
             }
         }
 
@@ -6459,20 +6479,38 @@ namespace CoopSpectator.UI
             if (!canStartBattleNow)
                 return;
 
+            bool isDeferredHostReinforcementRequest =
+                CoopHideoutAmbushContract.ShouldAllowDeferredHostStartHotkey(
+                    hasLocalControlledAgent: hasLocalControlledAgent,
+                    canStartBattle: canStartBattleNow,
+                    snapshotHasAgent: snapshot?.HasAgent ?? false,
+                    isSpawnQueued: string.Equals(
+                        snapshot?.LifecycleState,
+                        "SpawnQueued",
+                        StringComparison.OrdinalIgnoreCase));
             if (!hasLocalControlledAgent)
             {
-                if (_autoDeployInstructionShown ||
-                    !_localSpawnPending ||
-                    !_localSpawnPendingWaitsForDeployment)
+                if (_localSpawnPending && _localSpawnPendingWaitsForDeployment)
                 {
+                    if (_autoDeployInstructionShown)
+                        return;
+
+                    _autoDeployInstructionShown = true;
+                    InformationManager.DisplayMessage(
+                        new InformationMessage("Coop Battle: press H to auto-deploy both armies."));
+                    ModLogger.Info(
+                        "CoopMissionSelectionView: showed one-shot both-armies auto-deployment instruction for local host peer.");
                     return;
                 }
 
-                _autoDeployInstructionShown = true;
+                if (!isDeferredHostReinforcementRequest || _startBattleInstructionShown)
+                    return;
+
+                _startBattleInstructionShown = true;
                 InformationManager.DisplayMessage(
-                    new InformationMessage("Coop Battle: press H to auto-deploy both armies."));
+                    new InformationMessage("Coop Battle: press H to start while waiting for reinforcements."));
                 ModLogger.Info(
-                    "CoopMissionSelectionView: showed one-shot both-armies auto-deployment instruction for local host peer.");
+                    "CoopMissionSelectionView: showed one-shot start battle instruction for host with pending reinforcement selection.");
                 return;
             }
 

@@ -324,6 +324,22 @@ namespace CoopSpectator.Infrastructure.Hideout
             return phase == CoopHideoutBossPhase.AllBattle;
         }
 
+        public static bool ShouldAttachUnformedBossFightAgentForAllBattle(
+            bool isCampaignStagedPlacementActive,
+            CoopHideoutBossPhase targetPhase,
+            bool isAgentActive,
+            bool isAiControlled,
+            bool isBossSideParticipant,
+            bool hasFormation)
+        {
+            return isCampaignStagedPlacementActive &&
+                   targetPhase == CoopHideoutBossPhase.AllBattle &&
+                   isAgentActive &&
+                   isAiControlled &&
+                   isBossSideParticipant &&
+                   !hasFormation;
+        }
+
         public static bool ShouldDetachAgentForCampaignBossCinematic(
             bool isCampaignStagedPlacementActive,
             bool isAiControlled)
@@ -627,6 +643,74 @@ namespace CoopSpectator.Infrastructure.Hideout
             bool isValidatedDayHideoutScenario)
         {
             return isExactLandBattleScenario || isValidatedDayHideoutScenario;
+        }
+
+        public static bool ShouldApplyCommanderOrderAuthorityGuards(
+            bool isExactCampaignBattleScene,
+            bool isValidatedHideoutScenario)
+        {
+            return isExactCampaignBattleScene || isValidatedHideoutScenario;
+        }
+
+        public static bool ShouldSuppressCommanderOrderControls(
+            bool authorityGuardsApply,
+            bool isExactCommander,
+            bool hasDelegatedOrderAuthority)
+        {
+            return authorityGuardsApply &&
+                !isExactCommander &&
+                !hasDelegatedOrderAuthority;
+        }
+
+        public static bool ShouldBypassSpawnHandshakeSelectAllSuppression(
+            bool isExactCommander,
+            bool hasAuthorizedFormations)
+        {
+            return isExactCommander && hasAuthorizedFormations;
+        }
+
+        public static bool AreAssignedPeersReadyWithDeferredSelections(
+            int assignedPeerCount,
+            int controlledPeerCount,
+            int deferredReadyPeerCount)
+        {
+            if (assignedPeerCount <= 0 || controlledPeerCount <= 0)
+                return false;
+
+            long readyPeerCount =
+                (long)Math.Max(0, controlledPeerCount) +
+                Math.Max(0, deferredReadyPeerCount);
+            return readyPeerCount >= assignedPeerCount;
+        }
+
+        public static bool ShouldDeferReservedBossPossession(
+            bool isReservedBossEntry,
+            CoopHideoutBossPhase phase)
+        {
+            return isReservedBossEntry &&
+                   phase != CoopHideoutBossPhase.Duel &&
+                   phase != CoopHideoutBossPhase.AllBattle &&
+                   phase != CoopHideoutBossPhase.Completed;
+        }
+
+        public static bool ShouldPreservePendingReservedBossSelection(
+            bool isReservedBossEntry,
+            CoopHideoutBossPhase phase)
+        {
+            return isReservedBossEntry && phase != CoopHideoutBossPhase.Completed;
+        }
+
+        public static bool ShouldRepairReservedBossPossessionFormation(
+            bool isReservedBossEntry,
+            CoopHideoutBossPhase phase,
+            bool isExactEntryMatch,
+            bool hasFormation)
+        {
+            return isReservedBossEntry &&
+                   isExactEntryMatch &&
+                   !hasFormation &&
+                   (phase == CoopHideoutBossPhase.Duel ||
+                    phase == CoopHideoutBossPhase.AllBattle);
         }
 
         public static int ResolveBossTriggerCount(int initialEnemyCount)

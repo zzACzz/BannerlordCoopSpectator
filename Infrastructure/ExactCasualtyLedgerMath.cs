@@ -49,5 +49,34 @@ namespace CoopSpectator.Infrastructure
                 targetNumber - currentNumber,
                 targetWounded - currentWounded);
         }
+
+        public static int ResolveEffectiveParticipantCount(
+            int activeCount,
+            int killedCount,
+            int unconsciousCount,
+            int routedCount,
+            int otherRemovedCount)
+        {
+            int total = CombineStageCounts(activeCount, killedCount);
+            total = CombineStageCounts(total, unconsciousCount);
+            total = CombineStageCounts(total, routedCount);
+            return CombineStageCounts(total, otherRemovedCount);
+        }
+
+        public static int ResolveEffectiveSurvivorCount(
+            int activeCount,
+            int unconsciousCount,
+            int routedCount)
+        {
+            int total = CombineStageCounts(activeCount, unconsciousCount);
+            return CombineStageCounts(total, routedCount);
+        }
+
+        public static bool ShouldSkipTerminalAgentReconciliation(
+            bool isActive,
+            bool wasTerminalRemovalRecorded)
+        {
+            return !isActive && wasTerminalRemovalRecorded;
+        }
     }
 }

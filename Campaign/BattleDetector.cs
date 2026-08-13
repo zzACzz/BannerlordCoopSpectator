@@ -3676,6 +3676,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 !useNativeFinalLordsHallAftermath &&
                 !useNativeFinalLandBattleAftermath &&
                 !useNativeSiegeAmbushAftermath &&
+                !isFinalHideoutResult &&
                 !finalSiegeDefenderPreviewApplied)
             {
                 // A completed final-siege preview already exposes the wounded defenders to

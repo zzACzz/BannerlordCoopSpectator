@@ -121,8 +121,9 @@ namespace CoopSpectator.Infrastructure
 
         public static bool IsExactCommanderOrderControlScene(string sceneName)
         {
-            return IsExactCampaignBattleScene(sceneName) ||
-                   IsValidatedDayHideoutScenarioScene(sceneName);
+            return CoopHideoutBossPhaseContract.ShouldApplyCommanderOrderAuthorityGuards(
+                IsExactCampaignBattleScene(sceneName),
+                IsValidatedDayHideoutScenarioScene(sceneName));
         }
 
         public static bool IsExactSiegeAssaultWithDeploymentScene(string sceneName)

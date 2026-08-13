@@ -13,6 +13,8 @@ internal static class Program
             ValidateExistingNativeStateIsPreserved();
             ValidateDecisiveSiegeAmbushPlan();
             ValidateHideoutCasualtyLedgerPlan();
+            ValidateEffectiveHideoutPopulationPlan();
+            ValidateTerminalAgentReconciliationPolicy();
             ValidateCampaignCasualtyScenarioPolicy();
             ValidateCampaignHeroDeathPolicy();
             ValidateInvalidInputsAreClamped();
@@ -91,7 +93,7 @@ internal static class Program
             "Repeated siege-ambush wounded casualties must not duplicate loot.");
     }
 
-    private static void ValidateHideoutCasualtyLedgerPlan()
+        private static void ValidateHideoutCasualtyLedgerPlan()
     {
         ExactCasualtyLedgerDelta killed =
             ExactCasualtyLedgerMath.PlanMissingDelta(0, 0, 12, 0);
@@ -108,9 +110,59 @@ internal static class Program
             ExactCasualtyLedgerMath.PlanMissingDelta(7, 7, 7, 7);
         Assert(retryKilled.NumberDelta == 0 && retryKilled.WoundedDelta == 0,
             "Repeated hideout killed casualties must not duplicate equipment loot.");
-        Assert(retryWounded.NumberDelta == 0 && retryWounded.WoundedDelta == 0,
-            "Repeated hideout wounded casualties must not duplicate equipment loot.");
-    }
+            Assert(retryWounded.NumberDelta == 0 && retryWounded.WoundedDelta == 0,
+                "Repeated hideout wounded casualties must not duplicate equipment loot.");
+        }
+
+        private static void ValidateEffectiveHideoutPopulationPlan()
+        {
+            int nightParticipants = ExactCasualtyLedgerMath.ResolveEffectiveParticipantCount(
+                activeCount: 0,
+                killedCount: 10,
+                unconsciousCount: 28,
+                routedCount: 6,
+                otherRemovedCount: 0);
+            int nightSurvivors = ExactCasualtyLedgerMath.ResolveEffectiveSurvivorCount(
+                activeCount: 0,
+                unconsciousCount: 28,
+                routedCount: 6);
+            Assert(nightParticipants == 44,
+                "Night hideout aftermath must include every materialized boss guard in the effective population.");
+            Assert(nightSurvivors == 34,
+                "Only the ten killed fighters may be removed from the 44-fighter night hideout population.");
+
+            int dayParticipants = ExactCasualtyLedgerMath.ResolveEffectiveParticipantCount(
+                activeCount: 0,
+                killedCount: 11,
+                unconsciousCount: 18,
+                routedCount: 0,
+                otherRemovedCount: 0);
+            int daySurvivors = ExactCasualtyLedgerMath.ResolveEffectiveSurvivorCount(
+                activeCount: 0,
+                unconsciousCount: 18,
+                routedCount: 0);
+            Assert(dayParticipants == 29 && daySurvivors == 18,
+                "Day hideout aftermath must preserve the full 29-fighter population while removing only the killed fighters.");
+        }
+
+        private static void ValidateTerminalAgentReconciliationPolicy()
+        {
+            Assert(
+                ExactCasualtyLedgerMath.ShouldSkipTerminalAgentReconciliation(
+                    isActive: false,
+                    wasTerminalRemovalRecorded: true),
+                "An inactive agent with an authoritative terminal removal must not be registered twice.");
+            Assert(
+                !ExactCasualtyLedgerMath.ShouldSkipTerminalAgentReconciliation(
+                    isActive: true,
+                    wasTerminalRemovalRecorded: true),
+                "An active agent that reused an index must still be reconciled.");
+            Assert(
+                !ExactCasualtyLedgerMath.ShouldSkipTerminalAgentReconciliation(
+                    isActive: false,
+                    wasTerminalRemovalRecorded: false),
+                "An untracked inactive agent must remain eligible for final reconciliation.");
+        }
 
     private static void ValidateCampaignCasualtyScenarioPolicy()
     {

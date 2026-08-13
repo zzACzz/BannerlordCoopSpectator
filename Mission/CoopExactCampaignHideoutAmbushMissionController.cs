@@ -60,6 +60,8 @@ namespace CoopSpectator.MissionBehaviors
 
             public bool HasSpear => _source.HasSpear;
 
+            internal IAgentOriginBase Source => _source;
+
             public void SetWounded()
             {
             }
@@ -96,6 +98,23 @@ namespace CoopSpectator.MissionBehaviors
             {
                 return _source.GetTraitsMask();
             }
+        }
+
+        internal static bool TryResolveSyntheticCampaignIdentity(
+            Agent agent,
+            out string entryId,
+            out BattleSideEnum side)
+        {
+            entryId = null;
+            side = BattleSideEnum.None;
+            ExactCampaignSnapshotAgentOrigin exactSource =
+                (agent?.Origin as SyntheticHideoutAgentOrigin)?.Source as ExactCampaignSnapshotAgentOrigin;
+            if (exactSource == null || string.IsNullOrWhiteSpace(exactSource.EntryId))
+                return false;
+
+            entryId = exactSource.EntryId;
+            side = exactSource.Side;
+            return true;
         }
 
         private readonly List<IAgentOriginBase> _reservedPlayerOrigins =
@@ -142,7 +161,7 @@ namespace CoopSpectator.MissionBehaviors
                 if (_alarmStartedAt < 0f || _alarmFailureTriggered)
                     return false;
 
-                Agent mainHeroAgent = ResolveHostAgent();
+                Agent mainHeroAgent = ResolveAuthoritativeMainHeroAgent();
                 CoopHideoutStealthPatrolController stealthController =
                     Mission?.GetMissionBehavior<CoopHideoutStealthPatrolController>();
                 return CoopHideoutAmbushContract.ShouldRunMainHeroAlarmFailureCounter(
@@ -167,13 +186,14 @@ namespace CoopSpectator.MissionBehaviors
 
         internal CoopHideoutSceneManifest SceneManifest => _sceneManifest;
 
-        internal bool CanHostUseCallTroopsPoint(
+        internal bool CanMainHeroUseCallTroopsPoint(
             Agent agent,
             UsableMissionObject usedObject)
         {
             return _phase == CoopHideoutAmbushPhase.Stealth &&
                    IsSupportedUsePoint(usedObject) &&
-                   IsHostAgent(agent);
+                   agent?.IsActive() == true &&
+                   IsAuthoritativeMainHeroAgent(agent);
         }
 
         public override bool IsBossPhaseEligible =>
@@ -188,6 +208,23 @@ namespace CoopSpectator.MissionBehaviors
                 ? 0
                 : (_nightBossOrigin != null ? 1 : 0) +
                   _nightBossBodyguardTargetCount;
+
+        internal bool IsReservedPlayerReinforcementEntry(string entryId)
+        {
+            if (_phase != CoopHideoutAmbushPhase.Stealth ||
+                _reinforcementsSpawned ||
+                string.IsNullOrWhiteSpace(entryId))
+            {
+                return false;
+            }
+
+            return _reservedPlayerOrigins
+                .OfType<ExactCampaignSnapshotAgentOrigin>()
+                .Any(origin => string.Equals(
+                    origin.EntryId,
+                    entryId,
+                    StringComparison.Ordinal));
+        }
 
         public override int GetRemainingTroopCount(BattleSideEnum side)
         {
@@ -315,9 +352,10 @@ namespace CoopSpectator.MissionBehaviors
             if (GameNetwork.IsServer &&
                 _phase == CoopHideoutAmbushPhase.Stealth &&
                 IsSupportedUsePoint(usedObject) &&
-                IsHostAgent(userAgent))
+                userAgent?.IsActive() == true &&
+                IsAuthoritativeMainHeroAgent(userAgent))
             {
-                BeginCallTroops("host-used-stealth-area-use-point");
+                BeginCallTroops("main-hero-used-stealth-area-use-point");
             }
 
             base.OnObjectUsed(userAgent, usedObject);
@@ -335,7 +373,8 @@ namespace CoopSpectator.MissionBehaviors
             bool isDefeatingAgentState =
                 agentState == AgentState.Killed ||
                 agentState == AgentState.Unconscious;
-            if (ReferenceEquals(affectedAgent, _authoritativeMainHeroAgent) &&
+            if ((ReferenceEquals(affectedAgent, _authoritativeMainHeroAgent) ||
+                 IsAuthoritativeMainHeroAgent(affectedAgent)) &&
                 isDefeatingAgentState)
             {
                 _mainHeroWasDefeated = true;
@@ -380,9 +419,7 @@ namespace CoopSpectator.MissionBehaviors
             if (_authoritativeMainHeroAgent != null)
                 return;
 
-            Agent hostAgent = ResolveHostAgent();
-            if (hostAgent?.IsActive() == true)
-                _authoritativeMainHeroAgent = hostAgent;
+            ResolveAuthoritativeMainHeroAgent();
         }
 
         private void TryMaterializeNightAmbush()
@@ -609,7 +646,7 @@ namespace CoopSpectator.MissionBehaviors
 
             _callTroopsReadyLogged = true;
             ModLogger.Info(
-                "CoopExactCampaignHideoutAmbushMissionController: all sentries cleared; host call-troops interaction is ready. " +
+                "CoopExactCampaignHideoutAmbushMissionController: all sentries cleared; main-hero call-troops interaction is ready. " +
                 "ActiveCampEnemies=" + CountActive(_spawnedEnemyAgents) + ".");
         }
 
@@ -617,7 +654,7 @@ namespace CoopSpectator.MissionBehaviors
         {
             CoopHideoutStealthPatrolController stealthController =
                 Mission.GetMissionBehavior<CoopHideoutStealthPatrolController>();
-            Agent mainHeroAgent = ResolveHostAgent();
+            Agent mainHeroAgent = ResolveAuthoritativeMainHeroAgent();
             bool shouldRunCounter =
                 CoopHideoutAmbushContract.ShouldRunMainHeroAlarmFailureCounter(
                     _phase == CoopHideoutAmbushPhase.Stealth,
@@ -686,10 +723,9 @@ namespace CoopSpectator.MissionBehaviors
             out string rejection)
         {
             rejection = string.Empty;
-            Agent hostAgent = ResolveControlledAgent(peer);
-            if (!IsHostAgent(hostAgent))
+            if (!DoesPeerControlAuthoritativeMainHero(peer))
             {
-                rejection = "call-troops-sender-not-host";
+                rejection = "call-troops-sender-not-main-hero-controller";
                 return false;
             }
 
@@ -705,7 +741,7 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
             }
 
-            BeginCallTroops("validated-host-network-use");
+            BeginCallTroops("validated-main-hero-network-use");
             return _phase == CoopHideoutAmbushPhase.CallTroops;
         }
 
@@ -901,64 +937,55 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        private static bool IsHostAgent(Agent agent)
+        internal bool DoesPeerControlAuthoritativeMainHero(
+            NetworkCommunicator peer)
         {
-            if (agent?.IsActive() != true || agent.MissionPeer == null)
-                return false;
-
-            NetworkCommunicator peer = agent.MissionPeer.GetNetworkPeer();
-            if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive)
-                return false;
-
-            if (HostSelfJoinRedirectState.TryResolvePersistedHostedPeerUserName(
-                    out string hostUserName) &&
-                !string.IsNullOrWhiteSpace(hostUserName))
+            if (peer == null ||
+                peer.IsServerPeer ||
+                !peer.IsConnectionActive ||
+                !peer.IsSynchronized)
             {
-                return string.Equals(
-                    peer.UserName,
-                    hostUserName,
-                    StringComparison.OrdinalIgnoreCase);
+                return false;
             }
 
-            return GameNetwork.NetworkPeers?
-                .Where(candidate =>
-                    candidate != null &&
-                    !candidate.IsServerPeer &&
-                    candidate.IsConnectionActive &&
-                    candidate.IsSynchronized)
-                .OrderBy(candidate => candidate.Index)
-                .FirstOrDefault()?.Index == peer.Index;
+            Agent controlledAgent = ResolveControlledAgent(peer);
+            RosterEntryState entry = ResolveExactEntryState(controlledAgent);
+            return CoopHideoutAmbushContract.HasMainHeroUseAuthority(
+                controlledAgent?.IsActive() == true,
+                entry?.OriginalCharacterId,
+                entry?.HeroRole);
         }
 
-        private static Agent ResolveHostAgent()
+        private Agent ResolveAuthoritativeMainHeroAgent()
         {
-            if (GameNetwork.NetworkPeers == null)
-                return null;
+            if (_authoritativeMainHeroAgent != null)
+                return _authoritativeMainHeroAgent;
 
-            if (HostSelfJoinRedirectState.TryResolvePersistedHostedPeerUserName(
-                    out string hostUserName) &&
-                !string.IsNullOrWhiteSpace(hostUserName))
-            {
-                NetworkCommunicator markedHost = GameNetwork.NetworkPeers.FirstOrDefault(peer =>
-                    peer != null &&
-                    !peer.IsServerPeer &&
-                    peer.IsConnectionActive &&
-                    peer.IsSynchronized &&
-                    string.Equals(peer.UserName, hostUserName, StringComparison.OrdinalIgnoreCase));
-                Agent markedAgent = ResolveControlledAgent(markedHost);
-                if (markedAgent?.IsActive() == true)
-                    return markedAgent;
-            }
+            _authoritativeMainHeroAgent = _spawnedPlayerAgents.FirstOrDefault(agent =>
+                agent?.IsActive() == true &&
+                IsAuthoritativeMainHeroAgent(agent));
+            if (_authoritativeMainHeroAgent != null)
+                return _authoritativeMainHeroAgent;
 
-            return GameNetwork.NetworkPeers
-                .Where(peer =>
-                    peer != null &&
-                    !peer.IsServerPeer &&
-                    peer.IsConnectionActive &&
-                    peer.IsSynchronized)
-                .OrderBy(peer => peer.Index)
-                .Select(ResolveControlledAgent)
-                .FirstOrDefault(agent => agent?.IsActive() == true);
+            _authoritativeMainHeroAgent = Mission?.Agents?.FirstOrDefault(agent =>
+                agent?.IsActive() == true &&
+                IsAuthoritativeMainHeroAgent(agent));
+            return _authoritativeMainHeroAgent;
+        }
+
+        private static bool IsAuthoritativeMainHeroAgent(Agent agent)
+        {
+            RosterEntryState entry = ResolveExactEntryState(agent);
+            return CoopHideoutAmbushContract.IsMainHeroEntry(
+                entry?.OriginalCharacterId,
+                entry?.HeroRole);
+        }
+
+        private static RosterEntryState ResolveExactEntryState(Agent agent)
+        {
+            return ExactCampaignArmyBootstrap.TryGetEntryId(agent, out string entryId)
+                ? BattleSnapshotRuntimeState.GetEntryState(entryId)
+                : null;
         }
 
         private static Agent ResolveControlledAgent(NetworkCommunicator peer)

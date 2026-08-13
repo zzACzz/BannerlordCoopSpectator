@@ -11,6 +11,7 @@ internal static class Program
             ValidateScenePolicy();
             ValidatePreOpenMissionContractPolicy();
             ValidateNightAmbushContractPolicy();
+            ValidateNightDeferredHostBattleStartPolicy();
             ValidateNightAlarmFailureCounterPolicy();
             ValidateNightMainHeroDefeatPolicy();
             ValidateCallTroopsCinematicPolicy();
@@ -21,6 +22,8 @@ internal static class Program
             ValidateNativeTimerStartupPolicy();
             ValidateCommanderIdentityFallbackPolicy();
             ValidateCommanderOrderInputPolicy();
+            ValidateCommanderOrderAuthorityGuardPolicy();
+            ValidateDeferredBossPossessionPolicy();
             ValidateSceneManifestParsing();
             ValidateNightSceneManifestParsing();
             ValidateTriggerPolicy();
@@ -373,6 +376,84 @@ internal static class Program
             "Nighttime sneak-attack multipliers must match the Bannerlord 1.4.8 campaign formula.");
         }
 
+        private static void ValidateNightDeferredHostBattleStartPolicy()
+        {
+            Assert(
+                CoopHideoutAmbushContract.ShouldCountHostedNightReinforcementSelectionAsReady(
+                    isHostedPeer: true,
+                    hasActiveControlledAgent: false,
+                    hasPendingSpawnRequest: true,
+                    pendingEntryIsReservedReinforcement: true),
+                "A hosted peer with an exact pending night reinforcement must be ready without an active agent.");
+            Assert(
+                !CoopHideoutAmbushContract.ShouldCountHostedNightReinforcementSelectionAsReady(
+                    isHostedPeer: false,
+                    hasActiveControlledAgent: false,
+                    hasPendingSpawnRequest: true,
+                    pendingEntryIsReservedReinforcement: true) &&
+                !CoopHideoutAmbushContract.ShouldCountHostedNightReinforcementSelectionAsReady(
+                    isHostedPeer: true,
+                    hasActiveControlledAgent: false,
+                    hasPendingSpawnRequest: false,
+                    pendingEntryIsReservedReinforcement: true) &&
+                !CoopHideoutAmbushContract.ShouldCountHostedNightReinforcementSelectionAsReady(
+                    isHostedPeer: true,
+                    hasActiveControlledAgent: false,
+                    hasPendingSpawnRequest: true,
+                    pendingEntryIsReservedReinforcement: false),
+                "A remote peer, missing request, or non-reinforcement entry must not receive deferred host readiness.");
+            Assert(
+                CoopHideoutAmbushContract.AreNightHideoutAssignedPeersReadyForBattleStart(
+                    assignedPeerCount: 2,
+                    controlledPeerCount: 1,
+                    hasHostedPendingReinforcementSelection: true),
+                "One controlled infiltrator plus the hosted pending reinforcement must allow the two-player ambush to start.");
+            Assert(
+                CoopHideoutAmbushContract.AreNightHideoutAssignedPeersReadyForBattleStart(
+                    assignedPeerCount: 2,
+                    controlledPeerCount: 2,
+                    hasHostedPendingReinforcementSelection: false),
+                "The ordinary all-peers-controlled path must remain ready.");
+            Assert(
+                !CoopHideoutAmbushContract.AreNightHideoutAssignedPeersReadyForBattleStart(
+                    assignedPeerCount: 1,
+                    controlledPeerCount: 0,
+                    hasHostedPendingReinforcementSelection: true) &&
+                !CoopHideoutAmbushContract.AreNightHideoutAssignedPeersReadyForBattleStart(
+                    assignedPeerCount: 3,
+                    controlledPeerCount: 1,
+                    hasHostedPendingReinforcementSelection: true) &&
+                !CoopHideoutAmbushContract.AreNightHideoutAssignedPeersReadyForBattleStart(
+                    assignedPeerCount: 2,
+                    controlledPeerCount: 1,
+                    hasHostedPendingReinforcementSelection: false),
+                "Deferred host readiness must not start without an infiltrator or while another assigned peer is still unready.");
+            Assert(
+                CoopHideoutAmbushContract.ShouldAllowDeferredHostStartHotkey(
+                    hasLocalControlledAgent: false,
+                    canStartBattle: true,
+                    snapshotHasAgent: false,
+                    isSpawnQueued: true),
+                "A server-authorized host must be able to press H while its exact reinforcement remains queued.");
+            Assert(
+                !CoopHideoutAmbushContract.ShouldAllowDeferredHostStartHotkey(
+                    hasLocalControlledAgent: false,
+                    canStartBattle: false,
+                    snapshotHasAgent: false,
+                    isSpawnQueued: true) &&
+                !CoopHideoutAmbushContract.ShouldAllowDeferredHostStartHotkey(
+                    hasLocalControlledAgent: false,
+                    canStartBattle: true,
+                    snapshotHasAgent: false,
+                    isSpawnQueued: false) &&
+                !CoopHideoutAmbushContract.ShouldAllowDeferredHostStartHotkey(
+                    hasLocalControlledAgent: false,
+                    canStartBattle: true,
+                    snapshotHasAgent: true,
+                    isSpawnQueued: true),
+                "The no-agent H path must require server authority, queued lifecycle, and an absent snapshot agent.");
+        }
+
         private static void ValidateNightAlarmFailureCounterPolicy()
         {
             Assert(
@@ -529,28 +610,52 @@ internal static class Program
                 "Awareness compression must clamp the authoritative value to a stable permille contract.");
 
             Assert(
-                CoopHideoutAmbushContract.TryValidateHostUseRequest(
-                    senderIsHost: true,
+                CoopHideoutAmbushContract.IsMainHeroEntry("main_hero", null) &&
+                CoopHideoutAmbushContract.IsMainHeroEntry(null, "player") &&
+                !CoopHideoutAmbushContract.IsMainHeroEntry("companion_character", "companion") &&
+                !CoopHideoutAmbushContract.IsMainHeroEntry(null, null),
+                "Only the exact campaign main-hero entry may own night call-troops authority.");
+            Assert(
+                CoopHideoutAmbushContract.HasMainHeroUseAuthority(
+                    hasActiveControlledAgent: true,
+                    originalCharacterId: "main_hero",
+                    heroRole: "player") &&
+                !CoopHideoutAmbushContract.HasMainHeroUseAuthority(
+                    hasActiveControlledAgent: false,
+                    originalCharacterId: "main_hero",
+                    heroRole: "player") &&
+                !CoopHideoutAmbushContract.HasMainHeroUseAuthority(
+                    hasActiveControlledAgent: true,
+                    originalCharacterId: "companion_character",
+                    heroRole: "companion") &&
+                !CoopHideoutAmbushContract.HasMainHeroUseAuthority(
+                    hasActiveControlledAgent: true,
+                    originalCharacterId: null,
+                    heroRole: null),
+                "Main-hero use authority must fail closed for inactive, companion, and unresolved controlled agents.");
+            Assert(
+                CoopHideoutAmbushContract.TryValidateMainHeroUseRequest(
+                    senderControlsMainHero: true,
                     CoopHideoutAmbushPhase.Stealth,
                     requestRevision: 4,
                     currentRevision: 4,
                     out bool idempotent,
                     out string rejection) &&
                 !idempotent,
-                "A current host request emitted after the engine accepted the authored use point must be allowed to call troops: " + rejection);
+                "A current request from the peer controlling the main hero must be allowed to call troops: " + rejection);
             Assert(
-                !CoopHideoutAmbushContract.TryValidateHostUseRequest(
-                    senderIsHost: false,
+                !CoopHideoutAmbushContract.TryValidateMainHeroUseRequest(
+                    senderControlsMainHero: false,
                     CoopHideoutAmbushPhase.Stealth,
                     requestRevision: 4,
                     currentRevision: 4,
                     out _,
                     out rejection) &&
-                rejection == "call-troops-sender-not-host",
-                "A non-host client must not trigger the campaign-authoritative transition.");
+                rejection == "call-troops-sender-not-main-hero-controller",
+                "A host or client controlling a companion must not trigger the main-hero-authoritative transition.");
             Assert(
-                !CoopHideoutAmbushContract.TryValidateHostUseRequest(
-                    senderIsHost: true,
+                !CoopHideoutAmbushContract.TryValidateMainHeroUseRequest(
+                    senderControlsMainHero: true,
                     CoopHideoutAmbushPhase.Stealth,
                     requestRevision: 3,
                     currentRevision: 4,
@@ -559,8 +664,8 @@ internal static class Program
                 rejection == "call-troops-revision-stale",
                 "A stale use command must fail closed.");
             Assert(
-                CoopHideoutAmbushContract.TryValidateHostUseRequest(
-                    senderIsHost: true,
+                CoopHideoutAmbushContract.TryValidateMainHeroUseRequest(
+                    senderControlsMainHero: true,
                     CoopHideoutAmbushPhase.CallTroops,
                     requestRevision: 3,
                     currentRevision: 4,
@@ -919,6 +1024,59 @@ internal static class Program
                 CoopHideoutBossPhase.Duel),
             "Formation AI control must return for the all-battle branch but remain suspended during the conversation and duel isolation.");
         Assert(
+            CoopHideoutBossPhaseContract.ShouldAttachUnformedBossFightAgentForAllBattle(
+                isCampaignStagedPlacementActive: true,
+                targetPhase: CoopHideoutBossPhase.AllBattle,
+                isAgentActive: true,
+                isAiControlled: true,
+                isBossSideParticipant: true,
+                hasFormation: false),
+            "An active unformed day or night boss-side AI participant must join a combat formation before the all-battle charge order.");
+        Assert(
+            !CoopHideoutBossPhaseContract.ShouldAttachUnformedBossFightAgentForAllBattle(
+                isCampaignStagedPlacementActive: false,
+                targetPhase: CoopHideoutBossPhase.AllBattle,
+                isAgentActive: true,
+                isAiControlled: true,
+                isBossSideParticipant: true,
+                hasFormation: false) &&
+            !CoopHideoutBossPhaseContract.ShouldAttachUnformedBossFightAgentForAllBattle(
+                isCampaignStagedPlacementActive: true,
+                targetPhase: CoopHideoutBossPhase.Duel,
+                isAgentActive: true,
+                isAiControlled: true,
+                isBossSideParticipant: true,
+                hasFormation: false) &&
+            !CoopHideoutBossPhaseContract.ShouldAttachUnformedBossFightAgentForAllBattle(
+                isCampaignStagedPlacementActive: true,
+                targetPhase: CoopHideoutBossPhase.AllBattle,
+                isAgentActive: false,
+                isAiControlled: true,
+                isBossSideParticipant: true,
+                hasFormation: false) &&
+            !CoopHideoutBossPhaseContract.ShouldAttachUnformedBossFightAgentForAllBattle(
+                isCampaignStagedPlacementActive: true,
+                targetPhase: CoopHideoutBossPhase.AllBattle,
+                isAgentActive: true,
+                isAiControlled: false,
+                isBossSideParticipant: true,
+                hasFormation: false) &&
+            !CoopHideoutBossPhaseContract.ShouldAttachUnformedBossFightAgentForAllBattle(
+                isCampaignStagedPlacementActive: true,
+                targetPhase: CoopHideoutBossPhase.AllBattle,
+                isAgentActive: true,
+                isAiControlled: true,
+                isBossSideParticipant: false,
+                hasFormation: false) &&
+            !CoopHideoutBossPhaseContract.ShouldAttachUnformedBossFightAgentForAllBattle(
+                isCampaignStagedPlacementActive: true,
+                targetPhase: CoopHideoutBossPhase.AllBattle,
+                isAgentActive: true,
+                isAiControlled: true,
+                isBossSideParticipant: true,
+                hasFormation: true),
+            "Formation attachment must not alter fallbacks, duels, inactive agents, players, the opposing side, or agents already assigned to a formation.");
+        Assert(
             CoopHideoutBossPhaseContract.ShouldDetachAgentForCampaignBossCinematic(
                 isCampaignStagedPlacementActive: true,
                 isAiControlled: true) &&
@@ -1241,6 +1399,161 @@ internal static class Program
                 isValidatedDayHideoutScenario: false),
             "An unrelated commander scenario must preserve its existing dedicated order-input path.");
     }
+
+        private static void ValidateCommanderOrderAuthorityGuardPolicy()
+    {
+        Assert(
+            CoopHideoutBossPhaseContract.ShouldApplyCommanderOrderAuthorityGuards(
+                isExactCampaignBattleScene: true,
+                isValidatedHideoutScenario: false),
+            "Exact campaign battles must retain commander order-authority guards.");
+        Assert(
+            CoopHideoutBossPhaseContract.ShouldApplyCommanderOrderAuthorityGuards(
+                isExactCampaignBattleScene: false,
+                isValidatedHideoutScenario: true),
+            "Validated day and night hideouts must suppress non-commander order controls.");
+        Assert(
+            !CoopHideoutBossPhaseContract.ShouldApplyCommanderOrderAuthorityGuards(
+                isExactCampaignBattleScene: false,
+                isValidatedHideoutScenario: false),
+            "Unrelated multiplayer scenes must not inherit campaign commander guards.");
+        Assert(
+            CoopHideoutBossPhaseContract.ShouldSuppressCommanderOrderControls(
+                authorityGuardsApply: true,
+                isExactCommander: false,
+                hasDelegatedOrderAuthority: false),
+            "A regular companion in a validated hideout must not retain order flags.");
+            Assert(
+                !CoopHideoutBossPhaseContract.ShouldSuppressCommanderOrderControls(
+                authorityGuardsApply: true,
+                isExactCommander: true,
+                hasDelegatedOrderAuthority: false),
+            "The exact campaign commander must retain order controls.");
+        Assert(
+            !CoopHideoutBossPhaseContract.ShouldSuppressCommanderOrderControls(
+                authorityGuardsApply: true,
+                isExactCommander: false,
+                hasDelegatedOrderAuthority: true),
+            "An explicitly delegated captain must retain authorized order controls.");
+        Assert(
+            !CoopHideoutBossPhaseContract.ShouldSuppressCommanderOrderControls(
+                authorityGuardsApply: false,
+                isExactCommander: false,
+                hasDelegatedOrderAuthority: false),
+                "Unrelated multiplayer missions must preserve their native order controls.");
+
+            Assert(
+                CoopHideoutBossPhaseContract.ShouldBypassSpawnHandshakeSelectAllSuppression(
+                    isExactCommander: true,
+                    hasAuthorizedFormations: true),
+                "The exact commander must be able to select all formations even while synchronized bot counters remain zero.");
+            Assert(
+                !CoopHideoutBossPhaseContract.ShouldBypassSpawnHandshakeSelectAllSuppression(
+                    isExactCommander: true,
+                    hasAuthorizedFormations: false) &&
+                !CoopHideoutBossPhaseContract.ShouldBypassSpawnHandshakeSelectAllSuppression(
+                    isExactCommander: false,
+                    hasAuthorizedFormations: true),
+                "Spawn-handshake suppression may only be bypassed by the exact commander with resolved formation authority.");
+        }
+
+        private static void ValidateDeferredBossPossessionPolicy()
+        {
+            Assert(
+                CoopHideoutBossPhaseContract.AreAssignedPeersReadyWithDeferredSelections(
+                    assignedPeerCount: 3,
+                    controlledPeerCount: 2,
+                    deferredReadyPeerCount: 1),
+                "A reserved boss selection must count as ready while two other peers are already materialized.");
+            Assert(
+                !CoopHideoutBossPhaseContract.AreAssignedPeersReadyWithDeferredSelections(
+                    assignedPeerCount: 1,
+                    controlledPeerCount: 0,
+                    deferredReadyPeerCount: 1) &&
+                !CoopHideoutBossPhaseContract.AreAssignedPeersReadyWithDeferredSelections(
+                    assignedPeerCount: 4,
+                    controlledPeerCount: 2,
+                    deferredReadyPeerCount: 1),
+                "A deferred boss selection must neither start an empty battle nor hide another unready peer.");
+
+            Assert(
+                CoopHideoutBossPhaseContract.ShouldDeferReservedBossPossession(
+                    isReservedBossEntry: true,
+                    phase: CoopHideoutBossPhase.InitialAssault) &&
+                CoopHideoutBossPhaseContract.ShouldDeferReservedBossPossession(
+                    isReservedBossEntry: true,
+                    phase: CoopHideoutBossPhase.PreparingCinematic) &&
+                CoopHideoutBossPhaseContract.ShouldDeferReservedBossPossession(
+                    isReservedBossEntry: true,
+                    phase: CoopHideoutBossPhase.Cinematic) &&
+                CoopHideoutBossPhaseContract.ShouldDeferReservedBossPossession(
+                    isReservedBossEntry: true,
+                    phase: CoopHideoutBossPhase.AwaitingHostChoice),
+                "The boss peer must remain unpossessed through the initial assault, cutscene, and dialogue choice.");
+            Assert(
+                !CoopHideoutBossPhaseContract.ShouldDeferReservedBossPossession(
+                    isReservedBossEntry: true,
+                    phase: CoopHideoutBossPhase.Duel) &&
+                !CoopHideoutBossPhaseContract.ShouldDeferReservedBossPossession(
+                    isReservedBossEntry: true,
+                    phase: CoopHideoutBossPhase.AllBattle) &&
+                !CoopHideoutBossPhaseContract.ShouldDeferReservedBossPossession(
+                    isReservedBossEntry: false,
+                    phase: CoopHideoutBossPhase.InitialAssault),
+                "Exact boss possession must release only for the duel or all-battle phases and never affect a regular entry.");
+            Assert(
+                CoopHideoutBossPhaseContract.ShouldPreservePendingReservedBossSelection(
+                    isReservedBossEntry: true,
+                    phase: CoopHideoutBossPhase.AllBattle) &&
+                !CoopHideoutBossPhaseContract.ShouldPreservePendingReservedBossSelection(
+                    isReservedBossEntry: true,
+                    phase: CoopHideoutBossPhase.Completed),
+                "The exact pending boss selection must survive until the boss phase completes.");
+            Assert(
+                CoopHideoutBossPhaseContract.ShouldRepairReservedBossPossessionFormation(
+                    isReservedBossEntry: true,
+                    phase: CoopHideoutBossPhase.Duel,
+                    isExactEntryMatch: true,
+                    hasFormation: false) &&
+                CoopHideoutBossPhaseContract.ShouldRepairReservedBossPossessionFormation(
+                    isReservedBossEntry: true,
+                    phase: CoopHideoutBossPhase.AllBattle,
+                    isExactEntryMatch: true,
+                    hasFormation: false),
+                "An exact reserved boss may receive its campaign formation only after the duel or all-battle release.");
+            Assert(
+                !CoopHideoutBossPhaseContract.ShouldRepairReservedBossPossessionFormation(
+                    isReservedBossEntry: true,
+                    phase: CoopHideoutBossPhase.Cinematic,
+                    isExactEntryMatch: true,
+                    hasFormation: false) &&
+                !CoopHideoutBossPhaseContract.ShouldRepairReservedBossPossessionFormation(
+                    isReservedBossEntry: true,
+                    phase: CoopHideoutBossPhase.AwaitingHostChoice,
+                    isExactEntryMatch: true,
+                    hasFormation: false) &&
+                !CoopHideoutBossPhaseContract.ShouldRepairReservedBossPossessionFormation(
+                    isReservedBossEntry: true,
+                    phase: CoopHideoutBossPhase.Completed,
+                    isExactEntryMatch: true,
+                    hasFormation: false) &&
+                !CoopHideoutBossPhaseContract.ShouldRepairReservedBossPossessionFormation(
+                    isReservedBossEntry: false,
+                    phase: CoopHideoutBossPhase.AllBattle,
+                    isExactEntryMatch: true,
+                    hasFormation: false) &&
+                !CoopHideoutBossPhaseContract.ShouldRepairReservedBossPossessionFormation(
+                    isReservedBossEntry: true,
+                    phase: CoopHideoutBossPhase.AllBattle,
+                    isExactEntryMatch: false,
+                    hasFormation: false) &&
+                !CoopHideoutBossPhaseContract.ShouldRepairReservedBossPossessionFormation(
+                    isReservedBossEntry: true,
+                    phase: CoopHideoutBossPhase.AllBattle,
+                    isExactEntryMatch: true,
+                    hasFormation: true),
+                "Formation repair must not alter the cinematic, a completed phase, a regular or inexact entry, or an already formed boss.");
+        }
 
     private static void ValidateSceneManifestParsing()
     {

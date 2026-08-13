@@ -83,6 +83,62 @@ namespace CoopSpectator.MissionBehaviors
         public static CoopHideoutBossPhaseSession CurrentClientState { get; private set; }
         public static int CurrentClientPhaseDurationMilliseconds { get; private set; }
 
+        internal bool IsReservedBossEntry(string entryId)
+        {
+            if (string.IsNullOrWhiteSpace(entryId) || Mission == null)
+                return false;
+
+            CoopExactCampaignHideoutMissionController hideoutController =
+                Mission.GetMissionBehavior<CoopExactCampaignHideoutMissionController>();
+            if (hideoutController == null)
+                return false;
+
+            CoopExactCampaignHideoutAmbushMissionController nightController =
+                hideoutController as CoopExactCampaignHideoutAmbushMissionController;
+            bool hasReservedBossContract =
+                hideoutController.HasReservedBossGroup ||
+                hideoutController.ReservedBossAgent != null ||
+                nightController?.HasNightReservedBossGroup == true ||
+                _bossAgent != null;
+            if (!hasReservedBossContract)
+                return false;
+
+            BattleSideEnum bossSide = hideoutController.PlayerSide == BattleSideEnum.Attacker
+                ? BattleSideEnum.Defender
+                : BattleSideEnum.Attacker;
+            RosterEntryState commanderEntry = BattleCommanderResolver.ResolveCommanderEntry(
+                BattleSnapshotRuntimeState.GetState(),
+                bossSide);
+            return commanderEntry != null &&
+                   string.Equals(commanderEntry.EntryId, entryId, StringComparison.Ordinal);
+        }
+
+        internal bool ShouldDeferReservedBossPossession(string entryId)
+        {
+            return CoopHideoutBossPhaseContract.ShouldDeferReservedBossPossession(
+                IsReservedBossEntry(entryId),
+                _session?.Phase ?? CoopHideoutBossPhase.InitialAssault);
+        }
+
+        internal bool ShouldPreservePendingReservedBossSelection(string entryId)
+        {
+            return CoopHideoutBossPhaseContract.ShouldPreservePendingReservedBossSelection(
+                IsReservedBossEntry(entryId),
+                _session?.Phase ?? CoopHideoutBossPhase.InitialAssault);
+        }
+
+        internal bool ShouldRepairReservedBossPossessionFormation(
+            string entryId,
+            bool isExactEntryMatch,
+            bool hasFormation)
+        {
+            return CoopHideoutBossPhaseContract.ShouldRepairReservedBossPossessionFormation(
+                IsReservedBossEntry(entryId),
+                _session?.Phase ?? CoopHideoutBossPhase.InitialAssault,
+                isExactEntryMatch,
+                hasFormation);
+        }
+
         internal bool ShouldPreserveNightBossFormationDetachment(Agent agent)
         {
             if (agent == null || _session == null ||
@@ -816,6 +872,7 @@ namespace CoopSpectator.MissionBehaviors
 
             SetTeamsAsEnemies(_playerTeam, _enemyTeam, true);
             RestoreMissionMode();
+            AttachUnformedBossFightAgentsToCombatFormations(_enemyTeam);
             RestoreFormationAiForBossPhase(CoopHideoutBossPhase.AllBattle);
             OrderTeamToCharge(_playerTeam);
             OrderTeamToCharge(_enemyTeam);
@@ -2222,6 +2279,88 @@ namespace CoopSpectator.MissionBehaviors
                 formation.SetMovementOrder(MovementOrder.MovementOrderCharge);
                 formation.SetFiringOrder(FiringOrder.FiringOrderFireAtWill);
             }
+        }
+
+        private void AttachUnformedBossFightAgentsToCombatFormations(Team bossTeam)
+        {
+            int eligibleAgentCount = 0;
+            int attachedAgentCount = 0;
+            int failedAgentCount = 0;
+            var attachedByFormation = new Dictionary<FormationClass, int>();
+
+            foreach (FrozenAgentState frozen in _frozenAgentStates.Values)
+            {
+                Agent agent = frozen?.Agent;
+                bool isAgentActive = agent?.IsActive() == true;
+                bool isBossSideParticipant =
+                    isAgentActive && ReferenceEquals(agent.Team, bossTeam);
+                if (!CoopHideoutBossPhaseContract.ShouldAttachUnformedBossFightAgentForAllBattle(
+                        _campaignStagedPlacementActive,
+                        CoopHideoutBossPhase.AllBattle,
+                        isAgentActive,
+                        agent?.IsAIControlled == true,
+                        isBossSideParticipant,
+                        agent?.Formation != null))
+                {
+                    continue;
+                }
+
+                eligibleAgentCount++;
+                FormationClass formationClass = ResolveBossFightCombatFormationClass(agent);
+                try
+                {
+                    Formation formation = bossTeam?.GetFormation(formationClass);
+                    if (formation == null)
+                    {
+                        failedAgentCount++;
+                        continue;
+                    }
+
+                    agent.Formation = formation;
+                    attachedAgentCount++;
+                    attachedByFormation.TryGetValue(formationClass, out int formationCount);
+                    attachedByFormation[formationClass] = formationCount + 1;
+                }
+                catch (Exception ex)
+                {
+                    failedAgentCount++;
+                    ModLogger.Info(
+                        "CoopHideoutBossPhaseController: boss-side formation attachment failed. " +
+                        "Agent=" + (agent?.Index.ToString() ?? "null") +
+                        " Formation=" + formationClass +
+                        " Error=" + ex.Message + ".");
+                }
+            }
+
+            string formationSummary = attachedByFormation.Count == 0
+                ? "none"
+                : string.Join(
+                    ",",
+                    attachedByFormation
+                        .OrderBy(pair => (int)pair.Key)
+                        .Select(pair => pair.Key + ":" + pair.Value));
+            ModLogger.Info(
+                "CoopHideoutBossPhaseController: prepared boss-side formations for all-battle. " +
+                "EligibleAgents=" + eligibleAgentCount +
+                " AttachedAgents=" + attachedAgentCount +
+                " FailedAgents=" + failedAgentCount +
+                " Formations=" + formationSummary + ".");
+        }
+
+        private static FormationClass ResolveBossFightCombatFormationClass(Agent agent)
+        {
+            FormationClass formationClass =
+                agent?.Character?.DefaultFormationClass ?? FormationClass.Infantry;
+            int formationIndex = (int)formationClass;
+            if (formationIndex >= 0 &&
+                formationIndex < (int)FormationClass.NumberOfRegularFormations)
+            {
+                return formationClass;
+            }
+
+            return agent?.IsRangedCached == true
+                ? FormationClass.Ranged
+                : FormationClass.Infantry;
         }
 
         private void StopTeamFormationsForCinematic(Team team)

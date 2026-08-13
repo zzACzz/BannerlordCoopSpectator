@@ -67,6 +67,7 @@ namespace CoopSpectator.MissionBehaviors
         protected bool _materializationFaulted;
         private bool _attackerSpawnerEnabled = true;
         private bool _defenderSpawnerEnabled = true;
+        private bool _mainHeroUnavailableChargeApplied;
         protected int _initialAssaultEnemyCount;
         private Agent _reservedBossAgent;
 
@@ -473,12 +474,33 @@ namespace CoopSpectator.MissionBehaviors
             if (playerTeam == null)
                 return;
 
+            bool isDayHideout = !(this is CoopExactCampaignHideoutAmbushMissionController);
+            Agent controlledMainHero = isDayHideout
+                ? _spawnedPlayerAgents.FirstOrDefault(agent =>
+                    agent?.IsActive() == true &&
+                    IsAuthoritativeMainHeroAgent(agent) &&
+                    agent.MissionPeer != null &&
+                    ReferenceEquals(agent.MissionPeer.ControlledAgent, agent))
+                : null;
+            if (isDayHideout && controlledMainHero == null)
+            {
+                ApplyMainHeroUnavailableCharge(playerTeam, "combat-activated-without-controlled-main-hero");
+                _combatActivated = true;
+                ModLogger.Info(
+                    "CoopExactCampaignHideoutMissionController: initial assault combat activated. " +
+                    "PlayerActive=" + CountActive(_spawnedPlayerAgents) +
+                    " EnemyActive=" + CountActive(_spawnedEnemyAgents) + ".");
+                return;
+            }
+
             foreach (Formation formation in playerTeam.FormationsIncludingEmpty)
             {
                 if (formation == null || formation.CountOfUnits <= 0)
                     continue;
-                Agent playerAgent = _spawnedPlayerAgents.FirstOrDefault(agent =>
-                    agent?.IsActive() == true && !agent.IsAIControlled);
+                Agent playerAgent = isDayHideout
+                    ? controlledMainHero
+                    : _spawnedPlayerAgents.FirstOrDefault(agent =>
+                        agent?.IsActive() == true && !agent.IsAIControlled);
                 formation.SetMovementOrder(playerAgent != null
                     ? MovementOrder.MovementOrderFollow(playerAgent)
                     : MovementOrder.MovementOrderStop);
@@ -490,6 +512,45 @@ namespace CoopSpectator.MissionBehaviors
                 "CoopExactCampaignHideoutMissionController: initial assault combat activated. " +
                 "PlayerActive=" + CountActive(_spawnedPlayerAgents) +
                 " EnemyActive=" + CountActive(_spawnedEnemyAgents) + ".");
+        }
+
+        private void ApplyMainHeroUnavailableCharge(Team playerTeam, string reason)
+        {
+            if (_mainHeroUnavailableChargeApplied || playerTeam == null)
+                return;
+
+            int formationCount = 0;
+            foreach (Formation formation in playerTeam.FormationsIncludingEmpty)
+            {
+                if (formation == null || formation.CountOfUnits <= 0)
+                    continue;
+
+                formation.SetMovementOrder(MovementOrder.MovementOrderCharge);
+                formation.SetFiringOrder(FiringOrder.FiringOrderFireAtWill);
+                formationCount++;
+            }
+
+            _mainHeroUnavailableChargeApplied = formationCount > 0;
+            ModLogger.Info(
+                "CoopExactCampaignHideoutMissionController: player formations released because the exact main hero is unavailable. " +
+                "Formations=" + formationCount +
+                " Reason=" + (reason ?? "unknown") + ".");
+        }
+
+        private static bool IsAuthoritativeMainHeroAgent(Agent agent)
+        {
+            if (agent == null)
+                return false;
+
+            string entryId = (agent.Origin as ExactCampaignSnapshotAgentOrigin)?.EntryId;
+            if (string.IsNullOrWhiteSpace(entryId))
+                CoopMissionSpawnLogic.TryResolveSelectableEntryId(agent, out entryId);
+            RosterEntryState entry = string.IsNullOrWhiteSpace(entryId)
+                ? null
+                : BattleSnapshotRuntimeState.GetEntryState(entryId);
+            return CoopHideoutAmbushContract.IsMainHeroEntry(
+                entry?.OriginalCharacterId,
+                entry?.HeroRole);
         }
 
         protected void HoldPlayerFormations()
@@ -1278,6 +1339,27 @@ namespace CoopSpectator.MissionBehaviors
                 return;
             left.SetIsEnemyOf(right, enemies);
             right.SetIsEnemyOf(left, enemies);
+        }
+
+        public override void OnAgentRemoved(
+            Agent affectedAgent,
+            Agent affectorAgent,
+            AgentState agentState,
+            KillingBlow blow)
+        {
+            if (GameNetwork.IsServer &&
+                _combatActivated &&
+                !(this is CoopExactCampaignHideoutAmbushMissionController) &&
+                affectedAgent != null &&
+                IsAuthoritativeMainHeroAgent(affectedAgent) &&
+                (agentState == AgentState.Killed || agentState == AgentState.Unconscious))
+            {
+                ApplyMainHeroUnavailableCharge(
+                    ResolveTeam(_playerSide),
+                    "main-hero-" + agentState.ToString().ToLowerInvariant());
+            }
+
+            base.OnAgentRemoved(affectedAgent, affectorAgent, agentState, blow);
         }
 
         internal static void TryWieldInitialSlots(Agent agent)

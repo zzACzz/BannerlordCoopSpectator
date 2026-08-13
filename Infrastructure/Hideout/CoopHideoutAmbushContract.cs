@@ -136,6 +136,46 @@ namespace CoopSpectator.Infrastructure.Hideout
                    hasSelectedRosterContract;
         }
 
+        public static bool ShouldCountHostedNightReinforcementSelectionAsReady(
+            bool isHostedPeer,
+            bool hasActiveControlledAgent,
+            bool hasPendingSpawnRequest,
+            bool pendingEntryIsReservedReinforcement)
+        {
+            return isHostedPeer &&
+                   !hasActiveControlledAgent &&
+                   hasPendingSpawnRequest &&
+                   pendingEntryIsReservedReinforcement;
+        }
+
+        public static bool AreNightHideoutAssignedPeersReadyForBattleStart(
+            int assignedPeerCount,
+            int controlledPeerCount,
+            bool hasHostedPendingReinforcementSelection)
+        {
+            if (assignedPeerCount <= 0)
+                return false;
+
+            if (controlledPeerCount >= assignedPeerCount)
+                return true;
+
+            return hasHostedPendingReinforcementSelection &&
+                   controlledPeerCount > 0 &&
+                   controlledPeerCount + 1 >= assignedPeerCount;
+        }
+
+        public static bool ShouldAllowDeferredHostStartHotkey(
+            bool hasLocalControlledAgent,
+            bool canStartBattle,
+            bool snapshotHasAgent,
+            bool isSpawnQueued)
+        {
+            return !hasLocalControlledAgent &&
+                   canStartBattle &&
+                   !snapshotHasAgent &&
+                   isSpawnQueued;
+        }
+
         public static bool ShouldUseMissingSpawnComponentFallback(
             bool isServer,
             bool hasIsolatedHideoutController,
@@ -524,8 +564,31 @@ namespace CoopSpectator.Infrastructure.Hideout
             return false;
         }
 
-        public static bool TryValidateHostUseRequest(
-            bool senderIsHost,
+        public static bool IsMainHeroEntry(
+            string originalCharacterId,
+            string heroRole)
+        {
+            return string.Equals(
+                       originalCharacterId,
+                       "main_hero",
+                       StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(
+                       heroRole,
+                       "player",
+                       StringComparison.OrdinalIgnoreCase);
+        }
+
+        public static bool HasMainHeroUseAuthority(
+            bool hasActiveControlledAgent,
+            string originalCharacterId,
+            string heroRole)
+        {
+            return hasActiveControlledAgent &&
+                   IsMainHeroEntry(originalCharacterId, heroRole);
+        }
+
+        public static bool TryValidateMainHeroUseRequest(
+            bool senderControlsMainHero,
             CoopHideoutAmbushPhase phase,
             int requestRevision,
             int currentRevision,
@@ -534,9 +597,9 @@ namespace CoopSpectator.Infrastructure.Hideout
         {
             idempotent = false;
             rejection = string.Empty;
-            if (!senderIsHost)
+            if (!senderControlsMainHero)
             {
-                rejection = "call-troops-sender-not-host";
+                rejection = "call-troops-sender-not-main-hero-controller";
                 return false;
             }
 

@@ -16231,6 +16231,30 @@ namespace CoopSpectator.MissionBehaviors
             CoopBattlePhaseRuntimeState.AdvanceToAtLeast(CoopBattlePhase.SideSelection, source + " waiting-for-side", mission);
         }
 
+        private static bool IsHostedPendingNightReinforcementSelectionReady(
+            Mission mission,
+            MissionPeer missionPeer,
+            bool hasActiveControlledAgent)
+        {
+            CoopExactCampaignHideoutAmbushMissionController ambushController =
+                mission?.GetMissionBehavior<CoopExactCampaignHideoutAmbushMissionController>();
+            bool hasPendingSpawnRequest =
+                CoopBattleSpawnRequestState.TryGetPendingRequest(
+                    missionPeer,
+                    out CoopBattleSpawnRequestState.PeerSpawnRequestState pendingRequest);
+            bool pendingEntryIsReservedReinforcement =
+                hasPendingSpawnRequest &&
+                ambushController?.IsReservedPlayerReinforcementEntry(
+                    pendingRequest.EntryId) == true;
+
+            return CoopHideoutAmbushContract
+                .ShouldCountHostedNightReinforcementSelectionAsReady(
+                    isHostedPeer: IsBattleStartAuthorityPeer(mission, missionPeer),
+                    hasActiveControlledAgent: hasActiveControlledAgent,
+                    hasPendingSpawnRequest: hasPendingSpawnRequest,
+                    pendingEntryIsReservedReinforcement: pendingEntryIsReservedReinforcement);
+        }
+
         private static bool IsBattleStartReady(Mission mission, out int assignedPeerCount, out int controlledPeerCount)
         {
             assignedPeerCount = 0;
@@ -16243,6 +16267,7 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
 
             var assignedPeerIndices = new List<int>();
+            int deferredReadyPeerCount = 0;
             foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
             {
                 if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized)
@@ -16258,8 +16283,18 @@ namespace CoopSpectator.MissionBehaviors
 
                 assignedPeerCount++;
                 assignedPeerIndices.Add(peer.Index);
-                if (missionPeer.ControlledAgent != null && missionPeer.ControlledAgent.IsActive())
+                bool hasActiveControlledAgent =
+                    missionPeer.ControlledAgent != null &&
+                    missionPeer.ControlledAgent.IsActive();
+                if (hasActiveControlledAgent)
                     controlledPeerCount++;
+                else if (IsHostedPendingNightReinforcementSelectionReady(
+                             mission,
+                             missionPeer,
+                             hasActiveControlledAgent))
+                    deferredReadyPeerCount++;
+                else if (IsDeferredReservedBossSelectionReady(mission, missionPeer))
+                    deferredReadyPeerCount++;
             }
 
             bool assignedPeersInitialMaterializationReady =
@@ -16287,14 +16322,38 @@ namespace CoopSpectator.MissionBehaviors
                     mission,
                     assignedPeerIndices,
                     out _);
+            bool assignedPeersReadyForBattleStart =
+                CoopHideoutBossPhaseContract.AreAssignedPeersReadyWithDeferredSelections(
+                    assignedPeerCount,
+                    controlledPeerCount,
+                    deferredReadyPeerCount);
             return AreBattlefieldArmiesReadyForStart(mission, out _, out _, out _) &&
-                assignedPeerCount > 0 &&
-                controlledPeerCount >= assignedPeerCount &&
+                assignedPeersReadyForBattleStart &&
                 assignedPeersInitialMaterializationReady &&
                 assignedPeersInitialFieldBattleMaterializationReady &&
                 assignedPeersInitialVillageBattleMaterializationReady &&
                 assignedPeersInitialSiegeAssaultMaterializationReady &&
                 assignedPeersInitialSiegeAmbushMaterializationReady;
+        }
+
+        private static bool IsDeferredReservedBossSelectionReady(
+            Mission mission,
+            MissionPeer missionPeer)
+        {
+            if (mission == null || missionPeer == null || missionPeer.ControlledAgent != null)
+                return false;
+
+            if (!CoopBattleSpawnRequestState.TryGetPendingRequest(
+                    missionPeer,
+                    out CoopBattleSpawnRequestState.PeerSpawnRequestState pendingRequest) ||
+                string.IsNullOrWhiteSpace(pendingRequest.EntryId))
+            {
+                return false;
+            }
+
+            CoopHideoutBossPhaseController bossController =
+                mission.GetMissionBehavior<CoopHideoutBossPhaseController>();
+            return bossController?.ShouldDeferReservedBossPossession(pendingRequest.EntryId) == true;
         }
 
         private static bool AreBattlefieldArmiesReadyForStart(
@@ -25999,16 +26058,36 @@ namespace CoopSpectator.MissionBehaviors
             ExactCampaignArmyBootstrap.TryGetEntryId(agent, out exactEntryId);
             BattleSideEnum exactSide = BattleSideEnum.None;
             ExactCampaignArmyBootstrap.TryGetSide(agent, out exactSide);
+            if (string.IsNullOrWhiteSpace(exactEntryId))
+            {
+                CoopExactCampaignHideoutAmbushMissionController.TryResolveSyntheticCampaignIdentity(
+                    agent,
+                    out exactEntryId,
+                    out exactSide);
+            }
 
             string resolvedEntryId = !string.IsNullOrWhiteSpace(exactEntryId)
                 ? exactEntryId
-                : cachedEntryId;
+                : agentIndexRebound
+                    ? null
+                    : cachedEntryId;
             BattleSideEnum resolvedSide = exactSide != BattleSideEnum.None
                 ? exactSide
-                : cachedSide;
+                : agentIndexRebound
+                    ? BattleSideEnum.None
+                    : cachedSide;
 
             if (string.IsNullOrWhiteSpace(resolvedEntryId))
+            {
+                if (agentIndexRebound)
+                {
+                    ClearMaterializedAgentIndexScopedRuntimeCaches(
+                        agent.Index,
+                        clearRemovedGuard: true,
+                        preserveClientMountedHeroPayloadState: true);
+                }
                 return false;
+            }
 
             bool entryChanged = !hadCachedEntry || !string.Equals(cachedEntryId, resolvedEntryId, StringComparison.OrdinalIgnoreCase);
             bool sideChanged = resolvedSide != BattleSideEnum.None &&
@@ -26558,6 +26637,12 @@ namespace CoopSpectator.MissionBehaviors
                 if (agent == null || agent.IsMount)
                     continue;
 
+                bool isActive = agent.IsActive();
+                if (!isActive && _materializedBattleResultRemovedAgentIndices.Contains(agent.Index))
+                {
+                    continue;
+                }
+
                 bool usedExactOriginFallback = false;
                 if (!TryRefreshMaterializedAgentIdentityCache(
                         agent,
@@ -26594,7 +26679,7 @@ namespace CoopSpectator.MissionBehaviors
                         ? trackedInitialHealth
                         : agent.HealthLimit;
                 counts.ObservedDamageTaken += Math.Max(0f, initialHealth - agent.Health);
-                if (agent.IsActive())
+                if (isActive)
                 {
                     counts.ActiveCount++;
                     activeTotal++;
@@ -33964,6 +34049,19 @@ namespace CoopSpectator.MissionBehaviors
                     continue;
                 }
 
+                CoopHideoutBossPhaseController bossController =
+                    mission.GetMissionBehavior<CoopHideoutBossPhaseController>();
+                bool isReservedBossSelection =
+                    bossController?.IsReservedBossEntry(pendingRequest.EntryId) == true;
+                if (bossController?.ShouldDeferReservedBossPossession(pendingRequest.EntryId) == true)
+                    continue;
+
+                bool allowFormationlessExactEntryMatch =
+                    bossController?.ShouldRepairReservedBossPossessionFormation(
+                        pendingRequest.EntryId,
+                        isExactEntryMatch: true,
+                        hasFormation: false) == true;
+
                 if (CoopBattlePeerReconnectState.TryGetActiveBattleReconnectFinalizeGateState(
                         missionPeer,
                         out CoopBattlePeerReconnectState.ActiveBattleReconnectFinalizeGateState reconnectFinalizeGateState) &&
@@ -33972,8 +34070,14 @@ namespace CoopSpectator.MissionBehaviors
                     continue;
                 }
 
-                Agent candidateAgent = FindEligibleMaterializedArmyAgent(mission, authoritativeSide, pendingRequest.EntryId, pendingRequest.TroopId);
-                if (candidateAgent == null)
+                Agent candidateAgent = FindEligibleMaterializedArmyAgent(
+                    mission,
+                    authoritativeSide,
+                    pendingRequest.EntryId,
+                    pendingRequest.TroopId,
+                    requireExactEntryMatch: isReservedBossSelection,
+                    allowFormationlessExactEntryMatch: allowFormationlessExactEntryMatch);
+                if (candidateAgent == null && !isReservedBossSelection)
                 {
                     candidateAgent = TrySeedExactScenePossessionCandidate(
                         mission,
@@ -33988,6 +34092,19 @@ namespace CoopSpectator.MissionBehaviors
                 {
                     LogMaterializedArmyPossessionCandidateMiss(mission, peer, authoritativeSide, pendingRequest, source);
                     continue;
+                }
+
+                if (bossController?.ShouldRepairReservedBossPossessionFormation(
+                        pendingRequest.EntryId,
+                        IsExactMaterializedArmyEntryMatch(candidateAgent, pendingRequest.EntryId),
+                        candidateAgent.Formation != null) == true)
+                {
+                    RosterEntryState candidateEntryState =
+                        ResolveMaterializedEntryStateForPossessedAgent(candidateAgent, pendingRequest);
+                    TryAlignExactCampaignNativeAgentFormation(
+                        candidateAgent,
+                        candidateEntryState,
+                        authoritativeSide);
                 }
 
                 if (!TryReplaceMaterializedBotWithPlayer(mission, missionPeer, peer, candidateAgent, pendingRequest, source + " army-possession"))
@@ -34014,7 +34131,13 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        private static Agent FindEligibleMaterializedArmyAgent(Mission mission, BattleSideEnum side, string entryId, string troopId)
+        private static Agent FindEligibleMaterializedArmyAgent(
+            Mission mission,
+            BattleSideEnum side,
+            string entryId,
+            string troopId,
+            bool requireExactEntryMatch = false,
+            bool allowFormationlessExactEntryMatch = false)
         {
             if (mission?.AllAgents == null)
                 return null;
@@ -34027,7 +34150,6 @@ namespace CoopSpectator.MissionBehaviors
                 if (candidate == null ||
                     !candidate.IsActive() ||
                     candidate.IsMount ||
-                    candidate.Formation == null ||
                     candidate.MissionPeer != null ||
                     candidate.Controller == AgentControllerType.Player)
                 {
@@ -34043,14 +34165,15 @@ namespace CoopSpectator.MissionBehaviors
                 if (!trackedMaterialized && !nativeBootstrapMaterialized && candidate.Team?.Side != side)
                     continue;
 
-                if (!string.IsNullOrWhiteSpace(entryId) &&
-                    ((_materializedArmyEntryIdByAgentIndex.TryGetValue(candidate.Index, out string candidateEntryId) &&
-                      string.Equals(candidateEntryId, entryId, StringComparison.Ordinal)) ||
-                     (ExactCampaignArmyBootstrap.TryGetEntryId(candidate, out string originEntryId) &&
-                      string.Equals(originEntryId, entryId, StringComparison.Ordinal))))
+                bool isExactEntryMatch = IsExactMaterializedArmyEntryMatch(candidate, entryId);
+                if (isExactEntryMatch &&
+                    (candidate.Formation != null || allowFormationlessExactEntryMatch))
                 {
                     return candidate;
                 }
+
+                if (candidate.Formation == null)
+                    continue;
 
                 string candidateTroopId = (candidate.Character as BasicCharacterObject)?.StringId;
                 if (troopCandidate == null &&
@@ -34070,7 +34193,22 @@ namespace CoopSpectator.MissionBehaviors
                 }
             }
 
+            if (requireExactEntryMatch)
+                return null;
+
             return troopCandidate ?? nativeTroopCandidate;
+        }
+
+        private static bool IsExactMaterializedArmyEntryMatch(Agent candidate, string entryId)
+        {
+            if (candidate == null || string.IsNullOrWhiteSpace(entryId))
+                return false;
+
+            return
+                (_materializedArmyEntryIdByAgentIndex.TryGetValue(candidate.Index, out string candidateEntryId) &&
+                 string.Equals(candidateEntryId, entryId, StringComparison.Ordinal)) ||
+                (ExactCampaignArmyBootstrap.TryGetEntryId(candidate, out string originEntryId) &&
+                 string.Equals(originEntryId, entryId, StringComparison.Ordinal));
         }
 
         private static void LogMaterializedArmyPossessionCandidateMiss(
@@ -34168,6 +34306,22 @@ namespace CoopSpectator.MissionBehaviors
             CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
             if (currentPhase < CoopBattlePhase.BattleActive)
                 return true;
+
+            CoopHideoutBossPhaseController bossController =
+                mission.GetMissionBehavior<CoopHideoutBossPhaseController>();
+            if (bossController?.ShouldPreservePendingReservedBossSelection(
+                    pendingRequest.EntryId) == true)
+            {
+                return true;
+            }
+
+            if (IsHostedPendingNightReinforcementSelectionReady(
+                    mission,
+                    missionPeer,
+                    hasActiveControlledAgent: false))
+            {
+                return true;
+            }
 
             IReadOnlyList<string> selectableEntryIds = ResolveSelectableEntryIdsForStatus(
                 mission,

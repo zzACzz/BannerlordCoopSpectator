@@ -133,6 +133,19 @@ namespace CoopSpectator.Campaign.LandBattle
             internal int Wounded { get; set; }
         }
 
+        private sealed class EffectiveRosterAggregate
+        {
+            internal MapEventParty MapEventParty { get; set; }
+
+            internal CharacterObject Character { get; set; }
+
+            internal int ParticipantCount { get; set; }
+
+            internal int SurvivorCount { get; set; }
+
+            internal int WoundedSurvivorCount { get; set; }
+        }
+
         internal sealed class CasualtyRosterChange
         {
             private int _beforeNumber;
@@ -153,6 +166,12 @@ namespace CoopSpectator.Campaign.LandBattle
 
             internal int DesiredMinimumWounded { get; set; }
 
+            internal bool ApplyAbsoluteTarget { get; set; }
+
+            internal int DesiredNumber { get; set; }
+
+            internal int DesiredWounded { get; set; }
+
             internal void CaptureBeforeState()
             {
                 int index = Roster.FindIndexOfTroop(Character);
@@ -165,6 +184,33 @@ namespace CoopSpectator.Campaign.LandBattle
             {
                 if (!_beforeCaptured)
                     throw new InvalidOperationException("casualty-before-state-not-captured");
+
+                if (ApplyAbsoluteTarget)
+                {
+                    int desiredNumber = Math.Max(0, DesiredNumber);
+                    int desiredWounded = Math.Max(0, Math.Min(desiredNumber, DesiredWounded));
+                    int index = Roster.FindIndexOfTroop(Character);
+                    if (index < 0)
+                    {
+                        if (desiredNumber > 0)
+                        {
+                            Roster.AddToCounts(
+                                Character,
+                                desiredNumber,
+                                insertAtFront: false,
+                                woundedCount: desiredWounded);
+                        }
+                        return;
+                    }
+
+                    Roster.AddToCountsAtIndex(
+                        index,
+                        desiredNumber - _beforeNumber,
+                        desiredWounded - _beforeWounded,
+                        0,
+                        removeDepleted: true);
+                    return;
+                }
 
                 int numberDelta = NumberDelta;
                 int woundedDelta = WoundedDelta;
@@ -290,6 +336,159 @@ namespace CoopSpectator.Campaign.LandBattle
                 applyMissingCasualtiesOnly: true,
                 out preparation,
                 out diagnostics);
+        }
+
+        internal static bool TryPrepareEffectiveDefeatedMemberRoster(
+            MapEvent battle,
+            CoopBattleResultBridgeFile.BattleResultSnapshot result,
+            out Preparation preparation,
+            out string diagnostics)
+        {
+            preparation = null;
+            diagnostics = "not-prepared";
+            if (battle == null || result?.Entries == null)
+            {
+                diagnostics = "battle-or-result-null";
+                return false;
+            }
+
+            if (!TryResolveWinnerSide(result.WinnerSide, out BattleSideEnum winnerSide))
+            {
+                diagnostics = "winner-unresolved";
+                return false;
+            }
+
+            BattleSideEnum defeatedSide = winnerSide.GetOppositeSide();
+            List<MapEventParty> defeatedParties = GetParties(battle, defeatedSide);
+            if (defeatedParties.Count == 0)
+            {
+                diagnostics = "defeated-parties-missing";
+                return false;
+            }
+
+            Dictionary<string, MapEventParty> allPartiesById = BuildPartyIndex(battle);
+            var defeatedPartySet = new HashSet<MapEventParty>(defeatedParties);
+            var aggregates = new Dictionary<string, EffectiveRosterAggregate>(StringComparer.OrdinalIgnoreCase);
+            foreach (CoopBattleResultBridgeFile.BattleResultEntrySnapshot entry in
+                     result.Entries.Where(item => item != null))
+            {
+                if (!TryResolveParty(allPartiesById, entry.PartyId, out MapEventParty mapEventParty))
+                {
+                    if (IsSideId(entry.SideId, defeatedSide))
+                    {
+                        diagnostics = "effective-roster-party-unresolved:" + (entry.PartyId ?? "null");
+                        return false;
+                    }
+                    continue;
+                }
+
+                if (!defeatedPartySet.Contains(mapEventParty))
+                    continue;
+
+                CharacterObject character = TryResolveCharacter(
+                    entry.HeroId,
+                    entry.OriginalCharacterId,
+                    entry.CharacterId);
+                if (character == null)
+                {
+                    diagnostics =
+                        "effective-roster-character-unresolved:" +
+                        (entry.HeroId ?? entry.OriginalCharacterId ?? entry.CharacterId ?? "null");
+                    return false;
+                }
+
+                if (character.IsHero)
+                    continue;
+
+                string key = BuildCasualtyKey(mapEventParty, character);
+                if (!aggregates.TryGetValue(key, out EffectiveRosterAggregate aggregate))
+                {
+                    aggregate = new EffectiveRosterAggregate
+                    {
+                        MapEventParty = mapEventParty,
+                        Character = character
+                    };
+                    aggregates[key] = aggregate;
+                }
+
+                aggregate.ParticipantCount = ExactCasualtyLedgerMath.CombineStageCounts(
+                    aggregate.ParticipantCount,
+                    ExactCasualtyLedgerMath.ResolveEffectiveParticipantCount(
+                        entry.ActiveCount,
+                        entry.KilledCount,
+                        entry.UnconsciousCount,
+                        entry.RoutedCount,
+                        entry.OtherRemovedCount));
+                aggregate.SurvivorCount = ExactCasualtyLedgerMath.CombineStageCounts(
+                    aggregate.SurvivorCount,
+                    ExactCasualtyLedgerMath.CombineStageCounts(
+                        Math.Max(0, entry.SnapshotWoundedCount),
+                        ExactCasualtyLedgerMath.ResolveEffectiveSurvivorCount(
+                            entry.ActiveCount,
+                            entry.UnconsciousCount,
+                            entry.RoutedCount)));
+                aggregate.WoundedSurvivorCount = ExactCasualtyLedgerMath.CombineStageCounts(
+                    aggregate.WoundedSurvivorCount,
+                    ExactCasualtyLedgerMath.CombineStageCounts(
+                        Math.Max(0, entry.SnapshotWoundedCount),
+                        Math.Max(0, entry.UnconsciousCount)));
+            }
+
+            var rosterChanges = new List<CasualtyRosterChange>();
+            int participantTotal = 0;
+            int survivorTotal = 0;
+            int woundedTotal = 0;
+            foreach (EffectiveRosterAggregate aggregate in aggregates.Values)
+            {
+                TroopRoster memberRoster = aggregate.MapEventParty?.Party?.MemberRoster;
+                if (memberRoster == null)
+                {
+                    diagnostics = "effective-roster-member-roster-missing";
+                    return false;
+                }
+
+                rosterChanges.Add(new CasualtyRosterChange
+                {
+                    Roster = memberRoster,
+                    Character = aggregate.Character,
+                    ApplyAbsoluteTarget = true,
+                    DesiredNumber = aggregate.SurvivorCount,
+                    DesiredWounded = aggregate.WoundedSurvivorCount
+                });
+                participantTotal = ExactCasualtyLedgerMath.CombineStageCounts(
+                    participantTotal,
+                    aggregate.ParticipantCount);
+                survivorTotal = ExactCasualtyLedgerMath.CombineStageCounts(
+                    survivorTotal,
+                    aggregate.SurvivorCount);
+                woundedTotal = ExactCasualtyLedgerMath.CombineStageCounts(
+                    woundedTotal,
+                    aggregate.WoundedSurvivorCount);
+            }
+
+            string preparationDiagnostics =
+                "ResultId=" + ResolveResultId(result) +
+                " EffectiveRosterEntries=" + aggregates.Count +
+                " Participants=" + participantTotal +
+                " Survivors=" + survivorTotal +
+                " WoundedSurvivors=" + woundedTotal;
+            preparation = new Preparation(
+                ResolveResultId(result),
+                rosterChanges,
+                new List<ContributionChange>(),
+                preparationDiagnostics);
+            if (!preparation.TryApply(out string applyDiagnostics))
+            {
+                preparation = null;
+                diagnostics = applyDiagnostics;
+                return false;
+            }
+
+            diagnostics = applyDiagnostics;
+            ModLogger.Verbose(
+                "ExactLandBattleNativeAftermathBridge: prepared effective defeated member roster. " +
+                preparationDiagnostics);
+            return true;
         }
 
         private static bool TryPrepareCore(
