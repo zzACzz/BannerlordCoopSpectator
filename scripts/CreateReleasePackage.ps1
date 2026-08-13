@@ -25,6 +25,8 @@ $releaseTag = "BannerlordCoopCampaign_{0}" -f $moduleVersion.Trim()
 $releaseChangelogTemplate = Join-Path $distRoot ("CHANGELOG_{0}.md" -f $moduleVersion.Trim())
 $releaseChangelogEnTemplate = Join-Path $distRoot ("CHANGELOG_{0}_EN.md" -f $moduleVersion.Trim())
 $releaseChangelogUaTemplate = Join-Path $distRoot ("CHANGELOG_{0}_UA.md" -f $moduleVersion.Trim())
+$githubReadmeEnTemplate = Join-Path $distRoot ("README_{0}_EN.md" -f $moduleVersion.Trim())
+$githubReadmeUaTemplate = Join-Path $distRoot ("README_{0}_UA.md" -f $moduleVersion.Trim())
 
 $legacyClientDir = Join-Path $distRoot "CoopSpectator_ClientPackage"
 $legacyClientZip = Join-Path $distRoot "CoopSpectator_ClientPackage.zip"
@@ -142,6 +144,19 @@ function Assert-PathExists([string]$targetPath, [string]$label)
     }
 }
 
+function Assert-ExactChildNames([string]$rootDir, [string[]]$expectedNames, [string]$label)
+{
+    Assert-PathExists $rootDir $label
+
+    $actualNames = @(Get-ChildItem -LiteralPath $rootDir -Force | ForEach-Object { $_.Name } | Sort-Object)
+    $sortedExpectedNames = @($expectedNames | Sort-Object)
+    $differences = @(Compare-Object -ReferenceObject $sortedExpectedNames -DifferenceObject $actualNames)
+    if ($differences.Count -ne 0)
+    {
+        throw "Release payload validation failed: unexpected entries in $label. Expected=$($sortedExpectedNames -join ', ') Actual=$($actualNames -join ', ')"
+    }
+}
+
 function Assert-ProductVersionMatches([string]$expectedVersion, [string]$targetFile, [string]$label)
 {
     $actualVersion = Get-ProductVersion $targetFile
@@ -196,10 +211,15 @@ function Validate-GitHubReleasePayload([string]$clientRoot, [string]$hostRoot)
     Assert-PathExists $hostClientDll "GitHub host client CoopSpectator.dll"
     Assert-PathExists $hostMultiplayerDll "GitHub host TaleWorlds.MountAndBlade.Multiplayer.dll"
     Assert-PathExists $hostModuleXml "GitHub host SubModule.xml"
-    Assert-PathExists (Join-Path $clientRoot (Split-Path $releaseChangelogEnTemplate -Leaf)) "GitHub client English changelog"
-    Assert-PathExists (Join-Path $clientRoot (Split-Path $releaseChangelogUaTemplate -Leaf)) "GitHub client Ukrainian changelog"
-    Assert-PathExists (Join-Path $hostRoot (Split-Path $releaseChangelogEnTemplate -Leaf)) "GitHub host English changelog"
-    Assert-PathExists (Join-Path $hostRoot (Split-Path $releaseChangelogUaTemplate -Leaf)) "GitHub host Ukrainian changelog"
+    Assert-PathExists $releaseChangelogEnTemplate "standalone English changelog"
+    Assert-PathExists $releaseChangelogUaTemplate "standalone Ukrainian changelog"
+    Assert-PathExists $githubReadmeEnTemplate "standalone English README"
+    Assert-PathExists $githubReadmeUaTemplate "standalone Ukrainian README"
+
+    Assert-ExactChildNames $clientRoot @("Modules", "run_mp_with_mod_from_game_root.bat") "GitHub client package root"
+    Assert-ExactChildNames (Join-Path $clientRoot "Modules") @("CoopSpectator") "GitHub client Modules directory"
+    Assert-ExactChildNames $hostRoot @("Modules") "GitHub host package root"
+    Assert-ExactChildNames (Join-Path $hostRoot "Modules") @("CoopSpectatorDedicated") "GitHub host Modules directory"
 
     $expectedClientVersion = Get-ProductVersion (Join-Path $clientModuleSource "bin\Win64_Shipping_Client\CoopSpectator.dll")
     $expectedDedicatedVersion = Get-ProductVersion (Join-Path $dedicatedModuleSource "bin\Win64_Shipping_Server\CoopSpectator.dll")
@@ -232,6 +252,8 @@ function Create-GitHubReleaseAssets
 {
     Assert-PathExists $releaseChangelogEnTemplate "English release changelog"
     Assert-PathExists $releaseChangelogUaTemplate "Ukrainian release changelog"
+    Assert-PathExists $githubReadmeEnTemplate "English release README"
+    Assert-PathExists $githubReadmeUaTemplate "Ukrainian release README"
 
     Reset-Path $githubClientDir
     Reset-Path $githubClientZip
@@ -241,13 +263,9 @@ function Create-GitHubReleaseAssets
     New-Item -ItemType Directory -Path (Join-Path $githubClientDir "Modules") -Force | Out-Null
     Copy-DirectoryContent $clientModuleSource (Join-Path $githubClientDir "Modules\CoopSpectator")
     Copy-Item -LiteralPath $portableLauncher -Destination (Join-Path $githubClientDir "run_mp_with_mod_from_game_root.bat") -Force
-    Copy-Item -LiteralPath $releaseChangelogEnTemplate -Destination $githubClientDir -Force
-    Copy-Item -LiteralPath $releaseChangelogUaTemplate -Destination $githubClientDir -Force
 
     New-Item -ItemType Directory -Path (Join-Path $githubHostDir "Modules") -Force | Out-Null
     Copy-HostPayload (Join-Path $githubHostDir "Modules") $false
-    Copy-Item -LiteralPath $releaseChangelogEnTemplate -Destination $githubHostDir -Force
-    Copy-Item -LiteralPath $releaseChangelogUaTemplate -Destination $githubHostDir -Force
 
     Remove-DebugSymbols $githubClientDir
     Remove-DebugSymbols $githubHostDir

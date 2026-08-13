@@ -8,10 +8,10 @@
     <AssemblyName>CoopSpectator</AssemblyName>
     <!-- Кореневий namespace для типів проєкту -->
     <RootNamespace>CoopSpectator</RootNamespace>
-    <Version>0.2.1</Version>
-    <AssemblyVersion>0.2.1.0</AssemblyVersion>
-    <FileVersion>0.2.1.0</FileVersion>
-    <InformationalVersion>0.2.1</InformationalVersion>
+    <Version>0.3.0</Version>
+    <AssemblyVersion>0.3.0.0</AssemblyVersion>
+    <FileVersion>0.3.0.0</FileVersion>
+    <InformationalVersion>0.3.0</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <!-- Забороняємо Prefer32Bit, бо гра 64-бітна -->
     <Prefer32Bit>false</Prefer32Bit>

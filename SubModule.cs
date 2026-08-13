@@ -505,7 +505,7 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
             } // Ð—Ð°Ð²ÐµÑ€ÑˆÑƒÑ”Ð¼Ð¾ Ð±Ð»Ð¾Ðº if
 
             _hasShownLoadedMessage = true; // Ð’ÑÑ‚Ð°Ð½Ð¾Ð²Ð»ÑŽÑ”Ð¼Ð¾ Ð¿Ñ€Ð°Ð¿Ð¾Ñ€ÐµÑ†ÑŒ, Ñ‰Ð¾Ð± Ð¿Ð¾Ð²Ñ‚Ð¾Ñ€Ð½Ð¸Ð¹ OnGameStart Ð½Ðµ ÑÐ¿Ð°Ð¼Ð¸Ð² Ð¿Ð¾Ð²Ñ–Ð´Ð¾Ð¼Ð»ÐµÐ½Ð½ÑÐ¼Ð¸
-            ShowMessage("Bannerlord Coop Campaign mod loaded! (v0.1.1-ui)"); // Version marker to confirm the client runs the latest build
+            ShowMessage("Bannerlord Coop Campaign mod loaded! (v0.3.0)"); // Version marker to confirm the client runs the latest build
         } // Ð—Ð°Ð²ÐµÑ€ÑˆÑƒÑ”Ð¼Ð¾ Ð±Ð»Ð¾Ðº Ð¼ÐµÑ‚Ð¾Ð´Ñƒ
 
         private static void TryRegisterCoopCampaignDerivedAgentStatModel(Game game, IGameStarter gameStarterObject, string source)

@@ -2,7 +2,7 @@
 <Module>
   <Name value="Bannerlord Coop Campaign (Dedicated)" />
   <Id value="CoopSpectatorDedicated" />
-  <Version value="v0.2.1" />
+  <Version value="v0.3.0" />
   <SingleplayerModule value="false" />
   <MultiplayerModule value="false" />
   <DependedModules>
