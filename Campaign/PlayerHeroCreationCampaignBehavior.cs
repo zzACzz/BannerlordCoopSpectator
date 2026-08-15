@@ -22,7 +22,11 @@ namespace CoopSpectator.Campaign
         private List<string> _consumedResultIds = new List<string>();
         private int _previousTimeMode;
         private bool _timePausedForCreator;
-        private float _pollTimer;
+        private readonly CoopHeroCreationWallClockPollGate _pollGate =
+            new CoopHeroCreationWallClockPollGate(TimeSpan.FromMilliseconds(500));
+        private string _lastObservedProgressSignature;
+        private string _currentStatusText;
+        private int _statusRevision;
 
         public PlayerHeroCreationCampaignBehavior() { _instance = this; }
 
@@ -57,6 +61,19 @@ namespace CoopSpectator.Campaign
         public static bool HasActiveSession =>
             _instance != null && !string.IsNullOrWhiteSpace(_instance._activeRequestJson);
 
+        public static int StatusRevision => _instance?._statusRevision ?? 0;
+
+        public static string CurrentStatusText =>
+            _instance == null || string.IsNullOrWhiteSpace(_instance._currentStatusText)
+                ? "Hero creation is starting. Waiting for the dedicated server."
+                : _instance._currentStatusText;
+
+        public static void PumpApplicationTick()
+        {
+            if (_instance == null || CampaignSystemRuntime.Current == null) return;
+            _instance.PollActiveSession(DateTime.UtcNow);
+        }
+
         public static bool TryStart(out string message)
         {
             string reason;
@@ -80,6 +97,7 @@ namespace CoopSpectator.Campaign
             bool serverWasAlive = DedicatedHelperLauncher.HasDedicatedProcess();
             bool endMissionRequested = !serverWasAlive || DedicatedServerCommands.SendEndMission();
             _instance._activeRequestJson = null;
+            _instance.ResetProgressState();
             _instance.RestoreCampaignTime();
             message = endMissionRequested
                 ? "Hero creation has been canceled."
@@ -107,10 +125,13 @@ namespace CoopSpectator.Campaign
                 };
                 CoopHeroCreationBridgeFile.WriteRequest(request);
                 _activeRequestJson = JsonConvert.SerializeObject(request, Formatting.None);
+                ResetProgressState();
+                SetStatus("Hero creation is starting. Waiting for the dedicated server.", false);
                 PauseCampaign();
                 if (!DedicatedServerCommands.SendStartHeroCreatorMission())
                 {
                     _activeRequestJson = null;
+                    ResetProgressState();
                     RestoreCampaignTime();
                     message = "The dedicated server did not accept the request to start the hero creation mission.";
                     return false;
@@ -121,6 +142,7 @@ namespace CoopSpectator.Campaign
             catch (Exception ex)
             {
                 _activeRequestJson = null;
+                ResetProgressState();
                 RestoreCampaignTime();
                 message = "Failed to start hero creation: " + ex.Message;
                 return false;
@@ -129,11 +151,14 @@ namespace CoopSpectator.Campaign
 
         private void OnTick(float dt)
         {
+            PollActiveSession(DateTime.UtcNow);
+        }
+
+        private void PollActiveSession(DateTime utcNow)
+        {
             if (string.IsNullOrWhiteSpace(_activeRequestJson)) return;
             PauseCampaign();
-            _pollTimer -= dt;
-            if (_pollTimer > 0f) return;
-            _pollTimer = 0.5f;
+            if (!_pollGate.TryEnter(utcNow)) return;
 
             CoopHeroCreationRequest request;
             try { request = JsonConvert.DeserializeObject<CoopHeroCreationRequest>(_activeRequestJson); }
@@ -141,7 +166,7 @@ namespace CoopSpectator.Campaign
             if (request == null) { ClearActiveSession("The saved hero creation request is corrupted."); return; }
 
             DateTime createdUtc;
-            if (DateTime.TryParse(request.CreatedUtc, out createdUtc) && DateTime.UtcNow > createdUtc.ToUniversalTime().AddMinutes(12))
+            if (DateTime.TryParse(request.CreatedUtc, out createdUtc) && utcNow > createdUtc.ToUniversalTime().AddMinutes(12))
             {
                 ClearActiveSession("The hero creation session was canceled because it timed out.");
                 return;
@@ -157,8 +182,21 @@ namespace CoopSpectator.Campaign
                 return;
             }
 
+            CoopHeroCreationProgressSnapshot progress;
+            if (CoopHeroCreationBridgeFile.TryReadProgress(out progress, out error) &&
+                CoopHeroCreationProgressContract.MatchesActiveRequest(request, progress, out error))
+                ObserveProgress(progress);
+
             if (!DedicatedHelperLauncher.HasDedicatedProcess())
                 ClearActiveSession("The hero creation session was canceled because the dedicated server stopped running.");
+        }
+
+        private void ObserveProgress(CoopHeroCreationProgressSnapshot progress)
+        {
+            string signature = CoopHeroCreationProgressContract.BuildSignature(progress);
+            if (string.Equals(signature, _lastObservedProgressSignature, StringComparison.Ordinal)) return;
+            _lastObservedProgressSignature = signature;
+            SetStatus(CoopHeroCreationProgressContract.BuildHostStatusText(progress), true);
         }
 
         private void ConsumeResult(CoopHeroCreationRequest request, CoopHeroCreationResult result)
@@ -224,6 +262,7 @@ namespace CoopSpectator.Campaign
             WriteRecords(records);
             RememberConsumedResult(result.ResultId);
             _activeRequestJson = null;
+            ResetProgressState();
             RestoreCampaignTime();
             InformationManager.DisplayMessage(new InformationMessage(
                 "Hero creation completed. Companions added: " + created + ", skipped: " + skipped + "."));
@@ -287,8 +326,27 @@ namespace CoopSpectator.Campaign
         private void ClearActiveSession(string message)
         {
             _activeRequestJson = null;
+            ResetProgressState();
             RestoreCampaignTime();
             InformationManager.DisplayMessage(new InformationMessage(message));
+        }
+
+        private void SetStatus(string message, bool showMessage)
+        {
+            string normalized = message ?? string.Empty;
+            if (string.Equals(normalized, _currentStatusText, StringComparison.Ordinal)) return;
+            _currentStatusText = normalized;
+            _statusRevision++;
+            if (showMessage && !string.IsNullOrWhiteSpace(normalized))
+                InformationManager.DisplayMessage(new InformationMessage(normalized));
+        }
+
+        private void ResetProgressState()
+        {
+            _pollGate.Reset();
+            _lastObservedProgressSignature = null;
+            _currentStatusText = null;
+            _statusRevision++;
         }
 
         private static bool MatchesActiveRequest(CoopHeroCreationRequest request, CoopHeroCreationResult result)

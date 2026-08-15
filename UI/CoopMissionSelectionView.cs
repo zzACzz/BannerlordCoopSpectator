@@ -37,6 +37,20 @@ namespace CoopSpectator.UI
 {
     public sealed class CoopMissionSelectionView : MissionView
     {
+        private enum SelectionScreenLoadResult
+        {
+            Unchanged,
+            Loaded,
+            Deferred
+        }
+
+        private enum CommanderDeploymentPreparationResult
+        {
+            Ready,
+            Pending,
+            Failed
+        }
+
         private const string TeamMovieName = "CoopTeamSelection";
         private const string ClassMovieName = "CoopClassLoadout";
         private const string CommanderDeploymentMovieName = "OrderOfBattle";
@@ -135,6 +149,7 @@ namespace CoopSpectator.UI
         private string _lastCommanderBattleOrderBridgeContextKey = string.Empty;
         private string _lastCommanderBattleOrderEmptySetGuardKey = string.Empty;
         private string _lastCommanderBattleOrderVisualAuditKey = string.Empty;
+        private string _lastCommanderDeploymentReadinessLogKey = string.Empty;
 
         public override void OnBehaviorInitialize()
         {
@@ -163,6 +178,7 @@ namespace CoopSpectator.UI
             _lastCommanderBattleOrderBridgeContextKey = string.Empty;
             _lastCommanderBattleOrderEmptySetGuardKey = string.Empty;
             _lastCommanderBattleOrderVisualAuditKey = string.Empty;
+            _lastCommanderDeploymentReadinessLogKey = string.Empty;
             _commanderBattleFocusedFormationsCache = null;
             _commanderDeploymentPlacementInputActive = false;
             _commanderBattleOrderActive = false;
@@ -269,6 +285,7 @@ namespace CoopSpectator.UI
             _lastReconnectSelectionContractLogKey = string.Empty;
             _lastCommanderBattleOrderBridgeContextKey = string.Empty;
             _lastCommanderBattleOrderEmptySetGuardKey = string.Empty;
+            _lastCommanderDeploymentReadinessLogKey = string.Empty;
             base.OnMissionScreenFinalize();
         }
 
@@ -357,16 +374,17 @@ namespace CoopSpectator.UI
             CoopSelectionScreen desiredScreen = DetermineDesiredScreen(snapshot);
             if (desiredScreen == CoopSelectionScreen.None)
             {
+                ClearCommanderDeploymentReadinessWait();
                 ReleaseCurrentMovie();
                 ClearCameraPreviewTarget("overlay-hidden");
                 UpdateOverlayInputState(false);
                 return;
             }
 
-            bool loadedNewScreen;
+            SelectionScreenLoadResult loadResult;
             try
             {
-                loadedNewScreen = EnsureScreenLoaded(snapshot, desiredScreen);
+                loadResult = EnsureScreenLoaded(snapshot, desiredScreen);
             }
             catch (Exception ex)
             {
@@ -376,6 +394,18 @@ namespace CoopSpectator.UI
                 ReleaseCurrentMovie();
                 return;
             }
+            if (loadResult == SelectionScreenLoadResult.Deferred)
+            {
+                if (_currentScreen == CoopSelectionScreen.None)
+                    ClearCameraPreviewTarget("commander-deployment-waiting");
+                else
+                    UpdateCameraPreviewTarget(snapshot, _currentScreen, hasLocalControlledAgent);
+
+                UpdateOverlayInputState(_currentScreen != CoopSelectionScreen.None);
+                return;
+            }
+
+            bool loadedNewScreen = loadResult == SelectionScreenLoadResult.Loaded;
             string refreshKey = GetRefreshKey(snapshot, desiredScreen);
             bool needsRefresh = force || loadedNewScreen || !string.Equals(_lastAppliedRefreshKey, refreshKey, StringComparison.Ordinal);
             if (needsRefresh && !loadedNewScreen)
@@ -730,13 +760,40 @@ namespace CoopSpectator.UI
                 StringComparison.OrdinalIgnoreCase);
         }
 
-        private bool EnsureScreenLoaded(CoopSelectionUiSnapshot snapshot, CoopSelectionScreen desiredScreen)
+        private SelectionScreenLoadResult EnsureScreenLoaded(CoopSelectionUiSnapshot snapshot, CoopSelectionScreen desiredScreen)
         {
             if (_currentScreen == desiredScreen &&
                 _viewModel != null &&
                 (desiredScreen == CoopSelectionScreen.CommanderDeployment || _screenViewModel != null))
             {
-                return false;
+                return SelectionScreenLoadResult.Unchanged;
+            }
+
+            if (desiredScreen == CoopSelectionScreen.CommanderDeployment)
+            {
+                CommanderDeploymentPreparationResult preparationResult =
+                    TryPrepareNativeCommanderDeploymentMissionState(
+                        Mission,
+                        snapshot,
+                        out CoopCommanderDeploymentReadiness readiness,
+                        out string preparationDiagnostics);
+                if (preparationResult == CommanderDeploymentPreparationResult.Pending)
+                {
+                    ObserveCommanderDeploymentReadinessWait(readiness, preparationDiagnostics);
+                    _commanderDeploymentOrderOfBattleActive = false;
+                    return SelectionScreenLoadResult.Deferred;
+                }
+
+                ClearCommanderDeploymentReadinessWait();
+                if (preparationResult == CommanderDeploymentPreparationResult.Failed)
+                {
+                    throw new InvalidOperationException(
+                        "native-order-of-battle-prepare-failed " + preparationDiagnostics);
+                }
+            }
+            else
+            {
+                ClearCommanderDeploymentReadinessWait();
             }
 
             ReleaseCurrentMovie();
@@ -750,7 +807,7 @@ namespace CoopSpectator.UI
                 _currentScreen = desiredScreen;
                 _lastAppliedRefreshKey = GetRefreshKey(snapshot, desiredScreen);
                 ModLogger.Info("CoopMissionSelectionView: loaded coop team selection shell.");
-                return true;
+                return SelectionScreenLoadResult.Loaded;
             }
 
             if (desiredScreen == CoopSelectionScreen.CommanderDeployment)
@@ -771,7 +828,7 @@ namespace CoopSpectator.UI
                     _currentScreen = desiredScreen;
                     _lastAppliedRefreshKey = GetRefreshKey(snapshot, desiredScreen);
                     ModLogger.Info("CoopMissionSelectionView: loaded native OrderOfBattle commander deployment shell.");
-                    return true;
+                    return SelectionScreenLoadResult.Loaded;
                 }
                 catch
                 {
@@ -788,7 +845,7 @@ namespace CoopSpectator.UI
             _currentScreen = desiredScreen;
             _lastAppliedRefreshKey = GetRefreshKey(snapshot, desiredScreen);
             ModLogger.Info("CoopMissionSelectionView: loaded coop class loadout shell.");
-            return true;
+            return SelectionScreenLoadResult.Loaded;
         }
 
         private OrderOfBattleVM CreateNativeCommanderDeploymentViewModel(CoopSelectionUiSnapshot snapshot)
@@ -796,14 +853,6 @@ namespace CoopSpectator.UI
             Mission mission = Mission;
             if (mission == null)
                 throw new InvalidOperationException("mission-null");
-
-            if (!TryPrepareNativeCommanderDeploymentMissionState(
-                    mission,
-                    snapshot,
-                    out string prepareDiagnostics))
-            {
-                throw new InvalidOperationException("native-order-of-battle-prepare-failed " + prepareDiagnostics);
-            }
 
             string siegeUiDiagnostics = "not-required-formation-only";
             BattleScenarioContextMessage scenarioContext =
@@ -902,9 +951,34 @@ namespace CoopSpectator.UI
 
             ModLogger.Info(
                 "CoopMissionSelectionView: prepared native OrderOfBattle commander deployment. " +
-                "Diagnostics={" + (prepareDiagnostics ?? string.Empty) + "} " +
+                "Readiness=Ready " +
                 "SiegeUi={" + (siegeUiDiagnostics ?? string.Empty) + "}");
             return commanderVm;
+        }
+
+        private void ObserveCommanderDeploymentReadinessWait(
+            CoopCommanderDeploymentReadiness readiness,
+            string diagnostics)
+        {
+            string logKey = readiness.ToString();
+            if (string.Equals(
+                    _lastCommanderDeploymentReadinessLogKey,
+                    logKey,
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _lastCommanderDeploymentReadinessLogKey = logKey;
+            ModLogger.Verbose(
+                "CoopMissionSelectionView: commander deployment presentation deferred. " +
+                "Readiness=" + readiness +
+                " Diagnostics={" + (diagnostics ?? string.Empty) + "}");
+        }
+
+        private void ClearCommanderDeploymentReadinessWait()
+        {
+            _lastCommanderDeploymentReadinessLogKey = string.Empty;
         }
 
         private static void TryRefreshNativeCommanderOrderOfBattleCounts(
@@ -1451,49 +1525,74 @@ namespace CoopSpectator.UI
             return value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
         }
 
-        private bool TryPrepareNativeCommanderDeploymentMissionState(
+        private CommanderDeploymentPreparationResult TryPrepareNativeCommanderDeploymentMissionState(
             Mission mission,
             CoopSelectionUiSnapshot snapshot,
+            out CoopCommanderDeploymentReadiness readiness,
             out string diagnostics)
         {
-            diagnostics = "mission-null";
-            if (mission == null)
-                return false;
-
             BattleSideEnum side = snapshot?.EffectiveSide ?? BattleSideEnum.None;
             if (side == BattleSideEnum.None)
                 side = _selectedSideOverride;
-            if (side == BattleSideEnum.None)
-            {
-                diagnostics = "side-none";
-                return false;
-            }
 
             BattleScenarioContextMessage scenarioContext =
                 snapshot?.BattleState?.ScenarioContext ??
                 BattleSnapshotRuntimeState.GetScenarioContext();
-            if (GameNetwork.IsClient &&
+            bool villageBoundaryReady = true;
+            string boundaryReadinessDiagnostics = "not-required";
+            if (mission != null &&
+                GameNetwork.IsClient &&
                 !GameNetwork.IsServer &&
                 ExactCampaignCommanderDeploymentRuntime.IsExactVillageBattleScenario(
                     mission,
-                    scenarioContext) &&
-                !ExactVillageBattleDeploymentBoundaryRuntime.IsClientApplied(
+                    scenarioContext))
+            {
+                villageBoundaryReady = ExactVillageBattleDeploymentBoundaryRuntime.IsClientApplied(
                     mission,
                     out _,
                     out _,
-                    out string boundaryReadinessDiagnostics))
-            {
-                diagnostics =
-                    "authoritative-village-boundary-not-ready " +
-                    (boundaryReadinessDiagnostics ?? "unknown");
-                return false;
+                    out boundaryReadinessDiagnostics);
             }
 
-            Team playerTeam = ResolveMissionTeamForSide(mission, side);
-            if (playerTeam == null)
+            Team playerTeam = mission != null && side != BattleSideEnum.None
+                ? ResolveMissionTeamForSide(mission, side)
+                : null;
+            BannerBearerLogic bannerBearerLogic =
+                mission?.GetMissionBehavior<BannerBearerLogic>();
+            OrderController orderController = playerTeam?.PlayerOrderController;
+            string commanderAuthorityEntryId =
+                ResolveCommanderDeploymentAuthorityEntryId(snapshot);
+            Agent selectedCommanderAgent = null;
+            bool hasCommanderAgent =
+                side != BattleSideEnum.None &&
+                !string.IsNullOrWhiteSpace(commanderAuthorityEntryId) &&
+                TryResolveCameraPreviewAgentForEntry(
+                    side,
+                    commanderAuthorityEntryId,
+                    out selectedCommanderAgent) &&
+                selectedCommanderAgent?.Team?.Side == side;
+
+            readiness = CoopCommanderDeploymentReadinessContract.EvaluatePrerequisites(
+                hasMission: mission != null,
+                hasSide: side != BattleSideEnum.None,
+                isVillageBoundaryReady: villageBoundaryReady,
+                hasTeam: playerTeam != null,
+                hasBannerBearerLogic: bannerBearerLogic != null,
+                hasOrderController: orderController != null,
+                hasCommanderEntry: !string.IsNullOrWhiteSpace(commanderAuthorityEntryId),
+                hasCommanderAgent: hasCommanderAgent);
+            if (!CoopCommanderDeploymentReadinessContract.ShouldReplaceCurrentPresentation(readiness))
             {
-                diagnostics = "team-null Side=" + side;
-                return false;
+                diagnostics =
+                    "Readiness=" + readiness +
+                    " Side=" + side +
+                    " SelectedEntryId=" + (snapshot?.SelectedEntryId ?? string.Empty) +
+                    " CommanderEntryId=" + (commanderAuthorityEntryId ?? string.Empty) +
+                    " Team=" + (playerTeam == null ? "null" : playerTeam.Side + "#" + playerTeam.TeamIndex) +
+                    " VillageBoundary={" + (boundaryReadinessDiagnostics ?? "unknown") + "}";
+                return CoopCommanderDeploymentReadinessContract.IsTransientWait(readiness)
+                    ? CommanderDeploymentPreparationResult.Pending
+                    : CommanderDeploymentPreparationResult.Failed;
             }
 
             string refreshDiagnostics = string.Empty;
@@ -1521,6 +1620,17 @@ namespace CoopSpectator.UI
                 }
             }
 
+            if (!ReferenceEquals(mission.PlayerTeam, playerTeam))
+            {
+                readiness = CoopCommanderDeploymentReadiness.Ready;
+                diagnostics =
+                    "player-team-relation-failed" +
+                    " Side=" + side +
+                    " Team=" + playerTeam.Side + "#" + playerTeam.TeamIndex +
+                    " Refresh={" + refreshDiagnostics + "}";
+                return CommanderDeploymentPreparationResult.Failed;
+            }
+
             bool setPlayerRole = false;
             try
             {
@@ -1534,48 +1644,31 @@ namespace CoopSpectator.UI
                     "set-player-role-failed " +
                     ex.GetType().Name + ":" + ex.Message +
                     " Refresh={" + refreshDiagnostics + "}";
-                return false;
+                return CommanderDeploymentPreparationResult.Failed;
             }
 
-            BannerBearerLogic bannerBearerLogic = mission.GetMissionBehavior<BannerBearerLogic>();
-            if (bannerBearerLogic == null)
+            if (!setPlayerRole)
             {
                 diagnostics =
-                    "banner-bearer-logic-null" +
+                    "set-player-role-not-applied" +
                     " Side=" + side +
                     " Team=" + playerTeam.Side + "#" + playerTeam.TeamIndex +
                     " Refresh={" + refreshDiagnostics + "}";
-                return false;
+                return CommanderDeploymentPreparationResult.Failed;
             }
 
-            OrderController orderController = playerTeam.PlayerOrderController;
-            if (orderController == null)
+            if (!selectedCommanderAgent.IsActive() ||
+                selectedCommanderAgent.Team?.Side != side)
             {
+                readiness = CoopCommanderDeploymentReadiness.WaitingForCommanderAgent;
                 diagnostics =
-                    "player-order-controller-null" +
-                    " Side=" + side +
-                    " Team=" + playerTeam.Side + "#" + playerTeam.TeamIndex +
-                    " Refresh={" + refreshDiagnostics + "}";
-                return false;
-            }
-
-            string commanderAuthorityEntryId =
-                ResolveCommanderDeploymentAuthorityEntryId(snapshot);
-            if (!TryResolveCameraPreviewAgentForEntry(
-                    side,
-                    commanderAuthorityEntryId,
-                    out Agent selectedCommanderAgent) ||
-                selectedCommanderAgent?.Team == null ||
-                selectedCommanderAgent.Team.Side != side)
-            {
-                diagnostics =
-                    "selected-commander-agent-null" +
+                    "selected-commander-agent-changed-before-prepare" +
                     " Side=" + side +
                     " SelectedEntryId=" + (snapshot?.SelectedEntryId ?? string.Empty) +
                     " CommanderEntryId=" + (commanderAuthorityEntryId ?? string.Empty) +
                     " Team=" + playerTeam.Side + "#" + playerTeam.TeamIndex +
                     " Refresh={" + refreshDiagnostics + "}";
-                return false;
+                return CommanderDeploymentPreparationResult.Pending;
             }
 
             bool orderOwnerAssigned = false;
@@ -1594,14 +1687,27 @@ namespace CoopSpectator.UI
                     " CommanderEntryId=" + (commanderAuthorityEntryId ?? string.Empty) +
                     " AgentIndex=" + selectedCommanderAgent.Index +
                     " Refresh={" + refreshDiagnostics + "}";
-                return false;
+                return CommanderDeploymentPreparationResult.Failed;
             }
 
-            bool formationContractPrepared = TryPrepareNativeCommanderFormationContract(
+            if (!orderOwnerAssigned)
+            {
+                diagnostics =
+                    "player-order-owner-not-applied" +
+                    " Side=" + side +
+                    " CommanderEntryId=" + (commanderAuthorityEntryId ?? string.Empty) +
+                    " AgentIndex=" + selectedCommanderAgent.Index +
+                    " Refresh={" + refreshDiagnostics + "}";
+                return CommanderDeploymentPreparationResult.Failed;
+            }
+
+            CommanderDeploymentPreparationResult formationPreparationResult =
+                TryPrepareNativeCommanderFormationContract(
                 playerTeam,
                 selectedCommanderAgent,
+                out readiness,
                 out string formationContractDiagnostics);
-            if (!formationContractPrepared)
+            if (formationPreparationResult != CommanderDeploymentPreparationResult.Ready)
             {
                 diagnostics =
                     "formation-contract-prepare-failed" +
@@ -1611,7 +1717,7 @@ namespace CoopSpectator.UI
                     " AgentIndex=" + selectedCommanderAgent.Index +
                     " FormationContract={" + formationContractDiagnostics + "}" +
                     " Refresh={" + refreshDiagnostics + "}";
-                return false;
+                return formationPreparationResult;
             }
 
             diagnostics =
@@ -1628,17 +1734,20 @@ namespace CoopSpectator.UI
                 " SelectedEntryId=" + (snapshot?.SelectedEntryId ?? string.Empty) +
                 " CommanderEntryId=" + (commanderAuthorityEntryId ?? string.Empty) +
                 " Refresh={" + refreshDiagnostics + "}";
-            return ReferenceEquals(mission.PlayerTeam, playerTeam);
+            readiness = CoopCommanderDeploymentReadiness.Ready;
+            return CommanderDeploymentPreparationResult.Ready;
         }
 
-        private static bool TryPrepareNativeCommanderFormationContract(
+        private static CommanderDeploymentPreparationResult TryPrepareNativeCommanderFormationContract(
             Team playerTeam,
             Agent selectedCommanderAgent,
+            out CoopCommanderDeploymentReadiness readiness,
             out string diagnostics)
         {
+            readiness = CoopCommanderDeploymentReadiness.Ready;
             diagnostics = "team-or-commander-null";
             if (playerTeam == null || selectedCommanderAgent == null)
-                return false;
+                return CommanderDeploymentPreparationResult.Failed;
 
             try
             {
@@ -1682,15 +1791,21 @@ namespace CoopSpectator.UI
                     " SelectableWithUnits=" + selectableFormationsWithUnits +
                     " PhysicalClassUnits=" + physicalClassUnitCount +
                     " CommanderAgentIndex=" + selectedCommanderAgent.Index;
-                return formationsWithUnits > 0 &&
-                       selectableFormationsWithUnits > 0 &&
-                       physicalClassUnitCount > 0 &&
-                       ownedFormationsWithUnits == formationsWithUnits;
+                readiness = CoopCommanderDeploymentReadinessContract.EvaluateArmy(
+                    formationsWithUnits,
+                    selectableFormationsWithUnits,
+                    physicalClassUnitCount);
+                if (readiness != CoopCommanderDeploymentReadiness.Ready)
+                    return CommanderDeploymentPreparationResult.Pending;
+
+                return ownedFormationsWithUnits == formationsWithUnits
+                    ? CommanderDeploymentPreparationResult.Ready
+                    : CommanderDeploymentPreparationResult.Failed;
             }
             catch (Exception ex)
             {
                 diagnostics = ex.GetType().Name + ":" + ex.Message;
-                return false;
+                return CommanderDeploymentPreparationResult.Failed;
             }
         }
 
@@ -2806,7 +2921,7 @@ namespace CoopSpectator.UI
             Agent agent = Agent.Main ?? orderController?.Owner;
             Formation formation = ResolveCommanderBattleFocusedFormation();
             Mission mission = Mission;
-            WorldPosition? orderPosition = TryResolveCommanderBattleOrderPosition(
+            WorldPosition? orderPosition = TryResolveCommanderOrderPosition(
                 mission,
                 orderController?.Team ?? mission?.PlayerTeam,
                 out WorldPosition resolvedOrderPosition)
@@ -2816,7 +2931,7 @@ namespace CoopSpectator.UI
             return new VisualOrderExecutionParameters(agent, formation, orderPosition);
         }
 
-        private bool TryResolveCommanderBattleOrderPosition(
+        private bool TryResolveCommanderOrderPosition(
             Mission mission,
             Team team,
             out WorldPosition orderPosition)
@@ -2828,7 +2943,7 @@ namespace CoopSpectator.UI
             try
             {
                 Vec3 orderFlagPosition = MissionScreen.GetOrderFlagPosition();
-                if (TryCreateValidCommanderBattleOrderPosition(
+                if (TryCreateValidCommanderOrderPosition(
                         mission,
                         team,
                         orderFlagPosition,
@@ -2856,7 +2971,7 @@ namespace CoopSpectator.UI
                     return false;
                 }
 
-                return TryCreateValidCommanderBattleOrderPosition(
+                return TryCreateValidCommanderOrderPosition(
                     mission,
                     team,
                     fallbackPosition,
@@ -2869,7 +2984,7 @@ namespace CoopSpectator.UI
             }
         }
 
-        private static bool TryCreateValidCommanderBattleOrderPosition(
+        private static bool TryCreateValidCommanderOrderPosition(
             Mission mission,
             Team team,
             Vec3 position,
@@ -2878,7 +2993,7 @@ namespace CoopSpectator.UI
             orderPosition = WorldPosition.Invalid;
             if (mission?.Scene == null ||
                 team == null ||
-                !IsFiniteCommanderBattleOrderPosition(position) ||
+                !IsFiniteCommanderOrderPosition(position) ||
                 position.z <= -99999f)
             {
                 return false;
@@ -2899,7 +3014,7 @@ namespace CoopSpectator.UI
                 }
 
                 Vec3 groundPosition = candidate.GetGroundVec3();
-                if (!IsFiniteCommanderBattleOrderPosition(groundPosition))
+                if (!IsFiniteCommanderOrderPosition(groundPosition))
                     return false;
 
                 orderPosition = new WorldPosition(
@@ -2916,7 +3031,7 @@ namespace CoopSpectator.UI
             }
         }
 
-        private static bool IsFiniteCommanderBattleOrderPosition(Vec3 position)
+        private static bool IsFiniteCommanderOrderPosition(Vec3 position)
         {
             return !float.IsNaN(position.x) && !float.IsInfinity(position.x) &&
                    !float.IsNaN(position.y) && !float.IsInfinity(position.y) &&
@@ -3345,7 +3460,15 @@ namespace CoopSpectator.UI
             OrderController orderController = Mission?.PlayerTeam?.PlayerOrderController;
             Agent agent = orderController?.Owner ?? Agent.Main;
             Formation formation = orderController?.SelectedFormations?.FirstOrDefault();
-            return new VisualOrderExecutionParameters(agent, formation, null);
+            Mission mission = Mission;
+            WorldPosition? orderPosition = TryResolveCommanderOrderPosition(
+                mission,
+                orderController?.Team ?? mission?.PlayerTeam,
+                out WorldPosition resolvedOrderPosition)
+                ? resolvedOrderPosition
+                : (WorldPosition?)null;
+
+            return new VisualOrderExecutionParameters(agent, formation, orderPosition);
         }
 
         private static Team ResolveMissionTeamForSide(Mission mission, BattleSideEnum side)
@@ -4440,6 +4563,7 @@ namespace CoopSpectator.UI
             _selectedSideOverride = BattleSideEnum.None;
             _selectedEntryIdOverride = null;
             _spectatorOverlayHidden = false;
+            ClearCommanderDeploymentReadinessWait();
             ModLogger.Info("CoopMissionSelectionView: reset selection flow. Source=" + source);
         }
 
@@ -7317,6 +7441,56 @@ namespace CoopSpectator.UI
             return siegeSet;
         }
 
+        private sealed class CoopSafeToggleFacingVisualOrder : ToggleFacingVisualOrder
+        {
+            public CoopSafeToggleFacingVisualOrder(string iconId)
+                : base(iconId)
+            {
+            }
+
+            public override void ExecuteOrder(
+                OrderController orderController,
+                VisualOrderExecutionParameters executionParameters)
+            {
+                bool isWorldPositionValid = IsCommanderFacingWorldPositionValid(executionParameters);
+                CoopCommanderFacingOrderDecision decision = CoopCommanderFacingOrderContract.Evaluate(
+                    isFacingEnemyActive: GetActiveState(orderController) == OrderState.Active,
+                    hasWorldPosition: executionParameters.HasWorldPosition,
+                    isWorldPositionValid: isWorldPositionValid);
+
+                if (decision == CoopCommanderFacingOrderDecision.FaceEnemy)
+                {
+                    orderController.SetOrder(OrderType.LookAtEnemy);
+                }
+                else if (decision == CoopCommanderFacingOrderDecision.FaceDirection)
+                {
+                    orderController.SetOrderWithPosition(
+                        OrderType.LookAtDirection,
+                        executionParameters.WorldPosition);
+                }
+            }
+
+            private static bool IsCommanderFacingWorldPositionValid(
+                VisualOrderExecutionParameters executionParameters)
+            {
+                if (!executionParameters.HasWorldPosition ||
+                    !executionParameters.WorldPosition.IsValid)
+                {
+                    return false;
+                }
+
+                try
+                {
+                    Vec3 position = executionParameters.WorldPosition.GetVec3WithoutValidity();
+                    return IsFiniteCommanderOrderPosition(position) && position.z > -99999f;
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+        }
+
         private sealed class CoopCommanderDeploymentVisualOrderProvider : VisualOrderProvider
         {
             public override bool IsAvailable()
@@ -7381,7 +7555,7 @@ namespace CoopSpectator.UI
                     new TextObject("{=0HTNYQz2}Toggle"),
                     useActiveOrderForIconId: false,
                     useActiveOrderForName: false);
-                var facingOrder = new ToggleFacingVisualOrder("order_toggle_facing");
+                var facingOrder = new CoopSafeToggleFacingVisualOrder("order_toggle_facing");
                 var fireOrder = new GenericToggleVisualOrder("order_toggle_fire", (OrderType)32, (OrderType)31);
                 var mountedOrder = new GenericToggleVisualOrder("order_toggle_mount", (OrderType)34, (OrderType)35);
                 var delegateOrder = new GenericToggleVisualOrder("order_toggle_ai", (OrderType)36, (OrderType)37);

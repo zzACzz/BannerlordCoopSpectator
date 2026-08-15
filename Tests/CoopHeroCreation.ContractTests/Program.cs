@@ -15,6 +15,8 @@ internal static class Program
             ValidateCanonicalHashAndLogicalIdentity();
             ValidateRequestJsonRoundTrip();
             ValidateFailureResultIdentity();
+            ValidateWallClockPolling();
+            ValidateProgressSnapshots();
             ValidateSubmissionIdempotency();
             ValidateDisconnectAndTimeoutTransitions();
             ValidatePerkRules();
@@ -326,6 +328,104 @@ internal static class Program
         Assert(restored.ResultId == CoopHeroCreationContract.ComputeResultId(restored), "Failure result identity must survive a JSON round-trip.");
         restored.FailureReason = "different_failure";
         Assert(restored.ResultId != CoopHeroCreationContract.ComputeResultId(restored), "Failure reason must be covered by the result identity.");
+    }
+
+    private static void ValidateWallClockPolling()
+    {
+        CoopHeroCreationWallClockPollGate gate =
+            new CoopHeroCreationWallClockPollGate(TimeSpan.FromMilliseconds(500));
+        DateTime now = new DateTime(2026, 8, 14, 12, 0, 0, DateTimeKind.Utc);
+
+        Assert(gate.TryEnter(now), "The first application-time poll must run immediately.");
+        Assert(!gate.TryEnter(now), "The poll gate must reject a duplicate application tick.");
+        Assert(!gate.TryEnter(now.AddMilliseconds(499)), "The poll interval must not depend on campaign dt.");
+        Assert(gate.TryEnter(now.AddMilliseconds(500)), "The poll must become due from wall-clock time alone.");
+        gate.Reset();
+        Assert(gate.TryEnter(now), "A new hero creation session must poll immediately after reset.");
+    }
+
+    private static void ValidateProgressSnapshots()
+    {
+        CoopHeroCreationRules rules = BuildRules();
+        CoopHeroCreationRequest request = new CoopHeroCreationRequest
+        {
+            CampaignScopeId = "campaign-a",
+            RequestId = "request-a",
+            SessionId = "session-a",
+            Nonce = "nonce-a",
+            Rules = rules,
+            RulesHash = rules.ComputeHash(),
+            CreatedUtc = "2026-08-14T12:00:00.0000000Z"
+        };
+        List<CoopHeroCreationParticipantSession> sessions = new List<CoopHeroCreationParticipantSession>
+        {
+            new CoopHeroCreationParticipantSession { PlayerIdentityHash = "player-a", State = CoopHeroCreationParticipantState.Completed },
+            new CoopHeroCreationParticipantSession { PlayerIdentityHash = "player-b", State = CoopHeroCreationParticipantState.Declined },
+            new CoopHeroCreationParticipantSession { PlayerIdentityHash = "player-c", State = CoopHeroCreationParticipantState.Disconnected }
+        };
+        DateTime now = new DateTime(2026, 8, 14, 12, 1, 0, DateTimeKind.Utc);
+
+        CoopHeroCreationProgressSnapshot progress = CoopHeroCreationProgressContract.CreateSnapshot(
+            request,
+            sessions,
+            true,
+            false,
+            now);
+        Assert(CoopHeroCreationProgressContract.MatchesActiveRequest(request, progress, out string error), error);
+        Assert(progress.RelevantCount == 3 && progress.TerminalCount == 2 && progress.CompletedCount == 1 &&
+               progress.DeclinedCount == 1 && progress.DisconnectedCount == 1,
+            "Progress counts must reflect the authoritative participant states.");
+        string status = CoopHeroCreationProgressContract.BuildHostStatusText(progress);
+        Assert(status.Contains("2/3") && status.Contains("submitted 1") && status.Contains("declined 1") &&
+               status.Contains("Disconnected: 1"),
+            "The host status must expose meaningful participant progress.");
+
+        CoopHeroCreationProgressSnapshot sameStateLater = CoopHeroCreationProgressContract.CreateSnapshot(
+            request,
+            sessions,
+            true,
+            false,
+            now.AddSeconds(10));
+        Assert(CoopHeroCreationProgressContract.BuildSignature(progress) ==
+               CoopHeroCreationProgressContract.BuildSignature(sameStateLater),
+            "A timestamp-only update must not trigger another bridge write or host notification.");
+
+        progress.RequestId = "stale-request";
+        Assert(!CoopHeroCreationProgressContract.MatchesActiveRequest(request, progress, out error) &&
+               error == "request_id_mismatch",
+            "Progress from a stale request must be rejected.");
+        progress.RequestId = request.RequestId;
+        progress.SessionId = "stale-session";
+        Assert(!CoopHeroCreationProgressContract.MatchesActiveRequest(request, progress, out error) &&
+               error == "session_id_mismatch",
+            "Progress from a stale session must be rejected.");
+        progress.SessionId = request.SessionId;
+        progress.Nonce = "stale-nonce";
+        Assert(!CoopHeroCreationProgressContract.MatchesActiveRequest(request, progress, out error) &&
+               error == "nonce_mismatch",
+            "Progress with the wrong nonce must be rejected.");
+        progress.Nonce = request.Nonce;
+        progress.RulesHash = "stale-rules";
+        Assert(!CoopHeroCreationProgressContract.MatchesActiveRequest(request, progress, out error) &&
+               error == "rules_hash_mismatch",
+            "Progress for different creation rules must be rejected.");
+        progress.RulesHash = request.RulesHash;
+
+        progress.TerminalCount = 3;
+        Assert(!CoopHeroCreationProgressContract.MatchesActiveRequest(request, progress, out error) &&
+               error == "terminal_breakdown_mismatch",
+            "A contradictory terminal count must be rejected.");
+
+        sessions[2].State = CoopHeroCreationParticipantState.TimedOut;
+        CoopHeroCreationProgressSnapshot finalProgress = CoopHeroCreationProgressContract.CreateSnapshot(
+            request,
+            sessions,
+            true,
+            true,
+            now.AddSeconds(20));
+        Assert(CoopHeroCreationProgressContract.MatchesActiveRequest(request, finalProgress, out error), error);
+        Assert(finalProgress.TerminalCount == finalProgress.RelevantCount && finalProgress.TimedOutCount == 1,
+            "A fully terminal retry/finalization snapshot must be accepted.");
     }
 
     private static void Assert(bool condition, string message)

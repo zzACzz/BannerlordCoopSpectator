@@ -35,6 +35,7 @@ namespace CoopSpectator.Campaign
         protected override void OnIdleTick(float dt)
         {
             base.OnFrameTick(dt);
+            _dataSource?.RefreshHeroCreationBindingsIfChanged();
             if (base.Layer != null && base.Layer.Input.IsHotKeyReleased("Exit"))
                 _dataSource?.ExecuteDone();
         }

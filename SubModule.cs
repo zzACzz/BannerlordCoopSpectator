@@ -734,6 +734,7 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
 
             if (EnableCoopRuntimeStartup)
             {
+                PlayerHeroCreationCampaignBehavior.PumpApplicationTick();
                 MainThreadDispatcher.ExecutePending(); // Ð’Ð¸ÐºÐ¾Ð½ÑƒÑ”Ð¼Ð¾ Ð´Ñ–Ñ—, ÑÐºÑ– Ð±ÑƒÐ»Ð¸ Ð¿Ð¾ÑÑ‚Ð°Ð²Ð»ÐµÐ½Ñ– Ð² Ñ‡ÐµÑ€Ð³Ñƒ Ð· Ð¼ÐµÑ€ÐµÐ¶ÐµÐ²Ð¾Ð³Ð¾ Ð¿Ð¾Ñ‚Ð¾ÐºÑƒ
                 _battleDetector?.Tick(); // ÐŸÐµÑ€ÐµÐ²Ñ–Ñ€ÑÑ”Ð¼Ð¾ Ñ‡Ð¸ ÑÑ‚Ð°Ñ€Ñ‚ÑƒÐ²Ð°Ð»Ð° Ð¼Ñ–ÑÑ–Ñ/Ð±Ð¸Ñ‚Ð²Ð° Ñ–, ÑÐºÑ‰Ð¾ Ð¼Ð¸ Ñ…Ð¾ÑÑ‚, ÑˆÐ»ÐµÐ¼Ð¾ BATTLE_START ÐºÐ»Ñ–Ñ”Ð½Ñ‚Ð°Ð¼
             }

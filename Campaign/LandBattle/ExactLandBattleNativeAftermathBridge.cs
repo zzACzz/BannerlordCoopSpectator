@@ -867,6 +867,8 @@ namespace CoopSpectator.Campaign.LandBattle
                 .GroupBy(entry => entry.EntryId, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
             var deltas = new Dictionary<MapEventParty, int>();
+            int skippedUnresolvedCharacterEventCount = 0;
+            string firstSkippedUnresolvedCharacterEvent = null;
             foreach (CoopBattleResultBridgeFile.BattleResultCombatEventSnapshot combatEvent in
                      (result.CombatEvents ?? new List<CoopBattleResultBridgeFile.BattleResultCombatEventSnapshot>())
                          .Where(item => item != null))
@@ -888,7 +890,16 @@ namespace CoopSpectator.Campaign.LandBattle
                         attackerPartyId,
                         out MapEventParty attackerParty))
                 {
-                    if (eventClaimsWinnerSide)
+                    CoopNativeAftermathContributionEventDecision unresolvedPartyDecision =
+                        CoopNativeAftermathContributionContract.EvaluateCombatEvent(
+                            eventClaimsWinnerSide,
+                            attackerPartyResolved: false,
+                            attackerPartyIsWinner: false,
+                            combatEvent.IsTeamKill,
+                            attackerCharacterResolved: false,
+                            victimCharacterResolved: false);
+                    if (unresolvedPartyDecision ==
+                        CoopNativeAftermathContributionEventDecision.AbortUnresolvedWinnerParty)
                     {
                         diagnostics =
                             "skipped-unresolved-winner-party:" +
@@ -899,26 +910,43 @@ namespace CoopSpectator.Campaign.LandBattle
                     continue;
                 }
 
-                if (!winnerPartySet.Contains(attackerParty))
-                    continue;
-                if (combatEvent.IsTeamKill)
-                    continue;
-
-                CharacterObject attackerCharacter = TryResolveCharacter(
-                    attackerEntry?.HeroId,
-                    attackerEntry?.OriginalCharacterId ?? combatEvent.AttackerOriginalCharacterId,
-                    attackerEntry?.CharacterId ?? combatEvent.AttackerCharacterId);
-                CharacterObject victimCharacter = TryResolveCharacter(
-                    victimEntry?.HeroId,
-                    victimEntry?.OriginalCharacterId ?? combatEvent.VictimOriginalCharacterId,
-                    victimEntry?.CharacterId ?? combatEvent.VictimCharacterId);
-                if (attackerCharacter == null || victimCharacter == null)
+                bool attackerPartyIsWinner = winnerPartySet.Contains(attackerParty);
+                CharacterObject attackerCharacter = null;
+                CharacterObject victimCharacter = null;
+                if (attackerPartyIsWinner && !combatEvent.IsTeamKill)
                 {
-                    diagnostics =
-                        "skipped-unresolved-combat-character:" +
-                        (combatEvent.AttackerEntryId ?? "null") + "/" +
-                        (combatEvent.VictimEntryId ?? "null");
-                    return new List<ContributionChange>();
+                    attackerCharacter = TryResolveCharacter(
+                        attackerEntry?.HeroId,
+                        attackerEntry?.OriginalCharacterId ?? combatEvent.AttackerOriginalCharacterId,
+                        attackerEntry?.CharacterId ?? combatEvent.AttackerCharacterId);
+                    victimCharacter = TryResolveCharacter(
+                        victimEntry?.HeroId,
+                        victimEntry?.OriginalCharacterId ?? combatEvent.VictimOriginalCharacterId,
+                        victimEntry?.CharacterId ?? combatEvent.VictimCharacterId);
+                }
+
+                CoopNativeAftermathContributionEventDecision eventDecision =
+                    CoopNativeAftermathContributionContract.EvaluateCombatEvent(
+                        eventClaimsWinnerSide,
+                        attackerPartyResolved: true,
+                        attackerPartyIsWinner,
+                        combatEvent.IsTeamKill,
+                        attackerCharacter != null,
+                        victimCharacter != null);
+                if (eventDecision == CoopNativeAftermathContributionEventDecision.Ignore)
+                    continue;
+                if (eventDecision ==
+                    CoopNativeAftermathContributionEventDecision.SkipUnresolvedCharacter)
+                {
+                    skippedUnresolvedCharacterEventCount++;
+                    if (firstSkippedUnresolvedCharacterEvent == null)
+                    {
+                        firstSkippedUnresolvedCharacterEvent =
+                            (combatEvent.AttackerEntryId ?? "null") + "/" +
+                            (combatEvent.VictimEntryId ?? "null");
+                    }
+
+                    continue;
                 }
 
                 int damage = Math.Max(
@@ -975,7 +1003,16 @@ namespace CoopSpectator.Campaign.LandBattle
             totalDelta = (int)combinedTotalDelta;
             diagnostics =
                 "exact:event-count=" + (result.CombatEvents?.Count ?? 0) +
-                ";party-count=" + changes.Count;
+                ";party-count=" + changes.Count +
+                ";skipped-unresolved-character-events=" +
+                skippedUnresolvedCharacterEventCount;
+            if (!string.IsNullOrWhiteSpace(firstSkippedUnresolvedCharacterEvent))
+            {
+                diagnostics +=
+                    ";first-skipped-unresolved-character-event=" +
+                    firstSkippedUnresolvedCharacterEvent;
+            }
+
             return changes;
         }
 

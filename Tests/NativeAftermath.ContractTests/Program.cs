@@ -17,6 +17,7 @@ internal static class Program
             ValidateTerminalAgentReconciliationPolicy();
             ValidateCampaignCasualtyScenarioPolicy();
             ValidateCampaignHeroDeathPolicy();
+            ValidateNativeAftermathContributionPolicy();
             ValidateInvalidInputsAreClamped();
             Console.WriteLine("Native aftermath contract tests passed.");
             return 0;
@@ -230,6 +231,74 @@ internal static class Program
                 isPlayerCharacter: false,
                 heroCanDieInBattle: false),
             "Hero-specific campaign protection must override the difficulty setting.");
+    }
+
+    private static void ValidateNativeAftermathContributionPolicy()
+    {
+        CoopNativeAftermathContributionEventDecision unresolvedCharacter =
+            CoopNativeAftermathContributionContract.EvaluateCombatEvent(
+                eventClaimsWinnerSide: true,
+                attackerPartyResolved: true,
+                attackerPartyIsWinner: true,
+                isTeamKill: false,
+                attackerCharacterResolved: true,
+                victimCharacterResolved: false);
+        CoopNativeAftermathContributionEventDecision laterValidEvent =
+            CoopNativeAftermathContributionContract.EvaluateCombatEvent(
+                eventClaimsWinnerSide: true,
+                attackerPartyResolved: true,
+                attackerPartyIsWinner: true,
+                isTeamKill: false,
+                attackerCharacterResolved: true,
+                victimCharacterResolved: true);
+        Assert(
+            unresolvedCharacter ==
+            CoopNativeAftermathContributionEventDecision.SkipUnresolvedCharacter,
+            "An unresolved mount or unknown character must skip only its own combat event.");
+        Assert(
+            laterValidEvent == CoopNativeAftermathContributionEventDecision.Apply,
+            "A valid combat event after an unresolved character must still contribute.");
+
+        Assert(
+            CoopNativeAftermathContributionContract.EvaluateCombatEvent(
+                eventClaimsWinnerSide: false,
+                attackerPartyResolved: true,
+                attackerPartyIsWinner: false,
+                isTeamKill: false,
+                attackerCharacterResolved: true,
+                victimCharacterResolved: true) ==
+            CoopNativeAftermathContributionEventDecision.Ignore,
+            "A losing-party combat event must not affect the winners' contribution.");
+        Assert(
+            CoopNativeAftermathContributionContract.EvaluateCombatEvent(
+                eventClaimsWinnerSide: true,
+                attackerPartyResolved: true,
+                attackerPartyIsWinner: true,
+                isTeamKill: true,
+                attackerCharacterResolved: true,
+                victimCharacterResolved: true) ==
+            CoopNativeAftermathContributionEventDecision.Ignore,
+            "A team-kill combat event must not affect contribution.");
+        Assert(
+            CoopNativeAftermathContributionContract.EvaluateCombatEvent(
+                eventClaimsWinnerSide: true,
+                attackerPartyResolved: false,
+                attackerPartyIsWinner: false,
+                isTeamKill: false,
+                attackerCharacterResolved: false,
+                victimCharacterResolved: false) ==
+            CoopNativeAftermathContributionEventDecision.AbortUnresolvedWinnerParty,
+            "An unresolved winning party must abort contribution replay to avoid assigning it incorrectly.");
+        Assert(
+            CoopNativeAftermathContributionContract.EvaluateCombatEvent(
+                eventClaimsWinnerSide: false,
+                attackerPartyResolved: false,
+                attackerPartyIsWinner: false,
+                isTeamKill: false,
+                attackerCharacterResolved: false,
+                victimCharacterResolved: false) ==
+            CoopNativeAftermathContributionEventDecision.Ignore,
+            "An unresolved non-winning event must be ignored safely.");
     }
 
     private static void ValidateInvalidInputsAreClamped()

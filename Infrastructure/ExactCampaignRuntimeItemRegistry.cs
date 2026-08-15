@@ -55,6 +55,8 @@ namespace CoopSpectator.Infrastructure
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, string> MirrorItemIdsByOriginalId =
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, string> OriginalItemIdsByMirrorId =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<string> LoadedMirrorItemIds =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, string> CraftedMirrorItemIdsByKey =
@@ -255,8 +257,24 @@ namespace CoopSpectator.Infrastructure
                 if (TryResolveItem(objectManager, mappedMirrorItemId) == null)
                     return false;
 
+                RecordStaticMirrorMappingLocked(originalItemId, mappedMirrorItemId);
                 mirrorItemId = mappedMirrorItemId;
                 return true;
+            }
+        }
+
+        public static bool TryResolveOriginalItemIdByMirrorId(
+            string mirrorItemId,
+            out string originalItemId)
+        {
+            originalItemId = null;
+            if (string.IsNullOrWhiteSpace(mirrorItemId))
+                return false;
+
+            lock (Sync)
+            {
+                return OriginalItemIdsByMirrorId.TryGetValue(mirrorItemId.Trim(), out originalItemId) &&
+                       !string.IsNullOrWhiteSpace(originalItemId);
             }
         }
 
@@ -661,6 +679,7 @@ namespace CoopSpectator.Infrastructure
                 !string.IsNullOrWhiteSpace(existingMirrorItemId) &&
                 TryResolveItem(objectManager, existingMirrorItemId) != null)
             {
+                RecordStaticMirrorMappingLocked(trimmedOriginalItemId, existingMirrorItemId);
                 mirrorItemId = existingMirrorItemId;
                 LoadedMirrorItemIds.Add(existingMirrorItemId);
                 return true;
@@ -674,7 +693,7 @@ namespace CoopSpectator.Infrastructure
                 return false;
             }
 
-            MirrorItemIdsByOriginalId[trimmedOriginalItemId] = generatedMirrorItemId;
+            RecordStaticMirrorMappingLocked(trimmedOriginalItemId, generatedMirrorItemId);
             LoadedMirrorItemIds.Add(generatedMirrorItemId);
             mirrorItemId = generatedMirrorItemId;
             return true;
@@ -700,6 +719,7 @@ namespace CoopSpectator.Infrastructure
                 !string.IsNullOrWhiteSpace(existingMirrorItemId) &&
                 TryResolveItem(objectManager, existingMirrorItemId) != null)
             {
+                RecordStaticMirrorMappingLocked(trimmedOriginalItemId, existingMirrorItemId);
                 mirrorItemId = existingMirrorItemId;
                 LoadedMirrorItemIds.Add(existingMirrorItemId);
                 return true;
@@ -709,7 +729,7 @@ namespace CoopSpectator.Infrastructure
             ItemObject alreadyRegisteredMirror = TryResolveItem(objectManager, generatedMirrorItemId);
             if (alreadyRegisteredMirror != null)
             {
-                MirrorItemIdsByOriginalId[trimmedOriginalItemId] = generatedMirrorItemId;
+                RecordStaticMirrorMappingLocked(trimmedOriginalItemId, generatedMirrorItemId);
                 LoadedMirrorItemIds.Add(generatedMirrorItemId);
                 mirrorItemId = generatedMirrorItemId;
                 return true;
@@ -803,7 +823,7 @@ namespace CoopSpectator.Infrastructure
                 return false;
             }
 
-            MirrorItemIdsByOriginalId[trimmedOriginalItemId] = generatedMirrorItemId;
+            RecordStaticMirrorMappingLocked(trimmedOriginalItemId, generatedMirrorItemId);
             LoadedMirrorItemIds.Add(generatedMirrorItemId);
             mirrorItemId = generatedMirrorItemId;
             ModLogger.Info(
@@ -817,6 +837,17 @@ namespace CoopSpectator.Infrastructure
                 " ManualSummary=" + (manualSummary ?? "none") +
                 " Source=" + (source ?? "unknown"));
             return true;
+        }
+
+        private static void RecordStaticMirrorMappingLocked(string originalItemId, string mirrorItemId)
+        {
+            if (string.IsNullOrWhiteSpace(originalItemId) || string.IsNullOrWhiteSpace(mirrorItemId))
+                return;
+
+            string trimmedOriginalItemId = originalItemId.Trim();
+            string trimmedMirrorItemId = mirrorItemId.Trim();
+            MirrorItemIdsByOriginalId[trimmedOriginalItemId] = trimmedMirrorItemId;
+            OriginalItemIdsByMirrorId[trimmedMirrorItemId] = trimmedOriginalItemId;
         }
 
         private static string BuildMirrorItemId(string originalItemId)

@@ -31,6 +31,7 @@ namespace CoopSpectator.MissionBehaviors
         private bool _enrollmentClosed;
         private bool _resultWritten;
         private bool _missionEnding;
+        private string _lastPublishedProgressSignature;
         private int _nextServerTransferId;
         private int _clientEnvelopeTransferId = -1;
         private CoopHeroCreationChunkAccumulator _clientEnvelopeAccumulator;
@@ -76,6 +77,7 @@ namespace CoopSpectator.MissionBehaviors
             _enrollmentDeadlineUtc = now.AddSeconds(_request.Rules.EnrollmentSeconds);
             _sessionDeadlineUtc = now.AddSeconds(_request.Rules.SessionSeconds);
             _nextServerPumpUtc = now;
+            PublishProgressIfChanged();
             ModLogger.Info(
                 "CoopHeroCreationMissionNetwork: authoritative session initialized. RequestId=" + _request.RequestId +
                 " EnrollmentSeconds=" + _request.Rules.EnrollmentSeconds +
@@ -110,7 +112,10 @@ namespace CoopSpectator.MissionBehaviors
 
             EnrollSynchronizedPeers(now);
             if (!_enrollmentClosed && now >= _enrollmentDeadlineUtc)
+            {
                 _enrollmentClosed = true;
+                QueueServerEnvelopeForAllPeers();
+            }
 
             int terminalCountBeforeTimeouts = _sessionsByIdentity.Values.Count(s => CoopHeroCreationContract.IsTerminal(s.State));
             if (_request != null)
@@ -572,11 +577,35 @@ namespace CoopSpectator.MissionBehaviors
 
         private void QueueServerEnvelopeForAllPeers()
         {
+            PublishProgressIfChanged();
             if (GameNetwork.NetworkPeers == null) return;
             foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
             {
                 if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized) continue;
                 _pendingServerEnvelopePeerIndices.Add(peer.Index);
+            }
+        }
+
+        private void PublishProgressIfChanged()
+        {
+            if (_request == null || !GameNetwork.IsServer) return;
+            CoopHeroCreationProgressSnapshot snapshot = CoopHeroCreationProgressContract.CreateSnapshot(
+                _request,
+                _sessionsByIdentity.Values,
+                _enrollmentClosed,
+                _resultWritten,
+                DateTime.UtcNow);
+            string signature = CoopHeroCreationProgressContract.BuildSignature(snapshot);
+            if (string.Equals(signature, _lastPublishedProgressSignature, StringComparison.Ordinal)) return;
+
+            try
+            {
+                CoopHeroCreationBridgeFile.WriteProgress(snapshot);
+                _lastPublishedProgressSignature = signature;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info("CoopHeroCreationMissionNetwork: progress bridge write failed. Error=" + ex.Message);
             }
         }
 
@@ -621,6 +650,7 @@ namespace CoopSpectator.MissionBehaviors
                 };
                 result.ResultId = CoopHeroCreationContract.ComputeResultId(result);
                 CoopHeroCreationBridgeFile.WriteResult(result);
+                PublishProgressIfChanged();
                 ModLogger.Info("CoopHeroCreationMissionNetwork: authoritative result written. ResultId=" + result.ResultId +
                                " Participants=" + result.Participants.Count + ".");
             }

@@ -141,6 +141,10 @@ namespace CoopSpectator.UI
         private readonly Action _onSpawn;
         private readonly Action _onBack;
         private MBBindingList<CoopClassLoadoutUnitVM> _units = new MBBindingList<CoopClassLoadoutUnitVM>();
+        private CoopSelectionUiSnapshot _latestSnapshot;
+        private IReadOnlyList<string> _latestOrderedEntryIds = Array.Empty<string>();
+        private string _searchText = string.Empty;
+        private string _searchPlaceholderText = "Search unit or hero by name...";
         private string _sideTitleText = "Select Unit";
         private string _statusText = string.Empty;
         private string _hintText = string.Empty;
@@ -172,6 +176,21 @@ namespace CoopSpectator.UI
         }
 
         [DataSourceProperty] public MBBindingList<CoopClassLoadoutUnitVM> Units { get => _units; private set => SetField(ref _units, value, nameof(Units)); }
+        [DataSourceProperty]
+        public string SearchText
+        {
+            get => _searchText;
+            set
+            {
+                string nextValue = value ?? string.Empty;
+                if (string.Equals(_searchText, nextValue, StringComparison.Ordinal))
+                    return;
+
+                SetField(ref _searchText, nextValue, nameof(SearchText));
+                RefreshFilteredUnitItems(force: false, _latestSnapshot?.SelectedEntryId ?? _lastSelectedEntryId);
+            }
+        }
+        [DataSourceProperty] public string SearchPlaceholderText { get => _searchPlaceholderText; private set => SetField(ref _searchPlaceholderText, value, nameof(SearchPlaceholderText)); }
         [DataSourceProperty] public string SideTitleText { get => _sideTitleText; private set => SetField(ref _sideTitleText, value, nameof(SideTitleText)); }
         [DataSourceProperty] public string StatusText { get => _statusText; private set => SetField(ref _statusText, value, nameof(StatusText)); }
         [DataSourceProperty] public string HintText { get => _hintText; private set => SetField(ref _hintText, value, nameof(HintText)); }
@@ -194,10 +213,11 @@ namespace CoopSpectator.UI
                 snapshot == null || snapshot.EffectiveSide == BattleSideEnum.None
                     ? Array.Empty<string>()
                     : CoopSelectionUiHelpers.OrderSelectableEntryIdsForDisplay(snapshot);
+            _latestSnapshot = snapshot;
+            _latestOrderedEntryIds = orderedEntryIds;
             SideTitleText = CoopSelectionUiHelpers.ResolveSideDisplayName(snapshot?.BattleState, snapshot?.EffectiveSide ?? BattleSideEnum.None);
             StatusText = CoopSelectionUiHelpers.BuildStatusText(snapshot);
             HintText = CoopSelectionUiHelpers.BuildClassHintText(snapshot);
-            EmptyText = CoopSelectionUiHelpers.BuildUnitEmptyText(snapshot);
             SelectedNameText = CoopSelectionUiHelpers.BuildSelectedNameText(snapshot);
             SelectedDetailText = CoopSelectionUiHelpers.BuildSelectedDetailText(snapshot);
             SelectedSummaryText = CoopSelectionUiHelpers.BuildSelectedSummaryText(snapshot);
@@ -207,12 +227,21 @@ namespace CoopSpectator.UI
             IsAttacker = snapshot?.EffectiveSide == BattleSideEnum.Attacker;
             CanSpawn = snapshot?.CanSpawn == true || snapshot?.CanQueueSpawnAfterDeployment == true;
             string selectedEntryId = snapshot?.SelectedEntryId ?? string.Empty;
-            string unitListSignature = BuildUnitListSignature(snapshot, orderedEntryIds);
+            RefreshFilteredUnitItems(force, selectedEntryId);
+        }
+
+        private void RefreshFilteredUnitItems(bool force, string selectedEntryId)
+        {
+            IReadOnlyList<string> filteredEntryIds = FilterOrderedEntryIds(
+                _latestSnapshot,
+                _latestOrderedEntryIds,
+                SearchText);
+            string unitListSignature = BuildUnitListSignature(_latestSnapshot, filteredEntryIds);
             bool unitListChanged = force || !string.Equals(_lastUnitListSignature, unitListSignature, StringComparison.Ordinal);
             bool selectionChanged = force || !string.Equals(_lastSelectedEntryId, selectedEntryId, StringComparison.Ordinal);
             if (unitListChanged)
             {
-                RefreshUnitItems(snapshot, orderedEntryIds);
+                RefreshUnitItems(_latestSnapshot, filteredEntryIds);
                 _lastUnitListSignature = unitListSignature;
             }
             else if (selectionChanged)
@@ -221,7 +250,11 @@ namespace CoopSpectator.UI
             }
 
             _lastSelectedEntryId = selectedEntryId;
-            ShowEmptyText = orderedEntryIds.Length <= 0;
+            ShowEmptyText = filteredEntryIds.Count <= 0;
+            EmptyText = _latestOrderedEntryIds.Count > 0 &&
+                        CoopUnitSelectionSearchContract.NormalizeQuery(SearchText).Length > 0
+                ? "No units match your search."
+                : CoopSelectionUiHelpers.BuildUnitEmptyText(_latestSnapshot);
         }
 
         public void ExecuteSpawn()
@@ -243,6 +276,32 @@ namespace CoopSpectator.UI
             HasSelectedCard = entryState != null;
             SelectedCultureId = CoopSelectionUiHelpers.ResolveEntryCultureBrushId(snapshot, snapshot?.SelectedEntryId);
             SelectedIconType = CoopSelectionUiHelpers.ResolveEntryIconType(entryState);
+        }
+
+        private static IReadOnlyList<string> FilterOrderedEntryIds(
+            CoopSelectionUiSnapshot snapshot,
+            IReadOnlyList<string> orderedEntryIds,
+            string query)
+        {
+            if (orderedEntryIds == null || orderedEntryIds.Count <= 0)
+                return Array.Empty<string>();
+
+            if (CoopUnitSelectionSearchContract.NormalizeQuery(query).Length == 0)
+                return orderedEntryIds;
+
+            var filteredEntryIds = new List<string>();
+            for (int index = 0; index < orderedEntryIds.Count; index++)
+            {
+                string entryId = orderedEntryIds[index];
+                RosterEntryState entryState = CoopSelectionUiHelpers.ResolveEntryState(
+                    snapshot?.EffectiveSide ?? BattleSideEnum.None,
+                    entryId);
+                string displayName = CoopSelectionUiHelpers.ResolveEntryDisplayName(entryState, entryId);
+                if (CoopUnitSelectionSearchContract.MatchesDisplayName(displayName, query))
+                    filteredEntryIds.Add(entryId);
+            }
+
+            return filteredEntryIds;
         }
 
         private void RefreshUnitItems(CoopSelectionUiSnapshot snapshot, IReadOnlyList<string> orderedEntryIds)

@@ -68,6 +68,12 @@
                   </Children>
                 </Widget>
 
+                <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="54" MarginLeft="20" MarginRight="20" MarginTop="8" MarginBottom="8" Sprite="General\CharacterCreation\name_input_area">
+                  <Children>
+                    <EditableTextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginLeft="12" MarginRight="12" MarginTop="8" MarginBottom="8" Brush="Review.NameInput.Text" Text="@SearchText" DefaultSearchText="@SearchPlaceholderText" KeyboardInfoText="Search unit or hero by name" MaxLength="64" />
+                  </Children>
+                </Widget>
+
                 <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginBottom="10">
                   <Children>
                     <ScrollablePanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" VerticalAlignment="Top" AutoAdjustScrollbarHandleSize="false" AutoHideScrollBars="true" ClipContents="true" ClipRect="ScrollingRect" InnerPanel="ScrollingRect\ClassesInnerPanel" VerticalScrollbar="..\ClassesScrollbar">

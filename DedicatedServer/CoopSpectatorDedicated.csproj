@@ -119,6 +119,7 @@
     <Compile Include="..\Infrastructure\CommanderDeployment\ExactFieldBattleCommanderDeploymentRuntime.cs" Link="Infrastructure\CommanderDeployment\ExactFieldBattleCommanderDeploymentRuntime.cs" />
     <Compile Include="..\Infrastructure\CommanderDeployment\ExactVillageBattleCommanderDeploymentRuntime.cs" Link="Infrastructure\CommanderDeployment\ExactVillageBattleCommanderDeploymentRuntime.cs" />
     <Compile Include="..\Infrastructure\CommanderDeployment\ExactCampaignCommanderDeploymentRuntime.cs" Link="Infrastructure\CommanderDeployment\ExactCampaignCommanderDeploymentRuntime.cs" />
+    <Compile Include="..\Infrastructure\CommanderDeployment\CoopCommanderDeathHandoffContract.cs" Link="Infrastructure\CommanderDeployment\CoopCommanderDeathHandoffContract.cs" />
     <Compile Include="..\Infrastructure\CampaignMapPatchMissionInit.cs" Link="Infrastructure\CampaignMapPatchMissionInit.cs" />
     <Compile Include="..\Infrastructure\CampaignMultiplayerHeroClassResolver.cs" Link="Infrastructure\CampaignMultiplayerHeroClassResolver.cs" />
     <Compile Include="..\Infrastructure\ExactBattleAgentSpawnTraceBridgeFile.cs" Link="Infrastructure\ExactBattleAgentSpawnTraceBridgeFile.cs" />
@@ -153,6 +154,10 @@
     <Compile Include="..\Infrastructure\CoopBattlePhaseRuntimeState.cs" Link="Infrastructure\CoopBattlePhaseRuntimeState.cs" />
     <Compile Include="..\Infrastructure\BattleSnapshotRuntimeState.cs" Link="Infrastructure\BattleSnapshotRuntimeState.cs" />
     <Compile Include="..\Infrastructure\CoopBattlePowerContract.cs" Link="Infrastructure\CoopBattlePowerContract.cs" />
+    <Compile Include="..\Infrastructure\CoopMaterializedAgentEntrySnapshotContract.cs" Link="Infrastructure\CoopMaterializedAgentEntrySnapshotContract.cs" />
+    <Compile Include="..\Infrastructure\CoopMountedHeroMountLinkContract.cs" Link="Infrastructure\CoopMountedHeroMountLinkContract.cs" />
+    <Compile Include="..\Infrastructure\CoopClientBootstrapResetContract.cs" Link="Infrastructure\CoopClientBootstrapResetContract.cs" />
+    <Compile Include="..\Infrastructure\CoopHeroBattleProgressionContract.cs" Link="Infrastructure\CoopHeroBattleProgressionContract.cs" />
     <Compile Include="..\Infrastructure\BattleAgentCapacityPolicy.cs" Link="Infrastructure\BattleAgentCapacityPolicy.cs" />
     <Compile Include="..\Infrastructure\GlobalCaptainPerkRuntimeState.cs" Link="Infrastructure\GlobalCaptainPerkRuntimeState.cs" />
     <Compile Include="..\Infrastructure\ExactSiegeMoraleDiagnostics.cs" Link="Infrastructure\ExactSiegeMoraleDiagnostics.cs" />
@@ -161,6 +166,7 @@
     <Compile Include="..\Infrastructure\CoopBattleAgentControlRuntimeState.cs" Link="Infrastructure\CoopBattleAgentControlRuntimeState.cs" />
     <Compile Include="..\Infrastructure\AtomicBridgeFileIO.cs" Link="Infrastructure\AtomicBridgeFileIO.cs" />
     <Compile Include="..\Infrastructure\CoopHeroCreationContract.cs" Link="Infrastructure\CoopHeroCreationContract.cs" />
+    <Compile Include="..\Infrastructure\CoopHeroCreationProgressContract.cs" Link="Infrastructure\CoopHeroCreationProgressContract.cs" />
     <Compile Include="..\Infrastructure\Hideout\CoopHideoutBossPhaseContract.cs" Link="Infrastructure\Hideout\CoopHideoutBossPhaseContract.cs" />
     <Compile Include="..\Infrastructure\Hideout\CoopHideoutAmbushContract.cs" Link="Infrastructure\Hideout\CoopHideoutAmbushContract.cs" />
     <Compile Include="..\Infrastructure\Hideout\CoopHideoutSceneManifest.cs" Link="Infrastructure\Hideout\CoopHideoutSceneManifest.cs" />
@@ -171,6 +177,7 @@
     <Compile Include="..\Infrastructure\CoopBattleEntryPolicy.cs" Link="Infrastructure\CoopBattleEntryPolicy.cs" />
     <Compile Include="..\Infrastructure\CoopBattlePeerSessionState.cs" Link="Infrastructure\CoopBattlePeerSessionState.cs" />
     <Compile Include="..\Infrastructure\CoopBattleEntryStatusBridgeFile.cs" Link="Infrastructure\CoopBattleEntryStatusBridgeFile.cs" />
+    <Compile Include="..\Infrastructure\CoopBattleResultReadCacheContract.cs" Link="Infrastructure\CoopBattleResultReadCacheContract.cs" />
     <Compile Include="..\Infrastructure\CoopBattleResultBridgeFile.cs" Link="Infrastructure\CoopBattleResultBridgeFile.cs" />
     <Compile Include="..\Infrastructure\CoopBattleSelectionBridgeFile.cs" Link="Infrastructure\CoopBattleSelectionBridgeFile.cs" />
     <Compile Include="..\Infrastructure\CustomGameJoinContextState.cs" Link="Infrastructure\CustomGameJoinContextState.cs" />

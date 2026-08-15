@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="..\..\Infrastructure\CoopClientBootstrapResetContract.cs" Link="CoopClientBootstrapResetContract.cs" />
+    <Compile Include="..\..\Infrastructure\CoopMaterializedAgentEntrySnapshotContract.cs" Link="CoopMaterializedAgentEntrySnapshotContract.cs" />
+    <Compile Include="..\..\Infrastructure\CoopUnitSelectionSearchContract.cs" Link="CoopUnitSelectionSearchContract.cs" />
+    <Compile Include="..\..\Infrastructure\CoopMountedHeroMountLinkContract.cs" Link="CoopMountedHeroMountLinkContract.cs" />
+    <Compile Include="..\..\Infrastructure\CommanderDeployment\CoopCommanderFacingOrderContract.cs" Link="CoopCommanderFacingOrderContract.cs" />
+    <Compile Include="..\..\Infrastructure\CommanderDeployment\CoopCommanderDeathHandoffContract.cs" Link="CoopCommanderDeathHandoffContract.cs" />
+    <Compile Include="..\..\Infrastructure\CommanderDeployment\CoopCommanderDeploymentReadinessContract.cs" Link="CoopCommanderDeploymentReadinessContract.cs" />
+  </ItemGroup>
+</Project>

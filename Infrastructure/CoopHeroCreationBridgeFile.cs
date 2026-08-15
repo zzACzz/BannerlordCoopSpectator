@@ -8,6 +8,7 @@ namespace CoopSpectator.Infrastructure
     {
         private const string RequestFileName = "hero_creation_request.json";
         private const string ResultFileName = "hero_creation_result.json";
+        private const string ProgressFileName = "hero_creation_progress.json";
 
         public static string GetDirectoryPath()
         {
@@ -19,6 +20,7 @@ namespace CoopSpectator.Infrastructure
 
         public static string GetRequestPath() => Path.Combine(GetDirectoryPath(), RequestFileName);
         public static string GetResultPath() => Path.Combine(GetDirectoryPath(), ResultFileName);
+        public static string GetProgressPath() => Path.Combine(GetDirectoryPath(), ProgressFileName);
 
         public static void WriteRequest(CoopHeroCreationRequest request)
         {
@@ -38,6 +40,16 @@ namespace CoopSpectator.Infrastructure
         public static bool TryReadResult(out CoopHeroCreationResult result, out string error)
         {
             return TryRead(GetResultPath(), out result, out error);
+        }
+
+        public static void WriteProgress(CoopHeroCreationProgressSnapshot progress)
+        {
+            AtomicBridgeFileIO.WriteAllLines(GetProgressPath(), new[] { JsonConvert.SerializeObject(progress, Formatting.None) });
+        }
+
+        public static bool TryReadProgress(out CoopHeroCreationProgressSnapshot progress, out string error)
+        {
+            return TryRead(GetProgressPath(), out progress, out error);
         }
 
         private static bool TryRead<T>(string path, out T value, out string error) where T : class

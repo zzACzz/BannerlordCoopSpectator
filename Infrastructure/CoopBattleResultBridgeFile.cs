@@ -10,6 +10,8 @@ namespace CoopSpectator.Infrastructure
     {
         private const string CoopSpectatorSubFolder = "CoopSpectator";
         private const string ResultFileName = "battle_result.json";
+        private static readonly CoopBattleResultReadCache<BattleResultSnapshot> ReadCache =
+            new CoopBattleResultReadCache<BattleResultSnapshot>();
 
         public sealed class BattleResultSnapshot
         {
@@ -97,6 +99,7 @@ namespace CoopSpectator.Infrastructure
             public string AttackerCharacterId { get; set; }
             public string AttackerOriginalCharacterId { get; set; }
             public string WeaponItemId { get; set; }
+            public string CampaignWeaponItemId { get; set; }
             public string CaptainHeroId { get; set; }
             public string CaptainCharacterId { get; set; }
             public string CaptainOriginalCharacterId { get; set; }
@@ -145,6 +148,11 @@ namespace CoopSpectator.Infrastructure
 
                 string json = JsonConvert.SerializeObject(snapshot, Formatting.Indented);
                 File.WriteAllText(path, json);
+                if (TryGetFileStamp(path, out CoopBattleResultFileStamp writtenStamp))
+                    ReadCache.TryStore(writtenStamp, writtenStamp, snapshot);
+                else
+                    ReadCache.Invalidate();
+
                 ModLogger.Info(
                     "CoopBattleResultBridgeFile: wrote result to " + path +
                     " BattleId=" + (snapshot.BattleId ?? "null") +
@@ -164,23 +172,40 @@ namespace CoopSpectator.Infrastructure
             string path = GetResultFilePath();
             try
             {
-                if (!File.Exists(path))
+                if (!TryGetFileStamp(path, out CoopBattleResultFileStamp beforeRead))
+                {
+                    ReadCache.Invalidate();
                     return null;
+                }
+
+                if (ReadCache.TryGet(beforeRead, out BattleResultSnapshot cachedSnapshot))
+                {
+                    LogReadResult(path, cachedSnapshot, logRead);
+                    return cachedSnapshot;
+                }
 
                 string json = File.ReadAllText(path);
+                if (!TryGetFileStamp(path, out CoopBattleResultFileStamp afterRead) ||
+                    !CoopBattleResultReadCacheContract.IsStable(beforeRead, afterRead))
+                {
+                    return null;
+                }
+
                 BattleResultSnapshot snapshot = JsonConvert.DeserializeObject<BattleResultSnapshot>(json);
                 if (snapshot == null)
                     return null;
 
-                if (logRead)
-                {
-                    ModLogger.Info(
-                        "CoopBattleResultBridgeFile: read result from " + path +
-                        " BattleId=" + (snapshot.BattleId ?? "null") +
-                        " Entries=" + (snapshot.Entries?.Count ?? 0) +
-                        " WinnerSide=" + (snapshot.WinnerSide ?? "none") + ".");
-                }
+                ReadCache.TryStore(beforeRead, afterRead, snapshot);
+                LogReadResult(path, snapshot, logRead);
                 return snapshot;
+            }
+            catch (IOException)
+            {
+                return null;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return null;
             }
             catch (Exception ex)
             {
@@ -192,6 +217,7 @@ namespace CoopSpectator.Infrastructure
         public static void ClearResult(string source)
         {
             string path = GetResultFilePath();
+            ReadCache.Invalidate();
             try
             {
                 if (!File.Exists(path))
@@ -207,6 +233,47 @@ namespace CoopSpectator.Infrastructure
             {
                 ModLogger.Error("CoopBattleResultBridgeFile: failed to clear " + path, ex);
             }
+        }
+
+        private static bool TryGetFileStamp(string path, out CoopBattleResultFileStamp stamp)
+        {
+            stamp = default(CoopBattleResultFileStamp);
+            try
+            {
+                var fileInfo = new FileInfo(path);
+                fileInfo.Refresh();
+                if (!fileInfo.Exists)
+                    return false;
+
+                stamp = new CoopBattleResultFileStamp(
+                    fileInfo.FullName,
+                    fileInfo.Length,
+                    fileInfo.LastWriteTimeUtc.Ticks);
+                return true;
+            }
+            catch (IOException)
+            {
+                return false;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return false;
+            }
+        }
+
+        private static void LogReadResult(
+            string path,
+            BattleResultSnapshot snapshot,
+            bool logRead)
+        {
+            if (!logRead || snapshot == null)
+                return;
+
+            ModLogger.Info(
+                "CoopBattleResultBridgeFile: read result from " + path +
+                " BattleId=" + (snapshot.BattleId ?? "null") +
+                " Entries=" + (snapshot.Entries?.Count ?? 0) +
+                " WinnerSide=" + (snapshot.WinnerSide ?? "none") + ".");
         }
     }
 }

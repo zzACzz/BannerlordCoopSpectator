@@ -8,6 +8,7 @@
     <Compile Include="Program.cs" />
     <Compile Include="..\..\Infrastructure\ExactCasualtyLedgerMath.cs" Link="ExactCasualtyLedgerMath.cs" />
     <Compile Include="..\..\Infrastructure\CampaignCasualtyPolicy.cs" Link="CampaignCasualtyPolicy.cs" />
+    <Compile Include="..\..\Infrastructure\CoopNativeAftermathContributionContract.cs" Link="CoopNativeAftermathContributionContract.cs" />
     <Compile Include="..\..\Infrastructure\Hideout\CoopHideoutBossPhaseContract.cs" Link="CoopHideoutBossPhaseContract.cs" />
     <Compile Include="..\..\Infrastructure\Hideout\CoopHideoutAmbushContract.cs" Link="CoopHideoutAmbushContract.cs" />
   </ItemGroup>

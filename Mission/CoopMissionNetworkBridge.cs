@@ -15205,8 +15205,10 @@ namespace CoopSpectator.MissionBehaviors
                         peer.Index,
                         out DateTime completedUtc);
                     DateTime nowUtc = DateTime.UtcNow;
-                    if (completedUtc != DateTime.MinValue &&
-                        nowUtc - completedUtc < MaterializedAgentEntrySnapshotAckRetryDelay)
+                    if (!CoopMaterializedAgentEntrySnapshotContract.IsRetryDue(
+                            completedUtc,
+                            nowUtc,
+                            MaterializedAgentEntrySnapshotAckRetryDelay))
                     {
                         return;
                     }
@@ -15884,11 +15886,7 @@ namespace CoopSpectator.MissionBehaviors
                         out PendingPayloadTransmission completedTransmission) &&
                     completedTransmission != null &&
                     completedTransmission.TransmissionId == message.TransmissionId;
-                if (retryPayloadAvailable)
-                {
-                    _completedMaterializedAgentEntryTransmissionUtcByPeer[peer.Index] = DateTime.MinValue;
-                }
-                else
+                if (!retryPayloadAvailable)
                 {
                     ClearPeerMaterializedAgentEntrySyncState(peer.Index);
                     _lastSentMaterializedAgentEntryPayloadByPeer.Remove(peer.Index);
@@ -16447,21 +16445,30 @@ namespace CoopSpectator.MissionBehaviors
                         bool transmissionMatched =
                             ReferenceEquals(_clientObservedMaterializedAgentEntryMission, Mission) &&
                             _clientObservedMaterializedAgentEntryTransmissionId == transmissionId;
-                        bool appliedSuccessfully =
+                        bool payloadMatched =
                             battleMatched &&
                             missionMatched &&
                             entryCountMatched &&
                             transmissionMatched &&
                             !string.IsNullOrWhiteSpace(payloadHash);
-                        if (appliedSuccessfully)
+                        CoopMaterializedAgentEntrySnapshotApplyResult applyResult =
+                            CoopMaterializedAgentEntrySnapshotContract.Evaluate(
+                                snapshot.EntryCount,
+                                mappings.Count,
+                                0);
+                        if (payloadMatched)
                         {
-                            CoopMissionSpawnLogic.ObserveClientAuthoritativeMaterializedAgentEntrySnapshot(
+                            applyResult = CoopMissionSpawnLogic.ObserveClientAuthoritativeMaterializedAgentEntrySnapshot(
                                 snapshot,
                                 "CoopMissionNetworkBridge.ApplyCompletedPayload");
-                            MarkClientMaterializedAgentEntrySnapshotApplied(
-                                transmissionId,
-                                snapshot.EntryCount,
-                                payloadHash);
+                            if (applyResult.AppliedSuccessfully)
+                            {
+                                MarkClientMaterializedAgentEntrySnapshotApplied(
+                                    transmissionId,
+                                    snapshot.EntryCount,
+                                    payloadHash);
+                            }
+
                             BattleMapSpawnHandoffPatch.TryProcessDeferredClientCreateAgentMessages(
                                 Mission,
                                 "CoopMissionNetworkBridge applied authoritative materialized-agent-entry snapshot");
@@ -16470,6 +16477,19 @@ namespace CoopSpectator.MissionBehaviors
                                 "CoopMissionNetworkBridge applied authoritative materialized-agent-entry snapshot");
                         }
 
+                        CoopBattlePhase currentPhase = CoopBattlePhaseRuntimeState.GetPhase();
+                        CoopMaterializedAgentEntrySnapshotAcknowledgementPhase acknowledgementPhase =
+                            currentPhase >= CoopBattlePhase.BattleActive &&
+                            currentPhase < CoopBattlePhase.BattleEnded
+                                ? CoopMaterializedAgentEntrySnapshotAcknowledgementPhase.BattleActive
+                                : currentPhase >= CoopBattlePhase.BattleEnded
+                                    ? CoopMaterializedAgentEntrySnapshotAcknowledgementPhase.BattleEnded
+                                    : CoopMaterializedAgentEntrySnapshotAcknowledgementPhase.InitialBarrier;
+                        bool appliedSuccessfully =
+                            CoopMaterializedAgentEntrySnapshotContract.ShouldAcknowledgeSuccess(
+                                payloadMatched,
+                                acknowledgementPhase,
+                                applyResult);
                         SendClientMaterializedAgentEntrySnapshotCompleteAck(
                             transmissionId,
                             appliedSuccessfully,
@@ -16486,6 +16506,7 @@ namespace CoopSpectator.MissionBehaviors
                                 " UseStringIdExactEquipmentPath=" + snapshot.UseStringIdExactEquipmentPath +
                                 " EntryCount=" + snapshot.EntryCount +
                                 " ParsedEntryCount=" + mappings.Count +
+                                " AppliedEntryCount=" + applyResult.AppliedMappingCount +
                                 " BattleMatched=" + battleMatched +
                                 " MissionMatched=" + missionMatched +
                                 " TransmissionMatched=" + transmissionMatched +

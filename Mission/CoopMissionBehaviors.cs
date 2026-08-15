@@ -3758,6 +3758,8 @@ namespace CoopSpectator.MissionBehaviors
             new Dictionary<int, int>();
         private static readonly Dictionary<int, string> _clientMountedHeroEntryIdByMountAgentIndex =
             new Dictionary<int, string>();
+        private static readonly Dictionary<int, ClientMountedHeroMountLinkLifecycleState> _clientMountedHeroMountLinkLifecycleByRiderAgentIndex =
+            new Dictionary<int, ClientMountedHeroMountLinkLifecycleState>();
         private static readonly Dictionary<int, PendingClientExactVisualOverlayState> _pendingExactNativeClientVisualOverlaysByAgentIndex =
             new Dictionary<int, PendingClientExactVisualOverlayState>();
         private static readonly Dictionary<int, ClientCreateAgentExactVisualRuntimeState> _clientCreateAgentExactVisualStateByAgentIndex =
@@ -4588,6 +4590,15 @@ namespace CoopSpectator.MissionBehaviors
             public DateTime LastUpdatedUtc { get; set; }
         }
 
+        private sealed class ClientMountedHeroMountLinkLifecycleState
+        {
+            public string EntryId { get; set; }
+            public string BattleId { get; set; }
+            public bool HasVerifiedLiveMountLink { get; set; }
+            public int LastVerifiedMountAgentIndex { get; set; } = -1;
+            public bool RuntimeDismountObserved { get; set; }
+        }
+
         private static class ExactSiegeMaterializationModule
         {
             public static Equipment TryBuildSiegeSpawnEquipment(
@@ -5138,6 +5149,7 @@ namespace CoopSpectator.MissionBehaviors
             _clientMountedHeroPayloadMountAgentIndexByRiderAgentIndex.Clear();
             _clientMountedHeroPayloadRiderAgentIndexByMountAgentIndex.Clear();
             _clientMountedHeroEntryIdByMountAgentIndex.Clear();
+            _clientMountedHeroMountLinkLifecycleByRiderAgentIndex.Clear();
             _pendingExactNativeClientVisualOverlaysByAgentIndex.Clear();
             _clientCreateAgentExactVisualStateByAgentIndex.Clear();
             _clientAuthoritativeMaterializedEntryObservedAgentIndices.Clear();
@@ -6656,6 +6668,10 @@ namespace CoopSpectator.MissionBehaviors
                 "CoopMissionSpawnLogic.OnAgentRemoved");
             if (GameNetwork.IsServer && affectedAgent != null)
             {
+                TryReleaseRemovedAgentOrderOwnership(
+                    Mission,
+                    affectedAgent,
+                    "CoopMissionSpawnLogic.OnAgentRemoved");
                 CoopBattleAgentControlRuntimeState.TryMarkServerObservedAgentUnavailable(
                     affectedAgent.Index,
                     "CoopMissionSpawnLogic.OnAgentRemoved",
@@ -6991,6 +7007,7 @@ namespace CoopSpectator.MissionBehaviors
             _clientMountedHeroMountAgentIndexByRiderAgentIndex.Clear();
             _clientMountedHeroRiderAgentIndexByMountAgentIndex.Clear();
             _clientMountedHeroEntryIdByMountAgentIndex.Clear();
+            _clientMountedHeroMountLinkLifecycleByRiderAgentIndex.Clear();
             _pendingExactNativeClientVisualOverlaysByAgentIndex.Clear();
             _clientHeroExactVisualWatchdogFirstSeenUtcByAgentIndex.Clear();
             _clientHeroExactVisualWatchdogLastAttemptUtcByAgentIndex.Clear();
@@ -8454,6 +8471,7 @@ namespace CoopSpectator.MissionBehaviors
             bool hadIncludesWeapons = _exactNativeClientVisualOverlayIncludesWeaponsByAgentIndex.Remove(agentIndex);
             bool hadEntryId = _exactNativeClientVisualOverlayEntryIdByAgentIndex.Remove(agentIndex);
             bool hadTrackedMount = ClearTrackedClientMountedHeroMountAgentIndexState(agentIndex);
+            bool hadMountLinkLifecycle = _clientMountedHeroMountLinkLifecycleByRiderAgentIndex.Remove(agentIndex);
             bool hadPending = _pendingExactNativeClientVisualOverlaysByAgentIndex.Remove(agentIndex);
             bool hadCreateAgentRuntime = _clientCreateAgentExactVisualStateByAgentIndex.Remove(agentIndex);
             bool hadAuthoritativeMaterializedObserved = _clientAuthoritativeMaterializedEntryObservedAgentIndices.Remove(agentIndex);
@@ -8463,7 +8481,7 @@ namespace CoopSpectator.MissionBehaviors
             bool hadStrictTransferState = _strictExactHeroTransferStateByRiderAgentIndex.ContainsKey(agentIndex);
             ClearStrictExactHeroTransferState(agentIndex, source, reason, logClear: false);
             if (logClear &&
-                (hadTrackedAgent || hadApplied || hadIncludesWeapons || hadEntryId || hadTrackedMount || hadPending || hadCreateAgentRuntime || hadAuthoritativeMaterializedObserved || hadWatchdogFirstSeen || hadWatchdogLastAttempt || hadStrictTransferState))
+                (hadTrackedAgent || hadApplied || hadIncludesWeapons || hadEntryId || hadTrackedMount || hadMountLinkLifecycle || hadPending || hadCreateAgentRuntime || hadAuthoritativeMaterializedObserved || hadWatchdogFirstSeen || hadWatchdogLastAttempt || hadStrictTransferState))
             {
                 ModLogger.Info(
                     "CoopMissionSpawnLogic: cleared client exact visual overlay agent-index state. " +
@@ -8475,6 +8493,7 @@ namespace CoopSpectator.MissionBehaviors
                     " HadIncludesWeapons=" + hadIncludesWeapons +
                     " HadEntryId=" + hadEntryId +
                     " HadTrackedMount=" + hadTrackedMount +
+                    " HadMountLinkLifecycle=" + hadMountLinkLifecycle +
                     " HadPending=" + hadPending +
                     " HadCreateAgentRuntime=" + hadCreateAgentRuntime +
                     " HadAuthoritativeMaterializedObserved=" + hadAuthoritativeMaterializedObserved +
@@ -8865,12 +8884,17 @@ namespace CoopSpectator.MissionBehaviors
             return false;
         }
 
-        internal static void ObserveClientAuthoritativeMaterializedAgentEntrySnapshot(
+        internal static CoopMaterializedAgentEntrySnapshotApplyResult ObserveClientAuthoritativeMaterializedAgentEntrySnapshot(
             CoopBattleEntryStatusBridgeFile.EntryStatusSnapshot snapshot,
             string source)
         {
             if (GameNetwork.IsServer || snapshot == null)
-                return;
+            {
+                return CoopMaterializedAgentEntrySnapshotContract.Evaluate(
+                    snapshot?.AuthoritativeMaterializedAgentEntryCount ?? 0,
+                    0,
+                    0);
+            }
 
             var materializedSnapshot = new CoopBattleEntryStatusBridgeFile.AuthoritativeMaterializedAgentEntrySnapshot
             {
@@ -8881,22 +8905,27 @@ namespace CoopSpectator.MissionBehaviors
                 AgentEntries = snapshot.AuthoritativeMaterializedAgentEntries ?? string.Empty,
                 UpdatedUtc = snapshot.UpdatedUtc
             };
-            ObserveClientAuthoritativeMaterializedAgentEntrySnapshot(materializedSnapshot, source);
+            return ObserveClientAuthoritativeMaterializedAgentEntrySnapshot(materializedSnapshot, source);
         }
 
-        internal static void ObserveClientAuthoritativeMaterializedAgentEntrySnapshot(
+        internal static CoopMaterializedAgentEntrySnapshotApplyResult ObserveClientAuthoritativeMaterializedAgentEntrySnapshot(
             CoopBattleEntryStatusBridgeFile.AuthoritativeMaterializedAgentEntrySnapshot snapshot,
             string source)
         {
             if (GameNetwork.IsServer || snapshot == null)
-                return;
+            {
+                return CoopMaterializedAgentEntrySnapshotContract.Evaluate(
+                    snapshot?.EntryCount ?? 0,
+                    0,
+                    0);
+            }
 
             _lastClientAuthoritativeMaterializedEntrySnapshotObservedUtc = DateTime.UtcNow;
             _lastClientAuthoritativeMaterializedEntrySnapshotEntryCount = Math.Max(0, snapshot.EntryCount);
             _clientUseStringIdExactEquipmentPath = snapshot.UseStringIdExactEquipmentPath;
             Dictionary<int, string> mappings =
                 CoopBattleEntryStatusBridgeFile.DeserializeAgentEntryMap(snapshot.AgentEntries);
-            ApplyClientAuthoritativeMaterializedAgentEntrySnapshot(
+            return ApplyClientAuthoritativeMaterializedAgentEntrySnapshot(
                 mappings,
                 snapshot.EntryCount,
                 source ?? snapshot.Source ?? "unknown");
@@ -9082,13 +9111,18 @@ namespace CoopSpectator.MissionBehaviors
                    AreRuntimeEquipmentItemIdsEquivalent(expectedItemId, actualItemId, entryState, slotLabel);
         }
 
-        private static void ApplyClientAuthoritativeMaterializedAgentEntrySnapshot(
+        private static CoopMaterializedAgentEntrySnapshotApplyResult ApplyClientAuthoritativeMaterializedAgentEntrySnapshot(
             Dictionary<int, string> mappings,
             int snapshotCount,
             string source)
         {
             if (GameNetwork.IsServer || mappings == null || mappings.Count == 0)
-                return;
+            {
+                return CoopMaterializedAgentEntrySnapshotContract.Evaluate(
+                    snapshotCount,
+                    mappings?.Count ?? 0,
+                    0);
+            }
 
             Mission mission = Mission.Current;
             TryRefreshClientPostPossessionExactVisualPauseWindow(
@@ -9298,6 +9332,11 @@ namespace CoopSpectator.MissionBehaviors
                     " SnapshotCount=" + snapshotCount +
                     " Source=" + (source ?? "unknown"));
             }
+
+            return CoopMaterializedAgentEntrySnapshotContract.Evaluate(
+                snapshotCount,
+                mappings.Count,
+                appliedCount);
         }
 
         internal static bool IsClientReconnectFinalizeReady(out string readinessSummary)
@@ -11684,6 +11723,101 @@ namespace CoopSpectator.MissionBehaviors
                 _clientMountedHeroEntryIdByMountAgentIndex[mountAgentIndex] = entryId;
         }
 
+        private static ClientMountedHeroMountLinkLifecycleState GetClientMountedHeroMountLinkLifecycleState(
+            int riderAgentIndex,
+            string entryId,
+            bool createIfMissing)
+        {
+            if (riderAgentIndex < 0 || string.IsNullOrWhiteSpace(entryId))
+                return null;
+
+            string battleId = GetStrictExactHeroCurrentBattleId();
+            if (_clientMountedHeroMountLinkLifecycleByRiderAgentIndex.TryGetValue(
+                    riderAgentIndex,
+                    out ClientMountedHeroMountLinkLifecycleState state) &&
+                state != null &&
+                string.Equals(state.EntryId, entryId, StringComparison.Ordinal) &&
+                string.Equals(state.BattleId ?? string.Empty, battleId, StringComparison.Ordinal))
+            {
+                return state;
+            }
+
+            if (!createIfMissing)
+                return null;
+
+            state = new ClientMountedHeroMountLinkLifecycleState
+            {
+                EntryId = entryId,
+                BattleId = battleId
+            };
+            _clientMountedHeroMountLinkLifecycleByRiderAgentIndex[riderAgentIndex] = state;
+            return state;
+        }
+
+        private static void ObserveClientMountedHeroLiveMountLink(
+            int riderAgentIndex,
+            int mountAgentIndex,
+            string entryId)
+        {
+            if (riderAgentIndex < 0 || mountAgentIndex < 0 || string.IsNullOrWhiteSpace(entryId))
+                return;
+
+            ClientMountedHeroMountLinkLifecycleState state =
+                GetClientMountedHeroMountLinkLifecycleState(riderAgentIndex, entryId, createIfMissing: true);
+            if (state == null)
+                return;
+
+            state.HasVerifiedLiveMountLink = true;
+            state.LastVerifiedMountAgentIndex = mountAgentIndex;
+            state.RuntimeDismountObserved = false;
+        }
+
+        private static bool HasVerifiedClientMountedHeroLiveMountLink(
+            int riderAgentIndex,
+            string entryId)
+        {
+            ClientMountedHeroMountLinkLifecycleState state =
+                GetClientMountedHeroMountLinkLifecycleState(riderAgentIndex, entryId, createIfMissing: false);
+            return state?.HasVerifiedLiveMountLink == true;
+        }
+
+        private static void ObserveClientMountedHeroRuntimeDismount(
+            int riderAgentIndex,
+            string entryId,
+            int trackedMountAgentIndex)
+        {
+            ClientMountedHeroMountLinkLifecycleState state =
+                GetClientMountedHeroMountLinkLifecycleState(riderAgentIndex, entryId, createIfMissing: false);
+            if (state == null || !state.HasVerifiedLiveMountLink)
+                return;
+
+            bool firstObservation = !state.RuntimeDismountObserved;
+            state.RuntimeDismountObserved = true;
+            ClearTrackedClientMountedHeroMountAgentIndexState(riderAgentIndex);
+            ClearClientMountedHeroPayloadMountAgentIndexState(riderAgentIndex);
+
+            if (_strictExactHeroTransferStateByRiderAgentIndex.TryGetValue(
+                    riderAgentIndex,
+                    out StrictExactHeroTransferRuntimeState transferState) &&
+                transferState != null)
+            {
+                transferState.MountMaterialized = false;
+                transferState.MountLinkVerified = false;
+                transferState.LastBlockedReason = null;
+                transferState.LastSource = "client mounted hero runtime dismount";
+                transferState.LastUpdatedUtc = DateTime.UtcNow;
+            }
+
+            if (firstObservation && ExperimentalFeatures.EnableVerboseDiagnostics)
+            {
+                ModLogger.Verbose(
+                    "CoopMissionSpawnLogic: preserved authoritative runtime dismount for mounted campaign hero. " +
+                    "AgentIndex=" + riderAgentIndex +
+                    " EntryId=" + entryId +
+                    " PreviousMountAgentIndex=" + trackedMountAgentIndex);
+            }
+        }
+
         private static void TrackClientMountedHeroMountAgentIndex(Agent riderAgent, string entryId)
         {
             if (riderAgent == null || riderAgent.IsMount || riderAgent.Index < 0 || string.IsNullOrWhiteSpace(entryId))
@@ -11694,6 +11828,7 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             TrackClientMountedHeroMountAgentIndex(riderAgent.Index, mountAgent.Index, entryId);
+            ObserveClientMountedHeroLiveMountLink(riderAgent.Index, mountAgent.Index, entryId);
             RosterEntryState entryState = BattleSnapshotRuntimeState.GetEntryState(entryId);
             UpdateStrictExactHeroTransferEntryState(riderAgent.Index, entryId, entryState, "track-mounted-hero-mount-live");
             UpdateStrictExactHeroTransferMountLinkState(riderAgent, entryState, "track-mounted-hero-mount-live");
@@ -11734,6 +11869,8 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             TrackClientMountedHeroMountAgentIndex(riderAgent.Index, mountAgentIndex, entryId);
+            if (riderAgent.MountAgent != null && riderAgent.MountAgent.Index == mountAgentIndex)
+                ObserveClientMountedHeroLiveMountLink(riderAgent.Index, mountAgentIndex, entryId);
             UpdateStrictExactHeroTransferEntryState(riderAgent.Index, entryId, entryState, "track-mounted-hero-mount-index");
             UpdateStrictExactHeroTransferPayloadState(riderAgent.Index, mountAgentIndex, "track-mounted-hero-mount-index");
             UpdateStrictExactHeroTransferMountLinkState(riderAgent, entryState, "track-mounted-hero-mount-index");
@@ -11803,19 +11940,47 @@ namespace CoopSpectator.MissionBehaviors
                 riderAgent.IsMount ||
                 riderAgent.Index < 0 ||
                 entryState == null ||
-                !entryState.IsMounted ||
-                riderAgent.MountAgent != null)
+                !entryState.IsMounted)
             {
                 return false;
             }
 
-            if (!TryGetTrackedClientMountedHeroMountAgentIndex(
-                    riderAgent.Index,
-                    out trackedMountAgentIndex,
-                    out _))
+            bool hasTrackedMount = TryGetTrackedClientMountedHeroMountAgentIndex(
+                riderAgent.Index,
+                out trackedMountAgentIndex,
+                out string entryId);
+            if (string.IsNullOrWhiteSpace(entryId))
+                entryId = entryState.EntryId;
+
+            int liveMountAgentIndex = riderAgent.MountAgent?.Index ?? -1;
+            CoopMountedHeroMountLinkDecision decision =
+                CoopMountedHeroMountLinkContract.Evaluate(
+                    isClient: !GameNetwork.IsServer,
+                    snapshotExpectsMount: entryState.IsMounted,
+                    trackedMountAgentIndex: hasTrackedMount ? trackedMountAgentIndex : -1,
+                    liveMountAgentIndex: liveMountAgentIndex,
+                    hasVerifiedLiveMountLink: HasVerifiedClientMountedHeroLiveMountLink(
+                        riderAgent.Index,
+                        entryId));
+
+            if (decision == CoopMountedHeroMountLinkDecision.LinkVerified)
             {
+                ObserveClientMountedHeroLiveMountLink(riderAgent.Index, liveMountAgentIndex, entryId);
                 return false;
             }
+
+            if (decision == CoopMountedHeroMountLinkDecision.PreserveRuntimeDismount)
+            {
+                ObserveClientMountedHeroRuntimeDismount(
+                    riderAgent.Index,
+                    entryId,
+                    trackedMountAgentIndex);
+                reason = "RuntimeDismountPreserved previous=" + trackedMountAgentIndex;
+                return false;
+            }
+
+            if (decision != CoopMountedHeroMountLinkDecision.RepairInitialLink)
+                return false;
 
             reason = "MountLinkMissing tracked=" + trackedMountAgentIndex;
             return true;
@@ -11904,7 +12069,10 @@ namespace CoopSpectator.MissionBehaviors
                 }
 
                 if (!string.IsNullOrWhiteSpace(entryId))
+                {
                     TrackClientMountedHeroMountAgentIndex(riderAgent.Index, mountAgent.Index, entryId);
+                    ObserveClientMountedHeroLiveMountLink(riderAgent.Index, mountAgent.Index, entryId);
+                }
 
                 repairReason = "mounted-hero-link-repaired:" + mountAgent.Index;
                 RosterEntryState entryState = !string.IsNullOrWhiteSpace(entryId)
@@ -14201,16 +14369,12 @@ namespace CoopSpectator.MissionBehaviors
 
         internal static void PrepareClientBattleSnapshotForMission(Mission mission, string source)
         {
-            EnsureClientBattleSnapshotFreshForMission(
-                mission,
-                source,
-                preserveDeferredClientBootstrapState: true);
+            EnsureClientBattleSnapshotFreshForMission(mission, source);
         }
 
         private static void EnsureClientBattleSnapshotFreshForMission(
             Mission mission,
-            string source,
-            bool preserveDeferredClientBootstrapState = false)
+            string source)
         {
             if (mission == null || GameNetwork.IsServer || !IsSceneAwareBattleMapRuntime(mission))
                 return;
@@ -14246,13 +14410,16 @@ namespace CoopSpectator.MissionBehaviors
                 BattleSnapshotRuntimeState.SetCurrent(refreshedSnapshot, "battle-roster-file");
 
             string refreshedKey = BuildClientBattleSnapshotRefreshKey(refreshedSnapshot);
+            bool shouldPreserveDeferredClientBootstrapState =
+                CoopClientBootstrapResetContract.ShouldPreserveDeferredPayloads(
+                    CoopClientBootstrapTransitionKind.BattleSnapshotRefresh);
 
             ResetClientMissionRuntimeState(
                 "EnsureClientBattleSnapshotFreshForMission: " + (source ?? "unknown"));
             CoopSpectator.Patches.BattleMapSpawnHandoffPatch.ResetRuntimeState(
                 "EnsureClientBattleSnapshotFreshForMission: " + (source ?? "unknown"),
                 preserveCommanderOrderControlState: true,
-                preserveDeferredClientBootstrapState: preserveDeferredClientBootstrapState);
+                preserveDeferredClientBootstrapState: shouldPreserveDeferredClientBootstrapState);
 
             _lastClientBattleSnapshotRefreshMission = mission;
             _lastClientBattleSnapshotRefreshKey = refreshedKey;
@@ -14263,7 +14430,7 @@ namespace CoopSpectator.MissionBehaviors
                 " Source=" + (source ?? "unknown") +
                 " MissionChanged=" + missionChanged +
                 " SceneMismatch=" + sceneMismatch +
-                " PreservedDeferredClientBootstrapState=" + preserveDeferredClientBootstrapState +
+                " PreservedDeferredClientBootstrapState=" + shouldPreserveDeferredClientBootstrapState +
                 " PreviousSnapshotKey=" + (previousKey ?? "null") +
                 " RefreshedSnapshotKey=" + (_lastClientBattleSnapshotRefreshKey ?? "null"));
         }
@@ -25724,6 +25891,7 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             string weaponItemId = ResolveCombatEventWeaponItemId(normalizedAffectorAgent, attackerWeapon);
+            string campaignWeaponItemId = ResolveCombatEventCampaignWeaponItemId(weaponItemId);
             ResolveCombatEventCaptainIdentity(
                 normalizedAffectorAgent,
                 attackerEntry,
@@ -25749,6 +25917,7 @@ namespace CoopSpectator.MissionBehaviors
                 AttackerCharacterId = attackerCharacterId,
                 AttackerOriginalCharacterId = attackerOriginalCharacterId,
                 WeaponItemId = weaponItemId,
+                CampaignWeaponItemId = campaignWeaponItemId,
                 CaptainHeroId = captainHeroId,
                 CaptainCharacterId = captainCharacterId,
                 CaptainOriginalCharacterId = captainOriginalCharacterId,
@@ -25841,7 +26010,8 @@ namespace CoopSpectator.MissionBehaviors
             else
                 state.OtherRemovedCount++;
 
-            MaterializedBattleResultEntryRuntimeState attackerState = TryGetMaterializedBattleResultEntryByAgent(affectorAgent, out string attackerEntryId);
+            Agent normalizedRemovalAffectorAgent = NormalizeBattleResultCombatAffectorAgent(affectorAgent);
+            MaterializedBattleResultEntryRuntimeState attackerState = TryGetMaterializedBattleResultEntryByAgent(normalizedRemovalAffectorAgent, out string attackerEntryId);
             if (attackerState != null)
             {
                 if (string.Equals(removedState, "Killed", StringComparison.OrdinalIgnoreCase))
@@ -25890,13 +26060,15 @@ namespace CoopSpectator.MissionBehaviors
                     if (combatEvent == null)
                         continue;
 
-                    if (!string.Equals(combatEvent.VictimEntryId, entryId, StringComparison.OrdinalIgnoreCase))
+                    if (!CoopHeroBattleProgressionContract.IsFatalCombatEventMatch(
+                            combatEvent.VictimEntryId,
+                            combatEvent.AttackerEntryId,
+                            entryId,
+                            attackerEntryId,
+                            combatEvent.IsFatal))
                         continue;
 
                     matchedExistingCombatEvent = true;
-                    if (combatEvent.IsFatal)
-                        break;
-
                     combatEvent.IsFatal = string.Equals(removedState, "Killed", StringComparison.OrdinalIgnoreCase);
                     break;
                 }
@@ -25904,7 +26076,7 @@ namespace CoopSpectator.MissionBehaviors
 
             TryTrackSyntheticRemovalCombatEvent(
                 affectedAgent,
-                affectorAgent,
+                normalizedRemovalAffectorAgent,
                 removedState,
                 entryId,
                 state,
@@ -26226,6 +26398,16 @@ namespace CoopSpectator.MissionBehaviors
             return string.Empty;
         }
 
+        private static string ResolveCombatEventCampaignWeaponItemId(string battleWeaponItemId)
+        {
+            ExactCampaignRuntimeItemRegistry.TryResolveOriginalItemIdByMirrorId(
+                battleWeaponItemId,
+                out string mappedOriginalItemId);
+            return CoopHeroBattleProgressionContract.SelectCampaignWeaponItemId(
+                battleWeaponItemId,
+                mappedOriginalItemId);
+        }
+
         private static void ResolveCombatEventCaptainIdentity(
             Agent affectorAgent,
             MaterializedBattleResultEntryRuntimeState attackerEntry,
@@ -26458,6 +26640,7 @@ namespace CoopSpectator.MissionBehaviors
                 out string captainCharacterId,
                 out string captainOriginalCharacterId);
             string commanderHeroId = ResolveCombatEventCommanderHeroId(normalizedAffectorAgent, attackerEntry);
+            string weaponItemId = ResolveCombatEventWeaponItemId(normalizedAffectorAgent, attackerWeapon);
 
             _materializedBattleResultCombatEvents.Add(new CoopBattleResultBridgeFile.BattleResultCombatEventSnapshot
             {
@@ -26466,7 +26649,8 @@ namespace CoopSpectator.MissionBehaviors
                 AttackerPartyId = attackerEntry.PartyId,
                 AttackerCharacterId = attackerCharacterId,
                 AttackerOriginalCharacterId = attackerOriginalCharacterId,
-                WeaponItemId = ResolveCombatEventWeaponItemId(normalizedAffectorAgent, attackerWeapon),
+                WeaponItemId = weaponItemId,
+                CampaignWeaponItemId = ResolveCombatEventCampaignWeaponItemId(weaponItemId),
                 CaptainHeroId = captainHeroId,
                 CaptainCharacterId = captainCharacterId,
                 CaptainOriginalCharacterId = captainOriginalCharacterId,
@@ -38292,14 +38476,31 @@ namespace CoopSpectator.MissionBehaviors
                 ReferenceEquals(team.GeneralAgent, controlledAgent) ||
                 ReferenceEquals(team.PlayerOrderController?.Owner, controlledAgent);
             int releasedFormations = 0;
+            int preservedLivingPlayerFormations = 0;
             foreach (Formation formation in team.FormationsIncludingSpecialAndEmpty)
             {
                 if (formation == null || !ReferenceEquals(formation.Team, team))
                     continue;
 
-                bool ownedByPeer = ReferenceEquals(GetServerMemberValue(formation, "PlayerOwner"), controlledAgent);
-                if (!ownedByPeer && !(releasedGeneral && formation.CountOfUnits > 0))
+                object formationOwner = GetServerMemberValue(formation, "PlayerOwner");
+                bool ownedByPeer = ReferenceEquals(formationOwner, controlledAgent);
+                bool hasDifferentActivePlayerOwner =
+                    IsDifferentConnectedActiveFormationPlayerOwner(
+                        formationOwner as Agent,
+                        controlledAgent,
+                        team);
+                bool shouldReleaseFormation =
+                    CoopCommanderDeathHandoffContract.ShouldReleaseFormationOwnership(
+                        ownedByPeer,
+                        releasedGeneral,
+                        formation.CountOfUnits,
+                        hasDifferentActivePlayerOwner);
+                if (!shouldReleaseFormation)
+                {
+                    if (hasDifferentActivePlayerOwner)
+                        preservedLivingPlayerFormations++;
                     continue;
+                }
 
                 SetServerMemberValue(formation, "PlayerOwner", null);
                 SetServerMemberValue(formation, "HasPlayerControlledTroop", false);
@@ -38347,8 +38548,26 @@ namespace CoopSpectator.MissionBehaviors
                 " AgentIndex=" + controlledAgent.Index +
                 " ReleasedGeneral=" + releasedGeneral +
                 " ReleasedFormations=" + releasedFormations +
+                " PreservedLivingPlayerFormations=" + preservedLivingPlayerFormations +
                 " ClearedOrderControllers=" + clearedOrderControllers +
                 " Source=" + (source ?? "unknown"));
+        }
+
+        private static bool IsDifferentConnectedActiveFormationPlayerOwner(
+            Agent formationOwner,
+            Agent releasedAgent,
+            Team expectedTeam)
+        {
+            if (formationOwner == null ||
+                ReferenceEquals(formationOwner, releasedAgent) ||
+                !formationOwner.IsActive() ||
+                !ReferenceEquals(formationOwner.Team, expectedTeam))
+            {
+                return false;
+            }
+
+            NetworkCommunicator ownerPeer = formationOwner.MissionPeer?.GetNetworkPeer();
+            return ownerPeer?.IsConnectionActive == true;
         }
 
         private static void TryForcePrimaryPeerRespawnable(Mission mission, string source)
@@ -38456,7 +38675,7 @@ namespace CoopSpectator.MissionBehaviors
             Agent controlledAgent,
             string source)
         {
-            if (mission == null || missionPeer == null || previousTeam == null || controlledAgent == null)
+            if (mission == null || previousTeam == null || controlledAgent == null)
                 return;
 
             if (ReferenceEquals(previousTeam, mission.SpectatorTeam) || previousTeam.Side == BattleSideEnum.None)
@@ -38470,6 +38689,7 @@ namespace CoopSpectator.MissionBehaviors
             int releasedFormationCount = 0;
             int chargedFormationCount = 0;
             int nativeExactSiegeAiFormationCount = 0;
+            int preservedLivingPlayerFormationCount = 0;
             var releasedFormations = new List<Formation>();
 
             foreach (Formation formation in previousTeam.FormationsIncludingSpecialAndEmpty)
@@ -38477,12 +38697,25 @@ namespace CoopSpectator.MissionBehaviors
                 if (formation == null || !ReferenceEquals(formation.Team, previousTeam))
                     continue;
 
-                bool ownedByDeadPeer = ReferenceEquals(GetServerMemberValue(formation, "PlayerOwner"), controlledAgent);
+                object formationOwner = GetServerMemberValue(formation, "PlayerOwner");
+                bool ownedByDeadPeer = ReferenceEquals(formationOwner, controlledAgent);
+                bool hasDifferentActivePlayerOwner =
+                    IsDifferentConnectedActiveFormationPlayerOwner(
+                        formationOwner as Agent,
+                        controlledAgent,
+                        previousTeam);
                 bool shouldReleaseFormation =
-                    ownedByDeadPeer ||
-                    (releasedGeneralOwnership && formation.CountOfUnits > 0);
+                    CoopCommanderDeathHandoffContract.ShouldReleaseFormationOwnership(
+                        ownedByDeadPeer,
+                        releasedGeneralOwnership,
+                        formation.CountOfUnits,
+                        hasDifferentActivePlayerOwner);
                 if (!shouldReleaseFormation)
+                {
+                    if (hasDifferentActivePlayerOwner)
+                        preservedLivingPlayerFormationCount++;
                     continue;
+                }
 
                 SetServerMemberValue(formation, "PlayerOwner", null);
                 SetServerMemberValue(formation, "HasPlayerControlledTroop", false);
@@ -38504,11 +38737,14 @@ namespace CoopSpectator.MissionBehaviors
                 {
                     formation.SetControlledByAI(true, true);
                     formation.SetFiringOrder(FiringOrder.FiringOrderFireAtWill);
-                    if (formation.CountOfUnits > 0)
-                    {
-                        formation.SetMovementOrder(MovementOrder.MovementOrderCharge);
-                        chargedFormationCount++;
-                    }
+                }
+
+                if (CoopCommanderDeathHandoffContract.ShouldIssueChargeOrder(
+                        useNativeExactSiegeFormationAi,
+                        formation.CountOfUnits))
+                {
+                    formation.SetMovementOrder(MovementOrder.MovementOrderCharge);
+                    chargedFormationCount++;
                 }
 
                 releasedFormations.Add(formation);
@@ -38598,9 +38834,63 @@ namespace CoopSpectator.MissionBehaviors
                 " ReleasedFormations=" + releasedFormationCount +
                 " ChargedFormations=" + chargedFormationCount +
                 " NativeExactSiegeAiFormations=" + nativeExactSiegeAiFormationCount +
+                " PreservedLivingPlayerFormations=" + preservedLivingPlayerFormationCount +
                 " ClearedOrderControllers=" + clearedOrderControllers +
                 " PulsedAgents=" + pulsedAgents +
                 " Source=" + (source ?? "unknown"));
+        }
+
+        private static void TryReleaseRemovedAgentOrderOwnership(
+            Mission mission,
+            Agent affectedAgent,
+            string source)
+        {
+            Team previousTeam = affectedAgent?.Team;
+            bool hasPlayableTeam =
+                previousTeam != null &&
+                !ReferenceEquals(previousTeam, mission?.SpectatorTeam) &&
+                previousTeam.Side != BattleSideEnum.None;
+            bool ownsGeneralRole =
+                previousTeam != null &&
+                ReferenceEquals(previousTeam.GeneralAgent, affectedAgent);
+            bool ownsPlayerOrderController =
+                previousTeam != null &&
+                ReferenceEquals(previousTeam.PlayerOrderController?.Owner, affectedAgent);
+            int ownedFormationCount = 0;
+            if (previousTeam != null && affectedAgent != null)
+            {
+                foreach (Formation formation in previousTeam.FormationsIncludingSpecialAndEmpty)
+                {
+                    if (formation != null &&
+                        ReferenceEquals(formation.Team, previousTeam) &&
+                        ReferenceEquals(GetServerMemberValue(formation, "PlayerOwner"), affectedAgent))
+                    {
+                        ownedFormationCount++;
+                    }
+                }
+            }
+
+            if (!CoopCommanderDeathHandoffContract.ShouldReleaseRemovedAgentOwnership(
+                    GameNetwork.IsServer,
+                    mission != null,
+                    affectedAgent != null,
+                    hasPlayableTeam,
+                    ownsGeneralRole,
+                    ownsPlayerOrderController,
+                    ownedFormationCount))
+            {
+                return;
+            }
+
+            MissionPeer missionPeer = affectedAgent.MissionPeer;
+            NetworkCommunicator peer = missionPeer?.GetNetworkPeer();
+            TryReleasePeerOrderOwnershipAfterLeavingActiveLife(
+                mission,
+                missionPeer,
+                peer,
+                previousTeam,
+                affectedAgent,
+                source + " removed-agent");
         }
 
         private static int TryClearDeadPeerOrderControllerOwnership(Team team, Agent controlledAgent, string source)

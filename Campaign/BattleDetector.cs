@@ -324,6 +324,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             public int TroopXpApplied { get; set; }
             public float HeroSkillXpApplied { get; set; }
             public float HeroRawXpApplied { get; set; }
+            public Dictionary<string, float> HeroSkillXpByHeroAndSkill { get; } =
+                new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
             public int UnresolvedPartyAggregates { get; set; }
             public int UnresolvedCombatEvents { get; set; }
             public RewardProjectionSummary RewardProjection { get; } = new RewardProjectionSummary();
@@ -353,6 +355,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         {
             public Hero Hero { get; set; }
             public int TotalXp { get; set; }
+            public Dictionary<string, float> SkillXpById { get; set; }
         }
 
         private sealed class RewardStateAuditSnapshot
@@ -476,7 +479,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             if (!isInMissionNow) // Якщо місії немає, значить ми не в битві (або вже вийшли з неї)
             { // Починаємо блок if
                 TryMaintainMainPartyBattleResultPreviewAfterMissionExit();
-                TryConsumeBattleResultWritebackAudit();
+                if (TaleWorlds.CampaignSystem.Campaign.Current != null)
+                    TryConsumeBattleResultWritebackAudit();
                 TryResetPendingLordsHallStageStateIfOrphaned();
                 ResetMissionExitState();
                 if (_wasInMissionLastTick && ShouldNotifyDedicatedHelper()) // Щойно вийшли з місії — сказати Dedicated Helper end_mission (якщо ми не спектатор-клієнт)
@@ -1111,6 +1115,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 " TroopXp=" + writebackSummary.TroopXpApplied +
                 " HeroSkillXp=" + writebackSummary.HeroSkillXpApplied.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) +
                 " HeroRawXp=" + writebackSummary.HeroRawXpApplied.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) +
+                " HeroSkillXpBreakdown=[" + FormatHeroSkillXpBreakdown(writebackSummary) + "]" +
                 " RewardProjection[Ready=" + writebackSummary.RewardProjection.Ready +
                 " Source=" + (writebackSummary.RewardProjection.Source ?? "none") +
                 " Committed=" + writebackSummary.RewardProjection.UsedCommittedMapEventResults +
@@ -1846,11 +1851,12 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
                         try
                         {
+                            List<HeroXpAuditSnapshot> beforeSnapshots =
+                                CaptureHeroXpAuditSnapshots(participant.Hero);
                             participant.Hero.HeroDeveloper?.AddSkillXp(bestSkill, weightedXp, true, false);
                             if (participant.Hero.HeroDeveloper == null)
                                 participant.Hero.AddSkillXp(bestSkill, weightedXp);
-                            summary.HeroSkillXpApplied += weightedXp;
-                            summary.HeroRawXpApplied += Math.Max(0f, weightedXp);
+                            ApplyHeroXpAuditDeltas(beforeSnapshots, summary);
                             anyApplied = true;
                         }
                         catch (Exception ex)
@@ -1928,7 +1934,22 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 return;
 
             CharacterObject captainCharacter = ResolveCombatEventCaptainCharacter(combatEvent, partyState);
-            WeaponComponentData attackerWeapon = ResolveCombatEventWeaponData(combatEvent);
+            WeaponComponentData attackerWeapon = ResolveCombatEventWeaponData(combatEvent, attackerCharacter);
+            bool expectedWeapon = !string.IsNullOrWhiteSpace(combatEvent?.CampaignWeaponItemId) ||
+                                  !string.IsNullOrWhiteSpace(combatEvent?.WeaponItemId) ||
+                                  !string.IsNullOrWhiteSpace(combatEvent?.WeaponSkillHint) ||
+                                  !string.IsNullOrWhiteSpace(combatEvent?.WeaponClassHint);
+            if (attackerWeapon == null && expectedWeapon && combatEvent?.IsHorseCharge != true)
+            {
+                summary.UnresolvedCombatEvents++;
+                AddWritebackSample(
+                    summary.UnresolvedSamples,
+                    "HeroCombatWeaponUnresolved:" +
+                    (combatEvent?.CampaignWeaponItemId ?? combatEvent?.WeaponItemId ?? "unknown") +
+                    "/Skill=" + (combatEvent?.WeaponSkillHint ?? "none") +
+                    "/Class=" + (combatEvent?.WeaponClassHint ?? "none"));
+                return;
+            }
             List<HeroXpAuditSnapshot> beforeSnapshots = CaptureHeroXpAuditSnapshots(attackerHero, commanderHero);
 
             try
@@ -2148,19 +2169,110 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         }
 
         private static WeaponComponentData ResolveCombatEventWeaponData(
-            CoopBattleResultBridgeFile.BattleResultCombatEventSnapshot combatEvent)
+            CoopBattleResultBridgeFile.BattleResultCombatEventSnapshot combatEvent,
+            CharacterObject attackerCharacter)
         {
-            if (combatEvent == null || string.IsNullOrWhiteSpace(combatEvent.WeaponItemId))
+            if (combatEvent == null)
                 return null;
 
+            IReadOnlyList<string> candidateItemIds =
+                CoopHeroBattleProgressionContract.BuildWeaponResolutionCandidates(
+                    combatEvent.CampaignWeaponItemId,
+                    combatEvent.WeaponItemId);
+            foreach (string candidateItemId in candidateItemIds)
+            {
+                try
+                {
+                    ItemObject weaponItem = MBObjectManager.Instance?.GetObject<ItemObject>(candidateItemId);
+                    WeaponComponentData resolvedWeapon = SelectCombatEventWeaponComponent(weaponItem, combatEvent);
+                    if (resolvedWeapon != null)
+                        return resolvedWeapon;
+                }
+                catch
+                {
+                }
+            }
+
+            Equipment equipment = attackerCharacter?.Equipment;
+            if (equipment == null)
+                return null;
+
+            for (EquipmentIndex slot = EquipmentIndex.WeaponItemBeginSlot;
+                 slot < EquipmentIndex.NumAllWeaponSlots;
+                 slot++)
+            {
+                WeaponComponentData resolvedWeapon =
+                    SelectCombatEventWeaponComponent(equipment[slot].Item, combatEvent);
+                if (resolvedWeapon != null)
+                    return resolvedWeapon;
+            }
+
+            return null;
+        }
+
+        private static WeaponComponentData SelectCombatEventWeaponComponent(
+            ItemObject weaponItem,
+            CoopBattleResultBridgeFile.BattleResultCombatEventSnapshot combatEvent)
+        {
+            if (weaponItem == null)
+                return null;
+
+            WeaponComponentData skillMatch = null;
             try
             {
-                ItemObject weaponItem = MBObjectManager.Instance?.GetObject<ItemObject>(combatEvent.WeaponItemId);
-                return weaponItem?.PrimaryWeapon;
+                if (weaponItem.Weapons != null)
+                {
+                    foreach (WeaponComponentData weapon in weaponItem.Weapons)
+                    {
+                        if (!DoesCombatEventWeaponSkillMatch(weapon, combatEvent?.WeaponSkillHint))
+                            continue;
+
+                        if (!string.IsNullOrWhiteSpace(combatEvent?.WeaponClassHint) &&
+                            string.Equals(
+                                weapon?.WeaponClass.ToString(),
+                                combatEvent.WeaponClassHint,
+                                StringComparison.OrdinalIgnoreCase))
+                        {
+                            return weapon;
+                        }
+
+                        if (skillMatch == null)
+                            skillMatch = weapon;
+                    }
+                }
             }
             catch
             {
-                return null;
+            }
+
+            if (skillMatch != null)
+                return skillMatch;
+
+            WeaponComponentData primaryWeapon = weaponItem.PrimaryWeapon;
+            return DoesCombatEventWeaponSkillMatch(primaryWeapon, combatEvent?.WeaponSkillHint)
+                ? primaryWeapon
+                : null;
+        }
+
+        private static bool DoesCombatEventWeaponSkillMatch(
+            WeaponComponentData weapon,
+            string weaponSkillHint)
+        {
+            if (weapon == null)
+                return false;
+            if (string.IsNullOrWhiteSpace(weaponSkillHint))
+                return true;
+
+            try
+            {
+                return string.Equals(
+                    weapon.RelevantSkill?.StringId,
+                    weaponSkillHint,
+                    StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -2208,7 +2320,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 snapshots.Add(new HeroXpAuditSnapshot
                 {
                     Hero = hero,
-                    TotalXp = hero.HeroDeveloper.TotalXp
+                    TotalXp = hero.HeroDeveloper.TotalXp,
+                    SkillXpById = CaptureHeroSkillXp(hero)
                 });
             }
 
@@ -2226,13 +2339,82 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             {
                 int afterXp = snapshot?.Hero?.HeroDeveloper?.TotalXp ?? snapshot?.TotalXp ?? 0;
                 int beforeXp = snapshot?.TotalXp ?? 0;
-                int delta = Math.Max(0, afterXp - beforeXp);
-                if (delta <= 0)
+                summary.HeroRawXpApplied += Math.Max(0, afterXp - beforeXp);
+
+                Dictionary<string, float> afterSkillXpById = CaptureHeroSkillXp(snapshot?.Hero);
+                Dictionary<string, float> skillXpDeltas =
+                    CoopHeroBattleProgressionContract.CalculatePositiveSkillXpDeltas(
+                        snapshot?.SkillXpById,
+                        afterSkillXpById);
+                foreach (KeyValuePair<string, float> skillXpDelta in skillXpDeltas)
+                {
+                    summary.HeroSkillXpApplied += skillXpDelta.Value;
+                    string breakdownKey = (snapshot?.Hero?.StringId ?? "hero") + "/" + skillXpDelta.Key;
+                    summary.HeroSkillXpByHeroAndSkill.TryGetValue(breakdownKey, out float currentXp);
+                    summary.HeroSkillXpByHeroAndSkill[breakdownKey] = currentXp + skillXpDelta.Value;
+                }
+            }
+        }
+
+        private static Dictionary<string, float> CaptureHeroSkillXp(Hero hero)
+        {
+            var skillXpById = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+            if (hero?.HeroDeveloper == null)
+                return skillXpById;
+
+            SkillObject[] auditedSkills =
+            {
+                DefaultSkills.OneHanded,
+                DefaultSkills.TwoHanded,
+                DefaultSkills.Polearm,
+                DefaultSkills.Bow,
+                DefaultSkills.Crossbow,
+                DefaultSkills.Throwing,
+                DefaultSkills.Riding,
+                DefaultSkills.Athletics,
+                DefaultSkills.Crafting,
+                DefaultSkills.Tactics,
+                DefaultSkills.Scouting,
+                DefaultSkills.Roguery,
+                DefaultSkills.Charm,
+                DefaultSkills.Leadership,
+                DefaultSkills.Trade,
+                DefaultSkills.Steward,
+                DefaultSkills.Medicine,
+                DefaultSkills.Engineering
+            };
+            foreach (SkillObject skill in auditedSkills)
+            {
+                if (skill == null || string.IsNullOrWhiteSpace(skill.StringId))
                     continue;
 
-                summary.HeroRawXpApplied += delta;
-                summary.HeroSkillXpApplied += delta;
+                try
+                {
+                    skillXpById[skill.StringId] = hero.HeroDeveloper.GetSkillXp(skill);
+                }
+                catch
+                {
+                }
             }
+
+            return skillXpById;
+        }
+
+        private static string FormatHeroSkillXpBreakdown(BattleResultWritebackSummary summary)
+        {
+            if (summary?.HeroSkillXpByHeroAndSkill == null ||
+                summary.HeroSkillXpByHeroAndSkill.Count == 0)
+            {
+                return "none";
+            }
+
+            return string.Join(
+                ", ",
+                summary.HeroSkillXpByHeroAndSkill
+                    .OrderBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase)
+                    .Select(entry =>
+                        entry.Key + "=" +
+                        entry.Value.ToString("0.#", CultureInfo.InvariantCulture)));
         }
 
         private static void TryBuildMainPartyRewardProjection(
@@ -4669,7 +4851,12 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 " HeroSkillXp=" +
                 summary.HeroSkillXpApplied.ToString(
                     "0.#",
-                    CultureInfo.InvariantCulture) + ".");
+                    CultureInfo.InvariantCulture) +
+                " HeroRawXp=" +
+                summary.HeroRawXpApplied.ToString(
+                    "0.#",
+                    CultureInfo.InvariantCulture) +
+                " HeroSkillXpBreakdown=[" + FormatHeroSkillXpBreakdown(summary) + "].");
         }
 
         private static bool ShouldArmFinalSiegeHeroCapture(

@@ -8,6 +8,7 @@
     <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
     <Compile Include="Program.cs" />
     <Compile Include="..\..\Infrastructure\CoopHeroCreationContract.cs" Link="CoopHeroCreationContract.cs" />
+    <Compile Include="..\..\Infrastructure\CoopHeroCreationProgressContract.cs" Link="CoopHeroCreationProgressContract.cs" />
     <Compile Include="..\..\Infrastructure\CoopHeroCreationChunkCodec.cs" Link="CoopHeroCreationChunkCodec.cs" />
     <Compile Include="..\..\Infrastructure\CoopHeroCreationStateMachine.cs" Link="CoopHeroCreationStateMachine.cs" />
   </ItemGroup>

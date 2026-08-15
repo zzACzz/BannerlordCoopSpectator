@@ -30,6 +30,7 @@ namespace CoopSpectator.Campaign
         private bool _hasToken;
         private bool _hasPersistedCloseSnapshot;
         private string _heroCreationAvailabilityText;
+        private int _observedHeroCreationStatusRevision;
 
         public CoopDedicatedServerSettingsVM(Action onClose)
         {
@@ -247,6 +248,12 @@ namespace CoopSpectator.Campaign
                 ExecuteDone();
         }
 
+        public void RefreshHeroCreationBindingsIfChanged()
+        {
+            if (_observedHeroCreationStatusRevision == PlayerHeroCreationCampaignBehavior.StatusRevision) return;
+            RefreshHeroCreationBindings();
+        }
+
         public void ExecuteToggleServerPasswordVisibility()
         {
             IsServerPasswordObfuscated = !IsServerPasswordObfuscated;
@@ -453,10 +460,11 @@ namespace CoopSpectator.Campaign
 
             CanExecuteHeroCreation = canStart;
             HeroCreationAvailabilityText = hasActiveSession
-                ? "A hero creation session is active. You can cancel it here."
+                ? PlayerHeroCreationCampaignBehavior.CurrentStatusText
                 : canStart
                     ? "The dedicated server is ready to start a hero creation mission."
                     : "Hero creation is unavailable: " + reason;
+            _observedHeroCreationStatusRevision = PlayerHeroCreationCampaignBehavior.StatusRevision;
             OnPropertyChanged(nameof(HeroCreationButtonText));
         }
 
