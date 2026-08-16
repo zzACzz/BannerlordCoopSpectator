@@ -25336,27 +25336,28 @@ namespace CoopSpectator.MissionBehaviors
                 MissionWeapon missionWeapon = equipment[index];
                 ItemObject item = missionWeapon.Item;
                 WeaponComponentData currentUsageItem = missionWeapon.CurrentUsageItem;
-                if (item == null || currentUsageItem == null)
+                if (item == null)
                     continue;
 
-                if (currentUsageItem.IsConsumable && currentUsageItem.RelevantSkill != null)
+                WeaponComponentData ammoUsageItem = ResolveExactCampaignMissionEquipmentAmmoUsage(missionWeapon);
+                if (ammoUsageItem != null)
                 {
                     float ammoBonus = 0f;
-                    if (currentUsageItem.RelevantSkill == DefaultSkills.Bow)
+                    if (ammoUsageItem.RelevantSkill == DefaultSkills.Bow)
                     {
                         if (HasPerkId(personalPerkIds, "BowDeepQuivers"))
                             ammoBonus += 3f;
                         if (HasPerkId(partyLeaderPerkIds, "BowDeepQuivers"))
                             ammoBonus += 1f;
                     }
-                    else if (currentUsageItem.RelevantSkill == DefaultSkills.Crossbow)
+                    else if (ammoUsageItem.RelevantSkill == DefaultSkills.Crossbow)
                     {
                         if (HasPerkId(personalPerkIds, "CrossbowFletcher"))
                             ammoBonus += 4f;
                         if (HasPerkId(partyLeaderPerkIds, "CrossbowFletcher"))
                             ammoBonus += 2f;
                     }
-                    else if (currentUsageItem.RelevantSkill == DefaultSkills.Throwing)
+                    else if (ammoUsageItem.RelevantSkill == DefaultSkills.Throwing)
                     {
                         if (HasPerkId(personalPerkIds, "ThrowingWellPrepared"))
                             ammoBonus += 1f;
@@ -25371,9 +25372,10 @@ namespace CoopSpectator.MissionBehaviors
                     int currentAmount = missionWeapon.Amount;
                     int roundedAmmoBonus = Math.Max(0, MathF.Round(ammoBonus));
                     int? snapshotBaseAmount = GetSnapshotCombatItemBaseAmount(entryState, index, item.StringId);
-                    int targetAmount = snapshotBaseAmount.HasValue && snapshotBaseAmount.Value > 0
-                        ? Math.Max(0, snapshotBaseAmount.Value + roundedAmmoBonus)
-                        : Math.Max(0, currentAmount + roundedAmmoBonus);
+                    int targetAmount = CoopMissionEquipmentAmmoPerkContract.CalculateTargetAmount(
+                        currentAmount,
+                        snapshotBaseAmount,
+                        roundedAmmoBonus);
                     if (targetAmount != currentAmount)
                     {
                         if (GameNetwork.IsServerOrRecorder)
@@ -25390,7 +25392,7 @@ namespace CoopSpectator.MissionBehaviors
                                 : index + "Ammo=" + currentAmount + "->" + targetAmount + "(" + (roundedAmmoBonus >= 0 ? "+" : string.Empty) + roundedAmmoBonus + ")");
                     }
                 }
-                else if (currentUsageItem.IsShield)
+                else if (currentUsageItem?.IsShield == true)
                 {
                     int currentHitPoints = missionWeapon.HitPoints;
                     float targetHitPointsValue = currentHitPoints;
@@ -25420,6 +25422,46 @@ namespace CoopSpectator.MissionBehaviors
 
             summary = "ExactPerks=" + string.Join("/", changes);
             return true;
+        }
+
+        private static WeaponComponentData ResolveExactCampaignMissionEquipmentAmmoUsage(MissionWeapon missionWeapon)
+        {
+            try
+            {
+                if (missionWeapon.IsEmpty || missionWeapon.Item == null || missionWeapon.WeaponsCount <= 0)
+                    return null;
+
+                int weaponsCount = missionWeapon.WeaponsCount;
+                var usageItems = new List<WeaponComponentData>(weaponsCount);
+                var contractUsages = new List<CoopMissionEquipmentAmmoUsage>(weaponsCount);
+                for (int usageIndex = 0; usageIndex < weaponsCount; usageIndex++)
+                {
+                    WeaponComponentData usageItem = null;
+                    try
+                    {
+                        usageItem = missionWeapon.GetWeaponComponentDataForUsage(usageIndex);
+                    }
+                    catch
+                    {
+                    }
+
+                    usageItems.Add(usageItem);
+                    contractUsages.Add(new CoopMissionEquipmentAmmoUsage(
+                        usageItem?.IsConsumable == true,
+                        usageItem?.RelevantSkill?.StringId));
+                }
+
+                int selectedUsageIndex = CoopMissionEquipmentAmmoPerkContract.SelectConsumableUsageIndex(
+                    SafeGetMissionWeaponCurrentUsageIndex(missionWeapon),
+                    contractUsages);
+                return selectedUsageIndex >= 0 && selectedUsageIndex < usageItems.Count
+                    ? usageItems[selectedUsageIndex]
+                    : null;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private static int? GetSnapshotCombatItemBaseAmount(

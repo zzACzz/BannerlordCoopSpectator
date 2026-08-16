@@ -159,6 +159,7 @@
     <Compile Include="..\Infrastructure\CoopMountedHeroMountLinkContract.cs" Link="Infrastructure\CoopMountedHeroMountLinkContract.cs" />
     <Compile Include="..\Infrastructure\CoopClientBootstrapResetContract.cs" Link="Infrastructure\CoopClientBootstrapResetContract.cs" />
     <Compile Include="..\Infrastructure\CoopHeroBattleProgressionContract.cs" Link="Infrastructure\CoopHeroBattleProgressionContract.cs" />
+    <Compile Include="..\Infrastructure\CoopMissionEquipmentAmmoPerkContract.cs" Link="Infrastructure\CoopMissionEquipmentAmmoPerkContract.cs" />
     <Compile Include="..\Infrastructure\BattleAgentCapacityPolicy.cs" Link="Infrastructure\BattleAgentCapacityPolicy.cs" />
     <Compile Include="..\Infrastructure\GlobalCaptainPerkRuntimeState.cs" Link="Infrastructure\GlobalCaptainPerkRuntimeState.cs" />
     <Compile Include="..\Infrastructure\ExactSiegeMoraleDiagnostics.cs" Link="Infrastructure\ExactSiegeMoraleDiagnostics.cs" />

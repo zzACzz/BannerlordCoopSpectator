@@ -24,6 +24,12 @@ internal static class Program
             ValidateFatalEventAttackerMatch();
             ValidateAlreadyFatalEventIsNotReused();
             ValidateMissingFatalEventMatch();
+            ValidateCurrentThrowingAmmoUsageSelection();
+            ValidateDualUseThrowingAxeAmmoUsageSelection();
+            ValidateMeleeOnlyAmmoUsageRejection();
+            ValidateBowAndCrossbowAmmoUsageSelection();
+            ValidateDualUseAmmoBonusIsAppliedOnce();
+            ValidateAmmoTargetAmountIsStableAcrossRepeatedApplication();
             Console.WriteLine("Coop hero battle progression contract tests passed.");
             return 0;
         }
@@ -165,6 +171,84 @@ internal static class Program
 
         Assert(FindFatalMatch(events, "victim-stack", "hero-a") == 0,
             "An already-fatal event must be skipped when another unit in the same stack is removed.");
+    }
+
+    private static void ValidateCurrentThrowingAmmoUsageSelection()
+    {
+        var usages = new List<CoopMissionEquipmentAmmoUsage>
+        {
+            new CoopMissionEquipmentAmmoUsage(true, "Throwing"),
+            new CoopMissionEquipmentAmmoUsage(false, "OneHanded")
+        };
+
+        Assert(CoopMissionEquipmentAmmoPerkContract.SelectConsumableUsageIndex(0, usages) == 0,
+            "A currently active throwing usage must be selected for ammo perks.");
+    }
+
+    private static void ValidateDualUseThrowingAxeAmmoUsageSelection()
+    {
+        var usages = new List<CoopMissionEquipmentAmmoUsage>
+        {
+            new CoopMissionEquipmentAmmoUsage(true, "Throwing"),
+            new CoopMissionEquipmentAmmoUsage(false, "OneHanded")
+        };
+
+        Assert(CoopMissionEquipmentAmmoPerkContract.SelectConsumableUsageIndex(1, usages) == 0,
+            "A throwing axe must retain its ammo usage when its melee usage is currently active.");
+    }
+
+    private static void ValidateMeleeOnlyAmmoUsageRejection()
+    {
+        var usages = new List<CoopMissionEquipmentAmmoUsage>
+        {
+            new CoopMissionEquipmentAmmoUsage(false, "OneHanded"),
+            new CoopMissionEquipmentAmmoUsage(false, "TwoHanded")
+        };
+
+        Assert(CoopMissionEquipmentAmmoPerkContract.SelectConsumableUsageIndex(0, usages) == -1,
+            "A melee-only weapon must not receive an ammo perk.");
+    }
+
+    private static void ValidateBowAndCrossbowAmmoUsageSelection()
+    {
+        var bowUsage = new List<CoopMissionEquipmentAmmoUsage>
+        {
+            new CoopMissionEquipmentAmmoUsage(true, "Bow")
+        };
+        var crossbowUsage = new List<CoopMissionEquipmentAmmoUsage>
+        {
+            new CoopMissionEquipmentAmmoUsage(true, "Crossbow")
+        };
+
+        Assert(CoopMissionEquipmentAmmoPerkContract.SelectConsumableUsageIndex(0, bowUsage) == 0,
+            "Bow ammunition must remain eligible for its ammo perks.");
+        Assert(CoopMissionEquipmentAmmoPerkContract.SelectConsumableUsageIndex(0, crossbowUsage) == 0,
+            "Crossbow ammunition must remain eligible for its ammo perks.");
+    }
+
+    private static void ValidateDualUseAmmoBonusIsAppliedOnce()
+    {
+        var usages = new List<CoopMissionEquipmentAmmoUsage>
+        {
+            new CoopMissionEquipmentAmmoUsage(true, "Throwing"),
+            new CoopMissionEquipmentAmmoUsage(false, "OneHanded"),
+            new CoopMissionEquipmentAmmoUsage(true, "Throwing")
+        };
+
+        int selectedUsageIndex = CoopMissionEquipmentAmmoPerkContract.SelectConsumableUsageIndex(1, usages);
+        int targetAmount = CoopMissionEquipmentAmmoPerkContract.CalculateTargetAmount(3, 3, 1);
+        Assert(selectedUsageIndex == 0 && targetAmount == 4,
+            "A dual-use throwing stack must receive one ammo bonus per equipment slot.");
+    }
+
+    private static void ValidateAmmoTargetAmountIsStableAcrossRepeatedApplication()
+    {
+        Assert(CoopMissionEquipmentAmmoPerkContract.CalculateTargetAmount(3, 3, 1) == 4,
+            "The first ammo perk application must add the bonus to the snapshot base amount.");
+        Assert(CoopMissionEquipmentAmmoPerkContract.CalculateTargetAmount(4, 3, 1) == 4,
+            "Repeated ammo perk application must not stack the same bonus again.");
+        Assert(CoopMissionEquipmentAmmoPerkContract.CalculateTargetAmount(3, null, 1) == 4,
+            "A missing snapshot amount must fall back to the live stack amount.");
     }
 
     private static int FindFatalMatch(
