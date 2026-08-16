@@ -7,12 +7,15 @@ namespace CoopSpectator.GameMode
     public sealed class MissionMultiplayerCoopSiegeAssaultWithDeploymentClient : MissionMultiplayerGameModeBaseClient
     {
         private readonly bool _disableSceneOcclusion;
+        private readonly string _disableSceneOcclusionReason;
         private bool _hasLoggedFirstMissionTick;
 
         public MissionMultiplayerCoopSiegeAssaultWithDeploymentClient(
-            bool disableSceneOcclusion = false)
+            bool disableSceneOcclusion = false,
+            string disableSceneOcclusionReason = "not-requested")
         {
             _disableSceneOcclusion = disableSceneOcclusion;
+            _disableSceneOcclusionReason = disableSceneOcclusionReason ?? string.Empty;
         }
 
         public override void OnBehaviorInitialize()
@@ -25,14 +28,17 @@ namespace CoopSpectator.GameMode
                     Mission.Scene.SetOcclusionMode(false);
                     ModLogger.Info(
                         "MissionMultiplayerCoopSiegeAssaultWithDeploymentClient: disabled scene occlusion " +
-                        "before renderer activation for SiegeAmbush. Scene=" +
-                        (Mission.SceneName ?? "null") + ".");
+                        "before renderer activation. Scene=" +
+                        (Mission.SceneName ?? "null") +
+                        " Reason=" + _disableSceneOcclusionReason + ".");
                 }
                 catch (Exception ex)
                 {
                     ModLogger.Error(
                         "MissionMultiplayerCoopSiegeAssaultWithDeploymentClient: failed to disable scene occlusion " +
-                        "for SiegeAmbush before renderer activation.",
+                        "before renderer activation. Scene=" +
+                        (Mission.SceneName ?? "null") +
+                        " Reason=" + _disableSceneOcclusionReason + ".",
                         ex);
                 }
             }

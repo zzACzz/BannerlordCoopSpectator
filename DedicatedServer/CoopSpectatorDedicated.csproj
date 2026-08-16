@@ -134,6 +134,7 @@
     <Compile Include="..\Infrastructure\SiegeAssault\SiegeMissionObjectIdBridge.cs" Link="Infrastructure\SiegeAssault\SiegeMissionObjectIdBridge.cs" />
     <Compile Include="..\Infrastructure\SiegeAssault\SiegeMissionObjectIdMapRuntime.cs" Link="Infrastructure\SiegeAssault\SiegeMissionObjectIdMapRuntime.cs" />
     <Compile Include="..\Infrastructure\SiegeAssault\SiegeAssaultMissionOpenBridge.cs" Link="Infrastructure\SiegeAssault\SiegeAssaultMissionOpenBridge.cs" />
+    <Compile Include="..\Infrastructure\SiegeAssault\CoopSiegeSceneOcclusionSafetyContract.cs" Link="Infrastructure\SiegeAssault\CoopSiegeSceneOcclusionSafetyContract.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" Link="Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignRuntimeItemRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeItemRegistry.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMirrorEquipmentResolver.cs" Link="Infrastructure\CoopCampaignMirrorEquipmentResolver.cs" />

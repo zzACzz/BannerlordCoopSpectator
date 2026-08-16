@@ -142,15 +142,20 @@ namespace CoopSpectator.GameMode
         private static List<MissionBehavior> BuildClientMissionBehaviors(Mission mission, bool isDedicated)
         {
             BattleScenarioContextMessage scenarioContext = ResolveScenarioContext();
-            bool isSiegeAmbushClient =
-                SiegeAmbushScenarioContract.IsSiegeAmbushScenario(
-                    scenarioContext);
+            CoopSiegeSceneOcclusionSafetyDecision sceneOcclusionSafety =
+                CoopSiegeSceneOcclusionSafetyContract.Resolve(
+                    isRemoteClient: GameNetwork.IsClient && !GameNetwork.IsServer,
+                    isSiegeBattle: scenarioContext?.IsSiegeBattle == true,
+                    missionShell: scenarioContext?.SiegeContext?.MissionShell,
+                    siegeSubtype: scenarioContext?.SiegeContext?.SiegeSubtype,
+                    runtimeScene: mission?.SceneName);
             var list = new List<MissionBehavior>
             {
                 MissionLobbyComponent.CreateBehavior(),
                 new MultiplayerWarmupComponent(),
                 new MissionMultiplayerCoopSiegeAssaultWithDeploymentClient(
-                    disableSceneOcclusion: isSiegeAmbushClient),
+                    disableSceneOcclusion: sceneOcclusionSafety.DisableSceneOcclusion,
+                    disableSceneOcclusionReason: sceneOcclusionSafety.Reason),
                 new MultiplayerTimerComponent(),
             };
 
