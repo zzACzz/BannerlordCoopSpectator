@@ -141,6 +141,7 @@
     <Compile Include="..\Infrastructure\SiegeAssault\SiegeAssaultMissionOpenBridge.cs" Link="Infrastructure\SiegeAssault\SiegeAssaultMissionOpenBridge.cs" />
     <Compile Include="..\Infrastructure\SiegeAssault\CoopSiegeSceneOcclusionSafetyContract.cs" Link="Infrastructure\SiegeAssault\CoopSiegeSceneOcclusionSafetyContract.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" Link="Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" />
+    <Compile Include="..\Infrastructure\ExactCampaignItemCatalogLoadPolicy.cs" Link="Infrastructure\ExactCampaignItemCatalogLoadPolicy.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignRuntimeItemRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeItemRegistry.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMirrorEquipmentResolver.cs" Link="Infrastructure\CoopCampaignMirrorEquipmentResolver.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignRuntimeObjectRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeObjectRegistry.cs" />
@@ -166,6 +167,7 @@
     <Compile Include="..\Infrastructure\CoopCampaignMapPrototypeBridgeFile.cs" Link="Infrastructure\CoopCampaignMapPrototypeBridgeFile.cs" />
     <Compile Include="..\Infrastructure\CoopMountedHeroMountLinkContract.cs" Link="Infrastructure\CoopMountedHeroMountLinkContract.cs" />
     <Compile Include="..\Infrastructure\CoopClientBootstrapResetContract.cs" Link="Infrastructure\CoopClientBootstrapResetContract.cs" />
+    <Compile Include="..\Infrastructure\CoopClientWeaponRuntimeSafetyContract.cs" Link="Infrastructure\CoopClientWeaponRuntimeSafetyContract.cs" />
     <Compile Include="..\Infrastructure\CoopHeroBattleProgressionContract.cs" Link="Infrastructure\CoopHeroBattleProgressionContract.cs" />
     <Compile Include="..\Infrastructure\CoopMissionEquipmentAmmoPerkContract.cs" Link="Infrastructure\CoopMissionEquipmentAmmoPerkContract.cs" />
     <Compile Include="..\Infrastructure\BattleAgentCapacityPolicy.cs" Link="Infrastructure\BattleAgentCapacityPolicy.cs" />

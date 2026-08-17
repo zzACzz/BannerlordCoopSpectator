@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Xml;
 using TaleWorlds.Core;
 using TaleWorlds.ObjectSystem;
 
@@ -38,12 +39,6 @@ namespace CoopSpectator.Infrastructure
             ObjectTypeRecordInterfaceType?.GetProperty("ElementListName", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
         private static readonly PropertyInfo ObjectTypeRecordObjectClassProperty =
             ObjectTypeRecordInterfaceType?.GetProperty("ObjectClass", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        private static readonly string[] ItemXmlCatalogs =
-        {
-            "Items",
-            "EquipmentRosters"
-        };
-
         private static readonly string[] CampaignXmlCatalogs =
         {
             "NPCCharacters",
@@ -183,8 +178,8 @@ namespace CoopSpectator.Infrastructure
                 }
                 else
                 {
-                    foreach (string xmlCatalog in ItemXmlCatalogs)
-                        TryLoadXml(objectManager, xmlCatalog, results);
+                    TryLoadMissingItemsXml(objectManager, results);
+                    TryLoadXml(objectManager, "EquipmentRosters", results);
                 }
 
                 if (canBootstrapCampaignCharacterCatalogs)
@@ -504,6 +499,110 @@ namespace CoopSpectator.Infrastructure
             {
                 results.Add(xmlCatalog + "=" + ex.GetType().Name);
             }
+        }
+
+        private static void TryLoadMissingItemsXml(MBObjectManager objectManager, List<string> results)
+        {
+            if (results == null)
+                return;
+
+            if (objectManager == null)
+            {
+                results.Add("Items=object-manager-null");
+                return;
+            }
+
+            Dictionary<string, int> existingCraftedWeaponUsageCounts =
+                CaptureExistingCraftedWeaponUsageCounts(objectManager);
+
+            try
+            {
+                XmlDocument mergedItemsDocument = MBObjectManager.GetMergedXmlForManaged(
+                    "Items",
+                    skipValidation: false,
+                    ignoreGameTypeInclusionCheck: true,
+                    gameType: "EditorGame");
+                ExactCampaignItemCatalogSelection selection =
+                    ExactCampaignItemCatalogLoadPolicy.SelectMissingItems(
+                        mergedItemsDocument,
+                        itemId => TryResolveItem(objectManager, itemId) != null);
+
+                if (selection.SelectedCount > 0)
+                    objectManager.LoadXml(selection.Document);
+
+                string craftedUsageInvariant =
+                    BuildExistingCraftedWeaponUsageInvariantSummary(
+                        objectManager,
+                        existingCraftedWeaponUsageCounts);
+                results.Add(
+                    "Items=loaded-missing-only" +
+                    ":Candidates=" + selection.CandidateCount +
+                    ":Selected=" + selection.SelectedCount +
+                    ":SkippedExisting=" + selection.SkippedExistingCount +
+                    ":SkippedDuplicate=" + selection.SkippedDuplicateCount +
+                    ":SkippedInvalid=" + selection.SkippedInvalidCount +
+                    ":ExistingCraftedUsageCounts=" + craftedUsageInvariant);
+            }
+            catch (Exception ex)
+            {
+                // Never fall back to MBObjectManager.LoadXML("Items") here. That
+                // deserializes already registered crafted items again and appends
+                // duplicate weapon usages to their WeaponComponent.
+                results.Add("Items=missing-only-load-failed:" + ex.GetType().Name);
+            }
+        }
+
+        private static Dictionary<string, int> CaptureExistingCraftedWeaponUsageCounts(MBObjectManager objectManager)
+        {
+            var usageCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            if (objectManager == null)
+                return usageCounts;
+
+            try
+            {
+                foreach (ItemObject item in objectManager.GetObjectTypeList<ItemObject>())
+                {
+                    if (item == null ||
+                        !item.IsCraftedWeapon ||
+                        string.IsNullOrWhiteSpace(item.StringId))
+                    {
+                        continue;
+                    }
+
+                    usageCounts[item.StringId] = item.Weapons?.Count ?? 0;
+                }
+            }
+            catch
+            {
+            }
+
+            return usageCounts;
+        }
+
+        private static string BuildExistingCraftedWeaponUsageInvariantSummary(
+            MBObjectManager objectManager,
+            IReadOnlyDictionary<string, int> usageCountsBefore)
+        {
+            if (objectManager == null || usageCountsBefore == null || usageCountsBefore.Count == 0)
+                return "not-applicable";
+
+            var changedItems = new List<string>();
+            foreach (KeyValuePair<string, int> usageCountBefore in usageCountsBefore)
+            {
+                ItemObject item = TryResolveItem(objectManager, usageCountBefore.Key);
+                int usageCountAfter = item?.Weapons?.Count ?? -1;
+                if (usageCountAfter == usageCountBefore.Value)
+                    continue;
+
+                changedItems.Add(
+                    usageCountBefore.Key + "=" + usageCountBefore.Value + "->" + usageCountAfter);
+                if (changedItems.Count >= 8)
+                    break;
+            }
+
+            return changedItems.Count == 0
+                ? "preserved:" + usageCountsBefore.Count
+                : "changed:[" + string.Join(",", changedItems) + "]";
         }
 
         private static void TryUnregisterNonReadyObjects(MBObjectManager objectManager, List<string> results)

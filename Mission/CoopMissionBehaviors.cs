@@ -41493,9 +41493,6 @@ namespace CoopSpectator.MissionBehaviors
                 }
             }
 
-            if (createAgent.MountAgentIndex < 0)
-                return false;
-
             if (TryResolveClientStrictExactHeroCreateAgentEntryFromPayloadDiagnostics(
                     createAgent,
                     payloadCharacterId,
@@ -41539,11 +41536,12 @@ namespace CoopSpectator.MissionBehaviors
             if (payloadSide == BattleSideEnum.None)
                 return false;
 
+            bool payloadExpectsMountedHero = createAgent.MountAgentIndex >= 0;
             List<RosterEntryState> heroCandidates = runtimeState.EntriesById.Values
                 .Where(candidate =>
                     candidate != null &&
                     IsHeroEntryEligibleForExactPersonalPerks(candidate) &&
-                    candidate.IsMounted &&
+                    candidate.IsMounted == payloadExpectsMountedHero &&
                     DoesClientVisualOverlayEntryMatchAgentSide(candidate, payloadSide) &&
                     DoesClientStrictExactHeroCreateAgentEntryMatchPayload(candidate, payloadCharacterId))
                 .ToList();
@@ -41561,7 +41559,9 @@ namespace CoopSpectator.MissionBehaviors
             if (exactSupportedCandidates.Count == 1)
             {
                 entryState = exactSupportedCandidates[0];
-                resolutionSource = "unique-exact-supported-mounted-hero-payload-match";
+                resolutionSource = payloadExpectsMountedHero
+                    ? "unique-exact-supported-mounted-hero-payload-match"
+                    : "unique-exact-supported-dismounted-hero-payload-match";
             }
             else if (TryResolveLocalSelectedStrictExactHeroCreateAgentEntry(
                          heroCandidates,
@@ -41569,18 +41569,23 @@ namespace CoopSpectator.MissionBehaviors
                          out RosterEntryState localSelectedEntry))
             {
                 entryState = localSelectedEntry;
-                resolutionSource = "local-selected-mounted-hero-payload-match";
+                resolutionSource = payloadExpectsMountedHero
+                    ? "local-selected-mounted-hero-payload-match"
+                    : "local-selected-dismounted-hero-payload-match";
             }
             else if (heroCandidates.Count == 1)
             {
                 entryState = heroCandidates[0];
-                resolutionSource = "unique-mounted-hero-payload-match";
+                resolutionSource = payloadExpectsMountedHero
+                    ? "unique-mounted-hero-payload-match"
+                    : "unique-dismounted-hero-payload-match";
             }
             else
             {
                 ModLogger.Info(
-                    "CoopMissionSpawnLogic: skipped strict client exact CreateAgent contract resolution because mounted remote hero payload was ambiguous. " +
+                    "CoopMissionSpawnLogic: skipped strict client exact CreateAgent contract resolution because hero payload was ambiguous. " +
                     "AgentIndex=" + createAgent.AgentIndex +
+                    " PayloadMounted=" + payloadExpectsMountedHero +
                     " TeamIndex=" + createAgent.TeamIndex +
                     " PayloadCharacterId=" + (payloadCharacterId ?? "null") +
                     " HeroCandidateCount=" + heroCandidates.Count +
@@ -41667,7 +41672,7 @@ namespace CoopSpectator.MissionBehaviors
             entryState = null;
             resolutionSource = null;
 
-            if (createAgent == null || createAgent.MountAgentIndex < 0)
+            if (createAgent == null)
                 return false;
 
             if (!ExactCreateAgentCorridorDiagnostics.TryResolveClientCreateAgentPayloadEntryId(
@@ -41685,7 +41690,7 @@ namespace CoopSpectator.MissionBehaviors
             RosterEntryState candidateEntryState = BattleSnapshotRuntimeState.GetEntryState(candidateEntryId);
             if (candidateEntryState == null ||
                 !IsHeroEntryEligibleForExactPersonalPerks(candidateEntryState) ||
-                !candidateEntryState.IsMounted)
+                candidateEntryState.IsMounted != (createAgent.MountAgentIndex >= 0))
             {
                 return false;
             }

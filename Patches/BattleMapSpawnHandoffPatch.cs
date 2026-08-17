@@ -89,11 +89,6 @@ namespace CoopSpectator.Patches
         private static MethodInfo _missionNetworkComponentHandleServerEventSetAgentHealthMethod;
         private static MethodInfo _missionNetworkComponentHandleServerEventMakeAgentDeadMethod;
         private static MethodInfo _missionNetworkComponentHandleServerEventHitSynchronizeObjectDestructionLevelMethod;
-        private static readonly object FiveModeWeaponUsageProtocolLock = new object();
-        private static CompressionInfo.Integer _defaultWeaponUsageIndexCompressionInfo;
-        private static bool _defaultWeaponUsageIndexCompressionInfoCaptured;
-        private static bool _fiveModeWeaponUsageProtocolApplied;
-
         private static string _lastSuppressedFollowSwitchKey;
         private static string _lastArmedLocalFollowSuppressionWindowKey;
         private static string _lastSuppressedWeaponDropKey;
@@ -726,7 +721,6 @@ namespace CoopSpectator.Patches
         {
             TryApplyPatchStep(nameof(CoopBotsControlledCountPatch), () => CoopBotsControlledCountPatch.Apply(harmony));
             TryApplyPatchStep(nameof(CoopMissionLobbySpawnPeriodGuardPatch), () => CoopMissionLobbySpawnPeriodGuardPatch.Apply(harmony));
-            TryApplyPatchStep(nameof(PatchBattleSnapshotRuntimeStateFiveModeWeaponUsageProtocol), () => PatchBattleSnapshotRuntimeStateFiveModeWeaponUsageProtocol(harmony));
             TryApplyPatchStep(nameof(PatchMissionPeerFollowedAgent), () => PatchMissionPeerFollowedAgent(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentCreateAgent), () => PatchMissionNetworkComponentCreateAgent(harmony));
             TryApplyPatchStep(nameof(PatchMissionNetworkComponentAgentSetFormation), () => PatchMissionNetworkComponentAgentSetFormation(harmony));
@@ -1020,70 +1014,6 @@ namespace CoopSpectator.Patches
             ModLogger.Info(
                 "BattleMapSpawnHandoffPatch: cleared active exact commander MissionOrderVM. " +
                 "Source=" + (source ?? "unknown"));
-        }
-
-        private static void PatchBattleSnapshotRuntimeStateFiveModeWeaponUsageProtocol(Harmony harmony)
-        {
-            MethodInfo target = AccessTools.Method(
-                typeof(BattleSnapshotRuntimeState),
-                nameof(BattleSnapshotRuntimeState.SetCurrent));
-            MethodInfo postfix = typeof(BattleMapSpawnHandoffPatch).GetMethod(
-                nameof(BattleSnapshotRuntimeState_SetCurrent_FiveModeWeaponUsageProtocol_Postfix),
-                BindingFlags.Static | BindingFlags.NonPublic);
-            if (target == null || postfix == null)
-            {
-                ModLogger.Info("BattleMapSpawnHandoffPatch: BattleSnapshotRuntimeState.SetCurrent not found for five-mode weapon usage protocol. Skip.");
-                return;
-            }
-
-            harmony.Patch(target, postfix: new HarmonyMethod(postfix));
-            ModLogger.Info("BattleMapSpawnHandoffPatch: postfix applied to BattleSnapshotRuntimeState.SetCurrent for five-mode weapon usage protocol.");
-        }
-
-        private static void BattleSnapshotRuntimeState_SetCurrent_FiveModeWeaponUsageProtocol_Postfix(
-            BattleSnapshotMessage snapshot,
-            string source)
-        {
-            try
-            {
-                bool enableFiveModeProtocol = CoopTestBattleOptions.IsFiveModeWeaponUsageProtocolSnapshot(snapshot);
-                TrySetFiveModeWeaponUsageProtocolApplied(
-                    enableFiveModeProtocol,
-                    "BattleSnapshotRuntimeState.SetCurrent:" + (source ?? "unknown") +
-                    ":BattleType=" + (snapshot?.BattleType ?? "null"));
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info("BattleMapSpawnHandoffPatch: five-mode weapon usage protocol snapshot postfix failed open: " + ex.Message);
-            }
-        }
-
-        private static void TrySetFiveModeWeaponUsageProtocolApplied(bool enabled, string source)
-        {
-            lock (FiveModeWeaponUsageProtocolLock)
-            {
-                if (!_defaultWeaponUsageIndexCompressionInfoCaptured)
-                {
-                    _defaultWeaponUsageIndexCompressionInfo = CompressionMission.WeaponUsageIndexCompressionInfo;
-                    _defaultWeaponUsageIndexCompressionInfoCaptured = true;
-                }
-
-                if (_fiveModeWeaponUsageProtocolApplied == enabled)
-                    return;
-
-                CompressionMission.WeaponUsageIndexCompressionInfo = enabled
-                    ? new CompressionInfo.Integer(0, 4, true)
-                    : _defaultWeaponUsageIndexCompressionInfo;
-                _fiveModeWeaponUsageProtocolApplied = enabled;
-
-                ModLogger.Info(
-                    "BattleMapSpawnHandoffPatch: " +
-                    (enabled
-                        ? "enabled experimental five-mode weapon usage protocol."
-                        : "restored default weapon usage protocol.") +
-                    " Source=" + (source ?? "unknown") +
-                    " ActiveRange=" + (enabled ? "0..4" : "default"));
-            }
         }
 
         private static void PatchMissionPeerFollowedAgent(Harmony harmony)
@@ -3283,6 +3213,29 @@ namespace CoopSpectator.Patches
                         return false;
                     }
                 }
+                else if (ShouldDeferSnapshotDependentStrictHeroCreateAgent(
+                             mission,
+                             createAgent,
+                             snapshotReadyForExactHeroHandoff,
+                             snapshotReadinessSummary,
+                             out string strictHeroSnapshotDeferralReason))
+                {
+                    RegisterDeferredClientCreateAgentPayload(
+                        createAgent,
+                        strictHeroSnapshotDeferralReason);
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: deferred snapshot-dependent strict hero CreateAgent until current battle snapshot is applied. " +
+                        "AgentIndex=" + createAgent.AgentIndex +
+                        " MountAgentIndex=" + createAgent.MountAgentIndex +
+                        " PayloadCharacter=" + (createAgent.Character?.StringId ?? "null") +
+                        " Reason=" + (strictHeroSnapshotDeferralReason ?? "unknown"));
+                    ExactCreateAgentCorridorDiagnostics.ObserveClientCreateAgentBypass(
+                        createAgent,
+                        "deferred-strict-hero-snapshot-not-ready:" +
+                        (strictHeroSnapshotDeferralReason ?? "unknown"),
+                        "battle-map handoff CreateAgent prefix");
+                    return false;
+                }
                 else if (mountedHeroPayloadCandidate)
                 {
                     RegisterDeferredMountedHeroCreateAgentPayload(createAgent, snapshotReadinessSummary);
@@ -3469,6 +3422,41 @@ namespace CoopSpectator.Patches
             return
                 MissionMultiplayerCoopBattleMode.IsBattleMapSceneName(sceneName) &&
                 SceneRuntimeClassifier.IsCampaignOrCurrentSiegeScene(sceneName);
+        }
+
+        private static bool ShouldDeferSnapshotDependentStrictHeroCreateAgent(
+            Mission mission,
+            CreateAgent createAgent,
+            bool snapshotReady,
+            string snapshotReadinessSummary,
+            out string reason)
+        {
+            reason = null;
+            if (GameNetwork.IsServer ||
+                mission == null ||
+                createAgent == null ||
+                snapshotReady ||
+                createAgent.IsPlayerAgent ||
+                createAgent.Peer != null ||
+                !IsHeroLikeCreateAgentPayload(createAgent))
+            {
+                return false;
+            }
+
+            string sceneName = mission.SceneName ?? string.Empty;
+            if (!CoopPreMissionTopologyRuntimeState.TryGetActive(
+                    sceneName,
+                    out CoopPreMissionTopologyContract _,
+                    out string topologyDiagnostics))
+            {
+                return false;
+            }
+
+            reason =
+                "validated-coop-topology-strict-hero-snapshot-pending" +
+                "|Snapshot=" + (snapshotReadinessSummary ?? "unknown") +
+                "|Topology=" + (topologyDiagnostics ?? "active");
+            return true;
         }
 
         private static bool ShouldRunAgentMaterializationHandoff(Mission mission)
@@ -10226,10 +10214,6 @@ namespace CoopSpectator.Patches
                 !SceneRuntimeClassifier.IsExactCampaignBattleScene(mission.SceneName ?? string.Empty) ||
                 !agent.IsActive() ||
                 agent.IsMount ||
-                agent.MissionPeer != null ||
-                IsLocalMissionPeerControlledAgent(agent) ||
-                agent.Character?.IsHero == true ||
-                (agent.Character?.StringId ?? string.Empty).EndsWith("_hero", StringComparison.Ordinal) ||
                 setWeaponAmmoData.Ammo != 0 ||
                 setWeaponAmmoData.AmmoEquipmentIndex != EquipmentIndex.None)
             {
@@ -12121,9 +12105,12 @@ namespace CoopSpectator.Patches
             out string reason)
         {
             reason = null;
-            if (mission == null ||
-                GameNetwork.IsServer ||
-                !SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(mission.SceneName ?? string.Empty))
+            bool isCoopClientContext =
+                mission != null &&
+                !GameNetwork.IsServer &&
+                ShouldRunAgentMaterializationHandoff(mission) &&
+                ShouldUseSafeStringIdCreateAgentPathOnClient(mission);
+            if (!isCoopClientContext)
             {
                 return true;
             }
@@ -12134,61 +12121,120 @@ namespace CoopSpectator.Patches
                 return true;
             }
 
-            if (agent == null)
-            {
-                reason = "agent-missing";
-                return false;
-            }
-
-            if (!agent.IsActive())
-            {
-                reason = "agent-inactive";
-                return false;
-            }
-
-            MissionEquipment missionEquipment = agent.Equipment;
-            if (missionEquipment == null)
-            {
-                reason = "mission-equipment-null";
-                return false;
-            }
-
-            MissionWeapon missionWeapon = missionEquipment[weaponEquipmentIndex];
-            ItemObject weaponItem = missionWeapon.Item;
-            if (weaponItem == null)
-            {
-                reason = "mission-weapon-slot-empty:" + weaponEquipmentIndex;
-                return false;
-            }
-
-            int weaponsCount;
+            bool agentExists = agent != null;
+            bool agentActive = false;
+            bool requestedSlotOccupied = false;
+            bool usageCatalogReadable = false;
+            int weaponsCount = 0;
+            string weaponItemId = null;
             try
             {
-                weaponsCount = missionWeapon.WeaponsCount;
+                agentActive = agentExists && agent.IsActive();
+                MissionEquipment missionEquipment = agentActive ? agent.Equipment : null;
+                if (missionEquipment != null)
+                {
+                    MissionWeapon missionWeapon = missionEquipment[weaponEquipmentIndex];
+                    ItemObject weaponItem = missionWeapon.Item;
+                    requestedSlotOccupied = weaponItem != null;
+                    weaponItemId = weaponItem?.StringId;
+                    if (requestedSlotOccupied)
+                    {
+                        weaponsCount = missionWeapon.WeaponsCount;
+                        usageCatalogReadable = true;
+                    }
+                }
             }
             catch (Exception ex)
             {
-                reason = "mission-weapon-usages-unavailable:" + ex.GetType().Name;
+                reason = "weapon-runtime-state-read-failed:" + ex.GetType().Name;
                 return false;
             }
 
-            if (weaponsCount <= 0)
-            {
-                reason = "mission-weapon-usages-empty:" + weaponItem.StringId;
-                return false;
-            }
-
-            if (usageIndex < 0 || usageIndex >= weaponsCount)
+            CoopClientWeaponRuntimeSafetyResult safety =
+                CoopClientWeaponRuntimeSafetyContract.Evaluate(
+                    isCoopClientContext: true,
+                    snapshotReady: true,
+                    hasDeferredAgentBootstrap: false,
+                    agentExists: agentExists,
+                    agentActive: agentActive,
+                    requestTargetsWeaponSlot: true,
+                    requestedSlotOccupied: requestedSlotOccupied,
+                    validateUsageIndex: true,
+                    usageCatalogReadable: usageCatalogReadable,
+                    requestedUsageIndex: usageIndex,
+                    usageCount: weaponsCount);
+            if (!safety.IsNativeSafe)
             {
                 reason =
-                    "requested-usage-index-invalid:" +
-                    weaponItem.StringId +
-                    ":Usage=" + usageIndex +
-                    ":Count=" + weaponsCount;
+                    (safety.Reason ?? "weapon-runtime-state-unsafe") +
+                    "|Slot=" + weaponEquipmentIndex +
+                    "|Item=" + (weaponItemId ?? "empty") +
+                    "|Usage=" + usageIndex +
+                    "|Count=" + weaponsCount;
                 return false;
             }
 
             return true;
+        }
+
+        private static bool ShouldFailClosedForClientWeaponRuntimeMessage()
+        {
+            if (GameNetwork.IsServer)
+                return false;
+
+            try
+            {
+                Mission mission = Mission.Current;
+                return mission != null &&
+                       ShouldRunAgentMaterializationHandoff(mission) &&
+                       ShouldUseSafeStringIdCreateAgentPathOnClient(mission);
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        private static bool IsExactCampaignClientWeaponCurrentStateNativeSafe(
+            Mission mission,
+            Agent agent,
+            EquipmentIndex weaponEquipmentIndex,
+            out string reason)
+        {
+            reason = null;
+            if (mission == null ||
+                GameNetwork.IsServer ||
+                !ShouldRunAgentMaterializationHandoff(mission) ||
+                !ShouldUseSafeStringIdCreateAgentPathOnClient(mission))
+            {
+                return true;
+            }
+
+            if (weaponEquipmentIndex < EquipmentIndex.Weapon0 ||
+                weaponEquipmentIndex > EquipmentIndex.Weapon3)
+            {
+                reason = "weapon-slot-invalid:" + weaponEquipmentIndex;
+                return false;
+            }
+
+            int currentUsageIndex = 0;
+            try
+            {
+                if (agent?.Equipment != null)
+                    currentUsageIndex = agent.Equipment[weaponEquipmentIndex].CurrentUsageIndex;
+            }
+            catch (Exception ex)
+            {
+                reason = "mission-weapon-current-usage-read-failed:" + ex.GetType().Name;
+                return false;
+            }
+
+            return IsExactSiegeClientWeaponUsageIndexNativeSafe(
+                mission,
+                agent,
+                weaponEquipmentIndex,
+                currentUsageIndex,
+                out reason);
         }
 
         private static bool IsExactSiegeClientWeaponStateNativeSafe(
@@ -14859,7 +14905,7 @@ namespace CoopSpectator.Patches
                 createTimeSpawnEquipment[EquipmentIndex.HorseHarness] = default;
             }
             MissionEquipment createTimeMissionEquipment =
-                ResolveStrictExactHeroCreateAgentMissionEquipment(createAgent);
+                ResolveStrictExactHeroCreateAgentMissionEquipment(contract, createAgent);
             if (createTimeSpawnEquipment == null || createTimeMissionEquipment == null)
                 return false;
 
@@ -16329,15 +16375,21 @@ namespace CoopSpectator.Patches
             ExactTransferSpawnContract contract,
             CreateAgent createAgent)
         {
-            if (createAgent?.SpawnEquipment != null)
-                return createAgent.SpawnEquipment.Clone(false);
+            Equipment exactSpawnEquipment = contract?.Equipment?.SpawnEquipment;
+            if (exactSpawnEquipment != null)
+                return exactSpawnEquipment.Clone(false);
 
-            return contract?.Equipment?.SpawnEquipment?.Clone(false);
+            return createAgent?.SpawnEquipment?.Clone(false);
         }
 
         private static MissionEquipment ResolveStrictExactHeroCreateAgentMissionEquipment(
+            ExactTransferSpawnContract contract,
             CreateAgent createAgent)
         {
+            MissionEquipment exactMissionEquipment = contract?.Equipment?.MissionEquipment;
+            if (exactMissionEquipment != null)
+                return exactMissionEquipment;
+
             return createAgent?.MissionEquipment;
         }
 
@@ -16763,6 +16815,10 @@ namespace CoopSpectator.Patches
                 // SynchronizeAgentSpawnEquipment and every later weapon-state message use the
                 // server's slot indices as one shared contract. Reordering a non-hero payload
                 // only on the client makes a later SetWieldedItemIndex target another item.
+                TryCanonicalizeExactHeroSynchronizeAgentEquipmentWeaponSlots(
+                    mission,
+                    synchronizeAgentSpawnEquipment,
+                    agent);
 
                 if (agent != null &&
                     ShouldSuppressCorruptedClientSynchronizeAgentEquipmentPayload(
@@ -18660,6 +18716,23 @@ namespace CoopSpectator.Patches
                     return false;
                 }
 
+                if (!IsExactCampaignClientWeaponCurrentStateNativeSafe(
+                        mission,
+                        agent,
+                        setWeaponNetworkData.WeaponEquipmentIndex,
+                        out string unsafeCurrentWeaponStateReason))
+                {
+                    RemoveDeferredClientSetWeaponNetworkDataPayload(
+                        setWeaponNetworkData.AgentIndex,
+                        setWeaponNetworkData);
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: suppressed unsafe client SetWeaponNetworkData before native handler. " +
+                        "AgentIndex=" + setWeaponNetworkData.AgentIndex +
+                        " EquipmentIndex=" + setWeaponNetworkData.WeaponEquipmentIndex +
+                        " Reason=" + (unsafeCurrentWeaponStateReason ?? "unknown"));
+                    return false;
+                }
+
                 if (TryMaskLocalCrossbowAttackDownForTerminalWeaponState(
                         mission,
                         agent,
@@ -18697,8 +18770,11 @@ namespace CoopSpectator.Patches
             }
             catch (Exception ex)
             {
-                ModLogger.Info("BattleMapSpawnHandoffPatch: SetWeaponNetworkData prefix failed open: " + ex.Message);
-                return true;
+                bool failClosed = ShouldFailClosedForClientWeaponRuntimeMessage();
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: SetWeaponNetworkData prefix failed " +
+                    (failClosed ? "closed" : "open") + ": " + ex.Message);
+                return !failClosed;
             }
         }
 
@@ -18981,8 +19057,11 @@ namespace CoopSpectator.Patches
             }
             catch (Exception ex)
             {
-                ModLogger.Info("BattleMapSpawnHandoffPatch: SetWeaponAmmoData prefix failed open: " + ex.Message);
-                return true;
+                bool failClosed = ShouldFailClosedForClientWeaponRuntimeMessage();
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: SetWeaponAmmoData prefix failed " +
+                    (failClosed ? "closed" : "open") + ": " + ex.Message);
+                return !failClosed;
             }
         }
 
@@ -19100,6 +19179,23 @@ namespace CoopSpectator.Patches
                         setWeaponReloadPhase.EquipmentIndex,
                         postPossessionWeaponStateReason,
                         "prefix");
+                    return false;
+                }
+
+                if (!IsExactCampaignClientWeaponCurrentStateNativeSafe(
+                        mission,
+                        agent,
+                        setWeaponReloadPhase.EquipmentIndex,
+                        out string unsafeCurrentWeaponStateReason))
+                {
+                    RemoveDeferredClientSetWeaponReloadPhasePayload(
+                        setWeaponReloadPhase.AgentIndex,
+                        setWeaponReloadPhase);
+                    ModLogger.Info(
+                        "BattleMapSpawnHandoffPatch: suppressed unsafe client SetWeaponReloadPhase before native handler. " +
+                        "AgentIndex=" + setWeaponReloadPhase.AgentIndex +
+                        " EquipmentIndex=" + setWeaponReloadPhase.EquipmentIndex +
+                        " Reason=" + (unsafeCurrentWeaponStateReason ?? "unknown"));
                     return false;
                 }
 
@@ -19273,8 +19369,11 @@ namespace CoopSpectator.Patches
             }
             catch (Exception ex)
             {
-                ModLogger.Info("BattleMapSpawnHandoffPatch: SetWeaponReloadPhase prefix failed open: " + ex.Message);
-                return true;
+                bool failClosed = ShouldFailClosedForClientWeaponRuntimeMessage();
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: SetWeaponReloadPhase prefix failed " +
+                    (failClosed ? "closed" : "open") + ": " + ex.Message);
+                return !failClosed;
             }
         }
 
@@ -19379,8 +19478,11 @@ namespace CoopSpectator.Patches
             }
             catch (Exception ex)
             {
-                ModLogger.Info("BattleMapSpawnHandoffPatch: StartSwitchingWeaponUsageIndex prefix failed open: " + ex.Message);
-                return true;
+                bool failClosed = ShouldFailClosedForClientWeaponRuntimeMessage();
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: StartSwitchingWeaponUsageIndex prefix failed " +
+                    (failClosed ? "closed" : "open") + ": " + ex.Message);
+                return !failClosed;
             }
         }
 
@@ -19492,8 +19594,11 @@ namespace CoopSpectator.Patches
             }
             catch (Exception ex)
             {
-                ModLogger.Info("BattleMapSpawnHandoffPatch: WeaponUsageIndexChangeMessage prefix failed open: " + ex.Message);
-                return true;
+                bool failClosed = ShouldFailClosedForClientWeaponRuntimeMessage();
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: WeaponUsageIndexChangeMessage prefix failed " +
+                    (failClosed ? "closed" : "open") + ": " + ex.Message);
+                return !failClosed;
             }
         }
 
@@ -20375,9 +20480,12 @@ namespace CoopSpectator.Patches
             }
             catch (Exception ex)
             {
-                ModLogger.Info("BattleMapSpawnHandoffPatch: SetWieldedItemIndex prefix failed open: " + ex.Message);
+                bool failClosed = ShouldFailClosedForClientWeaponRuntimeMessage();
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: SetWieldedItemIndex prefix failed " +
+                    (failClosed ? "closed" : "open") + ": " + ex.Message);
                 __state = false;
-                return true;
+                return !failClosed;
             }
         }
 
@@ -20590,9 +20698,6 @@ namespace CoopSpectator.Patches
                 return false;
 
             if (!agent.IsActive() || agent.Team == null || agent.Team.Side == BattleSideEnum.None)
-                return false;
-
-            if (agent.MissionPeer != null)
                 return false;
 
             int missionWeaponCount = CountOccupiedMissionWeaponSlots(agent.Equipment);

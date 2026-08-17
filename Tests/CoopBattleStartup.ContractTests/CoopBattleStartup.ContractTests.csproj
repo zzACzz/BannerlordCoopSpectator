@@ -10,6 +10,8 @@
     <Compile Include="..\..\Infrastructure\CoopMaterializedAgentEntrySnapshotContract.cs" Link="CoopMaterializedAgentEntrySnapshotContract.cs" />
     <Compile Include="..\..\Infrastructure\CoopUnitSelectionSearchContract.cs" Link="CoopUnitSelectionSearchContract.cs" />
     <Compile Include="..\..\Infrastructure\CoopMountedHeroMountLinkContract.cs" Link="CoopMountedHeroMountLinkContract.cs" />
+    <Compile Include="..\..\Infrastructure\CoopClientWeaponRuntimeSafetyContract.cs" Link="CoopClientWeaponRuntimeSafetyContract.cs" />
+    <Compile Include="..\..\Infrastructure\ExactCampaignItemCatalogLoadPolicy.cs" Link="ExactCampaignItemCatalogLoadPolicy.cs" />
     <Compile Include="..\..\Infrastructure\CommanderDeployment\CoopCommanderFacingOrderContract.cs" Link="CoopCommanderFacingOrderContract.cs" />
     <Compile Include="..\..\Infrastructure\CommanderDeployment\CoopCommanderDeathHandoffContract.cs" Link="CoopCommanderDeathHandoffContract.cs" />
     <Compile Include="..\..\Infrastructure\CommanderDeployment\CoopCommanderDeploymentReadinessContract.cs" Link="CoopCommanderDeploymentReadinessContract.cs" />

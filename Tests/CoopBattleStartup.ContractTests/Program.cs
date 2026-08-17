@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Xml;
 using CoopSpectator.Infrastructure;
 
 internal static class Program
@@ -51,6 +53,14 @@ internal static class Program
             ValidateCommanderReadinessRetryCanSucceed();
             ValidateMissingRequiredCommanderBehaviorIsHardFailure();
             ValidateUnitSelectionSearchContract();
+            ValidateWeaponRuntimeWaitsForSnapshot();
+            ValidatePossessedHeroEmptyWeaponSlotIsSuppressed();
+            ValidateCraftedThrowingAxeUsageIsAllowed();
+            ValidateInvalidCraftedWeaponUsageIsSuppressed();
+            ValidateWeaponRuntimeContractDoesNotAffectNonCoopTraffic();
+            ValidateMissingItemCatalogExcludesLoadedItems();
+            ValidateMissingItemCatalogLoadsEachMissingIdOnce();
+            ValidateMissingItemCatalogRejectsInvalidNodes();
             Console.WriteLine("Coop battle startup contract tests passed.");
             return 0;
         }
@@ -59,6 +69,78 @@ internal static class Program
             Console.Error.WriteLine(ex.Message);
             return 1;
         }
+    }
+
+    private static void ValidateMissingItemCatalogExcludesLoadedItems()
+    {
+        XmlDocument source = LoadXml(
+            "<Items>" +
+            "<CraftedItem id='cs_mirror_imperial_throwing_spear_1_t4_11307d28' />" +
+            "<Item id='already_loaded_armor' />" +
+            "<Item id='missing_campaign_armor' />" +
+            "</Items>");
+        var loadedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "cs_mirror_imperial_throwing_spear_1_t4_11307d28",
+            "already_loaded_armor"
+        };
+
+        ExactCampaignItemCatalogSelection selection =
+            ExactCampaignItemCatalogLoadPolicy.SelectMissingItems(
+                source,
+                itemId => loadedIds.Contains(itemId));
+
+        Assert(selection.CandidateCount == 3 && selection.SelectedCount == 1,
+            "The missing-item catalog must retain only items absent from MBObjectManager.");
+        Assert(selection.SkippedExistingCount == 2,
+            "The missing-item catalog must exclude an already loaded crafted Pilum and ordinary item.");
+        Assert(selection.Document.DocumentElement?.FirstChild?.Attributes?["id"]?.Value == "missing_campaign_armor",
+            "The missing-item catalog must preserve the exact missing item node.");
+    }
+
+    private static void ValidateMissingItemCatalogLoadsEachMissingIdOnce()
+    {
+        XmlDocument source = LoadXml(
+            "<Items>" +
+            "<Item id='missing_weapon' />" +
+            "<CraftedItem id='missing_weapon' />" +
+            "<CraftedItem id='missing_crafted_weapon' />" +
+            "</Items>");
+
+        ExactCampaignItemCatalogSelection selection =
+            ExactCampaignItemCatalogLoadPolicy.SelectMissingItems(source, itemId => false);
+
+        Assert(selection.CandidateCount == 3 && selection.SelectedCount == 2,
+            "The missing-item catalog must load every distinct missing id exactly once.");
+        Assert(selection.SkippedDuplicateCount == 1,
+            "The missing-item catalog must reject repeated ids before deserialization.");
+    }
+
+    private static void ValidateMissingItemCatalogRejectsInvalidNodes()
+    {
+        XmlDocument source = LoadXml(
+            "<Items>" +
+            "<!-- ignored -->" +
+            "<EquipmentRoster id='not_an_item' />" +
+            "<Item />" +
+            "<CraftedItem id='  ' />" +
+            "<Item id='valid_item' />" +
+            "</Items>");
+
+        ExactCampaignItemCatalogSelection selection =
+            ExactCampaignItemCatalogLoadPolicy.SelectMissingItems(source, itemId => false);
+
+        Assert(selection.CandidateCount == 3 && selection.SelectedCount == 1,
+            "The missing-item catalog must ignore non-item XML and reject item nodes without a valid id.");
+        Assert(selection.SkippedInvalidCount == 2,
+            "The missing-item catalog must report invalid item nodes without attempting deserialization.");
+    }
+
+    private static XmlDocument LoadXml(string xml)
+    {
+        var document = new XmlDocument();
+        document.LoadXml(xml);
+        return document;
     }
 
     private static void ValidateCompleteApplication()
@@ -647,6 +729,106 @@ internal static class Program
         Assert(CoopUnitSelectionSearchContract.MatchesDisplayName("VVS Hero", "   ") &&
                CoopUnitSelectionSearchContract.MatchesDisplayName("Player AC", "   "),
             "Clearing the search must restore the complete unit list.");
+    }
+
+    private static void ValidateWeaponRuntimeWaitsForSnapshot()
+    {
+        CoopClientWeaponRuntimeSafetyResult result =
+            CoopClientWeaponRuntimeSafetyContract.Evaluate(
+                isCoopClientContext: true,
+                snapshotReady: false,
+                hasDeferredAgentBootstrap: true,
+                agentExists: false,
+                agentActive: false,
+                requestTargetsWeaponSlot: true,
+                requestedSlotOccupied: false,
+                validateUsageIndex: true,
+                usageCatalogReadable: false,
+                requestedUsageIndex: 1,
+                usageCount: 0);
+
+        Assert(result.Decision == CoopClientWeaponRuntimeSafetyDecision.Defer,
+            "A strict hero weapon message must wait while its exact snapshot and agent bootstrap are pending.");
+    }
+
+    private static void ValidatePossessedHeroEmptyWeaponSlotIsSuppressed()
+    {
+        CoopClientWeaponRuntimeSafetyResult result =
+            CoopClientWeaponRuntimeSafetyContract.Evaluate(
+                isCoopClientContext: true,
+                snapshotReady: true,
+                hasDeferredAgentBootstrap: false,
+                agentExists: true,
+                agentActive: true,
+                requestTargetsWeaponSlot: true,
+                requestedSlotOccupied: false,
+                validateUsageIndex: true,
+                usageCatalogReadable: false,
+                requestedUsageIndex: 1,
+                usageCount: 0);
+
+        Assert(result.Decision == CoopClientWeaponRuntimeSafetyDecision.Suppress,
+            "A possessed hero must never enter native wield code when the requested crafted weapon slot is empty.");
+    }
+
+    private static void ValidateCraftedThrowingAxeUsageIsAllowed()
+    {
+        CoopClientWeaponRuntimeSafetyResult result =
+            CoopClientWeaponRuntimeSafetyContract.Evaluate(
+                isCoopClientContext: true,
+                snapshotReady: true,
+                hasDeferredAgentBootstrap: false,
+                agentExists: true,
+                agentActive: true,
+                requestTargetsWeaponSlot: true,
+                requestedSlotOccupied: true,
+                validateUsageIndex: true,
+                usageCatalogReadable: true,
+                requestedUsageIndex: 1,
+                usageCount: 2);
+
+        Assert(result.Decision == CoopClientWeaponRuntimeSafetyDecision.Allow,
+            "A materialized crafted throwing axe must allow its valid throwing usage before native wield.");
+    }
+
+    private static void ValidateInvalidCraftedWeaponUsageIsSuppressed()
+    {
+        CoopClientWeaponRuntimeSafetyResult result =
+            CoopClientWeaponRuntimeSafetyContract.Evaluate(
+                isCoopClientContext: true,
+                snapshotReady: true,
+                hasDeferredAgentBootstrap: false,
+                agentExists: true,
+                agentActive: true,
+                requestTargetsWeaponSlot: true,
+                requestedSlotOccupied: true,
+                validateUsageIndex: true,
+                usageCatalogReadable: true,
+                requestedUsageIndex: 1,
+                usageCount: 1);
+
+        Assert(result.Decision == CoopClientWeaponRuntimeSafetyDecision.Suppress,
+            "An out-of-range crafted weapon usage must be rejected before camera or network native code can read it.");
+    }
+
+    private static void ValidateWeaponRuntimeContractDoesNotAffectNonCoopTraffic()
+    {
+        CoopClientWeaponRuntimeSafetyResult result =
+            CoopClientWeaponRuntimeSafetyContract.Evaluate(
+                isCoopClientContext: false,
+                snapshotReady: false,
+                hasDeferredAgentBootstrap: false,
+                agentExists: false,
+                agentActive: false,
+                requestTargetsWeaponSlot: true,
+                requestedSlotOccupied: false,
+                validateUsageIndex: true,
+                usageCatalogReadable: false,
+                requestedUsageIndex: 99,
+                usageCount: 0);
+
+        Assert(result.Decision == CoopClientWeaponRuntimeSafetyDecision.Allow,
+            "The coop weapon safety contract must not intercept unrelated vanilla multiplayer traffic.");
     }
 
     private static void Assert(bool condition, string message)
