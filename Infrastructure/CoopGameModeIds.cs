@@ -17,6 +17,10 @@ namespace CoopSpectator.Infrastructure
 
         public const string CoopHeroCreator = "CoopHeroCreator";
 
+        /// <summary>Experimental isolated mission that renders Main_map on clients.</summary>
+        public const string CoopCampaignMapPrototype =
+            CoopCampaignMapPrototypeContract.GameModeId;
+
         /// <summary>Isolated daytime bandit-hideout assault runtime.</summary>
         public const string CoopHideoutDay = "CoopHideoutDay";
 

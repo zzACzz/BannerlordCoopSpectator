@@ -17,6 +17,13 @@ namespace CoopSpectator.Infrastructure
             IsEnvironmentFlagEnabledCore(VerboseDiagnosticsEnvironmentVariable);
 
         /// <summary>
+        /// Explicit opt-in for the isolated multiplayer Main_map rendering prototype.
+        /// It is independent from verbose diagnostics and remains disabled by default.
+        /// </summary>
+        public static readonly bool EnableCampaignMapPrototype =
+            IsEnvironmentFlagEnabledCore("COOPSPECTATOR_CAMPAIGN_MAP_PROTOTYPE");
+
+        /// <summary>
         /// Stable baseline: use vanilla TeamDeathmatch in listed flow and keep the
         /// custom TdmClone game-mode path disabled until reintroduced deliberately.
         /// </summary>

@@ -206,6 +206,64 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
                 return false;
             }
         }
+
+        public static bool SendStartCampaignMapPrototypeMission()
+        {
+            if (!ExperimentalFeatures.EnableCampaignMapPrototype)
+            {
+                ModLogger.Info(
+                    "DedicatedServerCommands: campaign map prototype start rejected because the explicit feature flag is disabled.");
+                return false;
+            }
+
+            string scene =
+                CoopCampaignMapPrototypeContract.MissionBootstrapScene;
+            string gameType = CoopCampaignMapPrototypeContract.GameModeId;
+            try
+            {
+                TryLogAvailableServerOptionsViaHttp();
+                if (!DedicatedHelperLauncher.HasDedicatedProcess())
+                {
+                    ModLogger.Info(
+                        "DedicatedServerCommands: campaign map prototype start rejected because no local dedicated process is available.");
+                    return false;
+                }
+
+                bool optionsApplied =
+                    TryApplySceneAwareMissionSelectionViaWebOptions(
+                        scene,
+                        gameType,
+                        gameType);
+                if (!optionsApplied)
+                {
+                    bool addMapSent = DedicatedHelperLauncher.TrySendConsoleLine(
+                        "add_map_to_usable_maps " + scene + " " + gameType);
+                    bool gameTypeSent = DedicatedHelperLauncher.TrySendConsoleLine(
+                        "GameType " + gameType);
+                    bool mapSent = DedicatedHelperLauncher.TrySendConsoleLine(
+                        "Map " + scene);
+                    ModLogger.Info(
+                        "DedicatedServerCommands: campaign map prototype fallback options sent. AddMap=" +
+                        addMapSent + " GameType=" + gameTypeSent +
+                        " Map=" + mapSent + ".");
+                    if (!gameTypeSent || !mapSent)
+                        return false;
+                    Thread.Sleep(100);
+                }
+
+                ModLogger.Info(
+                    "DedicatedServerCommands: starting isolated campaign map prototype mission.");
+                return SendCommand(StartMissionCommand);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "DedicatedServerCommands: campaign map prototype mission start failed. " +
+                    ex.Message);
+                return false;
+            }
+        }
+
         public static bool SendEndMission() => SendCommand(EndMissionCommand);
 
         private static bool TryApplySceneAwareMissionSelectionFromBattleRoster()

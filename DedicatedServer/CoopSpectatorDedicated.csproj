@@ -53,6 +53,9 @@
     <Compile Include="..\GameMode\MissionMultiplayerCoopHeroCreatorMode.cs" Link="GameMode\MissionMultiplayerCoopHeroCreatorMode.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopHeroCreator.cs" Link="GameMode\MissionMultiplayerCoopHeroCreator.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopHeroCreatorClient.cs" Link="GameMode\MissionMultiplayerCoopHeroCreatorClient.cs" />
+    <Compile Include="..\GameMode\MissionMultiplayerCoopCampaignMapPrototypeMode.cs" Link="GameMode\MissionMultiplayerCoopCampaignMapPrototypeMode.cs" />
+    <Compile Include="..\GameMode\MissionMultiplayerCoopCampaignMapPrototype.cs" Link="GameMode\MissionMultiplayerCoopCampaignMapPrototype.cs" />
+    <Compile Include="..\GameMode\MissionMultiplayerCoopCampaignMapPrototypeClient.cs" Link="GameMode\MissionMultiplayerCoopCampaignMapPrototypeClient.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopHideoutDayMode.cs" Link="GameMode\MissionMultiplayerCoopHideoutDayMode.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopHideoutNightMode.cs" Link="GameMode\MissionMultiplayerCoopHideoutNightMode.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerTdmCloneMode.cs" Link="GameMode\MissionMultiplayerTdmCloneMode.cs" />
@@ -75,6 +78,7 @@
     <Compile Include="..\Mission\CoopHideoutBossPhaseController.cs" Link="Mission\CoopHideoutBossPhaseController.cs" />
     <Compile Include="..\Mission\CoopHideoutAmbushNetworkController.cs" Link="Mission\CoopHideoutAmbushNetworkController.cs" />
     <Compile Include="..\Mission\CoopBattlePowerNetworkController.cs" Link="Mission\CoopBattlePowerNetworkController.cs" />
+    <Compile Include="..\Mission\CoopCampaignMapPrototypeNetworkController.cs" Link="Mission\CoopCampaignMapPrototypeNetworkController.cs" />
     <Compile Include="..\Mission\CoopSiegeAssaultFormationOrderRuntime.cs" Link="Mission\CoopSiegeAssaultFormationOrderRuntime.cs" />
     <Compile Include="..\MissionModels\CoopCampaignDerivedAgentStatCalculateModel.cs" Link="MissionModels\CoopCampaignDerivedAgentStatCalculateModel.cs" />
     <Compile Include="..\MissionModels\CoopCampaignDerivedStrikeMagnitudeCalculationModel.cs" Link="MissionModels\CoopCampaignDerivedStrikeMagnitudeCalculationModel.cs" />
@@ -92,6 +96,7 @@
     <Compile Include="..\Network\Messages\CoopHideoutBossPhaseNetworkMessages.cs" Link="Network\Messages\CoopHideoutBossPhaseNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopHideoutAmbushNetworkMessages.cs" Link="Network\Messages\CoopHideoutAmbushNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopBattlePowerNetworkMessages.cs" Link="Network\Messages\CoopBattlePowerNetworkMessages.cs" />
+    <Compile Include="..\Network\Messages\CoopCampaignMapPrototypeNetworkMessages.cs" Link="Network\Messages\CoopCampaignMapPrototypeNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopBattleAgentControlNetworkMessages.cs" Link="Network\Messages\CoopBattleAgentControlNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopSiegeAmbushOrderNetworkMessages.cs" Link="Network\Messages\CoopSiegeAmbushOrderNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopSiegeAssaultOrderNetworkMessages.cs" Link="Network\Messages\CoopSiegeAssaultOrderNetworkMessages.cs" />
@@ -156,6 +161,9 @@
     <Compile Include="..\Infrastructure\BattleSnapshotRuntimeState.cs" Link="Infrastructure\BattleSnapshotRuntimeState.cs" />
     <Compile Include="..\Infrastructure\CoopBattlePowerContract.cs" Link="Infrastructure\CoopBattlePowerContract.cs" />
     <Compile Include="..\Infrastructure\CoopMaterializedAgentEntrySnapshotContract.cs" Link="Infrastructure\CoopMaterializedAgentEntrySnapshotContract.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapPrototypeContract.cs" Link="Infrastructure\CoopCampaignMapPrototypeContract.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapPrototypeBridgeCodec.cs" Link="Infrastructure\CoopCampaignMapPrototypeBridgeCodec.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapPrototypeBridgeFile.cs" Link="Infrastructure\CoopCampaignMapPrototypeBridgeFile.cs" />
     <Compile Include="..\Infrastructure\CoopMountedHeroMountLinkContract.cs" Link="Infrastructure\CoopMountedHeroMountLinkContract.cs" />
     <Compile Include="..\Infrastructure\CoopClientBootstrapResetContract.cs" Link="Infrastructure\CoopClientBootstrapResetContract.cs" />
     <Compile Include="..\Infrastructure\CoopHeroBattleProgressionContract.cs" Link="Infrastructure\CoopHeroBattleProgressionContract.cs" />

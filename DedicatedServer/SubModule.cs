@@ -75,6 +75,13 @@ namespace CoopSpectator
                     return;
                 }
 
+                if (IsCoopCampaignMapPrototypeMission(currentMission))
+                {
+                    ResetDedicatedObserverMissionActivationState("coop-campaign-map-prototype-mission");
+                    DedicatedKnockoutOutcomeModelOverride.RestoreIfNeeded();
+                    return;
+                }
+
                 CoopMissionSpawnLogic.TryRunDedicatedMissionNetworkBootstrap(currentMission);
 
                 if (ShouldDelayDedicatedMissionObserverActivation(currentMission))
@@ -131,6 +138,14 @@ namespace CoopSpectator
             return mission != null &&
                    (mission.GetMissionBehavior<CoopHeroCreationMissionNetwork>() != null ||
                     mission.GetMissionBehavior<MissionMultiplayerCoopHeroCreator>() != null);
+        }
+
+        private static bool IsCoopCampaignMapPrototypeMission(Mission mission)
+        {
+            return mission != null &&
+                   CoopCampaignMapPrototypeContract.ShouldSuppressDedicatedBattleObserver(
+                       mission.GetMissionBehavior<MissionMultiplayerCoopCampaignMapPrototype>() != null,
+                       mission.GetMissionBehavior<CoopCampaignMapPrototypeNetworkController>() != null);
         }
 
         private static bool ShouldDelayDedicatedMissionObserverActivation(Mission mission)
@@ -1076,6 +1091,15 @@ namespace CoopSpectator
                 ModLogger.Info("[GameModeReg] add CoopHideoutNight id=" + MissionMultiplayerCoopHideoutNightMode.GameModeId);
                 TaleWorlds.MountAndBlade.Module.CurrentModule.AddMultiplayerGameMode(
                     new MissionMultiplayerCoopHideoutNightMode(CoopGameModeIds.CoopHideoutNight));
+                if (ExperimentalFeatures.EnableCampaignMapPrototype)
+                {
+                    ModLogger.Info(
+                        "[GameModeReg] add CoopCampaignMapPrototype id=" +
+                        MissionMultiplayerCoopCampaignMapPrototypeMode.GameModeId);
+                    TaleWorlds.MountAndBlade.Module.CurrentModule.AddMultiplayerGameMode(
+                        new MissionMultiplayerCoopCampaignMapPrototypeMode(
+                            CoopGameModeIds.CoopCampaignMapPrototype));
+                }
                 if (ExperimentalFeatures.EnableTdmCloneExperiment)
                 {
                     ModLogger.Info("[GameModeReg] add TdmClone id=" + MissionMultiplayerTdmCloneMode.GameModeId);

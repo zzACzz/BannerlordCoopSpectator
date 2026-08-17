@@ -100,6 +100,8 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                 TryRegisterCoopHeroCreatorForClient();
                 TryRegisterCoopHideoutDayForClient();
                 TryRegisterCoopHideoutNightForClient();
+                if (ExperimentalFeatures.EnableCampaignMapPrototype)
+                    TryRegisterCoopCampaignMapPrototypeForClient();
                 if (ExperimentalFeatures.EnableTdmCloneExperiment)
                     TryRegisterTdmCloneForClient(); // Ð ÐµÑ”ÑÑ‚Ñ€ÑƒÑ”Ð¼Ð¾ TdmClone Ð»Ð¸ÑˆÐµ ÐºÐ¾Ð»Ð¸ ÐµÐºÑÐ¿ÐµÑ€Ð¸Ð¼ÐµÐ½Ñ‚Ð°Ð»ÑŒÐ½Ð¸Ð¹ path ÑÐ²Ð½Ð¾ ÑƒÐ²Ñ–Ð¼ÐºÐ½ÐµÐ½Ð¾.
                 else
@@ -197,6 +199,25 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
             }
         }
 
+        private static void TryRegisterCoopCampaignMapPrototypeForClient()
+        {
+            try
+            {
+                if (TaleWorlds.MountAndBlade.Module.CurrentModule == null) return;
+                TaleWorlds.MountAndBlade.Module.CurrentModule.AddMultiplayerGameMode(
+                    new MissionMultiplayerCoopCampaignMapPrototypeMode(
+                        CoopGameModeIds.CoopCampaignMapPrototype));
+                ModLogger.Info(
+                    "[CoopSpectator] CoopCampaignMapPrototype client registration success.");
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "[CoopSpectator] CoopCampaignMapPrototype client registration fail: " +
+                    ex.Message);
+            }
+        }
+
         private static void TryRegisterCoopHideoutNightForClient()
         {
             try
@@ -251,6 +272,8 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                 }
 
                 HideoutAmbushArrowBarrelPatch.Apply(harmony);
+                if (ExperimentalFeatures.EnableCampaignMapPrototype)
+                    CoopCampaignMapPrototypeSceneLoadPatch.Apply(harmony);
 
                 if (EnableManualHarmonyApply)
                 {
@@ -446,6 +469,13 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                         {
                             CoopBattleEscapeMenuAiControlPatch.Apply(harmony);
                         }
+
+                        if ((loadedAssemblyName == "SandBox" ||
+                             loadedAssemblyName == "SandBox.View") &&
+                            ExperimentalFeatures.EnableCampaignMapPrototype)
+                        {
+                            CoopCampaignMapPrototypeSceneLoadPatch.Apply(harmony);
+                        }
                     };
                 }
                 else if (EnableManualHarmonyApply)
@@ -479,6 +509,8 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                     starter.AddBehavior(new MainThreadDispatcherPumpBehavior()); // Pump dispatcher from campaign tick for reliable UI feedback
                     starter.AddBehavior(new BattleResultWritebackJournalBehavior());
                     starter.AddBehavior(new PlayerHeroCreationCampaignBehavior());
+                    if (ExperimentalFeatures.EnableCampaignMapPrototype)
+                        starter.AddBehavior(new CoopCampaignMapPrototypePublisherBehavior());
                     ModLogger.Info("Campaign behaviors Ð´Ð¾Ð´Ð°Ð½Ð¾ (HostStateBroadcaster + SpectatorStateReceiver)."); // Ð›Ð¾Ð³ÑƒÑ”Ð¼Ð¾ Ñ„Ð°ÐºÑ‚ Ð´Ð¾Ð´Ð°Ð²Ð°Ð½Ð½Ñ behaviors Ð´Ð»Ñ Ð´ÐµÐ±Ð°Ð³Ñƒ
                 } // Ð—Ð°Ð²ÐµÑ€ÑˆÑƒÑ”Ð¼Ð¾ Ð±Ð»Ð¾Ðº if
                 else if (!EnableCampaignBehaviors)
@@ -708,6 +740,8 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
         { // ÐŸÐ¾Ñ‡Ð¸Ð½Ð°Ñ”Ð¼Ð¾ Ð±Ð»Ð¾Ðº Ð¼ÐµÑ‚Ð¾Ð´Ñƒ
             try // ÐžÐ±Ð³Ð¾Ñ€Ñ‚Ð°Ñ”Ð¼Ð¾ cleanup Ð² try-catch, Ñ‰Ð¾Ð± Ð½Ðµ ÐºÑ€Ð°ÑˆÐ½ÑƒÑ‚Ð¸ Ð³Ñ€Ñƒ Ð¿Ñ€Ð¸ Ð²Ð¸Ð²Ð°Ð½Ñ‚Ð°Ð¶ÐµÐ½Ð½Ñ–
             { // ÐŸÐ¾Ñ‡Ð¸Ð½Ð°Ñ”Ð¼Ð¾ Ð±Ð»Ð¾Ðº try
+                CoopCampaignMapPrototypePublisherBehavior.ResetApplicationTickPublisher();
+
                 if (EnableCoopRuntimeStartup && CoopRuntime.Network != null) // ÐŸÐµÑ€ÐµÐ²Ñ–Ñ€ÑÑ”Ð¼Ð¾ Ñ‰Ð¾ NetworkManager Ñ–ÑÐ½ÑƒÑ”
                 { // ÐŸÐ¾Ñ‡Ð¸Ð½Ð°Ñ”Ð¼Ð¾ Ð±Ð»Ð¾Ðº if
                     CoopRuntime.Network.MessageReceived -= OnNetworkMessageReceived; // Ð’Ñ–Ð´Ð¿Ð¸ÑÑƒÑ”Ð¼Ð¾ÑÑŒ Ð²Ñ–Ð´ Ð¿Ð¾Ð´Ñ–Ð¹, Ñ‰Ð¾Ð± ÑƒÐ½Ð¸ÐºÐ½ÑƒÑ‚Ð¸ memory leak
@@ -717,6 +751,7 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                 {
                     CoopRuntime.Shutdown(); // ÐšÐ¾Ñ€ÐµÐºÑ‚Ð½Ð¾ Ð·ÑƒÐ¿Ð¸Ð½ÑÑ”Ð¼Ð¾ Ð¼ÐµÑ€ÐµÐ¶Ñƒ Ñ– Ð·Ð²Ñ–Ð»ÑŒÐ½ÑÑ”Ð¼Ð¾ Ñ€ÐµÑÑƒÑ€ÑÐ¸
                 }
+
             } // Ð—Ð°Ð²ÐµÑ€ÑˆÑƒÑ”Ð¼Ð¾ Ð±Ð»Ð¾Ðº try
             catch (Exception ex) // Ð›Ð¾Ð²Ð¸Ð¼Ð¾ Ð±ÑƒÐ´ÑŒ-ÑÐºÑ– Ð²Ð¸Ð½ÑÑ‚ÐºÐ¸, Ñ‰Ð¾Ð± unload Ð½Ðµ Ð¿Ð°Ð´Ð°Ð²
             { // ÐŸÐ¾Ñ‡Ð¸Ð½Ð°Ñ”Ð¼Ð¾ Ð±Ð»Ð¾Ðº catch
@@ -731,6 +766,8 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
         protected override void OnApplicationTick(float dt) // Ð’Ð¸ÐºÐ»Ð¸ÐºÐ°Ñ”Ñ‚ÑŒÑÑ ÐºÐ¾Ð¶ÐµÐ½ ÐºÐ°Ð´Ñ€ Ð½Ð° Ñ€Ñ–Ð²Ð½Ñ– Ð´Ð¾Ð´Ð°Ñ‚ÐºÑƒ (ÐºÐ¾Ð»Ð¸ Ð³Ñ€Ð° Ð·Ð°Ð¿ÑƒÑ‰ÐµÐ½Ð°)
         { // ÐŸÐ¾Ñ‡Ð¸Ð½Ð°Ñ”Ð¼Ð¾ Ð±Ð»Ð¾Ðº Ð¼ÐµÑ‚Ð¾Ð´Ñƒ
             base.OnApplicationTick(dt); // Ð’Ð¸ÐºÐ»Ð¸ÐºÐ°Ñ”Ð¼Ð¾ Ð±Ð°Ð·Ð¾Ð²Ñƒ Ñ€ÐµÐ°Ð»Ñ–Ð·Ð°Ñ†Ñ–ÑŽ
+
+            CoopCampaignMapPrototypePublisherBehavior.PumpApplicationTick(dt);
 
             if (EnableCoopRuntimeStartup)
             {

@@ -5733,6 +5733,12 @@ namespace CoopSpectator.MissionBehaviors
 
         public override void AfterStart()
         {
+            if (IsCoopCampaignMapPrototypeRuntime(Mission))
+            {
+                base.AfterStart();
+                return;
+            }
+
             ModLogger.Info("CoopMissionSpawnLogic AfterStart ENTER");
             base.AfterStart();
             Mission mission = Mission;
@@ -5824,6 +5830,7 @@ namespace CoopSpectator.MissionBehaviors
         public override void OnMissionTick(float dt)
         {
             base.OnMissionTick(dt);
+            if (IsCoopCampaignMapPrototypeRuntime(Mission)) return;
             if (!_hasLoggedStart) return;
             BattleAgentCapacityPolicy.Tick(Mission, "CoopMissionSpawnLogic.OnMissionTick");
             ExactSiegeMoraleDiagnostics.Tick(Mission, "CoopMissionSpawnLogic.OnMissionTick");
@@ -7323,7 +7330,9 @@ namespace CoopSpectator.MissionBehaviors
 
         public static void TryRunDedicatedMissionObserver(Mission mission)
         {
-            if (mission == null || !GameNetwork.IsServer)
+            if (mission == null ||
+                !GameNetwork.IsServer ||
+                IsCoopCampaignMapPrototypeRuntime(mission))
                 return;
 
             bool isNewMission = !ReferenceEquals(_lastDedicatedObservedMission, mission);
@@ -7397,13 +7406,23 @@ namespace CoopSpectator.MissionBehaviors
 
         public static void TryRunDedicatedMissionNetworkBootstrap(Mission mission)
         {
-            if (mission == null || !GameNetwork.IsServer)
+            if (mission == null ||
+                !GameNetwork.IsServer ||
+                IsCoopCampaignMapPrototypeRuntime(mission))
                 return;
 
             if (!ShouldDedicatedObserverUseStrictNativeReadyGate(mission))
                 return;
 
             TryEnsureDedicatedObserverNetworkBridgeBehavior(mission, isNewMission: false);
+        }
+
+        private static bool IsCoopCampaignMapPrototypeRuntime(Mission mission)
+        {
+            return mission != null &&
+                   CoopCampaignMapPrototypeContract.ShouldSuppressDedicatedBattleObserver(
+                       mission.GetMissionBehavior<MissionMultiplayerCoopCampaignMapPrototype>() != null,
+                       mission.GetMissionBehavior<CoopCampaignMapPrototypeNetworkController>() != null);
         }
 
         private static bool TryEnsureDedicatedObserverNetworkBridgeBehavior(Mission mission, bool isNewMission)

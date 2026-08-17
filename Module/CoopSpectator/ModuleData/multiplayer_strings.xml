@@ -12,6 +12,8 @@
   <string id="str_multiplayer_game_type.CoopHideoutDay" text="{=*}Coop Hideout Assault" />
   <string id="str_multiplayer_official_game_type_name.CoopHideoutNight" text="{=*}Coop Hideout Ambush" />
   <string id="str_multiplayer_game_type.CoopHideoutNight" text="{=*}Coop Hideout Ambush" />
+  <string id="str_multiplayer_official_game_type_name.CoopCampaignMapPrototype" text="{=*}Coop Campaign Map Prototype" />
+  <string id="str_multiplayer_game_type.CoopCampaignMapPrototype" text="{=*}Coop Campaign Map Prototype" />
   <string id="CoopDelegateControlToAi" text="{=*}Delegate control to AI" />
   <string id="CoopReturnControlHint" text="{=*}H — Return control" />
   <string id="CoopAttackSiegeEngines" text="{=*}Attack Siege Engines" />
