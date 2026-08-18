@@ -34924,14 +34924,6 @@ namespace CoopSpectator.MissionBehaviors
                         : "mountProtection=skipped:no-mount";
                 possessionProtectionState = agentProtectionState + " " + mountProtectionState;
 
-                possessionStage = "sync-loaded-crossbow-before-player-control";
-                string possessionCrossbowRuntimeSyncState =
-                    TrySendExactHeroPossessionCrossbowRuntimeStateToPeer(
-                        peer,
-                        targetAgent,
-                        targetEntryState,
-                        source + " replace-bot pre-control");
-
                 possessionStage = "native-replace-bot";
                 Agent replacedAgent = mission.ReplaceBotWithPlayer(targetAgent, missionPeer);
                 if (replacedAgent == null)
@@ -35012,7 +35004,6 @@ namespace CoopSpectator.MissionBehaviors
                     " " + commanderControlState +
                     " " + formationOwnershipState +
                     " " + reappliedAgentState +
-                    " " + possessionCrossbowRuntimeSyncState +
                     " RemovedPendingVisuals=" + removedPendingVisuals +
                     " " + possessionProtectionState +
                     " Source=" + (source ?? "unknown"));
@@ -35481,13 +35472,6 @@ namespace CoopSpectator.MissionBehaviors
                     clearedStaleControlledAgent = true;
                 }
 
-                string possessionCrossbowRuntimeSyncState =
-                    TrySendExactHeroPossessionCrossbowRuntimeStateToPeer(
-                        peer,
-                        targetAgent,
-                        targetEntryState,
-                        source + " manual-respawn pre-control");
-
                 if (peer.IsConnectionActive && !peer.IsServerPeer)
                 {
                     GameNetwork.BeginModuleEventAsServer(peer);
@@ -35566,7 +35550,6 @@ namespace CoopSpectator.MissionBehaviors
                     " " + commanderControlState +
                     " " + formationOwnershipState +
                     " " + reappliedAgentState +
-                    " " + possessionCrossbowRuntimeSyncState +
                     " RemovedPendingVisuals=" + removedPendingVisuals +
                     " ClearedStaleControlledAgent=" + clearedStaleControlledAgent +
                     " Reason={" + (manualRespawnReason ?? "unknown") + "}" +
@@ -36037,169 +36020,6 @@ namespace CoopSpectator.MissionBehaviors
             return variantIndex >= 0
                 ? entryId.Substring(0, variantIndex)
                 : entryId;
-        }
-
-        private static string TrySendExactHeroPossessionCrossbowRuntimeStateToPeer(
-            NetworkCommunicator peer,
-            Agent agent,
-            RosterEntryState entryState,
-            string source)
-        {
-            bool isServer = GameNetwork.IsServer;
-            bool targetPeerActive = peer != null && peer.IsConnectionActive;
-            bool targetPeerRemote = peer != null && !peer.IsServerPeer;
-            bool agentExists = agent != null;
-            bool agentActive = agentExists && agent.IsActive();
-            bool agentHuman = agentExists && agent.IsHuman && !agent.IsMount;
-            bool exactHero =
-                entryState != null &&
-                IsHeroEntryEligibleForExactPersonalPerks(entryState) &&
-                IsCurrentRuntimeExactEntryContractSupported(entryState);
-            bool agentAiControlled = agentExists && agent.IsAIControlled;
-            bool exactWeaponResolutionAvailable = false;
-            bool mainHandMatchesResolution = false;
-            bool mainHandIsCrossbow = false;
-            bool compatibleAmmoAvailable = false;
-            EquipmentIndex mainHandSlot = EquipmentIndex.None;
-            EquipmentIndex ammoSlot = EquipmentIndex.None;
-            EquipmentIndex currentMainHandSlot = EquipmentIndex.None;
-            MissionWeapon mainHandWeapon = MissionWeapon.Invalid;
-            MissionWeapon ammoWeapon = MissionWeapon.Invalid;
-            int chamberAmmo = 0;
-            int maximumChamberAmmo = 0;
-            int reloadPhase = 0;
-            int reloadPhaseCount = 0;
-
-            try
-            {
-                ExactWeaponSlotResolution resolution = null;
-                exactWeaponResolutionAvailable =
-                    agentExists &&
-                    agent.Equipment != null &&
-                    ExactWeaponSlotMaterializationPolicy.TryResolveInitialWield(
-                        agent.Equipment,
-                        entryState,
-                        out resolution);
-                if (exactWeaponResolutionAvailable && resolution != null)
-                {
-                    mainHandSlot = resolution.MainHandSlot;
-                    ammoSlot = resolution.CompatibleAmmoSlot;
-                    bool mainHandSlotValid =
-                        mainHandSlot >= EquipmentIndex.Weapon0 &&
-                        mainHandSlot <= EquipmentIndex.Weapon3;
-                    bool ammoSlotValid =
-                        ammoSlot >= EquipmentIndex.Weapon0 &&
-                        ammoSlot <= EquipmentIndex.Weapon3;
-
-                    if (mainHandSlotValid)
-                    {
-                        currentMainHandSlot = agent.GetPrimaryWieldedItemIndex();
-                        mainHandWeapon = agent.Equipment[mainHandSlot];
-                        mainHandMatchesResolution =
-                            currentMainHandSlot == mainHandSlot &&
-                            !mainHandWeapon.IsEmpty &&
-                            mainHandWeapon.Item != null &&
-                            string.Equals(
-                                mainHandWeapon.Item.StringId,
-                                resolution.MainHandItemId,
-                                StringComparison.Ordinal);
-                        WeaponComponentData mainHandUsage = mainHandWeapon.CurrentUsageItem;
-                        mainHandIsCrossbow =
-                            mainHandMatchesResolution &&
-                            mainHandUsage != null &&
-                            mainHandUsage.WeaponClass == WeaponClass.Crossbow;
-
-                        if (mainHandIsCrossbow)
-                        {
-                            chamberAmmo = mainHandWeapon.Ammo;
-                            maximumChamberAmmo = mainHandWeapon.MaxAmmo;
-                            reloadPhase = mainHandWeapon.ReloadPhase;
-                            reloadPhaseCount = mainHandWeapon.ReloadPhaseCount;
-                            if (resolution.HasCompatibleAmmo && ammoSlotValid)
-                            {
-                                ammoWeapon = agent.Equipment[ammoSlot];
-                                WeaponComponentData ammoUsage = ammoWeapon.CurrentUsageItem;
-                                compatibleAmmoAvailable =
-                                    !ammoWeapon.IsEmpty &&
-                                    ammoUsage != null &&
-                                    ammoUsage.IsAmmo &&
-                                    ammoUsage.WeaponClass == mainHandUsage.AmmoClass;
-                            }
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                return
-                    "PossessionCrossbowRuntimeSync=skipped:state-read-exception:" + ex.GetType().Name +
-                    "|AgentIndex=" + (agent?.Index ?? -1) +
-                    "|Source=" + (source ?? "unknown");
-            }
-
-            CoopPossessionCrossbowRuntimeSyncResult decision =
-                CoopPossessionCrossbowRuntimeSyncContract.Evaluate(
-                    isServer,
-                    targetPeerActive,
-                    targetPeerRemote,
-                    agentExists,
-                    agentActive,
-                    agentHuman,
-                    exactHero,
-                    agentAiControlled,
-                    exactWeaponResolutionAvailable,
-                    mainHandMatchesResolution,
-                    mainHandIsCrossbow,
-                    compatibleAmmoAvailable,
-                    chamberAmmo,
-                    maximumChamberAmmo,
-                    reloadPhase,
-                    reloadPhaseCount);
-
-            string stateSummary =
-                "|AgentIndex=" + (agent?.Index ?? -1) +
-                "|CurrentMain=" + currentMainHandSlot +
-                "|ResolvedMain=" + mainHandSlot +
-                "|AmmoSlot=" + ammoSlot +
-                "|AmmoSlotData=" + (compatibleAmmoAvailable ? ammoWeapon.RawDataForNetwork.ToString() : "unavailable") +
-                "|ChamberAmmo=" + chamberAmmo + "/" + maximumChamberAmmo +
-                "|ReloadPhase=" + reloadPhase + "/" + reloadPhaseCount +
-                "|Source=" + (source ?? "unknown");
-            if (!decision.ShouldSynchronize)
-                return "PossessionCrossbowRuntimeSync=skipped:" + decision.Reason + stateSummary;
-
-            try
-            {
-                GameNetwork.BeginModuleEventAsServer(peer);
-                GameNetwork.WriteMessage(new NetworkMessages.FromServer.SetWeaponNetworkData(
-                    agent.Index,
-                    ammoSlot,
-                    ammoWeapon.RawDataForNetwork));
-                GameNetwork.EndModuleEventAsServer();
-
-                GameNetwork.BeginModuleEventAsServer(peer);
-                GameNetwork.WriteMessage(new NetworkMessages.FromServer.SetWeaponAmmoData(
-                    agent.Index,
-                    mainHandSlot,
-                    ammoSlot,
-                    mainHandWeapon.Ammo));
-                GameNetwork.EndModuleEventAsServer();
-
-                GameNetwork.BeginModuleEventAsServer(peer);
-                GameNetwork.WriteMessage(new NetworkMessages.FromServer.SetWeaponReloadPhase(
-                    agent.Index,
-                    mainHandSlot,
-                    mainHandWeapon.ReloadPhase));
-                GameNetwork.EndModuleEventAsServer();
-
-                return "PossessionCrossbowRuntimeSync=sent:" + decision.Reason + stateSummary;
-            }
-            catch (Exception ex)
-            {
-                return
-                    "PossessionCrossbowRuntimeSync=failed:send-exception:" + ex.GetType().Name +
-                    stateSummary;
-            }
         }
 
         private static bool ShouldForceInitialWieldAfterStrictPreSpawnExactLoadout(RosterEntryState entryState)
@@ -38482,15 +38302,6 @@ namespace CoopSpectator.MissionBehaviors
                     out _,
                     out _);
 
-                RosterEntryState targetEntryState =
-                    BattleSnapshotRuntimeState.GetEntryState(observedState.EntryId);
-                string possessionCrossbowRuntimeSyncState =
-                    TrySendExactHeroPossessionCrossbowRuntimeStateToPeer(
-                        peer,
-                        targetAgent,
-                        targetEntryState,
-                        source + " reclaim pre-control");
-
                 PrepareExistingAgentForPlayerControl(targetAgent);
                 Agent reclaimedAgent = mission.ReplaceBotWithPlayer(targetAgent, missionPeer);
                 if (reclaimedAgent == null)
@@ -38569,7 +38380,6 @@ namespace CoopSpectator.MissionBehaviors
                     " Formation=" + formation.FormationIndex +
                     " " + commanderControlState +
                     " " + formationOwnershipState +
-                    " " + possessionCrossbowRuntimeSyncState +
                     " Source=" + (source ?? "unknown"));
                 return true;
             }

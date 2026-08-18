@@ -63,9 +63,9 @@ internal static class Program
             ValidateExactHeroAgentCapabilityFlagMapping();
             ValidateExactHeroAgentCapabilityFlagsPreserveExistingFlags();
             ValidateClientExactHeroCapabilityApplyOrder();
-            ValidatePossessionCrossbowRuntimeSyncAllowsOnlyLoadedTerminalState();
-            ValidatePossessionCrossbowRuntimeSyncRejectsUnsafeState();
-            ValidatePossessionCrossbowRuntimeSyncPrecedesPlayerControl();
+            ValidateStrictExactHeroUsesAuthoritativeCreateAgentMissionEquipment();
+            ValidateStrictExactHeroRejectsIncompatibleMissionEquipment();
+            ValidatePossessionDoesNotInjectWeaponRuntimeState();
             ValidateMissingItemCatalogExcludesLoadedItems();
             ValidateMissingItemCatalogLoadsEachMissingIdOnce();
             ValidateMissingItemCatalogRejectsInvalidNodes();
@@ -1090,154 +1090,116 @@ internal static class Program
             "The client-local combat profile must restore exact campaign hero capability flags.");
     }
 
-    private static void ValidatePossessionCrossbowRuntimeSyncAllowsOnlyLoadedTerminalState()
+    private static void ValidateStrictExactHeroUsesAuthoritativeCreateAgentMissionEquipment()
     {
-        CoopPossessionCrossbowRuntimeSyncResult result =
-            EvaluatePossessionCrossbowRuntimeSync();
+        string source = File.ReadAllText(
+            Path.Combine(FindRepositoryRoot(), "Patches", "BattleMapSpawnHandoffPatch.cs"));
 
-        Assert(result.ShouldSynchronize,
-            "A remote peer acquiring an AI-controlled exact hero must receive an already-loaded terminal crossbow state.");
-        Assert(result.Reason == "loaded-terminal-crossbow",
-            "The allowed possession crossbow state must expose the exact safety reason.");
+        const string strictAdapterSignature =
+            "private static bool TryHandleStrictExactHeroCreateAgentViaContract";
+        int strictAdapterStart = source.IndexOf(strictAdapterSignature, StringComparison.Ordinal);
+        int strictAdapterEnd = source.IndexOf(
+            "private static bool TryHandleExactSiegeTroopCreateAgentViaSnapshot",
+            strictAdapterStart,
+            StringComparison.Ordinal);
+        Assert(strictAdapterStart >= 0 && strictAdapterEnd > strictAdapterStart,
+            "The strict exact hero CreateAgent adapter must remain available for source-contract validation.");
+
+        string strictAdapterBody = source.Substring(
+            strictAdapterStart,
+            strictAdapterEnd - strictAdapterStart);
+        int authoritativeResolveIndex = strictAdapterBody.IndexOf(
+            "TryResolveStrictExactHeroCreateAgentAuthoritativeMissionEquipment(",
+            StringComparison.Ordinal);
+        int missionEquipmentApplyIndex = strictAdapterBody.IndexOf(
+            ".MissionEquipment(createTimeMissionEquipment)",
+            StringComparison.Ordinal);
+        Assert(
+            authoritativeResolveIndex >= 0 &&
+            missionEquipmentApplyIndex > authoritativeResolveIndex,
+            "The strict exact hero adapter must resolve and apply the authoritative CreateAgent mission equipment.");
+
+        const string resolverSignature =
+            "private static bool TryResolveStrictExactHeroCreateAgentAuthoritativeMissionEquipment";
+        int resolverStart = source.IndexOf(resolverSignature, StringComparison.Ordinal);
+        int resolverEnd = source.IndexOf(
+            "private static Banner ResolveStrictExactHeroCreateAgentBanner",
+            resolverStart,
+            StringComparison.Ordinal);
+        Assert(resolverStart >= 0 && resolverEnd > resolverStart,
+            "The authoritative mission-equipment resolver must remain available for source-contract validation.");
+
+        string resolverBody = source.Substring(resolverStart, resolverEnd - resolverStart);
+        Assert(
+            resolverBody.IndexOf(
+                "authoritativeMissionEquipment = createAgent?.MissionEquipment;",
+                StringComparison.Ordinal) >= 0,
+            "Mutable weapon runtime state must come directly from the server-authoritative CreateAgent payload.");
+        Assert(
+            resolverBody.IndexOf("return exactMissionEquipment", StringComparison.Ordinal) < 0 &&
+            resolverBody.IndexOf("authoritativeMissionEquipment = expectedMissionEquipment", StringComparison.Ordinal) < 0,
+            "The exact contract mission equipment must never replace the authoritative CreateAgent runtime state.");
     }
 
-    private static void ValidatePossessionCrossbowRuntimeSyncRejectsUnsafeState()
+    private static void ValidateStrictExactHeroRejectsIncompatibleMissionEquipment()
     {
-        Assert(!EvaluatePossessionCrossbowRuntimeSync(isServer: false).ShouldSynchronize,
-            "A client must never publish possession crossbow runtime state.");
-        Assert(!EvaluatePossessionCrossbowRuntimeSync(targetPeerActive: false).ShouldSynchronize,
-            "An inactive peer must not receive a possession crossbow snapshot.");
-        Assert(!EvaluatePossessionCrossbowRuntimeSync(targetPeerRemote: false).ShouldSynchronize,
-            "A local server peer must not receive a redundant network snapshot.");
-        Assert(!EvaluatePossessionCrossbowRuntimeSync(agentActive: false).ShouldSynchronize,
-            "An inactive agent must not receive a possession crossbow snapshot.");
-        Assert(!EvaluatePossessionCrossbowRuntimeSync(agentHuman: false).ShouldSynchronize,
-            "A non-human agent must not use the possession crossbow contract.");
-        Assert(!EvaluatePossessionCrossbowRuntimeSync(exactHero: false).ShouldSynchronize,
-            "A non-hero entry must not use the exact hero possession crossbow contract.");
-        Assert(!EvaluatePossessionCrossbowRuntimeSync(agentAiControlled: false).ShouldSynchronize,
-            "A snapshot must not be injected after player control has already become active.");
-        Assert(!EvaluatePossessionCrossbowRuntimeSync(exactWeaponResolutionAvailable: false).ShouldSynchronize,
-            "An unresolved weapon layout must fail safely.");
-        Assert(!EvaluatePossessionCrossbowRuntimeSync(mainHandMatchesResolution: false).ShouldSynchronize,
-            "A different wielded slot must fail safely.");
-        Assert(!EvaluatePossessionCrossbowRuntimeSync(mainHandIsCrossbow: false).ShouldSynchronize,
-            "A non-crossbow weapon must not receive crossbow runtime messages.");
-        Assert(!EvaluatePossessionCrossbowRuntimeSync(compatibleAmmoAvailable: false).ShouldSynchronize,
-            "A crossbow without exact compatible ammo must fail safely.");
-        Assert(!EvaluatePossessionCrossbowRuntimeSync(chamberAmmo: 0).ShouldSynchronize,
-            "An empty crossbow chamber must never be forced into the terminal reload phase.");
-        Assert(!EvaluatePossessionCrossbowRuntimeSync(chamberAmmo: 2, maximumChamberAmmo: 1).ShouldSynchronize,
-            "An invalid chamber count must fail safely.");
-        Assert(!EvaluatePossessionCrossbowRuntimeSync(reloadPhase: 1, reloadPhaseCount: 2).ShouldSynchronize,
-            "A crossbow still reloading must not receive a fabricated terminal phase.");
-        Assert(!EvaluatePossessionCrossbowRuntimeSync(reloadPhase: 2, reloadPhaseCount: 0).ShouldSynchronize,
-            "An invalid reload phase count must fail safely.");
-        Assert(!EvaluatePossessionCrossbowRuntimeSync(reloadPhase: 11, reloadPhaseCount: 11).ShouldSynchronize,
-            "A reload phase outside Bannerlord's supported range must fail safely.");
+        string source = File.ReadAllText(
+            Path.Combine(FindRepositoryRoot(), "Patches", "BattleMapSpawnHandoffPatch.cs"));
+
+        const string resolverSignature =
+            "private static bool TryResolveStrictExactHeroCreateAgentAuthoritativeMissionEquipment";
+        int resolverStart = source.IndexOf(resolverSignature, StringComparison.Ordinal);
+        int resolverEnd = source.IndexOf(
+            "private static Banner ResolveStrictExactHeroCreateAgentBanner",
+            resolverStart,
+            StringComparison.Ordinal);
+        Assert(resolverStart >= 0 && resolverEnd > resolverStart,
+            "The authoritative mission-equipment resolver must remain available for compatibility validation.");
+
+        string resolverBody = source.Substring(resolverStart, resolverEnd - resolverStart);
+        Assert(
+            resolverBody.IndexOf("weapon-slot-presence-mismatch", StringComparison.Ordinal) >= 0 &&
+            resolverBody.IndexOf("weapon-slot-item-mismatch", StringComparison.Ordinal) >= 0 &&
+            resolverBody.IndexOf("weapon-slot-modifier-mismatch", StringComparison.Ordinal) >= 0 &&
+            resolverBody.IndexOf("weapon-slot-usage-mismatch", StringComparison.Ordinal) >= 0,
+            "The strict exact adapter must reject slot, item, modifier, and usage mismatches before mixing sources.");
+        Assert(
+            resolverBody.IndexOf("authoritativeMissionEquipment = null;", StringComparison.Ordinal) >= 0,
+            "An incompatible CreateAgent payload must fail closed instead of exposing mixed weapon state.");
     }
 
-    private static CoopPossessionCrossbowRuntimeSyncResult EvaluatePossessionCrossbowRuntimeSync(
-        bool isServer = true,
-        bool targetPeerActive = true,
-        bool targetPeerRemote = true,
-        bool agentExists = true,
-        bool agentActive = true,
-        bool agentHuman = true,
-        bool exactHero = true,
-        bool agentAiControlled = true,
-        bool exactWeaponResolutionAvailable = true,
-        bool mainHandMatchesResolution = true,
-        bool mainHandIsCrossbow = true,
-        bool compatibleAmmoAvailable = true,
-        int chamberAmmo = 1,
-        int maximumChamberAmmo = 1,
-        int reloadPhase = 2,
-        int reloadPhaseCount = 2)
-    {
-        return CoopPossessionCrossbowRuntimeSyncContract.Evaluate(
-            isServer,
-            targetPeerActive,
-            targetPeerRemote,
-            agentExists,
-            agentActive,
-            agentHuman,
-            exactHero,
-            agentAiControlled,
-            exactWeaponResolutionAvailable,
-            mainHandMatchesResolution,
-            mainHandIsCrossbow,
-            compatibleAmmoAvailable,
-            chamberAmmo,
-            maximumChamberAmmo,
-            reloadPhase,
-            reloadPhaseCount);
-    }
-
-    private static void ValidatePossessionCrossbowRuntimeSyncPrecedesPlayerControl()
+    private static void ValidatePossessionDoesNotInjectWeaponRuntimeState()
     {
         string source = File.ReadAllText(
             Path.Combine(FindRepositoryRoot(), "Mission", "CoopMissionBehaviors.cs"));
 
-        const string helperSignature =
-            "private static string TrySendExactHeroPossessionCrossbowRuntimeStateToPeer";
-        int helperStart = source.IndexOf(helperSignature, StringComparison.Ordinal);
-        int helperEnd = source.IndexOf(
-            "private static bool ShouldForceInitialWieldAfterStrictPreSpawnExactLoadout",
-            helperStart,
-            StringComparison.Ordinal);
-        Assert(helperStart >= 0 && helperEnd > helperStart,
-            "The exact hero possession crossbow synchronization helper must remain available.");
+        Assert(
+            source.IndexOf(
+                "TrySendExactHeroPossessionCrossbowRuntimeStateToPeer",
+                StringComparison.Ordinal) < 0,
+            "Possession must not use a custom crossbow runtime-state synchronization helper.");
 
-        string helperBody = source.Substring(helperStart, helperEnd - helperStart);
-        int networkDataIndex = helperBody.IndexOf(
-            "new NetworkMessages.FromServer.SetWeaponNetworkData",
-            StringComparison.Ordinal);
-        int ammoDataIndex = helperBody.IndexOf(
-            "new NetworkMessages.FromServer.SetWeaponAmmoData",
-            StringComparison.Ordinal);
-        int reloadPhaseIndex = helperBody.IndexOf(
-            "new NetworkMessages.FromServer.SetWeaponReloadPhase",
-            StringComparison.Ordinal);
-        Assert(
-            networkDataIndex >= 0 &&
-            ammoDataIndex > networkDataIndex &&
-            reloadPhaseIndex > ammoDataIndex,
-            "Possession synchronization must preserve Bannerlord's ammo-slot, chamber-ammo, reload-phase order.");
-        Assert(
-            helperBody.Split(
-                new[] { "GameNetwork.BeginModuleEventAsServer(peer)" },
-                StringSplitOptions.None).Length - 1 == 3,
-            "Each possession crossbow message must be addressed only to the acquiring peer.");
-        Assert(
-            helperBody.IndexOf("BeginBroadcastModuleEvent", StringComparison.Ordinal) < 0,
-            "Possession crossbow state must never be broadcast to other players.");
-
-        AssertPossessionSyncPrecedes(
+        AssertPossessionPathDoesNotInjectWeaponRuntimeState(
             source,
             "private static bool TryReplaceMaterializedBotWithPlayer",
             "private static string ArmMaterializedPossessionProtection",
-            "Agent replacedAgent = mission.ReplaceBotWithPlayer",
             "The generic materialized possession path");
-        AssertPossessionSyncPrecedes(
+        AssertPossessionPathDoesNotInjectWeaponRuntimeState(
             source,
             "private static bool TryBindMaterializedBotWithPlayerForSiegeRespawn",
-            helperSignature,
-            "new NetworkMessages.FromServer.ReplaceBotWithPlayer",
+            "private static RosterEntryState ResolveMaterializedEntryStateForPossessedAgent",
             "The manual siege possession path");
-        AssertPossessionSyncPrecedes(
+        AssertPossessionPathDoesNotInjectWeaponRuntimeState(
             source,
             "private static bool TryReclaimPeerAgentControlFromAi",
             "private static void TryRollbackFailedAgentReclaim",
-            "PrepareExistingAgentForPlayerControl(targetAgent)",
             "The AI reclaim possession path");
     }
 
-    private static void AssertPossessionSyncPrecedes(
+    private static void AssertPossessionPathDoesNotInjectWeaponRuntimeState(
         string source,
         string methodSignature,
         string followingMethodSignature,
-        string playerControlMarker,
         string pathName)
     {
         int methodStart = source.IndexOf(methodSignature, StringComparison.Ordinal);
@@ -1249,14 +1211,11 @@ internal static class Program
             pathName + " must remain available for source-contract validation.");
 
         string methodBody = source.Substring(methodStart, methodEnd - methodStart);
-        int syncIndex = methodBody.IndexOf(
-            "TrySendExactHeroPossessionCrossbowRuntimeStateToPeer(",
-            StringComparison.Ordinal);
-        int playerControlIndex = methodBody.IndexOf(playerControlMarker, StringComparison.Ordinal);
         Assert(
-            syncIndex >= 0 &&
-            playerControlIndex > syncIndex,
-            pathName + " must synchronize the loaded crossbow while the agent is still AI-controlled.");
+            methodBody.IndexOf("SetWeaponNetworkData", StringComparison.Ordinal) < 0 &&
+            methodBody.IndexOf("SetWeaponAmmoData", StringComparison.Ordinal) < 0 &&
+            methodBody.IndexOf("SetWeaponReloadPhase", StringComparison.Ordinal) < 0,
+            pathName + " must preserve Bannerlord's authoritative weapon state without manual injection.");
     }
 
     private static void Assert(bool condition, string message)

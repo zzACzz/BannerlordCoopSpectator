@@ -14904,10 +14904,23 @@ namespace CoopSpectator.Patches
                 createTimeSpawnEquipment[EquipmentIndex.Horse] = default;
                 createTimeSpawnEquipment[EquipmentIndex.HorseHarness] = default;
             }
-            MissionEquipment createTimeMissionEquipment =
-                ResolveStrictExactHeroCreateAgentMissionEquipment(contract, createAgent);
-            if (createTimeSpawnEquipment == null || createTimeMissionEquipment == null)
+            if (createTimeSpawnEquipment == null)
                 return false;
+
+            if (!TryResolveStrictExactHeroCreateAgentAuthoritativeMissionEquipment(
+                    contract,
+                    createAgent,
+                    out MissionEquipment createTimeMissionEquipment,
+                    out string missionEquipmentResolutionFailure))
+            {
+                ModLogger.Info(
+                    "BattleMapSpawnHandoffPatch: strict exact CreateAgent adapter skipped because the authoritative mission equipment was unavailable or incompatible. " +
+                    "AgentIndex=" + createAgent.AgentIndex +
+                    " EntryId=" + (entryId ?? "null") +
+                    " ResolutionSource=" + (resolutionSource ?? "null") +
+                    " Reason=" + (missionEquipmentResolutionFailure ?? "unknown"));
+                return false;
+            }
 
             TaleWorlds.Localization.TextObject originalTroopName = null;
             bool hasTemporaryNameOverride =
@@ -16382,15 +16395,79 @@ namespace CoopSpectator.Patches
             return createAgent?.SpawnEquipment?.Clone(false);
         }
 
-        private static MissionEquipment ResolveStrictExactHeroCreateAgentMissionEquipment(
+        private static bool TryResolveStrictExactHeroCreateAgentAuthoritativeMissionEquipment(
             ExactTransferSpawnContract contract,
-            CreateAgent createAgent)
+            CreateAgent createAgent,
+            out MissionEquipment authoritativeMissionEquipment,
+            out string failureReason)
         {
-            MissionEquipment exactMissionEquipment = contract?.Equipment?.MissionEquipment;
-            if (exactMissionEquipment != null)
-                return exactMissionEquipment;
+            authoritativeMissionEquipment = createAgent?.MissionEquipment;
+            failureReason = null;
+            if (authoritativeMissionEquipment == null)
+            {
+                failureReason = "create-agent-mission-equipment-unavailable";
+                return false;
+            }
 
-            return createAgent?.MissionEquipment;
+            MissionEquipment expectedMissionEquipment = contract?.Equipment?.MissionEquipment;
+            if (expectedMissionEquipment == null)
+            {
+                failureReason = "exact-contract-mission-equipment-unavailable";
+                return false;
+            }
+
+            for (EquipmentIndex slot = EquipmentIndex.Weapon0; slot <= EquipmentIndex.Weapon3; slot++)
+            {
+                MissionWeapon expectedWeapon = expectedMissionEquipment[slot];
+                MissionWeapon authoritativeWeapon = authoritativeMissionEquipment[slot];
+                bool expectedEmpty = expectedWeapon.IsEmpty || expectedWeapon.Item == null;
+                bool authoritativeEmpty = authoritativeWeapon.IsEmpty || authoritativeWeapon.Item == null;
+                if (expectedEmpty != authoritativeEmpty)
+                {
+                    failureReason = "weapon-slot-presence-mismatch:" + slot;
+                    authoritativeMissionEquipment = null;
+                    return false;
+                }
+
+                if (expectedEmpty)
+                    continue;
+
+                string expectedItemId = expectedWeapon.Item.StringId ?? string.Empty;
+                string authoritativeItemId = authoritativeWeapon.Item.StringId ?? string.Empty;
+                if (!string.Equals(expectedItemId, authoritativeItemId, StringComparison.Ordinal))
+                {
+                    failureReason =
+                        "weapon-slot-item-mismatch:" + slot +
+                        ":expected=" + expectedItemId +
+                        ":actual=" + authoritativeItemId;
+                    authoritativeMissionEquipment = null;
+                    return false;
+                }
+
+                string expectedModifierId = expectedWeapon.ItemModifier?.StringId ?? string.Empty;
+                string authoritativeModifierId = authoritativeWeapon.ItemModifier?.StringId ?? string.Empty;
+                if (!string.Equals(expectedModifierId, authoritativeModifierId, StringComparison.Ordinal))
+                {
+                    failureReason =
+                        "weapon-slot-modifier-mismatch:" + slot +
+                        ":expected=" + expectedModifierId +
+                        ":actual=" + authoritativeModifierId;
+                    authoritativeMissionEquipment = null;
+                    return false;
+                }
+
+                if (expectedWeapon.CurrentUsageIndex != authoritativeWeapon.CurrentUsageIndex)
+                {
+                    failureReason =
+                        "weapon-slot-usage-mismatch:" + slot +
+                        ":expected=" + expectedWeapon.CurrentUsageIndex +
+                        ":actual=" + authoritativeWeapon.CurrentUsageIndex;
+                    authoritativeMissionEquipment = null;
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private static Banner ResolveStrictExactHeroCreateAgentBanner(Team team, Formation formation)
