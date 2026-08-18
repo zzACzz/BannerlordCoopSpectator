@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.MissionBehaviors;
 using TaleWorlds.CampaignSystem;
@@ -6,7 +7,9 @@ using TaleWorlds.CampaignSystem.GameComponents;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.Core;
 using TaleWorlds.Engine;
+using TaleWorlds.Engine.GauntletUI;
 using TaleWorlds.Engine.Screens;
+using TaleWorlds.GauntletUI;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.View.MissionViews;
@@ -21,7 +24,24 @@ namespace CoopSpectator.UI
     public sealed class CoopCampaignMapPrototypeMissionView : MissionView
     {
         private const string MarkerMeshName = "order_flag_small";
+        private const string EntityOverlayMovieName = "PartyNameplate";
+        private const string SettlementOverlayMovieName = "SettlementNameplate";
         private const float RenderReadinessTimeoutSeconds = 5f;
+
+        private sealed class EntityReplica
+        {
+            public CoopCampaignMapPrototypeEntityState Target { get; set; }
+
+            public double DisplayedX { get; set; }
+
+            public double DisplayedY { get; set; }
+
+            public double DisplayedHeading { get; set; }
+
+            public Vec3 WorldPosition { get; set; }
+
+            public GameEntity Marker { get; set; }
+        }
 
         private sealed class PassiveSceneLayer : SceneLayer
         {
@@ -49,6 +69,19 @@ namespace CoopSpectator.UI
         private MBAgentRendererSceneController _agentRendererSceneController;
         private Camera _camera;
         private GameEntity _hostMarker;
+        private readonly Dictionary<string, EntityReplica> _entityReplicas =
+            new Dictionary<string, EntityReplica>(StringComparer.OrdinalIgnoreCase);
+        private IReadOnlyList<CoopCampaignMapPrototypeEntityState>
+            _pendingVisibleEntities;
+        private int _pendingVisibleEntitiesRevision = -1;
+        private int _appliedVisibleEntitiesRevision = -1;
+        private GauntletLayer _entityOverlayLayer;
+        private GauntletMovieIdentifier _entityOverlayMovie;
+        private CoopCampaignMapPrototypeEntityOverlayVM _entityOverlayViewModel;
+        private GauntletLayer _settlementOverlayLayer;
+        private GauntletMovieIdentifier _settlementOverlayMovie;
+        private CoopCampaignMapPrototypeSettlementOverlayVM
+            _settlementOverlayViewModel;
         private Vec3 _sceneMinimum;
         private Vec3 _sceneMaximum;
         private double _displayedX = 0.5d;
@@ -67,12 +100,17 @@ namespace CoopSpectator.UI
         private bool _readyRenderStateLogged;
         private bool _timeoutRenderStateLogged;
         private bool _renderStateProbeFailed;
+        private bool _mapSceneReadyToRender;
+        private int _appliedNormalizedTimeOfDay = -1;
+        private int _appliedSeasonTimeFactor = -1;
 
         public override void OnBehaviorInitialize()
         {
             base.OnBehaviorInitialize();
             CoopCampaignMapPrototypeNetworkController.ClientStateChanged +=
                 OnClientStateChanged;
+            CoopCampaignMapPrototypeNetworkController.ClientVisibleEntitiesChanged +=
+                OnClientVisibleEntitiesChanged;
         }
 
         public override void OnMissionScreenInitialize()
@@ -102,35 +140,41 @@ namespace CoopSpectator.UI
             if (_hostMarker == null)
                 return;
 
+            ApplyPendingVisibleEntities();
             CoopCampaignMapPrototypeState current =
                 _targetState ??
                 CoopCampaignMapPrototypeNetworkController.CurrentClientState;
-            if (current == null)
-                return;
-
-            double interpolationAmount = dt <= 0f
-                ? 0d
-                : Math.Min(1d, dt * 8d);
-            _displayedX = CoopCampaignMapPrototypeContract.InterpolateUnit(
-                _displayedX,
-                CoopCampaignMapPrototypeContract.DequantizeUnit(current.NormalizedX),
-                interpolationAmount);
-            _displayedY = CoopCampaignMapPrototypeContract.InterpolateUnit(
-                _displayedY,
-                CoopCampaignMapPrototypeContract.DequantizeUnit(current.NormalizedY),
-                interpolationAmount);
-            _displayedHeading = InterpolateHeading(
-                _displayedHeading,
-                CoopCampaignMapPrototypeContract.DequantizeHeading(current.Heading),
-                interpolationAmount);
-            UpdateDisplayedCamera(current.Camera, interpolationAmount);
-            UpdateMarkerAndCamera();
+            if (current != null)
+            {
+                double interpolationAmount = dt <= 0f
+                    ? 0d
+                    : Math.Min(1d, dt * 8d);
+                _displayedX = CoopCampaignMapPrototypeContract.InterpolateUnit(
+                    _displayedX,
+                    CoopCampaignMapPrototypeContract.DequantizeUnit(current.NormalizedX),
+                    interpolationAmount);
+                _displayedY = CoopCampaignMapPrototypeContract.InterpolateUnit(
+                    _displayedY,
+                    CoopCampaignMapPrototypeContract.DequantizeUnit(current.NormalizedY),
+                    interpolationAmount);
+                _displayedHeading = InterpolateHeading(
+                    _displayedHeading,
+                    CoopCampaignMapPrototypeContract.DequantizeHeading(current.Heading),
+                    interpolationAmount);
+                if (_mapSceneReadyToRender)
+                    ApplyMapVisualState(current);
+                UpdateDisplayedCamera(current.Camera, interpolationAmount);
+                UpdateMarkerAndCamera();
+            }
+            UpdateEntityReplicas(dt);
         }
 
         public override void OnMissionScreenFinalize()
         {
             CoopCampaignMapPrototypeNetworkController.ClientStateChanged -=
                 OnClientStateChanged;
+            CoopCampaignMapPrototypeNetworkController.ClientVisibleEntitiesChanged -=
+                OnClientVisibleEntitiesChanged;
             ReleaseSceneLayer();
             base.OnMissionScreenFinalize();
         }
@@ -139,6 +183,13 @@ namespace CoopSpectator.UI
         {
             if (state != null)
                 _targetState = state;
+        }
+
+        private void OnClientVisibleEntitiesChanged(
+            int revision,
+            IReadOnlyList<CoopCampaignMapPrototypeEntityState> entities)
+        {
+            QueueVisibleEntities(revision, entities);
         }
 
         private void TryLoadCampaignMap()
@@ -226,6 +277,8 @@ namespace CoopSpectator.UI
                 _sceneLayer.SceneView.SetAcceptGlobalDebugRenderObjects(true);
                 _sceneLayer.SceneView.SetResolutionScaling(true);
                 MissionScreen.AddLayer(_sceneLayer);
+                CreateEntityOverlayLayer();
+                CreateSettlementOverlayLayer();
 
                 _mapScene.PreloadForRendering();
                 _mapScene.CheckResources(checkInvisibleEntities: false);
@@ -234,7 +287,14 @@ namespace CoopSpectator.UI
                     CoopCampaignMapPrototypeNetworkController.CurrentClientState;
                 if (initialState != null)
                     _targetState = initialState;
+                QueueVisibleEntities(
+                    CoopCampaignMapPrototypeNetworkController
+                        .CurrentClientVisibleEntitiesRevision,
+                    CoopCampaignMapPrototypeNetworkController
+                        .CurrentClientVisibleEntities);
+                ApplyPendingVisibleEntities();
                 UpdateMarkerAndCamera();
+                UpdateEntityReplicas(0f);
                 ModLogger.Info(
                     "CoopCampaignMapPrototypeMissionView: Main_map loaded in isolated client scene layer. Module=" +
                     ownerModule +
@@ -250,6 +310,238 @@ namespace CoopSpectator.UI
             }
         }
 
+        private void CreateEntityOverlayLayer()
+        {
+            if (_entityOverlayViewModel != null || MissionScreen == null)
+                return;
+
+            _entityOverlayViewModel =
+                new CoopCampaignMapPrototypeEntityOverlayVM();
+            _entityOverlayLayer = new GauntletLayer(
+                "CoopCampaignMapPrototypeEntities",
+                ViewOrderPriority + 1,
+                false);
+            MissionScreen.AddLayer(_entityOverlayLayer);
+            _entityOverlayMovie = _entityOverlayLayer.LoadMovie(
+                EntityOverlayMovieName,
+                _entityOverlayViewModel);
+        }
+
+        private void CreateSettlementOverlayLayer()
+        {
+            if (_settlementOverlayViewModel != null || MissionScreen == null)
+                return;
+
+            _settlementOverlayViewModel =
+                new CoopCampaignMapPrototypeSettlementOverlayVM();
+            _settlementOverlayLayer = new GauntletLayer(
+                "CoopCampaignMapPrototypeSettlements",
+                ViewOrderPriority + 2,
+                false);
+            MissionScreen.AddLayer(_settlementOverlayLayer);
+            _settlementOverlayMovie = _settlementOverlayLayer.LoadMovie(
+                SettlementOverlayMovieName,
+                _settlementOverlayViewModel);
+        }
+
+        private void QueueVisibleEntities(
+            int revision,
+            IReadOnlyList<CoopCampaignMapPrototypeEntityState> entities)
+        {
+            if (revision < 0 ||
+                revision <= _appliedVisibleEntitiesRevision ||
+                revision < _pendingVisibleEntitiesRevision)
+            {
+                return;
+            }
+
+            var clone = new List<CoopCampaignMapPrototypeEntityState>();
+            if (entities != null)
+            {
+                foreach (CoopCampaignMapPrototypeEntityState entity in entities)
+                {
+                    if (entity != null)
+                        clone.Add(entity.Clone());
+                }
+            }
+            _pendingVisibleEntitiesRevision = revision;
+            _pendingVisibleEntities = clone;
+        }
+
+        private void ApplyPendingVisibleEntities()
+        {
+            if (_mapScene == null ||
+                _pendingVisibleEntities == null ||
+                _pendingVisibleEntitiesRevision <= _appliedVisibleEntitiesRevision)
+            {
+                return;
+            }
+
+            var observed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (CoopCampaignMapPrototypeEntityState entity in
+                     _pendingVisibleEntities)
+            {
+                if (!CoopCampaignMapPrototypeContract.IsValidVisibleEntity(entity) ||
+                    !observed.Add(entity.EntityId))
+                {
+                    continue;
+                }
+
+                if (!_entityReplicas.TryGetValue(
+                        entity.EntityId,
+                        out EntityReplica replica))
+                {
+                    replica = new EntityReplica
+                    {
+                        DisplayedX =
+                            CoopCampaignMapPrototypeContract.DequantizeUnit(
+                                entity.NormalizedX),
+                        DisplayedY =
+                            CoopCampaignMapPrototypeContract.DequantizeUnit(
+                                entity.NormalizedY),
+                        DisplayedHeading =
+                            CoopCampaignMapPrototypeContract.DequantizeHeading(
+                                entity.Heading),
+                        Marker = entity.Kind ==
+                                 CoopCampaignMapPrototypeEntityKind.MobileParty
+                            ? CreateHostMarker(_mapScene)
+                            : null
+                    };
+                    _entityReplicas.Add(entity.EntityId, replica);
+                }
+                else if (entity.Kind !=
+                         CoopCampaignMapPrototypeEntityKind.MobileParty &&
+                         replica.Marker != null)
+                {
+                    RemoveMarker(replica.Marker);
+                    replica.Marker = null;
+                }
+                else if (entity.Kind ==
+                         CoopCampaignMapPrototypeEntityKind.MobileParty &&
+                         replica.Marker == null)
+                {
+                    replica.Marker = CreateHostMarker(_mapScene);
+                }
+                replica.Target = entity.Clone();
+            }
+
+            var removed = new List<string>();
+            foreach (KeyValuePair<string, EntityReplica> pair in _entityReplicas)
+            {
+                if (!observed.Contains(pair.Key))
+                    removed.Add(pair.Key);
+            }
+            foreach (string entityId in removed)
+            {
+                EntityReplica replica = _entityReplicas[entityId];
+                RemoveMarker(replica.Marker);
+                _entityReplicas.Remove(entityId);
+            }
+
+            _entityOverlayViewModel?.Synchronize(_pendingVisibleEntities);
+            _settlementOverlayViewModel?.Synchronize(_pendingVisibleEntities);
+            _appliedVisibleEntitiesRevision = _pendingVisibleEntitiesRevision;
+            _pendingVisibleEntitiesRevision = -1;
+            _pendingVisibleEntities = null;
+        }
+
+        private void UpdateEntityReplicas(float dt)
+        {
+            if (_mapScene == null || _camera == null)
+                return;
+
+            double amount = dt <= 0f ? 1d : Math.Min(1d, dt * 6d);
+            float horizontalSpan = Math.Max(
+                _sceneMaximum.x - _sceneMinimum.x,
+                _sceneMaximum.y - _sceneMinimum.y);
+            float markerScale = Math.Max(0.6f, horizontalSpan * 0.0018f);
+            foreach (KeyValuePair<string, EntityReplica> pair in _entityReplicas)
+            {
+                EntityReplica replica = pair.Value;
+                CoopCampaignMapPrototypeEntityState target = replica.Target;
+                if (target == null)
+                    continue;
+
+                if (target.Kind == CoopCampaignMapPrototypeEntityKind.MainParty)
+                {
+                    replica.DisplayedX = _displayedX;
+                    replica.DisplayedY = _displayedY;
+                    replica.DisplayedHeading = _displayedHeading;
+                }
+                else
+                {
+                    replica.DisplayedX =
+                        CoopCampaignMapPrototypeContract.InterpolateUnit(
+                            replica.DisplayedX,
+                            CoopCampaignMapPrototypeContract.DequantizeUnit(
+                                target.NormalizedX),
+                            amount);
+                    replica.DisplayedY =
+                        CoopCampaignMapPrototypeContract.InterpolateUnit(
+                            replica.DisplayedY,
+                            CoopCampaignMapPrototypeContract.DequantizeUnit(
+                                target.NormalizedY),
+                            amount);
+                    replica.DisplayedHeading = InterpolateHeading(
+                        replica.DisplayedHeading,
+                        CoopCampaignMapPrototypeContract.DequantizeHeading(
+                            target.Heading),
+                        amount);
+                }
+
+                replica.WorldPosition = ResolveMapWorldPosition(
+                    replica.DisplayedX,
+                    replica.DisplayedY);
+                if (replica.Marker != null)
+                {
+                    MatrixFrame markerFrame = MatrixFrame.Identity;
+                    markerFrame.rotation.RotateAboutUp(
+                        (float)replica.DisplayedHeading);
+                    markerFrame.origin = replica.WorldPosition +
+                                         Vec3.Up * (markerScale * 0.15f);
+                    Vec3 scale = Vec3.One * markerScale;
+                    markerFrame.Scale(in scale);
+                    replica.Marker.SetFrame(ref markerFrame, true);
+                    replica.Marker.SetVisibilityExcludeParents(true);
+                }
+
+                _entityOverlayViewModel?.UpdatePosition(
+                    pair.Key,
+                    replica.WorldPosition,
+                    replica.WorldPosition + Vec3.Up * (markerScale * 1.2f),
+                    _camera);
+                _settlementOverlayViewModel?.UpdatePosition(
+                    pair.Key,
+                    replica.WorldPosition,
+                    _camera);
+            }
+        }
+
+        private Vec3 ResolveMapWorldPosition(double normalizedX, double normalizedY)
+        {
+            float x = _sceneMinimum.x +
+                      (_sceneMaximum.x - _sceneMinimum.x) * (float)normalizedX;
+            float y = _sceneMinimum.y +
+                      (_sceneMaximum.y - _sceneMinimum.y) * (float)normalizedY;
+            float terrainHeight = _mapScene.GetTerrainHeight(new Vec2(x, y));
+            if (!IsFinite(terrainHeight))
+                terrainHeight = 0f;
+            return new Vec3(x, y, terrainHeight);
+        }
+
+        private static void RemoveMarker(GameEntity marker)
+        {
+            if (marker == null)
+                return;
+            try
+            {
+                marker.Remove(103);
+            }
+            catch
+            {
+            }
+        }
+
         private void UpdateRenderReadiness(float dt)
         {
             if (_sceneLayer == null || _renderStateProbeFailed)
@@ -262,6 +554,8 @@ namespace CoopSpectator.UI
             {
                 bool viewReady = _sceneLayer.ReadyToRender();
                 bool sceneReady = _sceneLayer.SceneView.CheckSceneReadyToRender();
+                if (viewReady && sceneReady)
+                    _mapSceneReadyToRender = true;
 
                 if (!_initialRenderStateLogged)
                 {
@@ -489,8 +783,49 @@ namespace CoopSpectator.UI
             _sceneLayer?.SetCamera(_camera);
         }
 
+        private void ApplyMapVisualState(
+            CoopCampaignMapPrototypeState state)
+        {
+            if (!_mapSceneReadyToRender || _mapScene == null || state == null ||
+                state.NormalizedTimeOfDay < 0 ||
+                state.NormalizedTimeOfDay >
+                    CoopCampaignMapPrototypeContract.UnitScale ||
+                state.SeasonTimeFactor < 0 ||
+                state.SeasonTimeFactor >
+                    CoopCampaignMapPrototypeContract.UnitScale)
+            {
+                return;
+            }
+            if (state.NormalizedTimeOfDay == _appliedNormalizedTimeOfDay &&
+                state.SeasonTimeFactor == _appliedSeasonTimeFactor)
+            {
+                return;
+            }
+
+            float timeOfDay = (float)
+                CoopCampaignMapPrototypeContract.DequantizeTimeOfDay(
+                    state.NormalizedTimeOfDay);
+            float seasonTimeFactor = (float)
+                CoopCampaignMapPrototypeContract.DequantizeUnit(
+                    state.SeasonTimeFactor);
+            _mapScene.TimeOfDay = timeOfDay;
+            MBMapScene.SetSeasonTimeFactor(_mapScene, seasonTimeFactor);
+
+            _appliedNormalizedTimeOfDay = state.NormalizedTimeOfDay;
+            _appliedSeasonTimeFactor = state.SeasonTimeFactor;
+        }
+
         private void ReleaseSceneLayer()
         {
+            ReleaseSettlementOverlayLayer();
+            ReleaseEntityOverlayLayer();
+            foreach (EntityReplica replica in _entityReplicas.Values)
+                RemoveMarker(replica.Marker);
+            _entityReplicas.Clear();
+            _pendingVisibleEntities = null;
+            _pendingVisibleEntitiesRevision = -1;
+            _appliedVisibleEntitiesRevision = -1;
+
             if (_agentRendererSceneController != null && _mapScene != null)
             {
                 try
@@ -535,6 +870,9 @@ namespace CoopSpectator.UI
 
             _sceneLayer = null;
             _mapScene = null;
+            _mapSceneReadyToRender = false;
+            _appliedNormalizedTimeOfDay = -1;
+            _appliedSeasonTimeFactor = -1;
             _hostMarker = null;
             try
             {
@@ -544,6 +882,52 @@ namespace CoopSpectator.UI
             {
             }
             _camera = null;
+        }
+
+        private void ReleaseEntityOverlayLayer()
+        {
+            try
+            {
+                if (_entityOverlayLayer != null && _entityOverlayMovie != null)
+                    _entityOverlayLayer.ReleaseMovie(_entityOverlayMovie);
+                if (_entityOverlayLayer != null)
+                    MissionScreen?.RemoveLayer(_entityOverlayLayer);
+                _entityOverlayViewModel?.OnFinalize();
+            }
+            catch
+            {
+            }
+            finally
+            {
+                _entityOverlayMovie = null;
+                _entityOverlayLayer = null;
+                _entityOverlayViewModel = null;
+            }
+        }
+
+        private void ReleaseSettlementOverlayLayer()
+        {
+            try
+            {
+                if (_settlementOverlayLayer != null &&
+                    _settlementOverlayMovie != null)
+                {
+                    _settlementOverlayLayer.ReleaseMovie(
+                        _settlementOverlayMovie);
+                }
+                if (_settlementOverlayLayer != null)
+                    MissionScreen?.RemoveLayer(_settlementOverlayLayer);
+                _settlementOverlayViewModel?.OnFinalize();
+            }
+            catch
+            {
+            }
+            finally
+            {
+                _settlementOverlayMovie = null;
+                _settlementOverlayLayer = null;
+                _settlementOverlayViewModel = null;
+            }
         }
 
         private void UpdateDisplayedCamera(

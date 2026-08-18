@@ -11,10 +11,14 @@ internal static class Program
             ValidateSyntheticPathBounds();
             ValidateRevisionAndPayloadPolicy();
             ValidateQuantizationAndInterpolation();
+            ValidateMapVisualStateQuantization();
             ValidateMapPositionNormalization();
             ValidateDirectionQuantization();
             ValidateCameraPayload();
+            ValidateVisibleEntityContract();
+            ValidateVisibleEntitySnapshotAssembler();
             ValidateHostBridgeCodec();
+            ValidateSettlementNameplateSizeCodec();
             ValidateHostSnapshotFreshness();
             ValidateSceneOwnerResolution();
             ValidateDedicatedBattleObserverSuppression();
@@ -82,6 +86,39 @@ internal static class Program
             1d,
             CoopCampaignMapPrototypeContract.InterpolateUnit(0.75d, 2d, 1d),
             "Interpolation must clamp the result to the normalized range.");
+    }
+
+    private static void ValidateMapVisualStateQuantization()
+    {
+        Assert(
+            CoopCampaignMapPrototypeContract.TryQuantizeMapVisualState(
+                currentHourInDay: 18d,
+                seasonTimeFactor: 0.25d,
+                out int normalizedTimeOfDay,
+                out int seasonTimeFactor),
+            "A finite campaign map visual state must quantize.");
+        Assert(
+            normalizedTimeOfDay ==
+                CoopCampaignMapPrototypeContract.UnitScale * 3 / 4 &&
+            seasonTimeFactor ==
+                CoopCampaignMapPrototypeContract.UnitScale / 4,
+            "Map time and season factors must use deterministic unit quantization.");
+        AssertNearlyEqual(
+            18d,
+            CoopCampaignMapPrototypeContract.DequantizeTimeOfDay(
+                normalizedTimeOfDay),
+            "Campaign time of day must survive fixed-point quantization.");
+        Assert(
+            CoopCampaignMapPrototypeContract.QuantizeTimeOfDay(25d) ==
+                CoopCampaignMapPrototypeContract.QuantizeTimeOfDay(1d),
+            "Campaign time of day must wrap after 24 hours.");
+        Assert(
+            !CoopCampaignMapPrototypeContract.TryQuantizeMapVisualState(
+                double.NaN,
+                0.5d,
+                out _,
+                out _),
+            "A non-finite campaign map visual state must be rejected.");
     }
 
     private static void ValidateMapPositionNormalization()
@@ -238,9 +275,16 @@ internal static class Program
             actual.NormalizedX == expected.NormalizedX &&
             actual.NormalizedY == expected.NormalizedY &&
             actual.Heading == expected.Heading &&
+            actual.NormalizedTimeOfDay == expected.NormalizedTimeOfDay &&
+            actual.SeasonTimeFactor == expected.SeasonTimeFactor &&
             actual.SampleTimeMilliseconds == expected.SampleTimeMilliseconds &&
             actual.IsMoving == expected.IsMoving &&
             actual.IsActive == expected.IsActive &&
+            actual.VisibleEntitiesRevision ==
+                expected.VisibleEntitiesRevision &&
+            VisibleEntitiesEqual(
+                actual.VisibleEntities,
+                expected.VisibleEntities) &&
             CameraEquals(actual.Camera, expected.Camera) &&
             actual.UpdatedUtc == expected.UpdatedUtc,
             "The bridge codec must preserve every authoritative field.");
@@ -251,6 +295,148 @@ internal static class Program
                 out _,
                 out _),
             "A truncated bridge snapshot must be rejected.");
+    }
+
+    private static void ValidateVisibleEntityContract()
+    {
+        List<CoopCampaignMapPrototypeEntityState> entities =
+            CreateVisibleEntities();
+        Assert(
+            CoopCampaignMapPrototypeContract.TryValidateVisibleEntities(
+                entities,
+                out string reason),
+            "A bounded unique visible entity list must be accepted. Reason=" +
+            reason);
+
+        List<CoopCampaignMapPrototypeEntityState> duplicate =
+            CreateVisibleEntities();
+        duplicate[1].EntityId = duplicate[0].EntityId.ToUpperInvariant();
+        Assert(
+            !CoopCampaignMapPrototypeContract.TryValidateVisibleEntities(
+                duplicate,
+                out reason) &&
+            reason == "visible-entity-duplicate",
+            "Entity identifiers must be unique without case ambiguity.");
+
+        CoopCampaignMapPrototypeEntityState invalid = entities[0].Clone();
+        invalid.DisplayName = "Unsafe\nName";
+        Assert(
+            !CoopCampaignMapPrototypeContract.IsValidVisibleEntity(invalid),
+            "Control characters must be rejected from visible labels.");
+
+        invalid = entities[0].Clone();
+        invalid.BannerCode = new string(
+            '1',
+            CoopCampaignMapPrototypeContract.MaxBannerCodeCharacters + 1);
+        Assert(
+            !CoopCampaignMapPrototypeContract.IsValidVisibleEntity(invalid),
+            "Oversized banner codes must be rejected.");
+
+        invalid = entities[0].Clone();
+        invalid.SettlementNameplateSize =
+            CoopCampaignMapPrototypeSettlementNameplateSize.Small;
+        Assert(
+            !CoopCampaignMapPrototypeContract.IsValidVisibleEntity(invalid),
+            "A mobile party must not carry a settlement nameplate size.");
+
+        invalid = entities[1].Clone();
+        invalid.SettlementNameplateSize =
+            CoopCampaignMapPrototypeSettlementNameplateSize.None;
+        Assert(
+            !CoopCampaignMapPrototypeContract.IsValidVisibleEntity(invalid),
+            "A settlement must carry an explicit nameplate size.");
+
+        invalid = entities[1].Clone();
+        invalid.SettlementNameplateSize =
+            (CoopCampaignMapPrototypeSettlementNameplateSize)4;
+        Assert(
+            !CoopCampaignMapPrototypeContract.IsValidVisibleEntity(invalid),
+            "An undefined settlement nameplate size must be rejected.");
+
+        var oversized = new List<CoopCampaignMapPrototypeEntityState>();
+        for (int index = 0;
+             index <= CoopCampaignMapPrototypeContract.MaxVisibleEntities;
+             index++)
+        {
+            CoopCampaignMapPrototypeEntityState entity = entities[1].Clone();
+            entity.EntityId = "party:" + index;
+            oversized.Add(entity);
+        }
+        Assert(
+            !CoopCampaignMapPrototypeContract.TryValidateVisibleEntities(
+                oversized,
+                out reason) &&
+            reason == "visible-entities-count",
+            "The visible entity list must enforce its network cap.");
+    }
+
+    private static void ValidateVisibleEntitySnapshotAssembler()
+    {
+        List<CoopCampaignMapPrototypeEntityState> entities =
+            CreateVisibleEntities();
+        var assembler =
+            new CoopCampaignMapPrototypeEntitySnapshotAssembler();
+        Assert(
+            assembler.TryBegin(10, 2, out List<CoopCampaignMapPrototypeEntityState> completed) &&
+            completed == null,
+            "A non-empty entity snapshot header must begin assembly.");
+        Assert(
+            assembler.TryAdd(10, 1, 2, entities[1], out completed) &&
+            completed == null,
+            "Out-of-order entity records must be accepted until complete.");
+        Assert(
+            !assembler.TryAdd(10, 1, 2, entities[1], out completed),
+            "A duplicate entity record index must be rejected.");
+        Assert(
+            assembler.TryAdd(10, 0, 2, entities[0], out completed) &&
+            completed != null &&
+            completed.Count == 2 &&
+            completed[0].EntityId == entities[0].EntityId &&
+            completed[1].EntityId == entities[1].EntityId,
+            "A completed snapshot must be emitted in header index order.");
+        Assert(
+            !assembler.TryBegin(10, 0, out completed),
+            "A completed revision must not be replayed.");
+        Assert(
+            assembler.TryBegin(11, 0, out completed) &&
+            completed != null &&
+            completed.Count == 0,
+            "An empty newer snapshot must clear the client entity set.");
+    }
+
+    private static void ValidateSettlementNameplateSizeCodec()
+    {
+        foreach (CoopCampaignMapPrototypeSettlementNameplateSize size in new[]
+                 {
+                     CoopCampaignMapPrototypeSettlementNameplateSize.Small,
+                     CoopCampaignMapPrototypeSettlementNameplateSize.Medium,
+                     CoopCampaignMapPrototypeSettlementNameplateSize.Large
+                 })
+        {
+            CoopCampaignMapPrototypeHostSnapshot expected =
+                CreateHostSnapshot(
+                    new DateTime(
+                        2026,
+                        8,
+                        17,
+                        12,
+                        0,
+                        0,
+                        DateTimeKind.Utc));
+            expected.VisibleEntities[1].SettlementNameplateSize = size;
+            string[] serialized =
+                CoopCampaignMapPrototypeBridgeCodec.Serialize(expected);
+            Assert(
+                CoopCampaignMapPrototypeBridgeCodec.TryParse(
+                    serialized,
+                    out CoopCampaignMapPrototypeHostSnapshot actual,
+                    out string reason),
+                "Every settlement nameplate size must survive the host bridge. Reason=" +
+                reason);
+            Assert(
+                actual.VisibleEntities[1].SettlementNameplateSize == size,
+                "The host bridge must preserve the settlement nameplate size.");
+        }
     }
 
     private static void ValidateHostSnapshotFreshness()
@@ -317,12 +503,86 @@ internal static class Program
             NormalizedX = 250000,
             NormalizedY = 750000,
                 Heading = 125000,
+                NormalizedTimeOfDay = 750000,
+                SeasonTimeFactor = 250000,
                 SampleTimeMilliseconds = 12345,
                 IsMoving = true,
                 IsActive = true,
+                VisibleEntitiesRevision = 4,
+                VisibleEntities = CreateVisibleEntities(),
                 Camera = CreateCameraState(),
                 UpdatedUtc = updatedUtc
             };
+    }
+
+    private static List<CoopCampaignMapPrototypeEntityState>
+        CreateVisibleEntities()
+    {
+        return new List<CoopCampaignMapPrototypeEntityState>
+        {
+            new CoopCampaignMapPrototypeEntityState
+            {
+                EntityId = "main:player",
+                DisplayName = "Головний загін",
+                Kind = CoopCampaignMapPrototypeEntityKind.MainParty,
+                SettlementNameplateSize =
+                    CoopCampaignMapPrototypeSettlementNameplateSize.None,
+                NormalizedX = 250000,
+                NormalizedY = 750000,
+                Heading = 125000,
+                PartySize = 30,
+                PrimaryColor = 0x78563412u,
+                SecondaryColor = 0x12345678u,
+                BannerCode =
+                    "11.163.166.1528.1528.764.764.1.0.0.133.171.171.483.483.764.764.0.0.0"
+            },
+            new CoopCampaignMapPrototypeEntityState
+            {
+                EntityId = "settlement:town_V1",
+                DisplayName = "Vostrum",
+                Kind = CoopCampaignMapPrototypeEntityKind.Settlement,
+                SettlementNameplateSize =
+                    CoopCampaignMapPrototypeSettlementNameplateSize.Large,
+                NormalizedX = 260000,
+                NormalizedY = 740000,
+                Heading = 0,
+                PartySize = 0,
+                PrimaryColor = uint.MaxValue,
+                SecondaryColor = 0xFF102030u,
+                BannerCode = "24.193.116.1536.1536.768.768.1.0.0"
+            }
+        };
+    }
+
+    private static bool VisibleEntitiesEqual(
+        IReadOnlyList<CoopCampaignMapPrototypeEntityState> left,
+        IReadOnlyList<CoopCampaignMapPrototypeEntityState> right)
+    {
+        if (left == null || right == null || left.Count != right.Count)
+            return false;
+        for (int index = 0; index < left.Count; index++)
+        {
+            CoopCampaignMapPrototypeEntityState leftEntity = left[index];
+            CoopCampaignMapPrototypeEntityState rightEntity = right[index];
+            if (leftEntity == null ||
+                rightEntity == null ||
+                leftEntity.EntityId != rightEntity.EntityId ||
+                leftEntity.DisplayName != rightEntity.DisplayName ||
+                leftEntity.Kind != rightEntity.Kind ||
+                leftEntity.SettlementNameplateSize !=
+                    rightEntity.SettlementNameplateSize ||
+                leftEntity.NormalizedX != rightEntity.NormalizedX ||
+                leftEntity.NormalizedY != rightEntity.NormalizedY ||
+                leftEntity.Heading != rightEntity.Heading ||
+                leftEntity.PartySize != rightEntity.PartySize ||
+                leftEntity.PrimaryColor != rightEntity.PrimaryColor ||
+                leftEntity.SecondaryColor != rightEntity.SecondaryColor ||
+                leftEntity.BannerCode != rightEntity.BannerCode)
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static CoopCampaignMapPrototypeCameraState CreateCameraState()

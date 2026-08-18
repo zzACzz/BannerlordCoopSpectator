@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Text;
 
 namespace CoopSpectator.Infrastructure
 {
@@ -12,6 +13,13 @@ namespace CoopSpectator.Infrastructure
             if (snapshot == null)
                 return Array.Empty<string>();
 
+            IReadOnlyList<CoopCampaignMapPrototypeEntityState> visibleEntities =
+                snapshot.VisibleEntities ??
+                (IReadOnlyList<CoopCampaignMapPrototypeEntityState>)
+                    Array.Empty<CoopCampaignMapPrototypeEntityState>();
+            int visibleEntityCount = Math.Min(
+                visibleEntities.Count,
+                CoopCampaignMapPrototypeContract.MaxVisibleEntities);
             var lines = new List<string>
             {
                 "SchemaVersion=" + snapshot.SchemaVersion.ToString(CultureInfo.InvariantCulture),
@@ -20,10 +28,14 @@ namespace CoopSpectator.Infrastructure
                 "NormalizedX=" + snapshot.NormalizedX.ToString(CultureInfo.InvariantCulture),
                 "NormalizedY=" + snapshot.NormalizedY.ToString(CultureInfo.InvariantCulture),
                 "Heading=" + snapshot.Heading.ToString(CultureInfo.InvariantCulture),
+                "NormalizedTimeOfDay=" + snapshot.NormalizedTimeOfDay.ToString(CultureInfo.InvariantCulture),
+                "SeasonTimeFactor=" + snapshot.SeasonTimeFactor.ToString(CultureInfo.InvariantCulture),
                 "SampleTimeMilliseconds=" + snapshot.SampleTimeMilliseconds.ToString(CultureInfo.InvariantCulture),
                 "IsMoving=" + snapshot.IsMoving,
                 "IsActive=" + snapshot.IsActive,
-                "HasCamera=" + (snapshot.Camera != null)
+                "HasCamera=" + (snapshot.Camera != null),
+                "VisibleEntitiesRevision=" + snapshot.VisibleEntitiesRevision.ToString(CultureInfo.InvariantCulture),
+                "VisibleEntityCount=" + visibleEntityCount.ToString(CultureInfo.InvariantCulture)
             };
 
             if (snapshot.Camera != null)
@@ -38,6 +50,24 @@ namespace CoopSpectator.Infrastructure
                 lines.Add("CameraUpY=" + snapshot.Camera.UpY.ToString(CultureInfo.InvariantCulture));
                 lines.Add("CameraUpZ=" + snapshot.Camera.UpZ.ToString(CultureInfo.InvariantCulture));
                 lines.Add("CameraVerticalFov=" + snapshot.Camera.VerticalFov.ToString(CultureInfo.InvariantCulture));
+            }
+
+            for (int index = 0; index < visibleEntityCount; index++)
+            {
+                CoopCampaignMapPrototypeEntityState entity = visibleEntities[index];
+                string prefix = "VisibleEntity." +
+                                index.ToString(CultureInfo.InvariantCulture) + ".";
+                lines.Add(prefix + "EntityId=" + EncodeText(entity?.EntityId));
+                lines.Add(prefix + "DisplayName=" + EncodeText(entity?.DisplayName));
+                lines.Add(prefix + "Kind=" + (entity != null ? (int)entity.Kind : 0).ToString(CultureInfo.InvariantCulture));
+                lines.Add(prefix + "SettlementNameplateSize=" + (entity != null ? (int)entity.SettlementNameplateSize : 0).ToString(CultureInfo.InvariantCulture));
+                lines.Add(prefix + "NormalizedX=" + (entity?.NormalizedX ?? 0).ToString(CultureInfo.InvariantCulture));
+                lines.Add(prefix + "NormalizedY=" + (entity?.NormalizedY ?? 0).ToString(CultureInfo.InvariantCulture));
+                lines.Add(prefix + "Heading=" + (entity?.Heading ?? 0).ToString(CultureInfo.InvariantCulture));
+                lines.Add(prefix + "PartySize=" + (entity?.PartySize ?? 0).ToString(CultureInfo.InvariantCulture));
+                lines.Add(prefix + "PrimaryColor=" + (entity?.PrimaryColor ?? 0u).ToString(CultureInfo.InvariantCulture));
+                lines.Add(prefix + "SecondaryColor=" + (entity?.SecondaryColor ?? 0u).ToString(CultureInfo.InvariantCulture));
+                lines.Add(prefix + "BannerCode=" + EncodeText(entity?.BannerCode));
             }
 
             lines.Add(
@@ -81,13 +111,24 @@ namespace CoopSpectator.Infrastructure
                 !TryReadInt(values, "NormalizedX", out int normalizedX) ||
                 !TryReadInt(values, "NormalizedY", out int normalizedY) ||
                 !TryReadInt(values, "Heading", out int heading) ||
+                !TryReadInt(values, "NormalizedTimeOfDay", out int normalizedTimeOfDay) ||
+                !TryReadInt(values, "SeasonTimeFactor", out int seasonTimeFactor) ||
                 !TryReadInt(values, "SampleTimeMilliseconds", out int sampleTimeMilliseconds) ||
                 !TryReadBool(values, "IsMoving", out bool isMoving) ||
                 !TryReadBool(values, "IsActive", out bool isActive) ||
                 !TryReadBool(values, "HasCamera", out bool hasCamera) ||
+                !TryReadInt(values, "VisibleEntitiesRevision", out int visibleEntitiesRevision) ||
+                !TryReadInt(values, "VisibleEntityCount", out int visibleEntityCount) ||
                 !TryReadDateTime(values, "UpdatedUtc", out DateTime updatedUtc))
             {
                 return Fail("malformed", out reason);
+            }
+
+            if (visibleEntityCount < 0 ||
+                visibleEntityCount > CoopCampaignMapPrototypeContract.MaxVisibleEntities ||
+                visibleEntitiesRevision < 0)
+            {
+                return Fail("malformed-visible-entity-header", out reason);
             }
 
             CoopCampaignMapPrototypeCameraState camera = null;
@@ -124,6 +165,58 @@ namespace CoopSpectator.Infrastructure
                     return Fail("invalid-camera", out reason);
             }
 
+            var visibleEntities =
+                new List<CoopCampaignMapPrototypeEntityState>(visibleEntityCount);
+            for (int index = 0; index < visibleEntityCount; index++)
+            {
+                string prefix = "VisibleEntity." +
+                                index.ToString(CultureInfo.InvariantCulture) + ".";
+                if (!values.TryGetValue(prefix + "EntityId", out string encodedEntityId) ||
+                    !values.TryGetValue(prefix + "DisplayName", out string encodedDisplayName) ||
+                    !TryDecodeText(encodedEntityId, out string entityId) ||
+                    !TryDecodeText(encodedDisplayName, out string displayName) ||
+                    !TryReadInt(values, prefix + "Kind", out int kind) ||
+                    !TryReadInt(values, prefix + "SettlementNameplateSize", out int settlementNameplateSize) ||
+                    !TryReadInt(values, prefix + "NormalizedX", out int entityX) ||
+                    !TryReadInt(values, prefix + "NormalizedY", out int entityY) ||
+                    !TryReadInt(values, prefix + "Heading", out int entityHeading) ||
+                    !TryReadInt(values, prefix + "PartySize", out int partySize) ||
+                    !TryReadUInt(values, prefix + "PrimaryColor", out uint primaryColor) ||
+                    !TryReadUInt(values, prefix + "SecondaryColor", out uint secondaryColor) ||
+                    !values.TryGetValue(prefix + "BannerCode", out string encodedBannerCode) ||
+                    !TryDecodeText(encodedBannerCode, out string bannerCode))
+                {
+                    return Fail("malformed-visible-entity", out reason);
+                }
+
+                var entity = new CoopCampaignMapPrototypeEntityState
+                {
+                    EntityId = entityId,
+                    DisplayName = displayName,
+                    Kind = (CoopCampaignMapPrototypeEntityKind)kind,
+                    SettlementNameplateSize =
+                        (CoopCampaignMapPrototypeSettlementNameplateSize)
+                            settlementNameplateSize,
+                    NormalizedX = entityX,
+                    NormalizedY = entityY,
+                    Heading = entityHeading,
+                    PartySize = partySize,
+                    PrimaryColor = primaryColor,
+                    SecondaryColor = secondaryColor,
+                    BannerCode = bannerCode
+                };
+                if (!CoopCampaignMapPrototypeContract.IsValidVisibleEntity(entity))
+                    return Fail("invalid-visible-entity", out reason);
+                visibleEntities.Add(entity);
+            }
+
+            if (!CoopCampaignMapPrototypeContract.TryValidateVisibleEntities(
+                    visibleEntities,
+                    out reason))
+            {
+                return false;
+            }
+
             snapshot = new CoopCampaignMapPrototypeHostSnapshot
             {
                 SchemaVersion = schemaVersion,
@@ -132,9 +225,13 @@ namespace CoopSpectator.Infrastructure
                 NormalizedX = normalizedX,
                 NormalizedY = normalizedY,
                 Heading = heading,
+                NormalizedTimeOfDay = normalizedTimeOfDay,
+                SeasonTimeFactor = seasonTimeFactor,
                 SampleTimeMilliseconds = sampleTimeMilliseconds,
                 IsMoving = isMoving,
                 IsActive = isActive,
+                VisibleEntitiesRevision = visibleEntitiesRevision,
+                VisibleEntities = visibleEntities,
                 Camera = camera,
                 UpdatedUtc = updatedUtc
             };
@@ -163,6 +260,41 @@ namespace CoopSpectator.Infrastructure
             value = false;
             return values.TryGetValue(key, out string rawValue) &&
                    bool.TryParse(rawValue, out value);
+        }
+
+        private static bool TryReadUInt(
+            IReadOnlyDictionary<string, string> values,
+            string key,
+            out uint value)
+        {
+            value = 0u;
+            return values.TryGetValue(key, out string rawValue) &&
+                   uint.TryParse(
+                       rawValue,
+                       NumberStyles.Integer,
+                       CultureInfo.InvariantCulture,
+                       out value);
+        }
+
+        private static string EncodeText(string value)
+        {
+            return Convert.ToBase64String(
+                Encoding.UTF8.GetBytes(value ?? string.Empty));
+        }
+
+        private static bool TryDecodeText(string value, out string decoded)
+        {
+            decoded = null;
+            try
+            {
+                decoded = Encoding.UTF8.GetString(
+                    Convert.FromBase64String(value ?? string.Empty));
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static bool TryReadDateTime(
