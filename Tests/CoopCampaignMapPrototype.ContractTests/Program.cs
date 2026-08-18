@@ -19,6 +19,8 @@ internal static class Program
             ValidateVisibleEntityContract();
             ValidateVisibleEntitySnapshotAssembler();
             ValidateHostBridgeCodec();
+            ValidateReplicaCatalogCodec();
+            ValidateReplicaDynamicCodec();
             ValidateSettlementNameplateSizeCodec();
             ValidatePartyVisualCodec();
             ValidateExactPartyVisualContract();
@@ -94,9 +96,9 @@ internal static class Program
     private static void ValidateProtocolVersion()
     {
         Assert(
-            CoopCampaignMapPrototypeContract.ProtocolVersion == 8 &&
-            CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion == 8,
-            "The exact party visual payload requires protocol and bridge schema 8.");
+            CoopCampaignMapPrototypeContract.ProtocolVersion == 10 &&
+            CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion == 10,
+            "The full campaign-map replica requires protocol and bridge schema 9.");
     }
 
     private static void ValidateMapVisualStateQuantization()
@@ -293,6 +295,8 @@ internal static class Program
             actual.IsActive == expected.IsActive &&
             actual.VisibleEntitiesRevision ==
                 expected.VisibleEntitiesRevision &&
+            actual.CatalogRevision == expected.CatalogRevision &&
+            actual.DynamicRevision == expected.DynamicRevision &&
             VisibleEntitiesEqual(
                 actual.VisibleEntities,
                 expected.VisibleEntities) &&
@@ -306,6 +310,192 @@ internal static class Program
                 out _,
                 out _),
             "A truncated bridge snapshot must be rejected.");
+    }
+
+    private static void ValidateReplicaCatalogCodec()
+    {
+        var catalog = new CoopCampaignMapPrototypeCatalogSnapshot
+        {
+            SchemaVersion =
+                CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion,
+            SessionId = "0123456789abcdef0123456789abcdef",
+            Revision = 11,
+            UpdatedUtc = new DateTime(
+                2026,
+                8,
+                18,
+                9,
+                30,
+                0,
+                DateTimeKind.Utc),
+            Entities = new List<CoopCampaignMapPrototypeCatalogEntityState>
+            {
+                new CoopCampaignMapPrototypeCatalogEntityState
+                {
+                    EntityId = "party:main",
+                    DisplayName = "Main party",
+                    Kind = CoopCampaignMapPrototypeEntityKind.MainParty,
+                    SettlementNameplateSize =
+                        CoopCampaignMapPrototypeSettlementNameplateSize.None,
+                    SettlementKind =
+                        CoopCampaignMapPrototypeSettlementKind.None,
+                    PrimaryColor = 0xFF102030u,
+                    SecondaryColor = 0xFF405060u,
+                    BannerCode = "banner",
+                    VisualCharacterId = "lord_1_1",
+                    CultureId = "empire",
+                    PartyVisualKind =
+                        CoopCampaignMapPrototypePartyVisualKind.Mounted,
+                    HumanVisual = CreateHumanVisualState(),
+                    MountVisual = CreateMountVisualState("horse", "harness"),
+                    FactionId = "empire",
+                    FactionName = "Empire",
+                    OwnerName = "Owner",
+                    LeaderName = "Leader",
+                    ArmyId = "army-main",
+                    ArmyName = "Leader's Army",
+                    IsArmyLeader = true,
+                    SelectionRadius = 18000
+                },
+                new CoopCampaignMapPrototypeCatalogEntityState
+                {
+                    EntityId = "settlement:town",
+                    DisplayName = "Town",
+                    Kind = CoopCampaignMapPrototypeEntityKind.Settlement,
+                    SettlementNameplateSize =
+                        CoopCampaignMapPrototypeSettlementNameplateSize.Large,
+                    SettlementKind =
+                        CoopCampaignMapPrototypeSettlementKind.Town,
+                    PrimaryColor = 0xFF102030u,
+                    SecondaryColor = 0xFF405060u,
+                    BannerCode = "banner",
+                    VisualCharacterId = string.Empty,
+                    CultureId = string.Empty,
+                    PartyVisualKind =
+                        CoopCampaignMapPrototypePartyVisualKind.None,
+                    FactionId = "empire",
+                    FactionName = "Empire",
+                    OwnerName = "Clan",
+                    LeaderName = "Leader",
+                    ArmyId = string.Empty,
+                    ArmyName = string.Empty,
+                    SelectionRadius = 30000
+                },
+                new CoopCampaignMapPrototypeCatalogEntityState
+                {
+                    EntityId = "settlement:tutorial_training_field",
+                    DisplayName = "Training Field",
+                    Kind = CoopCampaignMapPrototypeEntityKind.Settlement,
+                    SettlementNameplateSize =
+                        CoopCampaignMapPrototypeSettlementNameplateSize.Small,
+                    SettlementKind =
+                        CoopCampaignMapPrototypeSettlementKind.Special,
+                    PrimaryColor = 0xFF102030u,
+                    SecondaryColor = 0xFF405060u,
+                    BannerCode = string.Empty,
+                    VisualCharacterId = string.Empty,
+                    CultureId = string.Empty,
+                    PartyVisualKind =
+                        CoopCampaignMapPrototypePartyVisualKind.None,
+                    FactionId = string.Empty,
+                    FactionName = string.Empty,
+                    OwnerName = string.Empty,
+                    LeaderName = string.Empty,
+                    ArmyId = string.Empty,
+                    ArmyName = string.Empty,
+                    SelectionRadius = 30000
+                }
+            }
+        };
+
+        string[] lines =
+            CoopCampaignMapPrototypeBridgeCodec.SerializeCatalog(catalog);
+        Assert(
+            CoopCampaignMapPrototypeBridgeCodec.TryParseCatalog(
+                lines,
+                out CoopCampaignMapPrototypeCatalogSnapshot actual,
+                out string reason),
+            "A serialized replica catalog must parse. Reason=" + reason);
+        Assert(
+            actual.Revision == catalog.Revision &&
+            actual.Entities.Count == 3 &&
+            actual.Entities[0].LeaderName == "Leader" &&
+            actual.Entities[0].MountVisual != null &&
+            actual.Entities[1].SettlementKind ==
+                CoopCampaignMapPrototypeSettlementKind.Town &&
+            actual.Entities[2].SettlementKind ==
+                CoopCampaignMapPrototypeSettlementKind.Special,
+            "The replica catalog codec must preserve identity, information and visuals.");
+        CoopCampaignMapPrototypeCatalogEntityState invalidSpecial =
+            actual.Entities[2].Clone();
+        invalidSpecial.SettlementKind =
+            CoopCampaignMapPrototypeSettlementKind.None;
+        Assert(
+            !CoopCampaignMapPrototypeContract.IsValidCatalogEntity(invalidSpecial),
+            "A settlement without a concrete settlement kind must remain invalid.");
+        Assert(
+            CoopCampaignMapPrototypeContract.IsCompletePartyVisualState(
+                actual.Entities[0]),
+            "A mounted catalog entity must retain a complete rider/mount descriptor.");
+        actual.Entities[0].MountVisual = null;
+        Assert(
+            !CoopCampaignMapPrototypeContract.IsCompletePartyVisualState(
+                actual.Entities[0]),
+            "An incomplete mounted descriptor must fail the completeness check.");
+    }
+
+    private static void ValidateReplicaDynamicCodec()
+    {
+        var dynamicSnapshot = new CoopCampaignMapPrototypeDynamicSnapshot
+        {
+            SchemaVersion =
+                CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion,
+            SessionId = "0123456789abcdef0123456789abcdef",
+            Revision = 17,
+            UpdatedUtc = new DateTime(
+                2026,
+                8,
+                18,
+                9,
+                31,
+                0,
+                DateTimeKind.Utc),
+            Entities = new List<CoopCampaignMapPrototypeDynamicEntityState>
+            {
+                new CoopCampaignMapPrototypeDynamicEntityState
+                {
+                    EntityId = "party:main",
+                    NormalizedX = 123000,
+                    NormalizedY = 456000,
+                    Heading = 789000,
+                    PartySize = 30,
+                    IsVisible = true,
+                    IsMoving = true,
+                    ArmyPartyCount = 4,
+                    ArmyTotalSize = 210,
+                    ArmyCohesion = 750000,
+                    AppearanceRevision = 2,
+                    InformationRevision = 3
+                }
+            }
+        };
+
+        string[] lines =
+            CoopCampaignMapPrototypeBridgeCodec.SerializeDynamic(
+                dynamicSnapshot);
+        Assert(
+            CoopCampaignMapPrototypeBridgeCodec.TryParseDynamic(
+                lines,
+                out CoopCampaignMapPrototypeDynamicSnapshot actual,
+                out string reason),
+            "A serialized dynamic snapshot must parse. Reason=" + reason);
+        Assert(
+            actual.Revision == dynamicSnapshot.Revision &&
+            actual.Entities.Count == 1 &&
+            actual.Entities[0].IsMoving &&
+            actual.Entities[0].ArmyTotalSize == 210 &&
+            actual.Entities[0].ArmyCohesion == 750000,
+            "The dynamic codec must preserve movement and army information.");
     }
 
     private static void ValidateVisibleEntityContract()
@@ -657,6 +847,8 @@ internal static class Program
                 IsMoving = true,
                 IsActive = true,
                 VisibleEntitiesRevision = 4,
+                CatalogRevision = 5,
+                DynamicRevision = 6,
                 VisibleEntities = CreateVisibleEntities(),
                 Camera = CreateCameraState(),
                 UpdatedUtc = updatedUtc

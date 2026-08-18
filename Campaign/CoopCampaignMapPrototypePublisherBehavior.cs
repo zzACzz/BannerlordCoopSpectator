@@ -32,13 +32,23 @@ namespace CoopSpectator.Campaign
         private string _sessionId = Guid.NewGuid().ToString("N");
         private int _revision;
         private int _visibleEntitiesRevision;
+        private int _catalogRevision;
+        private int _dynamicRevision;
         private int _lastHeading;
         private float _timeUntilNextPublish;
         private float _timeUntilNextVisibleEntityCapture;
         private List<CoopCampaignMapPrototypeEntityState> _cachedVisibleEntities =
             new List<CoopCampaignMapPrototypeEntityState>();
+        private CoopCampaignMapPrototypeCatalogSnapshot _cachedCatalog;
+        private CoopCampaignMapPrototypeDynamicSnapshot _cachedDynamic;
+        private string _catalogFingerprint = string.Empty;
+        private bool _catalogDirty;
+        private bool _dynamicDirty;
         private readonly Dictionary<string, int> _entityHeadings =
             new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, ReplicaInformation> _replicaInformation =
+            new Dictionary<string, ReplicaInformation>(
+                StringComparer.OrdinalIgnoreCase);
         private bool _initialPublishLogged;
         private DateTime _nextFailureLogUtc = DateTime.MinValue;
 
@@ -101,6 +111,30 @@ namespace CoopSpectator.Campaign
             {
                 LogFailureRateLimited("capture:" + (reason ?? "unknown"));
                 return;
+            }
+
+            if (_catalogDirty && _cachedCatalog != null)
+            {
+                if (!CoopCampaignMapPrototypeBridgeFile.TryWriteCatalog(
+                        _cachedCatalog,
+                        out reason))
+                {
+                    LogFailureRateLimited("catalog-write:" + (reason ?? "unknown"));
+                    return;
+                }
+                _catalogDirty = false;
+            }
+
+            if (_dynamicDirty && _cachedDynamic != null)
+            {
+                if (!CoopCampaignMapPrototypeBridgeFile.TryWriteDynamic(
+                        _cachedDynamic,
+                        out reason))
+                {
+                    LogFailureRateLimited("dynamic-write:" + (reason ?? "unknown"));
+                    return;
+                }
+                _dynamicDirty = false;
             }
 
             if (!CoopCampaignMapPrototypeBridgeFile.TryWrite(snapshot, out reason))
@@ -213,6 +247,7 @@ namespace CoopSpectator.Campaign
                     if (_visibleEntitiesRevision == int.MaxValue)
                         _visibleEntitiesRevision = 0;
                     _visibleEntitiesRevision++;
+                    UpdateReplicaSnapshots(_cachedVisibleEntities);
                 }
                 CoopCampaignMapPrototypeCameraState cameraState =
                     TryCaptureMapCamera();
@@ -231,8 +266,9 @@ namespace CoopSpectator.Campaign
                     IsMoving = mainParty.IsMoving,
                     IsActive = true,
                     VisibleEntitiesRevision = _visibleEntitiesRevision,
-                    VisibleEntities = CloneVisibleEntities(
-                        _cachedVisibleEntities),
+                    CatalogRevision = _catalogRevision,
+                    DynamicRevision = _dynamicRevision,
+                    VisibleEntities = new List<CoopCampaignMapPrototypeEntityState>(),
                     Camera = cameraState,
                     UpdatedUtc = DateTime.UtcNow
                 };
@@ -252,6 +288,7 @@ namespace CoopSpectator.Campaign
             Vec2 maximum)
         {
             var candidates = new List<VisibleEntityCandidate>();
+            _replicaInformation.Clear();
             MobilePartyVisualManager partyVisualManager = null;
             SettlementVisualManager settlementVisualManager = null;
             try
@@ -276,104 +313,76 @@ namespace CoopSpectator.Campaign
                 isVisible: true,
                 mainPartyVisual);
 
-            if (partyVisualManager != null)
+            foreach (MobileParty party in MobileParty.All)
             {
-                foreach (MobileParty party in MobileParty.All)
+                if (party == null ||
+                    party == mainParty ||
+                    party.IsGarrison ||
+                    party.IsMilitia ||
+                    party.CurrentSettlement != null ||
+                    !party.IsActive)
                 {
-                    if (party == null ||
-                        party == mainParty ||
-                        party.IsGarrison ||
-                        party.IsMilitia)
-                    {
-                        continue;
-                    }
-
-                    bool visible = false;
-                    MobilePartyVisual mobilePartyVisual = null;
-                    try
-                    {
-                        MapEntityVisual<PartyBase> visual =
-                            partyVisualManager.GetVisualOfEntity(party.Party);
-                        visible = visual?.IsVisibleOrFadingOut() == true;
-                        mobilePartyVisual = visual as MobilePartyVisual;
-                    }
-                    catch
-                    {
-                    }
-                    if (!visible)
-                        continue;
-
-                    AddMobilePartyCandidate(
-                        candidates,
-                        party,
-                        mainParty,
-                        minimum,
-                        maximum,
-                        CoopCampaignMapPrototypeEntityKind.MobileParty,
-                        isVisible: true,
-                        mobilePartyVisual);
+                    continue;
                 }
+
+                MobilePartyVisual mobilePartyVisual = TryGetMobilePartyVisual(
+                    partyVisualManager,
+                    party.Party);
+                AddMobilePartyCandidate(
+                    candidates,
+                    party,
+                    mainParty,
+                    minimum,
+                    maximum,
+                    CoopCampaignMapPrototypeEntityKind.MobileParty,
+                    isVisible: true,
+                    mobilePartyVisual);
             }
 
-            if (settlementVisualManager != null)
+            foreach (Settlement settlement in Settlement.All)
             {
-                foreach (Settlement settlement in Settlement.All)
+                if (settlement == null)
+                    continue;
+
+                Vec2 settlementPosition = settlement.GetPosition2D;
+                ResolveAppearance(
+                    settlement.Party,
+                    out uint primaryColor,
+                    out uint secondaryColor,
+                    out string bannerCode);
+                if (!TryCreateEntityState(
+                        "settlement:" + settlement.StringId,
+                        settlement.Name?.ToString(),
+                        CoopCampaignMapPrototypeEntityKind.Settlement,
+                        ResolveSettlementNameplateSize(settlement),
+                        settlementPosition,
+                        heading: 0,
+                        partySize: settlement.Party?.NumberOfAllMembers ?? 0,
+                        primaryColor,
+                        secondaryColor,
+                        bannerCode,
+                        visualCharacterId: string.Empty,
+                        cultureId: string.Empty,
+                        partyVisualKind:
+                            CoopCampaignMapPrototypePartyVisualKind.None,
+                        humanVisual: null,
+                        mountVisual: null,
+                        caravanMountVisual: null,
+                        minimum,
+                        maximum,
+                        out CoopCampaignMapPrototypeEntityState entity))
                 {
-                    if (settlement == null)
-                        continue;
-
-                    bool visible = false;
-                    try
-                    {
-                        MapEntityVisual<PartyBase> visual =
-                            settlementVisualManager.GetVisualOfEntity(
-                                settlement.Party);
-                        visible = visual?.IsVisibleOrFadingOut() == true;
-                    }
-                    catch
-                    {
-                    }
-                    if (!visible)
-                        continue;
-
-                    Vec2 settlementPosition = settlement.GetPosition2D;
-                    ResolveAppearance(
-                        settlement.Party,
-                        out uint primaryColor,
-                        out uint secondaryColor,
-                        out string bannerCode);
-                    if (!TryCreateEntityState(
-                            "settlement:" + settlement.StringId,
-                            settlement.Name?.ToString(),
-                            CoopCampaignMapPrototypeEntityKind.Settlement,
-                            ResolveSettlementNameplateSize(settlement),
-                            settlementPosition,
-                            heading: 0,
-                            partySize: settlement.Party?.NumberOfAllMembers ?? 0,
-                            primaryColor,
-                            secondaryColor,
-                            bannerCode,
-                            visualCharacterId: string.Empty,
-                            cultureId: string.Empty,
-                            partyVisualKind:
-                                CoopCampaignMapPrototypePartyVisualKind.None,
-                            humanVisual: null,
-                            mountVisual: null,
-                            caravanMountVisual: null,
-                            minimum,
-                            maximum,
-                            out CoopCampaignMapPrototypeEntityState entity))
-                    {
-                        continue;
-                    }
-
-                    candidates.Add(
-                        new VisibleEntityCandidate(
-                            entity,
-                            GetDistanceSquared(
-                                mainParty.VisualPosition2DWithoutError,
-                                settlementPosition)));
+                    continue;
                 }
+
+                candidates.Add(
+                    new VisibleEntityCandidate(
+                        entity,
+                        GetDistanceSquared(
+                            mainParty.VisualPosition2DWithoutError,
+                            settlementPosition)));
+                _replicaInformation[entity.EntityId] =
+                    CaptureSettlementInformation(settlement);
             }
 
             return candidates
@@ -384,13 +393,154 @@ namespace CoopSpectator.Campaign
                       CoopCampaignMapPrototypeEntityKind.MobileParty
                         ? 1
                         : 2)
-                .ThenBy(candidate => candidate.DistanceSquared)
                 .ThenBy(
                     candidate => candidate.Entity.EntityId,
                     StringComparer.OrdinalIgnoreCase)
                 .Take(CoopCampaignMapPrototypeContract.MaxVisibleEntities)
                 .Select(candidate => candidate.Entity.Clone())
                 .ToList();
+        }
+
+        private void UpdateReplicaSnapshots(
+            IReadOnlyList<CoopCampaignMapPrototypeEntityState> entities)
+        {
+            DateTime updatedUtc = DateTime.UtcNow;
+            var catalogEntities = new List<
+                CoopCampaignMapPrototypeCatalogEntityState>(entities?.Count ?? 0);
+            var dynamicEntities = new List<
+                CoopCampaignMapPrototypeDynamicEntityState>(entities?.Count ?? 0);
+
+            if (entities != null)
+            {
+                foreach (CoopCampaignMapPrototypeEntityState entity in entities)
+                {
+                    if (entity == null)
+                        continue;
+
+                    _replicaInformation.TryGetValue(
+                        entity.EntityId,
+                        out ReplicaInformation information);
+                    CoopCampaignMapPrototypeSettlementKind settlementKind =
+                        information?.SettlementKind ??
+                        ResolveSettlementKind(entity.SettlementNameplateSize);
+                    var catalogEntity =
+                        new CoopCampaignMapPrototypeCatalogEntityState
+                        {
+                            EntityId = entity.EntityId,
+                            DisplayName = entity.DisplayName,
+                            Kind = entity.Kind,
+                            SettlementNameplateSize = entity.SettlementNameplateSize,
+                            SettlementKind = settlementKind,
+                            PrimaryColor = entity.PrimaryColor,
+                            SecondaryColor = entity.SecondaryColor,
+                            BannerCode = entity.BannerCode,
+                            VisualCharacterId = entity.VisualCharacterId,
+                            CultureId = entity.CultureId,
+                            PartyVisualKind = entity.PartyVisualKind,
+                            HumanVisual = entity.HumanVisual?.Clone(),
+                            MountVisual = entity.MountVisual?.Clone(),
+                            CaravanMountVisual = entity.CaravanMountVisual?.Clone(),
+                            FactionId = information?.FactionId ?? string.Empty,
+                            FactionName = information?.FactionName ?? string.Empty,
+                            OwnerName = information?.OwnerName ?? string.Empty,
+                            LeaderName = information?.LeaderName ?? string.Empty,
+                            ArmyId = information?.ArmyId ?? string.Empty,
+                            ArmyName = information?.ArmyName ?? string.Empty,
+                            IsArmyLeader = information?.IsArmyLeader ?? false,
+                            SelectionRadius = entity.Kind ==
+                                CoopCampaignMapPrototypeEntityKind.Settlement
+                                ? 30000
+                                : 18000
+                        };
+                    var dynamicEntity =
+                        new CoopCampaignMapPrototypeDynamicEntityState
+                        {
+                            EntityId = entity.EntityId,
+                            NormalizedX = entity.NormalizedX,
+                            NormalizedY = entity.NormalizedY,
+                            Heading = entity.Heading,
+                            PartySize = entity.PartySize,
+                            IsVisible = true,
+                            IsMoving = information?.IsMoving ?? false,
+                            ArmyPartyCount = information?.ArmyPartyCount ?? 0,
+                            ArmyTotalSize = information?.ArmyTotalSize ?? 0,
+                            ArmyCohesion = information?.ArmyCohesion ?? 0,
+                            AppearanceRevision = 0,
+                            InformationRevision = 0
+                        };
+                    if (!CoopCampaignMapPrototypeContract.IsValidCatalogEntity(
+                            catalogEntity) ||
+                        !CoopCampaignMapPrototypeContract.IsValidDynamicEntity(
+                            dynamicEntity))
+                    {
+                        continue;
+                    }
+
+                    catalogEntities.Add(catalogEntity);
+                    dynamicEntities.Add(dynamicEntity);
+                }
+            }
+
+            var fingerprintSnapshot = new CoopCampaignMapPrototypeCatalogSnapshot
+            {
+                SchemaVersion = CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion,
+                SessionId = _sessionId,
+                Revision = 0,
+                Entities = catalogEntities,
+                UpdatedUtc = new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            };
+            string fingerprint = string.Join(
+                "\n",
+                CoopCampaignMapPrototypeBridgeCodec.SerializeCatalog(
+                    fingerprintSnapshot));
+            if (!string.Equals(
+                    fingerprint,
+                    _catalogFingerprint,
+                    StringComparison.Ordinal))
+            {
+                _catalogFingerprint = fingerprint;
+                if (_catalogRevision == int.MaxValue)
+                    _catalogRevision = 0;
+                _catalogRevision++;
+                _cachedCatalog = new CoopCampaignMapPrototypeCatalogSnapshot
+                {
+                    SchemaVersion = CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion,
+                    SessionId = _sessionId,
+                    Revision = _catalogRevision,
+                    Entities = catalogEntities,
+                    UpdatedUtc = updatedUtc
+                };
+                _catalogDirty = true;
+            }
+
+            if (_dynamicRevision == int.MaxValue)
+                _dynamicRevision = 0;
+            _dynamicRevision++;
+            _cachedDynamic = new CoopCampaignMapPrototypeDynamicSnapshot
+            {
+                SchemaVersion = CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion,
+                SessionId = _sessionId,
+                Revision = _dynamicRevision,
+                Entities = dynamicEntities,
+                UpdatedUtc = updatedUtc
+            };
+            _dynamicDirty = true;
+        }
+
+        private static CoopCampaignMapPrototypeSettlementKind ResolveSettlementKind(
+            CoopCampaignMapPrototypeSettlementNameplateSize nameplateSize)
+        {
+            switch (nameplateSize)
+            {
+                case CoopCampaignMapPrototypeSettlementNameplateSize.Large:
+                    return CoopCampaignMapPrototypeSettlementKind.Town;
+                case CoopCampaignMapPrototypeSettlementNameplateSize.Medium:
+                    return CoopCampaignMapPrototypeSettlementKind.Castle;
+                case CoopCampaignMapPrototypeSettlementNameplateSize.Small:
+                    return CoopCampaignMapPrototypeSettlementKind.Village;
+                default:
+                    return CoopCampaignMapPrototypeSettlementKind.None;
+            }
         }
 
         private void AddMobilePartyCandidate(
@@ -463,6 +613,8 @@ namespace CoopSpectator.Campaign
                     GetDistanceSquared(
                         mainParty.VisualPosition2DWithoutError,
                         partyPosition)));
+            _replicaInformation[entity.EntityId] =
+                CapturePartyInformation(party);
         }
 
         private static bool TryCreateEntityState(
@@ -580,6 +732,105 @@ namespace CoopSpectator.Campaign
             }
         }
 
+        private static ReplicaInformation CapturePartyInformation(
+            MobileParty party)
+        {
+            var information = new ReplicaInformation();
+            if (party == null)
+                return information;
+            try
+            {
+                information.FactionId = BoundInformation(
+                    party.MapFaction?.StringId);
+                information.FactionName = BoundInformation(
+                    party.MapFaction?.Name?.ToString());
+                information.OwnerName = BoundInformation(
+                    party.Owner?.Name?.ToString());
+                information.LeaderName = BoundInformation(
+                    party.LeaderHero?.Name?.ToString());
+                information.IsMoving = party.IsMoving;
+                Army army = party.Army;
+                if (army != null)
+                {
+                    information.ArmyId = BoundInformation(
+                        army.LeaderParty?.StringId);
+                    information.ArmyName = BoundInformation(
+                        army.Name?.ToString());
+                    information.IsArmyLeader = army.LeaderParty == party;
+                    information.ArmyPartyCount = Math.Max(
+                        0,
+                        Math.Min(
+                            CoopCampaignMapPrototypeContract.MaximumPartySize,
+                            army.Parties?.Count ?? 0));
+                    information.ArmyTotalSize = Math.Max(
+                        0,
+                        Math.Min(
+                            CoopCampaignMapPrototypeContract.MaximumPartySize,
+                            army.TotalManCount));
+                    information.ArmyCohesion =
+                        CoopCampaignMapPrototypeContract.QuantizeUnit(
+                            army.Cohesion / 100d);
+                }
+            }
+            catch
+            {
+            }
+            return information;
+        }
+
+        private static ReplicaInformation CaptureSettlementInformation(
+            Settlement settlement)
+        {
+            var information = new ReplicaInformation
+            {
+                SettlementKind = settlement == null
+                    ? CoopCampaignMapPrototypeSettlementKind.None
+                    : CoopCampaignMapPrototypeSettlementKind.Special
+            };
+            if (settlement == null)
+                return information;
+            try
+            {
+                information.SettlementKind = ResolveSettlementKind(settlement);
+                information.FactionId = BoundInformation(
+                    settlement.MapFaction?.StringId);
+                information.FactionName = BoundInformation(
+                    settlement.MapFaction?.Name?.ToString());
+                information.OwnerName = BoundInformation(
+                    settlement.OwnerClan?.Name?.ToString());
+                information.LeaderName = BoundInformation(
+                    settlement.OwnerClan?.Leader?.Name?.ToString());
+            }
+            catch
+            {
+            }
+            return information;
+        }
+
+        private static string BoundInformation(string value)
+        {
+            return CoopCampaignMapPrototypeContract.BoundEntityText(
+                value,
+                CoopCampaignMapPrototypeContract.MaxInformationTextCharacters,
+                string.Empty);
+        }
+
+        private static CoopCampaignMapPrototypeSettlementKind ResolveSettlementKind(
+            Settlement settlement)
+        {
+            if (settlement?.IsTown == true)
+                return CoopCampaignMapPrototypeSettlementKind.Town;
+            if (settlement?.IsCastle == true)
+                return CoopCampaignMapPrototypeSettlementKind.Castle;
+            if (settlement?.IsVillage == true)
+                return CoopCampaignMapPrototypeSettlementKind.Village;
+            if (settlement?.IsHideout == true)
+                return CoopCampaignMapPrototypeSettlementKind.Hideout;
+            return settlement == null
+                ? CoopCampaignMapPrototypeSettlementKind.None
+                : CoopCampaignMapPrototypeSettlementKind.Special;
+        }
+
         private static void ResolvePartyVisualState(
             MobileParty party,
             MobilePartyVisual nativeVisual,
@@ -612,6 +863,22 @@ namespace CoopSpectator.Campaign
                 caravanMountVisual = CaptureAgentVisual(
                     nativeVisual?.CaravanMountAgentVisuals,
                     includeBodyProperties: false);
+                if (humanVisual == null && visualLeader != null)
+                {
+                    humanVisual = CaptureCharacterVisual(
+                        visualLeader,
+                        party.Party.Banner,
+                        includeMountOnly: false);
+                }
+                if (mountVisual == null && visualLeader?.HasMount() == true)
+                {
+                    mountVisual = CaptureCharacterVisual(
+                        visualLeader,
+                        banner: null,
+                        includeMountOnly: true);
+                }
+                if (party.IsCaravan && caravanMountVisual == null)
+                    caravanMountVisual = mountVisual?.Clone();
                 visualCharacterId =
                     nativeVisual?.HumanAgentVisuals?.GetCharacterObjectID() ??
                     visualLeader?.StringId ??
@@ -756,6 +1023,97 @@ namespace CoopSpectator.Campaign
             }
         }
 
+        private static CoopCampaignMapPrototypeAgentVisualState CaptureCharacterVisual(
+            CharacterObject character,
+            Banner banner,
+            bool includeMountOnly)
+        {
+            if (character == null)
+                return null;
+
+            try
+            {
+                Equipment equipment = character.Equipment?.Clone(false);
+                if (equipment == null)
+                    return null;
+
+                var itemIds = new string[
+                    CoopCampaignMapPrototypeContract.EquipmentSlotCount];
+                for (int slot = 0; slot < itemIds.Length; slot++)
+                {
+                    if (includeMountOnly &&
+                        slot != (int)EquipmentIndex.Horse &&
+                        slot != (int)EquipmentIndex.HorseHarness)
+                    {
+                        itemIds[slot] = string.Empty;
+                        continue;
+                    }
+
+                    EquipmentElement element = equipment[(EquipmentIndex)slot];
+                    ItemObject visualItem = element.CosmeticItem ?? element.Item;
+                    itemIds[slot] =
+                        CoopCampaignMapPrototypeContract.BoundEntityText(
+                            visualItem?.StringId,
+                            CoopCampaignMapPrototypeContract.MaxVisualItemIdCharacters,
+                            string.Empty);
+                }
+
+                ItemObject horseItem = equipment[EquipmentIndex.Horse].Item;
+                string mountCreationKey = string.Empty;
+                if (includeMountOnly && horseItem != null)
+                {
+                    mountCreationKey = MountCreationKey.GetRandomMountKeyString(
+                        horseItem,
+                        character.GetMountKeySeed());
+                }
+
+                var captured = new CoopCampaignMapPrototypeAgentVisualState
+                {
+                    BodyProperties = includeMountOnly
+                        ? string.Empty
+                        : CoopCampaignMapPrototypeContract.BoundEntityText(
+                            character.GetBodyProperties(
+                                equipment,
+                                StableVisualSeed(character.StringId)).ToString(),
+                            CoopCampaignMapPrototypeContract.MaxBodyPropertiesCharacters,
+                            string.Empty),
+                    IsFemale = character.IsFemale,
+                    Race = character.Race,
+                    SkeletonType = character.IsFemale ? 1 : 0,
+                    RightWieldedItemIndex = -1,
+                    LeftWieldedItemIndex = -1,
+                    MountCreationKey =
+                        CoopCampaignMapPrototypeContract.BoundEntityText(
+                            mountCreationKey,
+                            CoopCampaignMapPrototypeContract.MaxMountCreationKeyCharacters,
+                            string.Empty),
+                    HasBanner = !includeMountOnly && banner != null,
+                    AddColorRandomness = !character.IsHero,
+                    EquipmentItemIds = itemIds
+                };
+                return CoopCampaignMapPrototypeContract.IsValidAgentVisualState(
+                    captured,
+                    requireBodyProperties: !includeMountOnly)
+                    ? captured
+                    : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static int StableVisualSeed(string value)
+        {
+            unchecked
+            {
+                int hash = 17;
+                foreach (char character in value ?? string.Empty)
+                    hash = hash * 31 + character;
+                return hash & int.MaxValue;
+            }
+        }
+
         private static double GetDistanceSquared(Vec2 left, Vec2 right)
         {
             double x = left.x - right.x;
@@ -792,6 +1150,33 @@ namespace CoopSpectator.Campaign
             public CoopCampaignMapPrototypeEntityState Entity { get; }
 
             public double DistanceSquared { get; }
+        }
+
+        private sealed class ReplicaInformation
+        {
+            public string FactionId { get; set; } = string.Empty;
+
+            public string FactionName { get; set; } = string.Empty;
+
+            public string OwnerName { get; set; } = string.Empty;
+
+            public string LeaderName { get; set; } = string.Empty;
+
+            public string ArmyId { get; set; } = string.Empty;
+
+            public string ArmyName { get; set; } = string.Empty;
+
+            public bool IsArmyLeader { get; set; }
+
+            public bool IsMoving { get; set; }
+
+            public int ArmyPartyCount { get; set; }
+
+            public int ArmyTotalSize { get; set; }
+
+            public int ArmyCohesion { get; set; }
+
+            public CoopCampaignMapPrototypeSettlementKind SettlementKind { get; set; }
         }
 
         private static CoopCampaignMapPrototypeCameraState TryCaptureMapCamera()

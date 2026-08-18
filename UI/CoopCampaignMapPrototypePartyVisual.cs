@@ -20,6 +20,11 @@ namespace CoopSpectator.UI
         private AgentVisuals _mountVisual;
         private AgentVisuals _caravanMountVisual;
 
+        internal bool IsUsable =>
+            HasValidEntity(_humanVisual) &&
+            (_mountVisual == null || HasValidEntity(_mountVisual)) &&
+            (_caravanMountVisual == null || HasValidEntity(_caravanMountVisual));
+
         internal static bool TryCreate(
             Scene scene,
             CoopCampaignMapPrototypeEntityState state,
@@ -231,8 +236,29 @@ namespace CoopSpectator.UI
             MatrixFrame initialFrame,
             out CoopCampaignMapPrototypePartyVisual visual)
         {
-            candidate.Update(initialFrame, 0.0001f, false, 0f);
+            SetFrame(candidate._mountVisual, initialFrame);
+            candidate._mountVisual?.Tick(null, 0.0001f, false, 0f);
+            ForceUpdateBoneFrames(candidate._mountVisual);
+
+            SetFrame(candidate._humanVisual, initialFrame);
+            candidate._humanVisual?.Tick(
+                candidate._mountVisual,
+                0.0001f,
+                false,
+                0f);
+            ForceUpdateBoneFrames(candidate._humanVisual);
+
+            MatrixFrame caravanFrame = initialFrame;
+            caravanFrame.origin +=
+                initialFrame.rotation.s * CaravanMountOffset.x +
+                initialFrame.rotation.f * CaravanMountOffset.y +
+                initialFrame.rotation.u * CaravanMountOffset.z;
+            SetFrame(candidate._caravanMountVisual, caravanFrame);
+            candidate._caravanMountVisual?.Tick(null, 0.0001f, false, 0f);
+            ForceUpdateBoneFrames(candidate._caravanMountVisual);
             candidate.SetVisible(true);
+            if (!candidate.IsUsable)
+                return FailCandidate(candidate, out visual);
             visual = candidate;
             return true;
         }
@@ -563,6 +589,35 @@ namespace CoopSpectator.UI
             try
             {
                 visual?.SetVisible(visible);
+            }
+            catch
+            {
+            }
+        }
+
+        private static bool HasValidEntity(AgentVisuals visual)
+        {
+            if (visual == null)
+                return false;
+            try
+            {
+                return visual.GetWeakEntity() != WeakGameEntity.Invalid;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void ForceUpdateBoneFrames(AgentVisuals visual)
+        {
+            if (visual == null)
+                return;
+            try
+            {
+                WeakGameEntity entity = visual.GetWeakEntity();
+                if (entity != WeakGameEntity.Invalid)
+                    entity.Skeleton.ForceUpdateBoneFrames();
             }
             catch
             {

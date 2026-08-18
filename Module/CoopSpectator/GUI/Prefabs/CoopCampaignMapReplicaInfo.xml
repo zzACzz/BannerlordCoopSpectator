@@ -1,0 +1,19 @@
+<Prefab>
+  <Window>
+    <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" DoNotAcceptEvents="true">
+      <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="360" SuggestedHeight="220" Position="@Position" IsVisible="@IsVisible" DoNotAcceptEvents="true">
+        <Children>
+          <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" Sprite="BlankWhiteSquare_9" Color="#11100EEE" DoNotAcceptEvents="true" />
+          <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginLeft="18" MarginRight="18" MarginTop="14" MarginBottom="14" StackLayout.LayoutMethod="VerticalTopToBottom" DoNotAcceptEvents="true">
+            <Children>
+              <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" Brush="Popup.Title.Text" Brush.FontSize="25" Text="@Title" DoNotAcceptEvents="true" />
+              <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginTop="2" Brush="Popup.Description.Text" Brush.FontSize="18" Text="@TypeText" DoNotAcceptEvents="true" />
+              <RichTextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginTop="10" Brush="Popup.Description.Text" Brush.FontSize="18" Text="@DetailsText" DoNotAcceptEvents="true" />
+              <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginTop="10" Brush="Popup.Description.Text" Brush.FontSize="15" Text="@InteractionText" DoNotAcceptEvents="true" />
+            </Children>
+          </ListPanel>
+        </Children>
+      </Widget>
+    </Widget>
+  </Window>
+</Prefab>

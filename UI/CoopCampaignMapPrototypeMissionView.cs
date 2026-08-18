@@ -12,6 +12,7 @@ using TaleWorlds.Engine.GauntletUI;
 using TaleWorlds.Engine.Screens;
 using TaleWorlds.GauntletUI;
 using TaleWorlds.Library;
+using TaleWorlds.InputSystem;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.View.MissionViews;
 using TaleWorlds.ScreenSystem;
@@ -27,9 +28,11 @@ namespace CoopSpectator.UI
         private const string MarkerMeshName = "order_flag_small";
         private const string EntityOverlayMovieName = "PartyNameplate";
         private const string SettlementOverlayMovieName = "SettlementNameplate";
+        private const string ReplicaInfoMovieName = "CoopCampaignMapReplicaInfo";
         private const float RenderReadinessTimeoutSeconds = 5f;
         private const int MaximumPartyVisualCreationAttempts = 3;
         private const float PartyVisualRetryDelaySeconds = 0.25f;
+        private const float PartyVisualStableResetSeconds = 2f;
 
         private sealed class EntityReplica
         {
@@ -52,6 +55,8 @@ namespace CoopSpectator.UI
             public int PartyVisualAttemptCount { get; set; }
 
             public float PartyVisualRetryDelayRemaining { get; set; }
+
+            public float PartyVisualStableSeconds { get; set; }
 
             public Vec3 PreviousWorldPosition { get; set; }
 
@@ -97,12 +102,28 @@ namespace CoopSpectator.UI
         private GauntletMovieIdentifier _settlementOverlayMovie;
         private CoopCampaignMapPrototypeSettlementOverlayVM
             _settlementOverlayViewModel;
+        private GauntletLayer _replicaInfoLayer;
+        private GauntletMovieIdentifier _replicaInfoMovie;
+        private CoopCampaignMapReplicaInfoVM _replicaInfoViewModel;
+        private bool _missionMouseVisibilityCaptured;
+        private bool _previousMissionMouseVisible;
+        private readonly Dictionary<string, CoopCampaignMapPrototypeCatalogEntityState>
+            _catalogById =
+                new Dictionary<string, CoopCampaignMapPrototypeCatalogEntityState>(
+                    StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, CoopCampaignMapPrototypeDynamicEntityState>
+            _dynamicById =
+                new Dictionary<string, CoopCampaignMapPrototypeDynamicEntityState>(
+                    StringComparer.OrdinalIgnoreCase);
+        private string _selectedReplicaId;
+        private float _replicaHoverUpdateDelay;
         private Vec3 _sceneMinimum;
         private Vec3 _sceneMaximum;
         private double _displayedX = 0.5d;
         private double _displayedY = 0.5d;
         private double _displayedHeading;
         private bool _hasDisplayedCamera;
+        private bool _hostCameraInitialized;
         private Vec3 _displayedCameraOrigin;
         private Vec3 _displayedCameraDirection;
         private Vec3 _displayedCameraUp;
@@ -127,6 +148,10 @@ namespace CoopSpectator.UI
                 OnClientStateChanged;
             CoopCampaignMapPrototypeNetworkController.ClientVisibleEntitiesChanged +=
                 OnClientVisibleEntitiesChanged;
+            CoopCampaignMapPrototypeNetworkController.ClientCatalogChanged +=
+                OnClientCatalogChanged;
+            CoopCampaignMapPrototypeNetworkController.ClientDynamicChanged +=
+                OnClientDynamicChanged;
         }
 
         public override void OnMissionScreenInitialize()
@@ -182,7 +207,9 @@ namespace CoopSpectator.UI
                 UpdateDisplayedCamera(current.Camera, interpolationAmount);
             }
             UpdateEntityReplicas(dt);
+            TickReplicaFreeCamera(dt);
             UpdateMarkerAndCamera();
+            UpdateReplicaInformation(dt);
         }
 
         public override void OnMissionScreenFinalize()
@@ -191,6 +218,10 @@ namespace CoopSpectator.UI
                 OnClientStateChanged;
             CoopCampaignMapPrototypeNetworkController.ClientVisibleEntitiesChanged -=
                 OnClientVisibleEntitiesChanged;
+            CoopCampaignMapPrototypeNetworkController.ClientCatalogChanged -=
+                OnClientCatalogChanged;
+            CoopCampaignMapPrototypeNetworkController.ClientDynamicChanged -=
+                OnClientDynamicChanged;
             ReleaseSceneLayer();
             base.OnMissionScreenFinalize();
         }
@@ -206,6 +237,34 @@ namespace CoopSpectator.UI
             IReadOnlyList<CoopCampaignMapPrototypeEntityState> entities)
         {
             QueueVisibleEntities(revision, entities);
+        }
+
+        private void OnClientCatalogChanged(
+            int revision,
+            IReadOnlyList<CoopCampaignMapPrototypeCatalogEntityState> entities)
+        {
+            _catalogById.Clear();
+            if (entities == null)
+                return;
+            foreach (CoopCampaignMapPrototypeCatalogEntityState entity in entities)
+            {
+                if (entity != null)
+                    _catalogById[entity.EntityId] = entity.Clone();
+            }
+        }
+
+        private void OnClientDynamicChanged(
+            int revision,
+            IReadOnlyList<CoopCampaignMapPrototypeDynamicEntityState> entities)
+        {
+            _dynamicById.Clear();
+            if (entities == null)
+                return;
+            foreach (CoopCampaignMapPrototypeDynamicEntityState entity in entities)
+            {
+                if (entity != null)
+                    _dynamicById[entity.EntityId] = entity.Clone();
+            }
         }
 
         private void TryLoadCampaignMap()
@@ -295,6 +354,7 @@ namespace CoopSpectator.UI
                 MissionScreen.AddLayer(_sceneLayer);
                 CreateEntityOverlayLayer();
                 CreateSettlementOverlayLayer();
+                CreateReplicaInfoLayer();
 
                 _mapScene.PreloadForRendering();
                 _mapScene.CheckResources(checkInvisibleEntities: false);
@@ -308,9 +368,16 @@ namespace CoopSpectator.UI
                         .CurrentClientVisibleEntitiesRevision,
                     CoopCampaignMapPrototypeNetworkController
                         .CurrentClientVisibleEntities);
+                OnClientCatalogChanged(
+                    0,
+                    CoopCampaignMapPrototypeNetworkController.CurrentClientCatalog);
+                OnClientDynamicChanged(
+                    0,
+                    CoopCampaignMapPrototypeNetworkController.CurrentClientDynamic);
                 ApplyPendingVisibleEntities();
                 UpdateEntityReplicas(0f);
                 UpdateMarkerAndCamera();
+                InitializeLocalFreeCamera();
                 ModLogger.Info(
                     "CoopCampaignMapPrototypeMissionView: Main_map loaded in isolated client scene layer. Module=" +
                     ownerModule +
@@ -358,6 +425,25 @@ namespace CoopSpectator.UI
             _settlementOverlayMovie = _settlementOverlayLayer.LoadMovie(
                 SettlementOverlayMovieName,
                 _settlementOverlayViewModel);
+        }
+
+        private void CreateReplicaInfoLayer()
+        {
+            if (_replicaInfoViewModel != null || MissionScreen == null)
+                return;
+            _replicaInfoViewModel = new CoopCampaignMapReplicaInfoVM();
+            _replicaInfoLayer = new GauntletLayer(
+                "CoopCampaignMapReplicaInfo",
+                ViewOrderPriority + 3,
+                false);
+            _previousMissionMouseVisible = MissionScreen.MouseVisible;
+            _missionMouseVisibilityCaptured = true;
+            _replicaInfoLayer.InputRestrictions.SetMouseVisibility(true);
+            MissionScreen.MouseVisible = true;
+            MissionScreen.AddLayer(_replicaInfoLayer);
+            _replicaInfoMovie = _replicaInfoLayer.LoadMovie(
+                ReplicaInfoMovieName,
+                _replicaInfoViewModel);
         }
 
         private void QueueVisibleEntities(
@@ -555,6 +641,21 @@ namespace CoopSpectator.UI
                             dt,
                             isMoving,
                             visualSpeed);
+                        if (!replica.PartyVisual.IsUsable)
+                        {
+                            ResetPartyVisual(replica);
+                            replica.PartyVisualRetryDelayRemaining =
+                                PartyVisualRetryDelaySeconds;
+                        }
+                        else
+                        {
+                            replica.PartyVisualStableSeconds += Math.Max(0f, dt);
+                            if (replica.PartyVisualStableSeconds >=
+                                PartyVisualStableResetSeconds)
+                            {
+                                replica.PartyVisualAttemptCount = 0;
+                            }
+                        }
                     }
                     catch
                     {
@@ -564,7 +665,8 @@ namespace CoopSpectator.UI
                     }
                 }
 
-                bool hasPartyVisual = replica.PartyVisual != null;
+                bool hasPartyVisual =
+                    replica.PartyVisual?.IsUsable == true;
                 if (target.Kind ==
                     CoopCampaignMapPrototypeEntityKind.MainParty)
                 {
@@ -628,6 +730,7 @@ namespace CoopSpectator.UI
                     out CoopCampaignMapPrototypePartyVisual visual))
             {
                 replica.PartyVisual = visual;
+                replica.PartyVisualStableSeconds = 0f;
                 replica.PartyVisualRetryDelayRemaining = 0f;
             }
             else if (replica.PartyVisualAttemptCount <
@@ -636,6 +739,94 @@ namespace CoopSpectator.UI
                 replica.PartyVisualRetryDelayRemaining =
                     PartyVisualRetryDelaySeconds;
             }
+        }
+
+        private void UpdateReplicaInformation(float dt)
+        {
+            if (_replicaInfoViewModel == null || _camera == null)
+                return;
+
+            bool clicked = Input.IsKeyPressed(InputKey.LeftMouseButton);
+            _replicaHoverUpdateDelay -= Math.Max(0f, dt);
+            if (!clicked && _replicaHoverUpdateDelay > 0f)
+                return;
+            _replicaHoverUpdateDelay = 0.08f;
+
+            Vec2 rangedMouse =
+                TaleWorlds.InputSystem.Input.MousePositionRanged;
+            Vec2 mouse = new Vec2(
+                rangedMouse.x * Screen.RealScreenResolutionWidth,
+                rangedMouse.y * Screen.RealScreenResolutionHeight);
+            string hoveredId = null;
+            float nearestDistanceSquared = 70f * 70f;
+            foreach (KeyValuePair<string, EntityReplica> pair in _entityReplicas)
+            {
+                EntityReplica replica = pair.Value;
+                if (replica?.Target == null)
+                    continue;
+                try
+                {
+                    float x = -500f;
+                    float y = -500f;
+                    float depth = 0f;
+                    MBWindowManager.WorldToScreenInsideUsableArea(
+                        _camera,
+                        replica.WorldPosition,
+                        ref x,
+                        ref y,
+                        ref depth);
+                    if (depth <= 0f)
+                        continue;
+                    float dx = x - mouse.x;
+                    float dy = y - mouse.y;
+                    float distanceSquared = dx * dx + dy * dy;
+                    if (distanceSquared < nearestDistanceSquared)
+                    {
+                        nearestDistanceSquared = distanceSquared;
+                        hoveredId = pair.Key;
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            if (clicked && hoveredId != null)
+            {
+                _selectedReplicaId = string.Equals(
+                    _selectedReplicaId,
+                    hoveredId,
+                    StringComparison.OrdinalIgnoreCase)
+                    ? null
+                    : hoveredId;
+            }
+
+            string effectiveId = !string.IsNullOrWhiteSpace(_selectedReplicaId)
+                ? _selectedReplicaId
+                : hoveredId;
+            bool pinned = !string.IsNullOrWhiteSpace(_selectedReplicaId);
+            if (effectiveId == null ||
+                !_catalogById.TryGetValue(
+                    effectiveId,
+                    out CoopCampaignMapPrototypeCatalogEntityState catalog) ||
+                !_dynamicById.TryGetValue(
+                    effectiveId,
+                    out CoopCampaignMapPrototypeDynamicEntityState dynamicState) ||
+                !dynamicState.IsVisible)
+            {
+                if (pinned)
+                    _selectedReplicaId = null;
+                _replicaInfoViewModel.Hide();
+                return;
+            }
+
+            _replicaInfoViewModel.Show(
+                catalog,
+                dynamicState,
+                mouse,
+                pinned,
+                Screen.RealScreenResolutionWidth,
+                Screen.RealScreenResolutionHeight);
         }
 
         private static string BuildPartyVisualAttemptKey(
@@ -705,6 +896,7 @@ namespace CoopSpectator.UI
 
             CoopCampaignMapPrototypePartyVisual visual = replica.PartyVisual;
             replica.PartyVisual = null;
+            replica.PartyVisualStableSeconds = 0f;
             visual.Reset();
         }
 
@@ -1009,6 +1201,7 @@ namespace CoopSpectator.UI
 
         private void ReleaseSceneLayer()
         {
+            ReleaseReplicaInfoLayer();
             ReleaseSettlementOverlayLayer();
             ReleaseEntityOverlayLayer();
             foreach (EntityReplica replica in _entityReplicas.Values)
@@ -1020,6 +1213,9 @@ namespace CoopSpectator.UI
             _pendingVisibleEntities = null;
             _pendingVisibleEntitiesRevision = -1;
             _appliedVisibleEntitiesRevision = -1;
+            _catalogById.Clear();
+            _dynamicById.Clear();
+            _selectedReplicaId = null;
 
             if (_agentRendererSceneController != null && _mapScene != null)
             {
@@ -1126,6 +1322,35 @@ namespace CoopSpectator.UI
             }
         }
 
+        private void ReleaseReplicaInfoLayer()
+        {
+            try
+            {
+                if (_replicaInfoLayer != null && _replicaInfoMovie != null)
+                    _replicaInfoLayer.ReleaseMovie(_replicaInfoMovie);
+                if (_replicaInfoLayer != null)
+                {
+                    _replicaInfoLayer.InputRestrictions.ResetInputRestrictions();
+                    _replicaInfoLayer.InputRestrictions.SetMouseVisibility(false);
+                }
+                if (_replicaInfoLayer != null)
+                    MissionScreen?.RemoveLayer(_replicaInfoLayer);
+                if (_missionMouseVisibilityCaptured && MissionScreen != null)
+                    MissionScreen.MouseVisible = _previousMissionMouseVisible;
+                _replicaInfoViewModel?.OnFinalize();
+            }
+            catch
+            {
+            }
+            finally
+            {
+                _replicaInfoMovie = null;
+                _replicaInfoLayer = null;
+                _replicaInfoViewModel = null;
+                _missionMouseVisibilityCaptured = false;
+            }
+        }
+
         private void UpdateDisplayedCamera(
             CoopCampaignMapPrototypeCameraState cameraState,
             double interpolationAmount)
@@ -1140,33 +1365,151 @@ namespace CoopSpectator.UI
                 return;
             }
 
-            if (!_hasDisplayedCamera)
-            {
-                _displayedCameraOrigin = targetOrigin;
-                _displayedCameraDirection = targetDirection;
-                _displayedCameraUp = targetUp;
-                _displayedCameraFov = targetFov;
-                _hasDisplayedCamera = true;
+            if (_hostCameraInitialized)
                 return;
-            }
 
-            float amount = (float)interpolationAmount;
-            Vec3 direction = Lerp(
-                _displayedCameraDirection,
-                targetDirection,
-                amount);
-            Vec3 up = Lerp(_displayedCameraUp, targetUp, amount);
+            _displayedCameraOrigin = targetOrigin;
+            _displayedCameraDirection = targetDirection;
+            _displayedCameraUp = targetUp;
+            _displayedCameraFov = targetFov;
+            _hasDisplayedCamera = true;
+            _hostCameraInitialized = true;
+        }
+
+        private void InitializeLocalFreeCamera()
+        {
+            if (_hasDisplayedCamera || _camera == null)
+                return;
+
+            MatrixFrame frame = _camera.Frame;
+            Vec3 direction = _camera.Direction;
+            Vec3 up = frame.rotation.f;
             if (!TryNormalizeCameraBasis(ref direction, ref up))
                 return;
 
-            _displayedCameraOrigin = Lerp(
-                _displayedCameraOrigin,
-                targetOrigin,
-                amount);
+            _displayedCameraOrigin = frame.origin;
             _displayedCameraDirection = direction;
             _displayedCameraUp = up;
-            _displayedCameraFov +=
-                (targetFov - _displayedCameraFov) * amount;
+            _displayedCameraFov = 0.6981317f;
+            _hasDisplayedCamera = true;
+        }
+
+        private void TickReplicaFreeCamera(float dt)
+        {
+            if (!_hasDisplayedCamera || _mapScene == null)
+                return;
+
+            float safeDt = Math.Max(0f, Math.Min(0.1f, dt));
+            Vec3 direction = _displayedCameraDirection;
+            Vec3 up = _displayedCameraUp;
+            if (!TryNormalizeCameraBasis(ref direction, ref up))
+                return;
+
+            Vec3 side = Cross(direction, up);
+            float sideLength = side.Normalize();
+            if (sideLength <= 0.0001f)
+                return;
+
+            if (Input.IsKeyDown(InputKey.RightMouseButton))
+            {
+                float yaw = Input.GetMouseMoveX() * 0.0025f;
+                float pitch = -Input.GetMouseMoveY() * 0.0025f;
+                if (Math.Abs(yaw) > 0.00001f)
+                {
+                    direction = RotateAroundAxis(direction, Vec3.Up, yaw);
+                    up = RotateAroundAxis(up, Vec3.Up, yaw);
+                }
+                side = Cross(direction, up);
+                side.Normalize();
+                if (Math.Abs(pitch) > 0.00001f)
+                {
+                    Vec3 candidateDirection =
+                        RotateAroundAxis(direction, side, pitch);
+                    Vec3 candidateUp = RotateAroundAxis(up, side, pitch);
+                    if (candidateDirection.z > -0.98f &&
+                        candidateDirection.z < 0.98f)
+                    {
+                        direction = candidateDirection;
+                        up = candidateUp;
+                    }
+                }
+                TryNormalizeCameraBasis(ref direction, ref up);
+            }
+
+            float moveForward = 0f;
+            float moveSide = 0f;
+            float moveUp = 0f;
+            if (Input.IsKeyDown(InputKey.W))
+                moveForward += 1f;
+            if (Input.IsKeyDown(InputKey.S))
+                moveForward -= 1f;
+            if (Input.IsKeyDown(InputKey.D))
+                moveSide += 1f;
+            if (Input.IsKeyDown(InputKey.A))
+                moveSide -= 1f;
+            if (Input.IsKeyDown(InputKey.Space) || Input.IsKeyDown(InputKey.E))
+                moveUp += 1f;
+            if (Input.IsKeyDown(InputKey.LeftControl) ||
+                Input.IsKeyDown(InputKey.RightControl) ||
+                Input.IsKeyDown(InputKey.Q))
+            {
+                moveUp -= 1f;
+            }
+
+            side = Cross(direction, up);
+            side.Normalize();
+            Vec3 movement =
+                direction * moveForward +
+                side * moveSide +
+                Vec3.Up * moveUp;
+            if (movement.IsNonZero)
+            {
+                movement.Normalize();
+                float horizontalSpan = Math.Max(
+                    _sceneMaximum.x - _sceneMinimum.x,
+                    _sceneMaximum.y - _sceneMinimum.y);
+                float speed = Math.Max(20f, horizontalSpan * 0.08f);
+                if (Input.IsKeyDown(InputKey.LeftShift) ||
+                    Input.IsKeyDown(InputKey.RightShift))
+                {
+                    speed *= 3f;
+                }
+                _displayedCameraOrigin += movement * (speed * safeDt);
+                _displayedCameraOrigin.x = Math.Max(
+                    _sceneMinimum.x,
+                    Math.Min(_sceneMaximum.x, _displayedCameraOrigin.x));
+                _displayedCameraOrigin.y = Math.Max(
+                    _sceneMinimum.y,
+                    Math.Min(_sceneMaximum.y, _displayedCameraOrigin.y));
+                _displayedCameraOrigin.z = Math.Max(
+                    1f,
+                    Math.Min(horizontalSpan * 2f, _displayedCameraOrigin.z));
+            }
+
+            _displayedCameraDirection = direction;
+            _displayedCameraUp = up;
+        }
+
+        private static Vec3 Cross(Vec3 left, Vec3 right)
+        {
+            return new Vec3(
+                left.y * right.z - left.z * right.y,
+                left.z * right.x - left.x * right.z,
+                left.x * right.y - left.y * right.x);
+        }
+
+        private static Vec3 RotateAroundAxis(Vec3 value, Vec3 axis, float angle)
+        {
+            float axisLength = axis.Normalize();
+            if (axisLength <= 0.0001f)
+                return value;
+            float cosine = (float)Math.Cos(angle);
+            float sine = (float)Math.Sin(angle);
+            Vec3 cross = Cross(axis, value);
+            float dot = axis.x * value.x + axis.y * value.y + axis.z * value.z;
+            return value * cosine +
+                   cross * sine +
+                   axis * (dot * (1f - cosine));
         }
 
         private static bool TryDecodeCamera(

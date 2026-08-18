@@ -97,6 +97,7 @@
     <Compile Include="..\Network\Messages\CoopHideoutAmbushNetworkMessages.cs" Link="Network\Messages\CoopHideoutAmbushNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopBattlePowerNetworkMessages.cs" Link="Network\Messages\CoopBattlePowerNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopCampaignMapPrototypeNetworkMessages.cs" Link="Network\Messages\CoopCampaignMapPrototypeNetworkMessages.cs" />
+    <Compile Include="..\Network\Messages\CoopCampaignMapReplicaNetworkMessages.cs" Link="Network\Messages\CoopCampaignMapReplicaNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopBattleAgentControlNetworkMessages.cs" Link="Network\Messages\CoopBattleAgentControlNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopSiegeAmbushOrderNetworkMessages.cs" Link="Network\Messages\CoopSiegeAmbushOrderNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopSiegeAssaultOrderNetworkMessages.cs" Link="Network\Messages\CoopSiegeAssaultOrderNetworkMessages.cs" />

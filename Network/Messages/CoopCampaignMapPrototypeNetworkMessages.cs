@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using CoopSpectator.Infrastructure;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.Network.Messages;
@@ -40,6 +41,8 @@ namespace CoopSpectator.Network.Messages
                 state?.ServerTimeMilliseconds ?? 0);
             VisibleEntitiesRevision = ClampPositive(
                 state?.VisibleEntitiesRevision ?? 0);
+            CatalogRevision = ClampPositive(state?.CatalogRevision ?? 0);
+            DynamicRevision = ClampPositive(state?.DynamicRevision ?? 0);
             Camera = CoopCampaignMapPrototypeContract.IsValidCameraState(
                 state?.Camera)
                 ? state?.Camera?.Clone()
@@ -68,6 +71,10 @@ namespace CoopSpectator.Network.Messages
 
         public int VisibleEntitiesRevision { get; private set; }
 
+        public int CatalogRevision { get; private set; }
+
+        public int DynamicRevision { get; private set; }
+
         public CoopCampaignMapPrototypeCameraState Camera { get; private set; }
 
         public CoopCampaignMapPrototypeState ToState()
@@ -82,6 +89,8 @@ namespace CoopSpectator.Network.Messages
                 SeasonTimeFactor = SeasonTimeFactor,
                 ServerTimeMilliseconds = ServerTimeMilliseconds,
                 VisibleEntitiesRevision = VisibleEntitiesRevision,
+                CatalogRevision = CatalogRevision,
+                DynamicRevision = DynamicRevision,
                 Camera = Camera?.Clone()
             };
         }
@@ -100,6 +109,8 @@ namespace CoopSpectator.Network.Messages
             VisibleEntitiesRevision = ReadIntFromPacket(
                 RevisionCompression,
                 ref valid);
+            CatalogRevision = ReadIntFromPacket(RevisionCompression, ref valid);
+            DynamicRevision = ReadIntFromPacket(RevisionCompression, ref valid);
             bool hasCamera = ReadBoolFromPacket(ref valid);
             Camera = hasCamera
                 ? ReadCamera(ref valid)
@@ -122,6 +133,8 @@ namespace CoopSpectator.Network.Messages
             WriteIntToPacket(
                 ClampPositive(VisibleEntitiesRevision),
                 RevisionCompression);
+            WriteIntToPacket(ClampPositive(CatalogRevision), RevisionCompression);
+            WriteIntToPacket(ClampPositive(DynamicRevision), RevisionCompression);
             bool hasCamera =
                 CoopCampaignMapPrototypeContract.IsValidCameraState(Camera) &&
                 Camera != null;
@@ -143,6 +156,8 @@ namespace CoopSpectator.Network.Messages
                    " Season=" + SeasonTimeFactor +
                    " ServerMs=" + ServerTimeMilliseconds +
                    " EntitiesRevision=" + VisibleEntitiesRevision +
+                   " CatalogRevision=" + CatalogRevision +
+                   " DynamicRevision=" + DynamicRevision +
                    " Camera=" + (Camera != null);
         }
 
