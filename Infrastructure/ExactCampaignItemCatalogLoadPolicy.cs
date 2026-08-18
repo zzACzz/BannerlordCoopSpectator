@@ -4,6 +4,48 @@ using System.Xml;
 
 namespace CoopSpectator.Infrastructure
 {
+    public enum ExactCampaignCraftingRuntimeDecision
+    {
+        SkipStandaloneCampaign = 0,
+        UsePreloadedCatalog = 1,
+        RejectUnavailableCatalog = 2
+    }
+
+    public static class ExactCampaignCraftingRuntimeSafetyContract
+    {
+        public static ExactCampaignCraftingRuntimeDecision Evaluate(
+            bool isCampaignRuntime,
+            bool isNetworkSessionActive,
+            bool isPreloadedCatalogReady)
+        {
+            if (isCampaignRuntime && !isNetworkSessionActive)
+                return ExactCampaignCraftingRuntimeDecision.SkipStandaloneCampaign;
+
+            return isPreloadedCatalogReady
+                ? ExactCampaignCraftingRuntimeDecision.UsePreloadedCatalog
+                : ExactCampaignCraftingRuntimeDecision.RejectUnavailableCatalog;
+        }
+
+        public static bool IsCanonicalCraftingPiece(
+            bool belongsToTemplate,
+            bool resolvesToSameObject,
+            bool isReady,
+            bool isValid)
+        {
+            return belongsToTemplate && resolvesToSameObject && isReady && isValid;
+        }
+
+        public static bool ShouldRetryRejectedCraftedMirror(bool wasRejected)
+        {
+            return !wasRejected;
+        }
+
+        public static bool ShouldUseSafeWeaponSlotFallback(bool craftedMirrorResolved)
+        {
+            return !craftedMirrorResolved;
+        }
+    }
+
     public sealed class ExactCampaignItemCatalogSelection
     {
         public ExactCampaignItemCatalogSelection(

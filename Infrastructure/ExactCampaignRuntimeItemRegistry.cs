@@ -9,6 +9,7 @@ using CoopSpectator.Network.Messages;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
 using TaleWorlds.Localization;
+using TaleWorlds.MountAndBlade;
 using TaleWorlds.ObjectSystem;
 
 namespace CoopSpectator.Infrastructure
@@ -63,34 +64,27 @@ namespace CoopSpectator.Infrastructure
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<string> LoadedCraftedMirrorItemIds =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private static readonly HashSet<string> RejectedCraftedMirrorKeys =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         private static bool _indexBuilt;
         private static string _indexSummary = "not-built";
         private static bool _craftingSupportLoaded;
+        private static bool _craftingSupportReady;
         private static string _craftingSupportSummary = "not-loaded";
         private const string MirrorItemIdPrefix = "cs_mirror_";
         private const string CraftedMirrorItemIdPrefix = "cs_crafted_";
-
-        internal static void EnsureCraftingSupportLoadedForBootstrap(string source)
-        {
-            MBObjectManager objectManager = Game.Current?.ObjectManager ?? MBObjectManager.Instance;
-            if (objectManager == null)
-            {
-                ModLogger.Info(
-                    "ExactCampaignRuntimeItemRegistry: crafting support bootstrap skipped because object manager is null. " +
-                    "Source=" + (source ?? "unknown"));
-                return;
-            }
-
-            lock (Sync)
-            {
-                EnsureCraftingSupportLoaded(objectManager);
-            }
-        }
+        private const int Bannerlord148CampaignCraftingPieceCount = 805;
+        private const int Bannerlord148MultiplayerCraftingPieceCount = 435;
+        private const int Bannerlord148CraftingTemplateCount = 12;
+        private const int Bannerlord148WeaponDescriptionCount = 22;
 
         public static void EnsureLoadedFromState(BattleRuntimeState runtimeState, string source)
         {
             if (!ExperimentalFeatures.EnableExactCampaignRuntimeItemRegistry || runtimeState == null)
+                return;
+
+            if (ShouldSkipStandaloneCampaignMaterialization())
                 return;
 
             ExactCampaignObjectCatalogBootstrap.EnsureLoaded("exact-runtime-item-registry:" + (source ?? "unknown"));
@@ -141,8 +135,6 @@ namespace CoopSpectator.Infrastructure
                         unresolvedThisPass.Add(failureSummary);
                     }
                 }
-
-                TryUnregisterNonReadyObjects(objectManager);
 
                 int itemCountAfter = TryGetItemCount(objectManager);
                 List<string> missingAfter = requestedAndSupportItemIds
@@ -331,6 +323,12 @@ namespace CoopSpectator.Infrastructure
             lock (Sync)
             {
                 string trimmedKey = craftedWeaponKey.Trim();
+                if (RejectedCraftedMirrorKeys.Contains(trimmedKey))
+                {
+                    failureSummary = trimmedKey + "=crafted-mirror-rejected-cached";
+                    return false;
+                }
+
                 if (!CraftedMirrorItemIdsByKey.TryGetValue(trimmedKey, out string mappedMirrorItemId) ||
                     string.IsNullOrWhiteSpace(mappedMirrorItemId))
                 {
@@ -338,9 +336,10 @@ namespace CoopSpectator.Infrastructure
                     return false;
                 }
 
-                if (TryResolveItem(objectManager, mappedMirrorItemId) == null)
+                ItemObject mappedMirrorItem = TryResolveItem(objectManager, mappedMirrorItemId);
+                if (!IsRuntimeWeaponItemUsable(mappedMirrorItem))
                 {
-                    failureSummary = trimmedKey + "=" + mappedMirrorItemId + "=crafted-mirror-unresolved";
+                    failureSummary = trimmedKey + "=" + mappedMirrorItemId + "=crafted-mirror-unusable";
                     return false;
                 }
 
@@ -368,7 +367,6 @@ namespace CoopSpectator.Infrastructure
 
             lock (Sync)
             {
-                EnsureCraftingSupportLoaded(objectManager);
                 itemModifier = TryResolveObject<ItemModifier>(objectManager, modifierId.Trim());
                 if (itemModifier != null)
                     return true;
@@ -416,6 +414,7 @@ namespace CoopSpectator.Infrastructure
                 }
                 else if (!string.IsNullOrWhiteSpace(failureSummary))
                 {
+                    RejectedCraftedMirrorKeys.Add(craftedWeapon.Key.Trim());
                     unresolvedThisPass.Add(failureSummary);
                 }
             }
@@ -467,13 +466,32 @@ namespace CoopSpectator.Infrastructure
             }
 
             string craftedKey = craftedWeapon.Key.Trim();
+            if (!ExactCampaignCraftingRuntimeSafetyContract.ShouldRetryRejectedCraftedMirror(
+                    RejectedCraftedMirrorKeys.Contains(craftedKey)))
+            {
+                failureSummary = craftedKey + "=crafted-mirror-rejected-cached";
+                return false;
+            }
+
+            EnsureCraftingSupportLoaded(objectManager);
+            ExactCampaignCraftingRuntimeDecision supportDecision =
+                ExactCampaignCraftingRuntimeSafetyContract.Evaluate(
+                    isCampaignRuntime: false,
+                    isNetworkSessionActive: GameNetwork.IsSessionActive,
+                    isPreloadedCatalogReady: _craftingSupportReady);
+            if (supportDecision != ExactCampaignCraftingRuntimeDecision.UsePreloadedCatalog)
+            {
+                failureSummary = craftedKey + "=preloaded-crafting-catalog-unavailable:" + _craftingSupportSummary;
+                return false;
+            }
+
             string generatedMirrorItemId = !string.IsNullOrWhiteSpace(craftedWeapon.MirrorItemId)
                 ? craftedWeapon.MirrorItemId.Trim()
                 : BuildCraftedMirrorItemId(craftedKey);
 
             if (CraftedMirrorItemIdsByKey.TryGetValue(craftedKey, out string existingMirrorItemId) &&
                 !string.IsNullOrWhiteSpace(existingMirrorItemId) &&
-                TryResolveItem(objectManager, existingMirrorItemId) != null)
+                IsRuntimeWeaponItemUsable(TryResolveItem(objectManager, existingMirrorItemId)))
             {
                 mirrorItemId = existingMirrorItemId;
                 LoadedCraftedMirrorItemIds.Add(existingMirrorItemId);
@@ -483,6 +501,12 @@ namespace CoopSpectator.Infrastructure
             ItemObject alreadyRegisteredMirror = TryResolveItem(objectManager, generatedMirrorItemId);
             if (alreadyRegisteredMirror != null)
             {
+                if (!IsRuntimeWeaponItemUsable(alreadyRegisteredMirror))
+                {
+                    failureSummary = craftedKey + "=" + generatedMirrorItemId + "=preexisting-crafted-mirror-unusable";
+                    return false;
+                }
+
                 CraftedMirrorItemIdsByKey[craftedKey] = generatedMirrorItemId;
                 LoadedCraftedMirrorItemIds.Add(generatedMirrorItemId);
                 mirrorItemId = generatedMirrorItemId;
@@ -528,8 +552,15 @@ namespace CoopSpectator.Infrastructure
                 return false;
             }
 
-            string weaponDescriptionCanonicalizationSummary =
-                CanonicalizeCraftingTemplateWeaponDescriptionAvailablePieces(objectManager, craftingTemplate, usedPieces);
+            if (!TryValidateCraftedWeaponDesignElements(
+                    objectManager,
+                    craftingTemplate,
+                    usedPieces,
+                    out string designFailure))
+            {
+                failureSummary = craftedKey + "=" + designFailure;
+                return false;
+            }
 
             ItemObject createdItem = null;
             try
@@ -546,14 +577,13 @@ namespace CoopSpectator.Infrastructure
                     CreateCraftedWeaponName(craftedWeapon, generatedMirrorItemId),
                     itemModifierGroup);
 
-                if (generatedItem?.WeaponComponent == null)
+                if (!IsRuntimeWeaponItemUsable(generatedItem))
                 {
                     objectManager.UnregisterObject(createdItem);
                     failureSummary =
                         craftedKey + "=" + generatedMirrorItemId +
-                        "=crafted-generation-returned-no-weapon-component" +
-                        BuildCraftedGenerationCompatibilitySuffix(objectManager, craftingTemplate, usedPieces) +
-                        "/compat:canonicalization=" + weaponDescriptionCanonicalizationSummary;
+                        "=crafted-generation-returned-unusable-weapon" +
+                        BuildCraftedGenerationCompatibilitySuffix(objectManager, craftingTemplate, usedPieces);
                     return false;
                 }
 
@@ -569,7 +599,7 @@ namespace CoopSpectator.Infrastructure
                     " Template=" + craftedWeapon.CraftingTemplateId +
                     " ModifierGroup=" + (craftedWeapon.ModifierGroupId ?? "(template-default)") +
                     " Pieces=" + (craftedWeapon.Pieces?.Count ?? 0) +
-                    " Canonicalization=" + weaponDescriptionCanonicalizationSummary +
+                    " CanonicalPieces=true" +
                     " Source=" + (source ?? "unknown"));
                 return true;
             }
@@ -768,6 +798,14 @@ namespace CoopSpectator.Infrastructure
             if (isCraftedItemNode)
             {
                 EnsureCraftingSupportLoaded(objectManager);
+                if (!_craftingSupportReady)
+                {
+                    failureSummary =
+                        trimmedOriginalItemId + "=" + generatedMirrorItemId +
+                        "=preloaded-crafting-catalog-unavailable:" + _craftingSupportSummary;
+                    return false;
+                }
+
                 craftedDependencies = TryCollectCraftedItemDependencies(mirrorNode);
             }
 
@@ -1089,6 +1127,13 @@ namespace CoopSpectator.Infrastructure
             if (isCraftedItemNode)
             {
                 EnsureCraftingSupportLoaded(objectManager);
+                if (!_craftingSupportReady)
+                {
+                    failureSummary =
+                        definition.ItemId + "=preloaded-crafting-catalog-unavailable:" + _craftingSupportSummary;
+                    return false;
+                }
+
                 craftedDependencies = TryCollectCraftedItemDependencies(sourceNode);
             }
 
@@ -1210,8 +1255,15 @@ namespace CoopSpectator.Infrastructure
                 return false;
             }
 
-            string weaponDescriptionCanonicalizationSummary =
-                CanonicalizeCraftingTemplateWeaponDescriptionAvailablePieces(objectManager, craftingTemplate, usedPieces);
+            if (!TryValidateCraftedWeaponDesignElements(
+                    objectManager,
+                    craftingTemplate,
+                    usedPieces,
+                    out string designFailure))
+            {
+                failureSummary = designFailure;
+                return false;
+            }
 
             ItemObject createdItem = null;
             try
@@ -1226,13 +1278,12 @@ namespace CoopSpectator.Infrastructure
                     craftedWeaponName,
                     itemModifierGroup);
 
-                if (generatedItem?.WeaponComponent == null)
+                if (!IsRuntimeWeaponItemUsable(generatedItem))
                 {
                     objectManager.UnregisterObject(createdItem);
                     failureSummary =
-                        "crafted-generation-returned-no-weapon-component" +
-                        BuildCraftedGenerationCompatibilitySuffix(objectManager, craftingTemplate, usedPieces) +
-                        "/compat:canonicalization=" + weaponDescriptionCanonicalizationSummary;
+                        "crafted-generation-returned-unusable-weapon" +
+                        BuildCraftedGenerationCompatibilitySuffix(objectManager, craftingTemplate, usedPieces);
                     return false;
                 }
 
@@ -1241,7 +1292,7 @@ namespace CoopSpectator.Infrastructure
                     definition.ItemId + "=" + generatedItem.StringId +
                     "(manual-crafted/template:" + templateId +
                     "/modifier:" + (modifierGroupId ?? "(template-default)") +
-                    "/canonicalization:" + weaponDescriptionCanonicalizationSummary + ")";
+                    "/canonical-pieces:true)";
                 return true;
             }
             catch (Exception ex)
@@ -1344,104 +1395,96 @@ namespace CoopSpectator.Infrastructure
                 "/compat:xmlWeaponDescriptions=[" + string.Join(", ", xmlCompatibleWeaponDescriptions) + "]";
         }
 
-        private static string CanonicalizeCraftingTemplateWeaponDescriptionAvailablePieces(
+        private static bool TryValidateCraftedWeaponDesignElements(
             MBObjectManager objectManager,
             CraftingTemplate craftingTemplate,
-            WeaponDesignElement[] usedPieces)
+            WeaponDesignElement[] usedPieces,
+            out string failureSummary)
         {
+            failureSummary = null;
             if (objectManager == null ||
                 craftingTemplate?.WeaponDescriptions == null ||
                 craftingTemplate.Pieces == null ||
                 craftingTemplate.Pieces.Count == 0 ||
-                usedPieces == null)
+                usedPieces == null ||
+                usedPieces.Length != 4)
             {
-                return "skipped";
+                failureSummary = "crafted-design-validation-input-invalid";
+                return false;
             }
 
-            FieldInfo availablePiecesField = typeof(WeaponDescription).GetField(
-                "_availablePieces",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            if (availablePiecesField == null)
-                return "field-missing";
-
-            var templatePiecesById = craftingTemplate.Pieces
-                .Where(piece => piece != null && !string.IsNullOrWhiteSpace(piece.StringId))
-                .GroupBy(piece => piece.StringId, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
-
-            int descriptionCount = 0;
-            int rewrittenDescriptions = 0;
-            int replacedPieceRefs = 0;
-            int appendedPieceRefs = 0;
-            HashSet<string> xmlCompatibleWeaponDescriptionIds =
-                GetXmlCompatibleWeaponDescriptionIds(objectManager, craftingTemplate, usedPieces);
-
-            foreach (WeaponDescription weaponDescription in craftingTemplate.WeaponDescriptions)
+            int validPieceCount = 0;
+            for (int pieceTypeIndex = 0; pieceTypeIndex < usedPieces.Length; pieceTypeIndex++)
             {
-                if (weaponDescription == null)
-                    continue;
-
-                descriptionCount++;
-                var availablePieces = availablePiecesField.GetValue(weaponDescription) as MBList<CraftingPiece>;
-                if (availablePieces == null || availablePieces.Count == 0)
+                WeaponDesignElement usedPiece = usedPieces[pieceTypeIndex];
+                if (usedPiece == null)
                 {
-                    availablePieces = new MBList<CraftingPiece>();
+                    failureSummary = "crafted-design-null-element:" + pieceTypeIndex;
+                    return false;
                 }
 
-                bool rewritten = false;
-                var canonicalPieces = new MBList<CraftingPiece>();
-                foreach (CraftingPiece availablePiece in availablePieces)
+                if (!usedPiece.IsValid)
+                    continue;
+
+                CraftingPiece craftingPiece = usedPiece.CraftingPiece;
+                if (craftingPiece == null || string.IsNullOrWhiteSpace(craftingPiece.StringId))
+                {
+                    failureSummary = "crafted-design-piece-missing:" + pieceTypeIndex;
+                    return false;
+                }
+
+                CraftingPiece resolvedPiece = TryResolveObject<CraftingPiece>(objectManager, craftingPiece.StringId);
+                bool isCanonical = ExactCampaignCraftingRuntimeSafetyContract.IsCanonicalCraftingPiece(
+                    belongsToTemplate: craftingTemplate.Pieces.Contains(craftingPiece),
+                    resolvesToSameObject: ReferenceEquals(resolvedPiece, craftingPiece),
+                    isReady: craftingPiece.IsReady,
+                    isValid: craftingPiece.IsValid);
+                if (!isCanonical)
+                {
+                    failureSummary = "crafted-design-piece-noncanonical:" + craftingPiece.StringId;
+                    return false;
+                }
+
+                validPieceCount++;
+            }
+
+            if (validPieceCount == 0)
+            {
+                failureSummary = "crafted-design-has-no-valid-pieces";
+                return false;
+            }
+
+            bool hasCompatibleWeaponDescription = craftingTemplate.WeaponDescriptions.Any(weaponDescription =>
+            {
+                if (weaponDescription?.AvailablePieces == null)
+                    return false;
+
+                int remainingMatches = validPieceCount;
+                foreach (CraftingPiece availablePiece in weaponDescription.AvailablePieces)
                 {
                     if (availablePiece == null)
                         continue;
 
-                    if (templatePiecesById.TryGetValue(availablePiece.StringId, out CraftingPiece templatePiece) &&
-                        !ReferenceEquals(templatePiece, availablePiece))
-                    {
-                        canonicalPieces.Add(templatePiece);
-                        rewritten = true;
-                        replacedPieceRefs++;
-                    }
-                    else
-                    {
-                        canonicalPieces.Add(availablePiece);
-                    }
+                    int availablePieceTypeIndex = (int)availablePiece.PieceType;
+                    if (availablePieceTypeIndex < 0 || availablePieceTypeIndex >= usedPieces.Length)
+                        continue;
+
+                    if (ReferenceEquals(usedPieces[availablePieceTypeIndex]?.CraftingPiece, availablePiece))
+                        remainingMatches--;
+
+                    if (remainingMatches <= 0)
+                        return true;
                 }
 
-                if (!string.IsNullOrWhiteSpace(weaponDescription.StringId) &&
-                    xmlCompatibleWeaponDescriptionIds.Contains(weaponDescription.StringId))
-                {
-                    foreach (WeaponDesignElement usedPiece in usedPieces)
-                    {
-                        CraftingPiece templatePiece = usedPiece?.CraftingPiece;
-                        if (templatePiece == null || string.IsNullOrWhiteSpace(templatePiece.StringId))
-                            continue;
-
-                        bool alreadyPresent = canonicalPieces.Any(piece =>
-                            piece != null &&
-                            string.Equals(piece.StringId, templatePiece.StringId, StringComparison.OrdinalIgnoreCase));
-                        if (!alreadyPresent)
-                        {
-                            canonicalPieces.Add(templatePiece);
-                            rewritten = true;
-                            appendedPieceRefs++;
-                        }
-                    }
-                }
-
-                if (rewritten)
-                {
-                    availablePiecesField.SetValue(weaponDescription, canonicalPieces);
-                    rewrittenDescriptions++;
-                }
+                return false;
+            });
+            if (!hasCompatibleWeaponDescription)
+            {
+                failureSummary = "crafted-design-has-no-canonical-weapon-description";
+                return false;
             }
 
-            return
-                "descriptions=" + descriptionCount +
-                "/rewritten=" + rewrittenDescriptions +
-                "/pieceRefs=" + replacedPieceRefs +
-                "/appendedPieceRefs=" + appendedPieceRefs +
-                "/xmlCompatibleDescriptions=" + xmlCompatibleWeaponDescriptionIds.Count;
+            return true;
         }
 
         private static HashSet<string> GetXmlCompatibleWeaponDescriptionIds(
@@ -1581,7 +1624,7 @@ namespace CoopSpectator.Infrastructure
                 return null;
             }
 
-            var usedPieces = new WeaponDesignElement[4];
+            WeaponDesignElement[] usedPieces = CreateEmptyCraftedWeaponDesignElements();
             XmlNode piecesNode = null;
             foreach (XmlNode childNode in sourceNode.ChildNodes)
             {
@@ -1648,7 +1691,7 @@ namespace CoopSpectator.Infrastructure
                 return null;
             }
 
-            var usedPieces = new WeaponDesignElement[4];
+            WeaponDesignElement[] usedPieces = CreateEmptyCraftedWeaponDesignElements();
             foreach (CraftedWeaponPieceSnapshotMessage pieceSnapshot in craftedWeapon.Pieces)
             {
                 if (pieceSnapshot == null ||
@@ -1697,17 +1740,36 @@ namespace CoopSpectator.Infrastructure
             if (string.IsNullOrWhiteSpace(pieceId))
                 return null;
 
-            if (craftingTemplate?.Pieces != null)
+            if (objectManager == null || craftingTemplate?.Pieces == null)
+                return null;
+
+            CraftingPiece templatePiece = craftingTemplate.Pieces
+                .FirstOrDefault(piece =>
+                    piece != null &&
+                    string.Equals(piece.StringId, pieceId, StringComparison.OrdinalIgnoreCase));
+            if (templatePiece == null)
+                return null;
+
+            CraftingPiece resolvedPiece = TryResolveObject<CraftingPiece>(objectManager, pieceId);
+            return ExactCampaignCraftingRuntimeSafetyContract.IsCanonicalCraftingPiece(
+                    belongsToTemplate: true,
+                    resolvesToSameObject: ReferenceEquals(resolvedPiece, templatePiece),
+                    isReady: templatePiece.IsReady,
+                    isValid: templatePiece.IsValid)
+                ? templatePiece
+                : null;
+        }
+
+        private static WeaponDesignElement[] CreateEmptyCraftedWeaponDesignElements()
+        {
+            var usedPieces = new WeaponDesignElement[4];
+            for (int pieceTypeIndex = 0; pieceTypeIndex < usedPieces.Length; pieceTypeIndex++)
             {
-                CraftingPiece templatePiece = craftingTemplate.Pieces
-                    .FirstOrDefault(piece =>
-                        piece != null &&
-                        string.Equals(piece.StringId, pieceId, StringComparison.OrdinalIgnoreCase));
-                if (templatePiece != null)
-                    return templatePiece;
+                usedPieces[pieceTypeIndex] = WeaponDesignElement.GetInvalidPieceForType(
+                    (CraftingPiece.PieceTypes)pieceTypeIndex);
             }
 
-            return TryResolveObject<CraftingPiece>(objectManager, pieceId);
+            return usedPieces;
         }
 
         private static TextObject CreateCraftedWeaponName(XmlNode sourceNode, string fallbackId)
@@ -1896,68 +1958,28 @@ namespace CoopSpectator.Infrastructure
             if (_craftingSupportLoaded || objectManager == null)
                 return;
 
-            int craftingPieceCountBefore = TryGetObjectTypeCount<CraftingPiece>(objectManager);
-            int craftingTemplateCountBefore = TryGetObjectTypeCount<CraftingTemplate>(objectManager);
-            int weaponDescriptionCountBefore = TryGetObjectTypeCount<WeaponDescription>(objectManager);
+            int craftingPieceCount = TryGetObjectTypeCount<CraftingPiece>(objectManager);
+            int craftingTemplateCount = TryGetObjectTypeCount<CraftingTemplate>(objectManager);
+            int weaponDescriptionCount = TryGetObjectTypeCount<WeaponDescription>(objectManager);
+            int requiredCraftingPieceCount =
+                Bannerlord148CampaignCraftingPieceCount + Bannerlord148MultiplayerCraftingPieceCount;
 
-            var loadedSources = new List<string>();
-            LoadSupportXmlDocument(objectManager, "Native", "weapon_descriptions.xml", loadedSources);
-            LoadSupportXmlDocument(objectManager, "Native", "crafting_pieces.xml", loadedSources);
-            LoadSupportXmlDocument(objectManager, "Native", "mp_crafting_pieces.xml", loadedSources);
-            LoadSupportXmlDocument(objectManager, "CoopSpectator", "coopspectator_crafting_pieces.xml", loadedSources);
-            LoadSupportXmlDocument(objectManager, "Native", "item_modifiers_groups.xml", loadedSources);
-            LoadSupportXmlDocument(objectManager, "Native", "item_modifiers.xml", loadedSources);
-            LoadSupportXmlDocument(objectManager, "Native", "crafting_templates.xml", loadedSources);
-
-            TryUnregisterNonReadyObjects(objectManager);
-
-            int craftingPieceCountAfter = TryGetObjectTypeCount<CraftingPiece>(objectManager);
-            int craftingTemplateCountAfter = TryGetObjectTypeCount<CraftingTemplate>(objectManager);
-            int weaponDescriptionCountAfter = TryGetObjectTypeCount<WeaponDescription>(objectManager);
+            _craftingSupportReady =
+                craftingPieceCount >= requiredCraftingPieceCount &&
+                craftingTemplateCount >= Bannerlord148CraftingTemplateCount &&
+                weaponDescriptionCount >= Bannerlord148WeaponDescriptionCount;
 
             _craftingSupportLoaded = true;
             _craftingSupportSummary =
-                "LoadedSources=[" + string.Join(", ", loadedSources) + "]" +
-                " CraftingPieces=" + craftingPieceCountBefore + "->" + craftingPieceCountAfter +
-                " CraftingTemplates=" + craftingTemplateCountBefore + "->" + craftingTemplateCountAfter +
-                " WeaponDescriptions=" + weaponDescriptionCountBefore + "->" + weaponDescriptionCountAfter;
+                "PreloadedOnly=true" +
+                " Ready=" + _craftingSupportReady +
+                " CraftingPieces=" + craftingPieceCount + "/" + requiredCraftingPieceCount +
+                " CraftingTemplates=" + craftingTemplateCount + "/" + Bannerlord148CraftingTemplateCount +
+                " WeaponDescriptions=" + weaponDescriptionCount + "/" + Bannerlord148WeaponDescriptionCount;
 
             ModLogger.Info(
-                "ExactCampaignRuntimeItemRegistry: ensured crafted-item runtime support catalogs. " +
+                "ExactCampaignRuntimeItemRegistry: validated preloaded crafted-item support catalogs without mutation. " +
                 _craftingSupportSummary);
-        }
-
-        private static void LoadSupportXmlDocument(
-            MBObjectManager objectManager,
-            string moduleId,
-            string relativeModuleDataPath,
-            List<string> loadedSources)
-        {
-            if (objectManager == null || string.IsNullOrWhiteSpace(relativeModuleDataPath))
-                return;
-
-            string xmlPath = ModulePathHelper.GetSiblingModuleDataFilePath(moduleId, relativeModuleDataPath);
-            if (string.IsNullOrWhiteSpace(xmlPath) || !File.Exists(xmlPath))
-                return;
-
-            XmlDocument xmlDocument = GetOrLoadXmlDocument(xmlPath);
-            if (xmlDocument?.DocumentElement == null)
-                return;
-
-            try
-            {
-                objectManager.LoadXml(xmlDocument);
-                loadedSources.Add(moduleId + "/" + relativeModuleDataPath);
-            }
-            catch (Exception ex)
-            {
-                loadedSources.Add(moduleId + "/" + relativeModuleDataPath + "=failed:" + ex.GetType().Name);
-                ModLogger.Info(
-                    "ExactCampaignRuntimeItemRegistry: crafted-item support load failed. " +
-                    "Module=" + moduleId +
-                    " RelativePath=" + relativeModuleDataPath +
-                    " Error=" + ex.GetType().Name + ":" + ex.Message);
-            }
         }
 
         private static XmlDocument BuildSingleItemDocument(XmlNode sourceNode)
@@ -2114,20 +2136,57 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
-        private static void TryUnregisterNonReadyObjects(MBObjectManager objectManager)
+        private static bool IsRuntimeWeaponItemUsable(ItemObject itemObject)
         {
-            if (objectManager == null)
-                return;
+            return itemObject?.WeaponComponent != null &&
+                   itemObject.Weapons != null &&
+                   itemObject.Weapons.Count > 0;
+        }
+
+        private static bool ShouldSkipStandaloneCampaignMaterialization()
+        {
+            bool isCampaignRuntime = IsCampaignRuntimeActive();
+            ExactCampaignCraftingRuntimeDecision decision =
+                ExactCampaignCraftingRuntimeSafetyContract.Evaluate(
+                    isCampaignRuntime,
+                    GameNetwork.IsSessionActive,
+                    isPreloadedCatalogReady: true);
+            return decision == ExactCampaignCraftingRuntimeDecision.SkipStandaloneCampaign;
+        }
+
+        private static bool IsCampaignRuntimeActive()
+        {
+            const string campaignTypeName = "TaleWorlds.CampaignSystem.Campaign";
+            const string campaignAssemblyName = "TaleWorlds.CampaignSystem";
 
             try
             {
-                objectManager.UnregisterNonReadyObjects();
+                Type campaignType = Type.GetType(
+                    campaignTypeName + ", " + campaignAssemblyName,
+                    throwOnError: false);
+                if (campaignType == null)
+                {
+                    campaignType = AppDomain.CurrentDomain.GetAssemblies()
+                        .Where(assembly => assembly != null)
+                        .Where(assembly => string.Equals(
+                            assembly.GetName()?.Name,
+                            campaignAssemblyName,
+                            StringComparison.Ordinal))
+                        .Select(assembly => assembly.GetType(
+                            campaignTypeName,
+                            throwOnError: false,
+                            ignoreCase: false))
+                        .FirstOrDefault(type => type != null);
+                }
+
+                PropertyInfo currentProperty = campaignType?.GetProperty(
+                    "Current",
+                    BindingFlags.Public | BindingFlags.Static);
+                return currentProperty?.GetValue(null, null) != null;
             }
-            catch (Exception ex)
+            catch
             {
-                ModLogger.Info(
-                    "ExactCampaignRuntimeItemRegistry: UnregisterNonReadyObjects failed: " +
-                    ex.Message);
+                return false;
             }
         }
 

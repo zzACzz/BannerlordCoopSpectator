@@ -137,12 +137,17 @@ namespace CoopSpectator.Infrastructure
             string mirrorItemId;
             if (useCraftedMirror)
             {
-                if (!ExactCampaignRuntimeItemRegistry.TryResolveCraftedMirrorItem(
+                bool craftedMirrorResolved = ExactCampaignRuntimeItemRegistry.TryResolveCraftedMirrorItem(
                         craftedWeaponKey,
                         out mirrorItemId,
-                        out string craftedMirrorFailure))
+                        out string craftedMirrorFailure);
+                if (ExactCampaignCraftingRuntimeSafetyContract.ShouldUseSafeWeaponSlotFallback(craftedMirrorResolved))
                 {
-                    missingSlots?.Add(slotLabel + "=" + itemLabel + " crafted-mirror-failed:" + (craftedMirrorFailure ?? "unknown"));
+                    deferredCraftedWeaponSlots?.Add(
+                        slotLabel + "=" + itemLabel +
+                        "/crafted:" + craftedWeaponKey +
+                        "/safe-empty-slot-fallback:" + (craftedMirrorFailure ?? "unknown") +
+                        (!string.IsNullOrWhiteSpace(modifierId) ? "/modifier:" + modifierId : string.Empty));
                     return;
                 }
 

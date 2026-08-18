@@ -153,7 +153,6 @@ namespace CoopSpectator.Infrastructure
                 _nextRetryUtc = utcNow + RetryCooldown;
 
                 var results = new List<string>();
-                ExactCampaignRuntimeItemRegistry.EnsureCraftingSupportLoadedForBootstrap("exact-object-catalog-bootstrap:" + (source ?? "unknown"));
 
                 TryRegisterCampaignTypeIfMissing(
                     objectManager,

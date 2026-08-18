@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Xml;
 using CoopSpectator.Infrastructure;
 
@@ -58,9 +60,23 @@ internal static class Program
             ValidateCraftedThrowingAxeUsageIsAllowed();
             ValidateInvalidCraftedWeaponUsageIsSuppressed();
             ValidateWeaponRuntimeContractDoesNotAffectNonCoopTraffic();
+            ValidateExactHeroAgentCapabilityFlagMapping();
+            ValidateExactHeroAgentCapabilityFlagsPreserveExistingFlags();
+            ValidateClientExactHeroCapabilityApplyOrder();
+            ValidatePossessionCrossbowRuntimeSyncAllowsOnlyLoadedTerminalState();
+            ValidatePossessionCrossbowRuntimeSyncRejectsUnsafeState();
+            ValidatePossessionCrossbowRuntimeSyncPrecedesPlayerControl();
             ValidateMissingItemCatalogExcludesLoadedItems();
             ValidateMissingItemCatalogLoadsEachMissingIdOnce();
             ValidateMissingItemCatalogRejectsInvalidNodes();
+            ValidateStandaloneCampaignSkipsCraftedMirrorMaterialization();
+            ValidateNetworkRuntimeUsesOnlyReadyPreloadedCraftingCatalog();
+            ValidateUnavailableCraftingCatalogIsRejected();
+            ValidateCraftingPieceCanonicalityContract();
+            ValidateRejectedCraftedMirrorIsNotRetried();
+            ValidateCraftedMirrorFailureUsesSafeWeaponSlotFallback();
+            ValidateBundledBannerlord148CraftingCatalog();
+            ValidateRuntimeCraftingRegistryDoesNotMutateGlobalCatalogs();
             Console.WriteLine("Coop battle startup contract tests passed.");
             return 0;
         }
@@ -141,6 +157,148 @@ internal static class Program
         var document = new XmlDocument();
         document.LoadXml(xml);
         return document;
+    }
+
+    private static void ValidateStandaloneCampaignSkipsCraftedMirrorMaterialization()
+    {
+        ExactCampaignCraftingRuntimeDecision decision =
+            ExactCampaignCraftingRuntimeSafetyContract.Evaluate(
+                isCampaignRuntime: true,
+                isNetworkSessionActive: false,
+                isPreloadedCatalogReady: false);
+
+        Assert(decision == ExactCampaignCraftingRuntimeDecision.SkipStandaloneCampaign,
+            "A standalone campaign host must publish snapshots without materializing multiplayer crafted mirrors.");
+    }
+
+    private static void ValidateNetworkRuntimeUsesOnlyReadyPreloadedCraftingCatalog()
+    {
+        ExactCampaignCraftingRuntimeDecision decision =
+            ExactCampaignCraftingRuntimeSafetyContract.Evaluate(
+                isCampaignRuntime: false,
+                isNetworkSessionActive: true,
+                isPreloadedCatalogReady: true);
+
+        Assert(decision == ExactCampaignCraftingRuntimeDecision.UsePreloadedCatalog,
+            "A network battle may materialize crafted mirrors only from the catalog loaded before the mission.");
+    }
+
+    private static void ValidateUnavailableCraftingCatalogIsRejected()
+    {
+        ExactCampaignCraftingRuntimeDecision decision =
+            ExactCampaignCraftingRuntimeSafetyContract.Evaluate(
+                isCampaignRuntime: false,
+                isNetworkSessionActive: true,
+                isPreloadedCatalogReady: false);
+
+        Assert(decision == ExactCampaignCraftingRuntimeDecision.RejectUnavailableCatalog,
+            "An incomplete network crafting catalog must be rejected instead of being reloaded at runtime.");
+    }
+
+    private static void ValidateCraftingPieceCanonicalityContract()
+    {
+        Assert(ExactCampaignCraftingRuntimeSafetyContract.IsCanonicalCraftingPiece(
+                belongsToTemplate: true,
+                resolvesToSameObject: true,
+                isReady: true,
+                isValid: true),
+            "A ready registered template piece must pass canonical validation.");
+        Assert(!ExactCampaignCraftingRuntimeSafetyContract.IsCanonicalCraftingPiece(
+                belongsToTemplate: true,
+                resolvesToSameObject: false,
+                isReady: true,
+                isValid: true),
+            "A duplicate piece instance with the same id must not enter crafted weapon generation.");
+        Assert(!ExactCampaignCraftingRuntimeSafetyContract.IsCanonicalCraftingPiece(
+                belongsToTemplate: true,
+                resolvesToSameObject: true,
+                isReady: false,
+                isValid: true),
+            "An unready crafting piece must not enter crafted weapon generation.");
+    }
+
+    private static void ValidateRejectedCraftedMirrorIsNotRetried()
+    {
+        Assert(!ExactCampaignCraftingRuntimeSafetyContract.ShouldRetryRejectedCraftedMirror(wasRejected: true),
+            "A rejected crafted mirror key must not repeatedly mutate native-sensitive state.");
+        Assert(ExactCampaignCraftingRuntimeSafetyContract.ShouldRetryRejectedCraftedMirror(wasRejected: false),
+            "A new crafted mirror key must receive one validation attempt.");
+    }
+
+    private static void ValidateCraftedMirrorFailureUsesSafeWeaponSlotFallback()
+    {
+        Assert(ExactCampaignCraftingRuntimeSafetyContract.ShouldUseSafeWeaponSlotFallback(craftedMirrorResolved: false),
+            "An unresolved crafted mirror must degrade to an empty safe weapon slot.");
+        Assert(!ExactCampaignCraftingRuntimeSafetyContract.ShouldUseSafeWeaponSlotFallback(craftedMirrorResolved: true),
+            "A valid crafted mirror must remain equipped.");
+    }
+
+    private static void ValidateBundledBannerlord148CraftingCatalog()
+    {
+        string repositoryRoot = FindRepositoryRoot();
+        string catalogPath = Path.Combine(
+            repositoryRoot,
+            "Module",
+            "CoopSpectator",
+            "ModuleData",
+            "coopspectator_crafting_pieces.xml");
+        var catalogDocument = new XmlDocument();
+        catalogDocument.Load(catalogPath);
+        string[] pieceIds = catalogDocument
+            .SelectNodes("/CraftingPieces/CraftingPiece")
+            .Cast<XmlElement>()
+            .Select(piece => piece.GetAttribute("id"))
+            .ToArray();
+
+        Assert(pieceIds.Length == 805,
+            "The bundled Bannerlord 1.4.8 campaign crafting catalog must contain all 805 pieces.");
+        Assert(pieceIds.Distinct(StringComparer.OrdinalIgnoreCase).Count() == 805,
+            "The bundled campaign crafting catalog must not contain duplicate piece ids.");
+
+        foreach (string subModuleRelativePath in new[]
+                 {
+                     Path.Combine("Module", "CoopSpectator", "SubModule.xml"),
+                     Path.Combine("Module", "CoopSpectatorDedicated", "SubModule.xml")
+                 })
+        {
+            var subModuleDocument = new XmlDocument();
+            subModuleDocument.Load(Path.Combine(repositoryRoot, subModuleRelativePath));
+            XmlNode craftingPiecesNode = subModuleDocument.SelectSingleNode(
+                "/Module/Xmls/XmlNode[XmlName/@path='coopspectator_crafting_pieces']");
+            Assert(craftingPiecesNode != null,
+                "Each module must declare the bundled crafting piece catalog.");
+            Assert(craftingPiecesNode.SelectSingleNode(
+                       "IncludedGameTypes/GameType[@value='MultiplayerGame']") != null,
+                "The bundled campaign crafting pieces must be loaded only by MultiplayerGame.");
+        }
+    }
+
+    private static void ValidateRuntimeCraftingRegistryDoesNotMutateGlobalCatalogs()
+    {
+        string repositoryRoot = FindRepositoryRoot();
+        string source = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "Infrastructure",
+            "ExactCampaignRuntimeItemRegistry.cs"));
+
+        Assert(!source.Contains("LoadSupportXmlDocument", StringComparison.Ordinal),
+            "The runtime crafting registry must never bulk-load support XML catalogs.");
+        Assert(!source.Contains("TryUnregisterNonReadyObjects", StringComparison.Ordinal),
+            "The runtime crafting registry must never globally unregister non-ready objects.");
+        Assert(!source.Contains("\"_availablePieces\"", StringComparison.Ordinal),
+            "The runtime crafting registry must never rewrite WeaponDescription private piece lists.");
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        DirectoryInfo directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory != null && !File.Exists(Path.Combine(directory.FullName, "CoopSpectator.csproj")))
+            directory = directory.Parent;
+
+        if (directory == null)
+            throw new InvalidOperationException("Could not locate the repository root for source contract checks.");
+
+        return directory.FullName;
     }
 
     private static void ValidateCompleteApplication()
@@ -829,6 +987,276 @@ internal static class Program
 
         Assert(result.Decision == CoopClientWeaponRuntimeSafetyDecision.Allow,
             "The coop weapon safety contract must not intercept unrelated vanilla multiplayer traffic.");
+    }
+
+    private static void ValidateExactHeroAgentCapabilityFlagMapping()
+    {
+        Assert(
+            CoopExactHeroAgentCapabilityFlagContract.ResolveDesiredFlagBits(new[] { "BowHorseMaster" }) ==
+            CoopExactHeroAgentCapabilityFlagContract.CanUseAllBowsMountedBit,
+            "BowHorseMaster must restore the exact hero's mounted bow capability flag.");
+        Assert(
+            CoopExactHeroAgentCapabilityFlagContract.ResolveDesiredFlagBits(new[] { "CrossbowMountedCrossbowman" }) ==
+            CoopExactHeroAgentCapabilityFlagContract.CanReloadAllXBowsMountedBit,
+            "CrossbowMountedCrossbowman must restore the exact hero's mounted crossbow reload capability flag.");
+        Assert(
+            CoopExactHeroAgentCapabilityFlagContract.ResolveDesiredFlagBits(new[] { "TwoHandedProjectileDeflection" }) ==
+            CoopExactHeroAgentCapabilityFlagContract.CanDeflectArrowsWithTwoHandedWeaponBit,
+            "TwoHandedProjectileDeflection must restore the exact hero's projectile deflection capability flag.");
+
+        int expectedCombinedFlags =
+            CoopExactHeroAgentCapabilityFlagContract.CanUseAllBowsMountedBit |
+            CoopExactHeroAgentCapabilityFlagContract.CanReloadAllXBowsMountedBit |
+            CoopExactHeroAgentCapabilityFlagContract.CanDeflectArrowsWithTwoHandedWeaponBit;
+        int combinedFlags = CoopExactHeroAgentCapabilityFlagContract.ResolveDesiredFlagBits(
+            new[]
+            {
+                "BowHorseMaster",
+                "CrossbowMountedCrossbowman",
+                "TwoHandedProjectileDeflection"
+            });
+
+        Assert(combinedFlags == expectedCombinedFlags,
+            "The exact hero capability contract must combine all supported campaign perk flags.");
+        Assert(
+            CoopExactHeroAgentCapabilityFlagContract.ResolveDesiredFlagBits(
+                new[] { "crossbowmountedcrossbowman" }) ==
+            CoopExactHeroAgentCapabilityFlagContract.CanReloadAllXBowsMountedBit,
+            "Exact hero capability perk matching must be case-insensitive.");
+        Assert(
+            CoopExactHeroAgentCapabilityFlagContract.ResolveDesiredFlagBits(new[] { "UnknownPerk" }) == 0,
+            "Unknown campaign perks must not add agent capability flags.");
+    }
+
+    private static void ValidateExactHeroAgentCapabilityFlagsPreserveExistingFlags()
+    {
+        const int existingFlags = 0x8 | 0x200;
+        int mergedFlags = CoopExactHeroAgentCapabilityFlagContract.MergeWithCurrentFlagBits(
+            existingFlags,
+            new[] { "CrossbowMountedCrossbowman" });
+
+        Assert((mergedFlags & existingFlags) == existingFlags,
+            "Applying an exact hero capability must preserve every existing agent flag.");
+        Assert(
+            (mergedFlags & CoopExactHeroAgentCapabilityFlagContract.CanReloadAllXBowsMountedBit) != 0,
+            "Applying the mounted crossbow perk must add its missing agent flag.");
+    }
+
+    private static void ValidateClientExactHeroCapabilityApplyOrder()
+    {
+        string source = File.ReadAllText(
+            Path.Combine(FindRepositoryRoot(), "Mission", "CoopMissionBehaviors.cs"));
+
+        const string strictMethodSignature =
+            "internal static bool TryApplyStrictExactHeroLocalInitialWield";
+        int strictMethodStart = source.IndexOf(strictMethodSignature, StringComparison.Ordinal);
+        int strictMethodEnd = source.IndexOf(
+            "public static bool TryResolveExactDisplayNameForAgent",
+            strictMethodStart,
+            StringComparison.Ordinal);
+        Assert(strictMethodStart >= 0 && strictMethodEnd > strictMethodStart,
+            "The strict exact hero local initial wield method must remain available for source-contract validation.");
+
+        string strictMethodBody = source.Substring(strictMethodStart, strictMethodEnd - strictMethodStart);
+        int capabilityApplyIndex = strictMethodBody.IndexOf(
+            "TryApplyExactCampaignHeroFlags(agent, entryState",
+            StringComparison.Ordinal);
+        int liveWeaponExitIndex = strictMethodBody.IndexOf(
+            "server-authoritative-live-weapons",
+            StringComparison.Ordinal);
+        Assert(
+            capabilityApplyIndex >= 0 &&
+            liveWeaponExitIndex >= 0 &&
+            capabilityApplyIndex < liveWeaponExitIndex,
+            "Client exact hero capability flags must be applied before the live-weapon early exit.");
+
+        const string clientProfileSignature =
+            "private static string TryApplyClientLocalCombatProfile";
+        int clientProfileStart = source.IndexOf(clientProfileSignature, StringComparison.Ordinal);
+        int clientProfileEnd = source.IndexOf(
+            "private static int TryAssignExactCampaignCommanders",
+            clientProfileStart,
+            StringComparison.Ordinal);
+        Assert(clientProfileStart >= 0 && clientProfileEnd > clientProfileStart,
+            "The client-local combat profile method must remain available for source-contract validation.");
+
+        string clientProfileBody = source.Substring(
+            clientProfileStart,
+            clientProfileEnd - clientProfileStart);
+        Assert(
+            clientProfileBody.IndexOf(
+                "TryApplyExactCampaignHeroFlags(agent, entryState",
+                StringComparison.Ordinal) >= 0,
+            "The client-local combat profile must restore exact campaign hero capability flags.");
+    }
+
+    private static void ValidatePossessionCrossbowRuntimeSyncAllowsOnlyLoadedTerminalState()
+    {
+        CoopPossessionCrossbowRuntimeSyncResult result =
+            EvaluatePossessionCrossbowRuntimeSync();
+
+        Assert(result.ShouldSynchronize,
+            "A remote peer acquiring an AI-controlled exact hero must receive an already-loaded terminal crossbow state.");
+        Assert(result.Reason == "loaded-terminal-crossbow",
+            "The allowed possession crossbow state must expose the exact safety reason.");
+    }
+
+    private static void ValidatePossessionCrossbowRuntimeSyncRejectsUnsafeState()
+    {
+        Assert(!EvaluatePossessionCrossbowRuntimeSync(isServer: false).ShouldSynchronize,
+            "A client must never publish possession crossbow runtime state.");
+        Assert(!EvaluatePossessionCrossbowRuntimeSync(targetPeerActive: false).ShouldSynchronize,
+            "An inactive peer must not receive a possession crossbow snapshot.");
+        Assert(!EvaluatePossessionCrossbowRuntimeSync(targetPeerRemote: false).ShouldSynchronize,
+            "A local server peer must not receive a redundant network snapshot.");
+        Assert(!EvaluatePossessionCrossbowRuntimeSync(agentActive: false).ShouldSynchronize,
+            "An inactive agent must not receive a possession crossbow snapshot.");
+        Assert(!EvaluatePossessionCrossbowRuntimeSync(agentHuman: false).ShouldSynchronize,
+            "A non-human agent must not use the possession crossbow contract.");
+        Assert(!EvaluatePossessionCrossbowRuntimeSync(exactHero: false).ShouldSynchronize,
+            "A non-hero entry must not use the exact hero possession crossbow contract.");
+        Assert(!EvaluatePossessionCrossbowRuntimeSync(agentAiControlled: false).ShouldSynchronize,
+            "A snapshot must not be injected after player control has already become active.");
+        Assert(!EvaluatePossessionCrossbowRuntimeSync(exactWeaponResolutionAvailable: false).ShouldSynchronize,
+            "An unresolved weapon layout must fail safely.");
+        Assert(!EvaluatePossessionCrossbowRuntimeSync(mainHandMatchesResolution: false).ShouldSynchronize,
+            "A different wielded slot must fail safely.");
+        Assert(!EvaluatePossessionCrossbowRuntimeSync(mainHandIsCrossbow: false).ShouldSynchronize,
+            "A non-crossbow weapon must not receive crossbow runtime messages.");
+        Assert(!EvaluatePossessionCrossbowRuntimeSync(compatibleAmmoAvailable: false).ShouldSynchronize,
+            "A crossbow without exact compatible ammo must fail safely.");
+        Assert(!EvaluatePossessionCrossbowRuntimeSync(chamberAmmo: 0).ShouldSynchronize,
+            "An empty crossbow chamber must never be forced into the terminal reload phase.");
+        Assert(!EvaluatePossessionCrossbowRuntimeSync(chamberAmmo: 2, maximumChamberAmmo: 1).ShouldSynchronize,
+            "An invalid chamber count must fail safely.");
+        Assert(!EvaluatePossessionCrossbowRuntimeSync(reloadPhase: 1, reloadPhaseCount: 2).ShouldSynchronize,
+            "A crossbow still reloading must not receive a fabricated terminal phase.");
+        Assert(!EvaluatePossessionCrossbowRuntimeSync(reloadPhase: 2, reloadPhaseCount: 0).ShouldSynchronize,
+            "An invalid reload phase count must fail safely.");
+        Assert(!EvaluatePossessionCrossbowRuntimeSync(reloadPhase: 11, reloadPhaseCount: 11).ShouldSynchronize,
+            "A reload phase outside Bannerlord's supported range must fail safely.");
+    }
+
+    private static CoopPossessionCrossbowRuntimeSyncResult EvaluatePossessionCrossbowRuntimeSync(
+        bool isServer = true,
+        bool targetPeerActive = true,
+        bool targetPeerRemote = true,
+        bool agentExists = true,
+        bool agentActive = true,
+        bool agentHuman = true,
+        bool exactHero = true,
+        bool agentAiControlled = true,
+        bool exactWeaponResolutionAvailable = true,
+        bool mainHandMatchesResolution = true,
+        bool mainHandIsCrossbow = true,
+        bool compatibleAmmoAvailable = true,
+        int chamberAmmo = 1,
+        int maximumChamberAmmo = 1,
+        int reloadPhase = 2,
+        int reloadPhaseCount = 2)
+    {
+        return CoopPossessionCrossbowRuntimeSyncContract.Evaluate(
+            isServer,
+            targetPeerActive,
+            targetPeerRemote,
+            agentExists,
+            agentActive,
+            agentHuman,
+            exactHero,
+            agentAiControlled,
+            exactWeaponResolutionAvailable,
+            mainHandMatchesResolution,
+            mainHandIsCrossbow,
+            compatibleAmmoAvailable,
+            chamberAmmo,
+            maximumChamberAmmo,
+            reloadPhase,
+            reloadPhaseCount);
+    }
+
+    private static void ValidatePossessionCrossbowRuntimeSyncPrecedesPlayerControl()
+    {
+        string source = File.ReadAllText(
+            Path.Combine(FindRepositoryRoot(), "Mission", "CoopMissionBehaviors.cs"));
+
+        const string helperSignature =
+            "private static string TrySendExactHeroPossessionCrossbowRuntimeStateToPeer";
+        int helperStart = source.IndexOf(helperSignature, StringComparison.Ordinal);
+        int helperEnd = source.IndexOf(
+            "private static bool ShouldForceInitialWieldAfterStrictPreSpawnExactLoadout",
+            helperStart,
+            StringComparison.Ordinal);
+        Assert(helperStart >= 0 && helperEnd > helperStart,
+            "The exact hero possession crossbow synchronization helper must remain available.");
+
+        string helperBody = source.Substring(helperStart, helperEnd - helperStart);
+        int networkDataIndex = helperBody.IndexOf(
+            "new NetworkMessages.FromServer.SetWeaponNetworkData",
+            StringComparison.Ordinal);
+        int ammoDataIndex = helperBody.IndexOf(
+            "new NetworkMessages.FromServer.SetWeaponAmmoData",
+            StringComparison.Ordinal);
+        int reloadPhaseIndex = helperBody.IndexOf(
+            "new NetworkMessages.FromServer.SetWeaponReloadPhase",
+            StringComparison.Ordinal);
+        Assert(
+            networkDataIndex >= 0 &&
+            ammoDataIndex > networkDataIndex &&
+            reloadPhaseIndex > ammoDataIndex,
+            "Possession synchronization must preserve Bannerlord's ammo-slot, chamber-ammo, reload-phase order.");
+        Assert(
+            helperBody.Split(
+                new[] { "GameNetwork.BeginModuleEventAsServer(peer)" },
+                StringSplitOptions.None).Length - 1 == 3,
+            "Each possession crossbow message must be addressed only to the acquiring peer.");
+        Assert(
+            helperBody.IndexOf("BeginBroadcastModuleEvent", StringComparison.Ordinal) < 0,
+            "Possession crossbow state must never be broadcast to other players.");
+
+        AssertPossessionSyncPrecedes(
+            source,
+            "private static bool TryReplaceMaterializedBotWithPlayer",
+            "private static string ArmMaterializedPossessionProtection",
+            "Agent replacedAgent = mission.ReplaceBotWithPlayer",
+            "The generic materialized possession path");
+        AssertPossessionSyncPrecedes(
+            source,
+            "private static bool TryBindMaterializedBotWithPlayerForSiegeRespawn",
+            helperSignature,
+            "new NetworkMessages.FromServer.ReplaceBotWithPlayer",
+            "The manual siege possession path");
+        AssertPossessionSyncPrecedes(
+            source,
+            "private static bool TryReclaimPeerAgentControlFromAi",
+            "private static void TryRollbackFailedAgentReclaim",
+            "PrepareExistingAgentForPlayerControl(targetAgent)",
+            "The AI reclaim possession path");
+    }
+
+    private static void AssertPossessionSyncPrecedes(
+        string source,
+        string methodSignature,
+        string followingMethodSignature,
+        string playerControlMarker,
+        string pathName)
+    {
+        int methodStart = source.IndexOf(methodSignature, StringComparison.Ordinal);
+        int methodEnd = source.IndexOf(
+            followingMethodSignature,
+            methodStart,
+            StringComparison.Ordinal);
+        Assert(methodStart >= 0 && methodEnd > methodStart,
+            pathName + " must remain available for source-contract validation.");
+
+        string methodBody = source.Substring(methodStart, methodEnd - methodStart);
+        int syncIndex = methodBody.IndexOf(
+            "TrySendExactHeroPossessionCrossbowRuntimeStateToPeer(",
+            StringComparison.Ordinal);
+        int playerControlIndex = methodBody.IndexOf(playerControlMarker, StringComparison.Ordinal);
+        Assert(
+            syncIndex >= 0 &&
+            playerControlIndex > syncIndex,
+            pathName + " must synchronize the loaded crossbow while the agent is still AI-controlled.");
     }
 
     private static void Assert(bool condition, string message)
