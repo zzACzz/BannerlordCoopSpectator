@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.MissionBehaviors;
 using TaleWorlds.CampaignSystem;
@@ -27,6 +28,8 @@ namespace CoopSpectator.UI
         private const string EntityOverlayMovieName = "PartyNameplate";
         private const string SettlementOverlayMovieName = "SettlementNameplate";
         private const float RenderReadinessTimeoutSeconds = 5f;
+        private const int MaximumPartyVisualCreationAttempts = 3;
+        private const float PartyVisualRetryDelaySeconds = 0.25f;
 
         private sealed class EntityReplica
         {
@@ -41,6 +44,18 @@ namespace CoopSpectator.UI
             public Vec3 WorldPosition { get; set; }
 
             public GameEntity Marker { get; set; }
+
+            public CoopCampaignMapPrototypePartyVisual PartyVisual { get; set; }
+
+            public string PartyVisualAttemptKey { get; set; }
+
+            public int PartyVisualAttemptCount { get; set; }
+
+            public float PartyVisualRetryDelayRemaining { get; set; }
+
+            public Vec3 PreviousWorldPosition { get; set; }
+
+            public bool HasPreviousWorldPosition { get; set; }
         }
 
         private sealed class PassiveSceneLayer : SceneLayer
@@ -101,6 +116,7 @@ namespace CoopSpectator.UI
         private bool _timeoutRenderStateLogged;
         private bool _renderStateProbeFailed;
         private bool _mapSceneReadyToRender;
+        private bool _mainPartyVisualActive;
         private int _appliedNormalizedTimeOfDay = -1;
         private int _appliedSeasonTimeFactor = -1;
 
@@ -164,9 +180,9 @@ namespace CoopSpectator.UI
                 if (_mapSceneReadyToRender)
                     ApplyMapVisualState(current);
                 UpdateDisplayedCamera(current.Camera, interpolationAmount);
-                UpdateMarkerAndCamera();
             }
             UpdateEntityReplicas(dt);
+            UpdateMarkerAndCamera();
         }
 
         public override void OnMissionScreenFinalize()
@@ -293,8 +309,8 @@ namespace CoopSpectator.UI
                     CoopCampaignMapPrototypeNetworkController
                         .CurrentClientVisibleEntities);
                 ApplyPendingVisibleEntities();
-                UpdateMarkerAndCamera();
                 UpdateEntityReplicas(0f);
+                UpdateMarkerAndCamera();
                 ModLogger.Info(
                     "CoopCampaignMapPrototypeMissionView: Main_map loaded in isolated client scene layer. Module=" +
                     ownerModule +
@@ -409,9 +425,20 @@ namespace CoopSpectator.UI
                     };
                     _entityReplicas.Add(entity.EntityId, replica);
                 }
-                else if (entity.Kind !=
-                         CoopCampaignMapPrototypeEntityKind.MobileParty &&
-                         replica.Marker != null)
+                string visualAttemptKey = BuildPartyVisualAttemptKey(entity);
+                if (!string.Equals(
+                        replica.PartyVisualAttemptKey,
+                        visualAttemptKey,
+                        StringComparison.Ordinal))
+                {
+                    ResetPartyVisual(replica);
+                    replica.PartyVisualAttemptKey = visualAttemptKey;
+                    replica.PartyVisualAttemptCount = 0;
+                    replica.PartyVisualRetryDelayRemaining = 0f;
+                }
+                if (entity.Kind !=
+                    CoopCampaignMapPrototypeEntityKind.MobileParty &&
+                    replica.Marker != null)
                 {
                     RemoveMarker(replica.Marker);
                     replica.Marker = null;
@@ -434,6 +461,7 @@ namespace CoopSpectator.UI
             foreach (string entityId in removed)
             {
                 EntityReplica replica = _entityReplicas[entityId];
+                ResetPartyVisual(replica);
                 RemoveMarker(replica.Marker);
                 _entityReplicas.Remove(entityId);
             }
@@ -450,6 +478,7 @@ namespace CoopSpectator.UI
             if (_mapScene == null || _camera == null)
                 return;
 
+            _mainPartyVisualActive = false;
             double amount = dt <= 0f ? 1d : Math.Min(1d, dt * 6d);
             float horizontalSpan = Math.Max(
                 _sceneMaximum.x - _sceneMinimum.x,
@@ -492,6 +521,55 @@ namespace CoopSpectator.UI
                 replica.WorldPosition = ResolveMapWorldPosition(
                     replica.DisplayedX,
                     replica.DisplayedY);
+                Vec3 movement = replica.HasPreviousWorldPosition
+                    ? replica.WorldPosition - replica.PreviousWorldPosition
+                    : Vec3.Zero;
+                float movementDistance = (float)Math.Sqrt(
+                    movement.x * movement.x +
+                    movement.y * movement.y +
+                    movement.z * movement.z);
+                bool isMoving =
+                    replica.HasPreviousWorldPosition &&
+                    dt > 0f &&
+                    movementDistance > 0.0005f;
+                float visualSpeed = isMoving
+                    ? movementDistance / dt
+                    : 0f;
+                replica.PreviousWorldPosition = replica.WorldPosition;
+                replica.HasPreviousWorldPosition = true;
+
+                MatrixFrame visualFrame = MatrixFrame.Identity;
+                visualFrame.rotation.RotateAboutUp(
+                    (float)replica.DisplayedHeading);
+                visualFrame.origin = replica.WorldPosition;
+                replica.PartyVisualRetryDelayRemaining = Math.Max(
+                    0f,
+                    replica.PartyVisualRetryDelayRemaining - Math.Max(0f, dt));
+                TryEnsurePartyVisual(replica, target, visualFrame);
+                if (replica.PartyVisual != null)
+                {
+                    try
+                    {
+                        replica.PartyVisual.Update(
+                            visualFrame,
+                            dt,
+                            isMoving,
+                            visualSpeed);
+                    }
+                    catch
+                    {
+                        ResetPartyVisual(replica);
+                        replica.PartyVisualRetryDelayRemaining =
+                            PartyVisualRetryDelaySeconds;
+                    }
+                }
+
+                bool hasPartyVisual = replica.PartyVisual != null;
+                if (target.Kind ==
+                    CoopCampaignMapPrototypeEntityKind.MainParty)
+                {
+                    _mainPartyVisualActive = hasPartyVisual;
+                }
                 if (replica.Marker != null)
                 {
                     MatrixFrame markerFrame = MatrixFrame.Identity;
@@ -502,7 +580,8 @@ namespace CoopSpectator.UI
                     Vec3 scale = Vec3.One * markerScale;
                     markerFrame.Scale(in scale);
                     replica.Marker.SetFrame(ref markerFrame, true);
-                    replica.Marker.SetVisibilityExcludeParents(true);
+                    replica.Marker.SetVisibilityExcludeParents(
+                        !hasPartyVisual);
                 }
 
                 _entityOverlayViewModel?.UpdatePosition(
@@ -515,6 +594,118 @@ namespace CoopSpectator.UI
                     replica.WorldPosition,
                     _camera);
             }
+        }
+
+        private void TryEnsurePartyVisual(
+            EntityReplica replica,
+            CoopCampaignMapPrototypeEntityState target,
+            MatrixFrame initialFrame)
+        {
+            if (!_mapSceneReadyToRender ||
+                _mapScene == null ||
+                replica == null ||
+                replica.PartyVisual != null ||
+                target == null ||
+                target.Kind == CoopCampaignMapPrototypeEntityKind.Settlement ||
+                target.PartyVisualKind ==
+                    CoopCampaignMapPrototypePartyVisualKind.None)
+            {
+                return;
+            }
+
+            if (replica.PartyVisualAttemptCount >=
+                    MaximumPartyVisualCreationAttempts ||
+                replica.PartyVisualRetryDelayRemaining > 0f)
+            {
+                return;
+            }
+
+            replica.PartyVisualAttemptCount++;
+            if (CoopCampaignMapPrototypePartyVisual.TryCreate(
+                    _mapScene,
+                    target,
+                    initialFrame,
+                    out CoopCampaignMapPrototypePartyVisual visual))
+            {
+                replica.PartyVisual = visual;
+                replica.PartyVisualRetryDelayRemaining = 0f;
+            }
+            else if (replica.PartyVisualAttemptCount <
+                     MaximumPartyVisualCreationAttempts)
+            {
+                replica.PartyVisualRetryDelayRemaining =
+                    PartyVisualRetryDelaySeconds;
+            }
+        }
+
+        private static string BuildPartyVisualAttemptKey(
+            CoopCampaignMapPrototypeEntityState state)
+        {
+            if (state == null)
+                return string.Empty;
+
+            var builder = new StringBuilder(512);
+            builder.Append((int)state.PartyVisualKind).Append('|');
+            AppendVisualKeyToken(builder, state.VisualCharacterId);
+            AppendVisualKeyToken(builder, state.CultureId);
+            AppendVisualKeyToken(builder, state.BannerCode);
+            builder.Append(state.PrimaryColor).Append('|')
+                .Append(state.SecondaryColor).Append('|');
+            AppendAgentVisualKey(builder, state.HumanVisual);
+            AppendAgentVisualKey(builder, state.MountVisual);
+            AppendAgentVisualKey(builder, state.CaravanMountVisual);
+            return builder.ToString();
+        }
+
+        private static void AppendAgentVisualKey(
+            StringBuilder builder,
+            CoopCampaignMapPrototypeAgentVisualState visual)
+        {
+            if (visual == null)
+            {
+                builder.Append("null|");
+                return;
+            }
+
+            builder.Append(visual.IsFemale ? '1' : '0').Append('|')
+                .Append(visual.Race).Append('|')
+                .Append(visual.SkeletonType).Append('|')
+                .Append(visual.RightWieldedItemIndex).Append('|')
+                .Append(visual.LeftWieldedItemIndex).Append('|')
+                .Append(visual.HasBanner ? '1' : '0').Append('|')
+                .Append(visual.AddColorRandomness ? '1' : '0').Append('|');
+            AppendVisualKeyToken(builder, visual.BodyProperties);
+            AppendVisualKeyToken(builder, visual.MountCreationKey);
+            string[] itemIds = visual.EquipmentItemIds;
+            for (int slot = 0;
+                 slot < CoopCampaignMapPrototypeContract.EquipmentSlotCount;
+                 slot++)
+            {
+                AppendVisualKeyToken(
+                    builder,
+                    itemIds != null && slot < itemIds.Length
+                        ? itemIds[slot]
+                        : string.Empty);
+            }
+        }
+
+        private static void AppendVisualKeyToken(
+            StringBuilder builder,
+            string value)
+        {
+            string safeValue = value ?? string.Empty;
+            builder.Append(safeValue.Length).Append(':')
+                .Append(safeValue).Append('|');
+        }
+
+        private static void ResetPartyVisual(EntityReplica replica)
+        {
+            if (replica?.PartyVisual == null)
+                return;
+
+            CoopCampaignMapPrototypePartyVisual visual = replica.PartyVisual;
+            replica.PartyVisual = null;
+            visual.Reset();
         }
 
         private Vec3 ResolveMapWorldPosition(double normalizedX, double normalizedY)
@@ -749,7 +940,8 @@ namespace CoopSpectator.UI
             Vec3 scale = Vec3.One * markerScale;
             markerFrame.Scale(in scale);
             _hostMarker.SetFrame(ref markerFrame, true);
-            _hostMarker.SetVisibilityExcludeParents(true);
+            _hostMarker.SetVisibilityExcludeParents(
+                !_mainPartyVisualActive);
 
             float farPlane = Math.Max(5000f, horizontalSpan * 10f);
             if (_hasDisplayedCamera)
@@ -820,7 +1012,10 @@ namespace CoopSpectator.UI
             ReleaseSettlementOverlayLayer();
             ReleaseEntityOverlayLayer();
             foreach (EntityReplica replica in _entityReplicas.Values)
+            {
+                ResetPartyVisual(replica);
                 RemoveMarker(replica.Marker);
+            }
             _entityReplicas.Clear();
             _pendingVisibleEntities = null;
             _pendingVisibleEntitiesRevision = -1;
@@ -871,6 +1066,7 @@ namespace CoopSpectator.UI
             _sceneLayer = null;
             _mapScene = null;
             _mapSceneReadyToRender = false;
+            _mainPartyVisualActive = false;
             _appliedNormalizedTimeOfDay = -1;
             _appliedSeasonTimeFactor = -1;
             _hostMarker = null;

@@ -8,6 +8,7 @@ internal static class Program
     {
         try
         {
+            ValidateProtocolVersion();
             ValidateSyntheticPathBounds();
             ValidateRevisionAndPayloadPolicy();
             ValidateQuantizationAndInterpolation();
@@ -19,6 +20,8 @@ internal static class Program
             ValidateVisibleEntitySnapshotAssembler();
             ValidateHostBridgeCodec();
             ValidateSettlementNameplateSizeCodec();
+            ValidatePartyVisualCodec();
+            ValidateExactPartyVisualContract();
             ValidateHostSnapshotFreshness();
             ValidateSceneOwnerResolution();
             ValidateDedicatedBattleObserverSuppression();
@@ -86,6 +89,14 @@ internal static class Program
             1d,
             CoopCampaignMapPrototypeContract.InterpolateUnit(0.75d, 2d, 1d),
             "Interpolation must clamp the result to the normalized range.");
+    }
+
+    private static void ValidateProtocolVersion()
+    {
+        Assert(
+            CoopCampaignMapPrototypeContract.ProtocolVersion == 8 &&
+            CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion == 8,
+            "The exact party visual payload requires protocol and bridge schema 8.");
     }
 
     private static void ValidateMapVisualStateQuantization()
@@ -353,6 +364,29 @@ internal static class Program
             !CoopCampaignMapPrototypeContract.IsValidVisibleEntity(invalid),
             "An undefined settlement nameplate size must be rejected.");
 
+        invalid = entities[0].Clone();
+        invalid.PartyVisualKind =
+            (CoopCampaignMapPrototypePartyVisualKind)4;
+        Assert(
+            !CoopCampaignMapPrototypeContract.IsValidVisibleEntity(invalid),
+            "An undefined party visual kind must be rejected.");
+
+        invalid = entities[1].Clone();
+        invalid.PartyVisualKind =
+            CoopCampaignMapPrototypePartyVisualKind.Foot;
+        invalid.VisualCharacterId = "mp_coop_light_infantry_empire_troop";
+        invalid.CultureId = "empire";
+        Assert(
+            !CoopCampaignMapPrototypeContract.IsValidVisibleEntity(invalid),
+            "A settlement must not carry party visual metadata.");
+
+        invalid = entities[0].Clone();
+        invalid.VisualCharacterId = string.Empty;
+        invalid.CultureId = string.Empty;
+        Assert(
+            !CoopCampaignMapPrototypeContract.IsValidVisibleEntity(invalid),
+            "A concrete party visual must have a character or culture fallback.");
+
         var oversized = new List<CoopCampaignMapPrototypeEntityState>();
         for (int index = 0;
              index <= CoopCampaignMapPrototypeContract.MaxVisibleEntities;
@@ -437,6 +471,120 @@ internal static class Program
                 actual.VisibleEntities[1].SettlementNameplateSize == size,
                 "The host bridge must preserve the settlement nameplate size.");
         }
+    }
+
+    private static void ValidatePartyVisualCodec()
+    {
+        foreach (CoopCampaignMapPrototypePartyVisualKind kind in new[]
+                 {
+                     CoopCampaignMapPrototypePartyVisualKind.None,
+                     CoopCampaignMapPrototypePartyVisualKind.Foot,
+                     CoopCampaignMapPrototypePartyVisualKind.Mounted,
+                     CoopCampaignMapPrototypePartyVisualKind.Caravan
+                 })
+        {
+            CoopCampaignMapPrototypeHostSnapshot expected =
+                CreateHostSnapshot(
+                    new DateTime(
+                        2026,
+                        8,
+                        18,
+                        12,
+                        0,
+                        0,
+                        DateTimeKind.Utc));
+            CoopCampaignMapPrototypeEntityState party =
+                expected.VisibleEntities[0];
+            party.PartyVisualKind = kind;
+            party.VisualCharacterId = kind ==
+                                      CoopCampaignMapPrototypePartyVisualKind.None
+                ? string.Empty
+                : "lord_1_1";
+            party.CultureId = kind ==
+                              CoopCampaignMapPrototypePartyVisualKind.None
+                ? string.Empty
+                : "empire";
+            party.HumanVisual = kind ==
+                                CoopCampaignMapPrototypePartyVisualKind.None
+                ? null
+                : CreateHumanVisualState();
+            party.MountVisual = kind ==
+                                CoopCampaignMapPrototypePartyVisualKind.Mounted ||
+                                kind ==
+                                CoopCampaignMapPrototypePartyVisualKind.Caravan
+                ? CreateMountVisualState("campaign_horse", "campaign_harness")
+                : null;
+            party.CaravanMountVisual = kind ==
+                                       CoopCampaignMapPrototypePartyVisualKind.Caravan
+                ? CreateMountVisualState("campaign_mule", "campaign_pack")
+                : null;
+
+            string[] serialized =
+                CoopCampaignMapPrototypeBridgeCodec.Serialize(expected);
+            Assert(
+                CoopCampaignMapPrototypeBridgeCodec.TryParse(
+                    serialized,
+                    out CoopCampaignMapPrototypeHostSnapshot actual,
+                    out string reason),
+                "Every party visual kind must survive the host bridge. Reason=" +
+                reason);
+            CoopCampaignMapPrototypeEntityState actualParty =
+                actual.VisibleEntities[0];
+            Assert(
+                actualParty.PartyVisualKind == kind &&
+                actualParty.VisualCharacterId == party.VisualCharacterId &&
+                actualParty.CultureId == party.CultureId &&
+                AgentVisualsEqual(actualParty.HumanVisual, party.HumanVisual) &&
+                AgentVisualsEqual(actualParty.MountVisual, party.MountVisual) &&
+                AgentVisualsEqual(
+                    actualParty.CaravanMountVisual,
+                    party.CaravanMountVisual),
+                "The host bridge must preserve party visual metadata.");
+        }
+    }
+
+    private static void ValidateExactPartyVisualContract()
+    {
+        CoopCampaignMapPrototypeEntityState exact =
+            CreateVisibleEntities()[0];
+        Assert(
+            CoopCampaignMapPrototypeContract.IsValidVisibleEntity(exact),
+            "An exact main-hero visual with body, banner and mount must be valid.");
+        Assert(
+            exact.HumanVisual.EquipmentItemIds.Length ==
+                CoopCampaignMapPrototypeContract.EquipmentSlotCount,
+            "An exact human visual must contain all 12 equipment slots.");
+
+        CoopCampaignMapPrototypeEntityState clone = exact.Clone();
+        exact.HumanVisual.EquipmentItemIds[0] = "mutated_item";
+        exact.MountVisual.EquipmentItemIds[10] = "mutated_horse";
+        Assert(
+            clone.HumanVisual.EquipmentItemIds[0] == "campaign_sword" &&
+            clone.MountVisual.EquipmentItemIds[10] == "campaign_horse",
+            "Entity cloning must deeply clone exact visual equipment arrays.");
+
+        CoopCampaignMapPrototypeEntityState invalid = clone.Clone();
+        invalid.HumanVisual.EquipmentItemIds = new string[
+            CoopCampaignMapPrototypeContract.EquipmentSlotCount - 1];
+        Assert(
+            !CoopCampaignMapPrototypeContract.IsValidVisibleEntity(invalid),
+            "An exact visual with a truncated equipment layout must be rejected.");
+
+        invalid = clone.Clone();
+        invalid.HumanVisual.BodyProperties = new string(
+            'x',
+            CoopCampaignMapPrototypeContract.MaxBodyPropertiesCharacters + 1);
+        Assert(
+            !CoopCampaignMapPrototypeContract.IsValidVisibleEntity(invalid),
+            "Oversized body properties must be rejected before transport.");
+
+        invalid = clone.Clone();
+        invalid.CaravanMountVisual = CreateMountVisualState(
+            "campaign_mule",
+            "campaign_pack");
+        Assert(
+            CoopCampaignMapPrototypeContract.IsValidVisibleEntity(invalid),
+            "A bounded separate caravan mount descriptor must remain transport-safe.");
     }
 
     private static void ValidateHostSnapshotFreshness()
@@ -534,7 +682,15 @@ internal static class Program
                 PrimaryColor = 0x78563412u,
                 SecondaryColor = 0x12345678u,
                 BannerCode =
-                    "11.163.166.1528.1528.764.764.1.0.0.133.171.171.483.483.764.764.0.0.0"
+                    "11.163.166.1528.1528.764.764.1.0.0.133.171.171.483.483.764.764.0.0.0",
+                VisualCharacterId = "lord_1_1",
+                CultureId = "empire",
+                PartyVisualKind =
+                    CoopCampaignMapPrototypePartyVisualKind.Mounted,
+                HumanVisual = CreateHumanVisualState(),
+                MountVisual = CreateMountVisualState(
+                    "campaign_horse",
+                    "campaign_harness")
             },
             new CoopCampaignMapPrototypeEntityState
             {
@@ -549,7 +705,11 @@ internal static class Program
                 PartySize = 0,
                 PrimaryColor = uint.MaxValue,
                 SecondaryColor = 0xFF102030u,
-                BannerCode = "24.193.116.1536.1536.768.768.1.0.0"
+                BannerCode = "24.193.116.1536.1536.768.768.1.0.0",
+                VisualCharacterId = string.Empty,
+                CultureId = string.Empty,
+                PartyVisualKind =
+                    CoopCampaignMapPrototypePartyVisualKind.None
             }
         };
     }
@@ -577,10 +737,108 @@ internal static class Program
                 leftEntity.PartySize != rightEntity.PartySize ||
                 leftEntity.PrimaryColor != rightEntity.PrimaryColor ||
                 leftEntity.SecondaryColor != rightEntity.SecondaryColor ||
-                leftEntity.BannerCode != rightEntity.BannerCode)
+                leftEntity.BannerCode != rightEntity.BannerCode ||
+                leftEntity.VisualCharacterId !=
+                    rightEntity.VisualCharacterId ||
+                leftEntity.CultureId != rightEntity.CultureId ||
+                leftEntity.PartyVisualKind != rightEntity.PartyVisualKind ||
+                !AgentVisualsEqual(
+                    leftEntity.HumanVisual,
+                    rightEntity.HumanVisual) ||
+                !AgentVisualsEqual(
+                    leftEntity.MountVisual,
+                    rightEntity.MountVisual) ||
+                !AgentVisualsEqual(
+                    leftEntity.CaravanMountVisual,
+                    rightEntity.CaravanMountVisual))
             {
                 return false;
             }
+        }
+        return true;
+    }
+
+    private static CoopCampaignMapPrototypeAgentVisualState
+        CreateHumanVisualState()
+    {
+        string[] itemIds = CreateEmptyEquipmentLayout();
+        itemIds[0] = "campaign_sword";
+        itemIds[4] = "campaign_banner_small";
+        itemIds[5] = "campaign_helmet";
+        itemIds[6] = "campaign_armor";
+        itemIds[10] = "campaign_horse";
+        itemIds[11] = "campaign_harness";
+        return new CoopCampaignMapPrototypeAgentVisualState
+        {
+            BodyProperties = "<BodyProperties version=\"4\" />",
+            IsFemale = false,
+            Race = 0,
+            SkeletonType = 0,
+            RightWieldedItemIndex = 0,
+            LeftWieldedItemIndex = 4,
+            MountCreationKey = string.Empty,
+            HasBanner = true,
+            AddColorRandomness = false,
+            EquipmentItemIds = itemIds
+        };
+    }
+
+    private static CoopCampaignMapPrototypeAgentVisualState
+        CreateMountVisualState(string horseItemId, string harnessItemId)
+    {
+        string[] itemIds = CreateEmptyEquipmentLayout();
+        itemIds[10] = horseItemId;
+        itemIds[11] = harnessItemId;
+        return new CoopCampaignMapPrototypeAgentVisualState
+        {
+            BodyProperties = string.Empty,
+            IsFemale = false,
+            Race = 0,
+            SkeletonType = 0,
+            RightWieldedItemIndex = -1,
+            LeftWieldedItemIndex = -1,
+            MountCreationKey = "mount-key-1084",
+            HasBanner = false,
+            AddColorRandomness = false,
+            EquipmentItemIds = itemIds
+        };
+    }
+
+    private static string[] CreateEmptyEquipmentLayout()
+    {
+        var itemIds = new string[
+            CoopCampaignMapPrototypeContract.EquipmentSlotCount];
+        for (int slot = 0; slot < itemIds.Length; slot++)
+            itemIds[slot] = string.Empty;
+        return itemIds;
+    }
+
+    private static bool AgentVisualsEqual(
+        CoopCampaignMapPrototypeAgentVisualState left,
+        CoopCampaignMapPrototypeAgentVisualState right)
+    {
+        if (left == null || right == null)
+            return left == right;
+        if (left.BodyProperties != right.BodyProperties ||
+            left.IsFemale != right.IsFemale ||
+            left.Race != right.Race ||
+            left.SkeletonType != right.SkeletonType ||
+            left.RightWieldedItemIndex != right.RightWieldedItemIndex ||
+            left.LeftWieldedItemIndex != right.LeftWieldedItemIndex ||
+            left.MountCreationKey != right.MountCreationKey ||
+            left.HasBanner != right.HasBanner ||
+            left.AddColorRandomness != right.AddColorRandomness ||
+            left.EquipmentItemIds == null ||
+            right.EquipmentItemIds == null ||
+            left.EquipmentItemIds.Length != right.EquipmentItemIds.Length)
+        {
+            return false;
+        }
+
+        for (int slot = 0; slot < left.EquipmentItemIds.Length; slot++)
+        {
+            if (left.EquipmentItemIds[slot] != right.EquipmentItemIds[slot])
+                return false;
         }
         return true;
     }

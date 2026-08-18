@@ -18,6 +18,57 @@ namespace CoopSpectator.Infrastructure
         Large = 3
     }
 
+    public enum CoopCampaignMapPrototypePartyVisualKind
+    {
+        None = 0,
+        Foot = 1,
+        Mounted = 2,
+        Caravan = 3
+    }
+
+    public sealed class CoopCampaignMapPrototypeAgentVisualState
+    {
+        public string BodyProperties { get; set; }
+
+        public bool IsFemale { get; set; }
+
+        public int Race { get; set; }
+
+        public int SkeletonType { get; set; }
+
+        public int RightWieldedItemIndex { get; set; } = -1;
+
+        public int LeftWieldedItemIndex { get; set; } = -1;
+
+        public string MountCreationKey { get; set; }
+
+        public bool HasBanner { get; set; }
+
+        public bool AddColorRandomness { get; set; }
+
+        public string[] EquipmentItemIds { get; set; } =
+            new string[CoopCampaignMapPrototypeContract.EquipmentSlotCount];
+
+        public CoopCampaignMapPrototypeAgentVisualState Clone()
+        {
+            return new CoopCampaignMapPrototypeAgentVisualState
+            {
+                BodyProperties = BodyProperties,
+                IsFemale = IsFemale,
+                Race = Race,
+                SkeletonType = SkeletonType,
+                RightWieldedItemIndex = RightWieldedItemIndex,
+                LeftWieldedItemIndex = LeftWieldedItemIndex,
+                MountCreationKey = MountCreationKey,
+                HasBanner = HasBanner,
+                AddColorRandomness = AddColorRandomness,
+                EquipmentItemIds = EquipmentItemIds == null
+                    ? null
+                    : (string[])EquipmentItemIds.Clone()
+            };
+        }
+    }
+
     public sealed class CoopCampaignMapPrototypeEntityState
     {
         public string EntityId { get; set; }
@@ -43,6 +94,18 @@ namespace CoopSpectator.Infrastructure
 
         public string BannerCode { get; set; }
 
+        public string VisualCharacterId { get; set; }
+
+        public string CultureId { get; set; }
+
+        public CoopCampaignMapPrototypePartyVisualKind PartyVisualKind { get; set; }
+
+        public CoopCampaignMapPrototypeAgentVisualState HumanVisual { get; set; }
+
+        public CoopCampaignMapPrototypeAgentVisualState MountVisual { get; set; }
+
+        public CoopCampaignMapPrototypeAgentVisualState CaravanMountVisual { get; set; }
+
         public CoopCampaignMapPrototypeEntityState Clone()
         {
             return new CoopCampaignMapPrototypeEntityState
@@ -57,7 +120,13 @@ namespace CoopSpectator.Infrastructure
                 PartySize = PartySize,
                 PrimaryColor = PrimaryColor,
                 SecondaryColor = SecondaryColor,
-                BannerCode = BannerCode
+                BannerCode = BannerCode,
+                VisualCharacterId = VisualCharacterId,
+                CultureId = CultureId,
+                PartyVisualKind = PartyVisualKind,
+                HumanVisual = HumanVisual?.Clone(),
+                MountVisual = MountVisual?.Clone(),
+                CaravanMountVisual = CaravanMountVisual?.Clone()
             };
         }
     }
@@ -337,12 +406,20 @@ namespace CoopSpectator.Infrastructure
     /// </summary>
     public static class CoopCampaignMapPrototypeContract
     {
-        public const int ProtocolVersion = 6;
-        public const int HostBridgeSchemaVersion = 6;
+        public const int ProtocolVersion = 8;
+        public const int HostBridgeSchemaVersion = 8;
         public const int MaxVisibleEntities = 64;
         public const int MaxEntityIdCharacters = 96;
         public const int MaxEntityNameCharacters = 64;
         public const int MaxBannerCodeCharacters = 512;
+        public const int MaxVisualCharacterIdCharacters = 96;
+        public const int MaxCultureIdCharacters = 64;
+        public const int EquipmentSlotCount = 12;
+        public const int MaxVisualItemIdCharacters = 128;
+        public const int MaxBodyPropertiesCharacters = 2048;
+        public const int MaxMountCreationKeyCharacters = 1024;
+        public const int MaximumVisualRace = 255;
+        public const int MaximumSkeletonType = 15;
         public const int MaximumPartySize = 100000;
         public const int UnitScale = 1000000;
         public const int WorldCoordinateScale = 1000;
@@ -661,10 +738,21 @@ namespace CoopSpectator.Infrastructure
                     entity.BannerCode,
                     MaxBannerCodeCharacters,
                     allowEmpty: true) ||
+                !IsSafeBoundedText(
+                    entity.VisualCharacterId,
+                    MaxVisualCharacterIdCharacters,
+                    allowEmpty: true) ||
+                !IsSafeBoundedText(
+                    entity.CultureId,
+                    MaxCultureIdCharacters,
+                    allowEmpty: true) ||
                 !Enum.IsDefined(typeof(CoopCampaignMapPrototypeEntityKind), entity.Kind) ||
                 !Enum.IsDefined(
                     typeof(CoopCampaignMapPrototypeSettlementNameplateSize),
                     entity.SettlementNameplateSize) ||
+                !Enum.IsDefined(
+                    typeof(CoopCampaignMapPrototypePartyVisualKind),
+                    entity.PartyVisualKind) ||
                 !IsUnitInRange(entity.NormalizedX) ||
                 !IsUnitInRange(entity.NormalizedY) ||
                 !IsUnitInRange(entity.Heading) ||
@@ -681,6 +769,92 @@ namespace CoopSpectator.Infrastructure
                  CoopCampaignMapPrototypeSettlementNameplateSize.None))
             {
                 return false;
+            }
+
+            if (isSettlement &&
+                (entity.PartyVisualKind !=
+                     CoopCampaignMapPrototypePartyVisualKind.None ||
+                 entity.VisualCharacterId.Length != 0 ||
+                 entity.CultureId.Length != 0 ||
+                 entity.HumanVisual != null ||
+                 entity.MountVisual != null ||
+                 entity.CaravanMountVisual != null))
+            {
+                return false;
+            }
+
+            if (!isSettlement &&
+                entity.PartyVisualKind !=
+                    CoopCampaignMapPrototypePartyVisualKind.None &&
+                entity.VisualCharacterId.Length == 0 &&
+                entity.CultureId.Length == 0)
+            {
+                return false;
+            }
+
+            if (!isSettlement &&
+                entity.PartyVisualKind ==
+                    CoopCampaignMapPrototypePartyVisualKind.None &&
+                (entity.HumanVisual != null ||
+                 entity.MountVisual != null ||
+                 entity.CaravanMountVisual != null))
+            {
+                return false;
+            }
+
+            if (!IsValidAgentVisualState(
+                    entity.HumanVisual,
+                    requireBodyProperties: true) ||
+                !IsValidAgentVisualState(
+                    entity.MountVisual,
+                    requireBodyProperties: false) ||
+                !IsValidAgentVisualState(
+                    entity.CaravanMountVisual,
+                    requireBodyProperties: false))
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        public static bool IsValidAgentVisualState(
+            CoopCampaignMapPrototypeAgentVisualState visual,
+            bool requireBodyProperties)
+        {
+            if (visual == null)
+                return true;
+            if (!IsSafeBoundedText(
+                    visual.BodyProperties,
+                    MaxBodyPropertiesCharacters,
+                    allowEmpty: !requireBodyProperties) ||
+                !IsSafeBoundedText(
+                    visual.MountCreationKey,
+                    MaxMountCreationKeyCharacters,
+                    allowEmpty: true) ||
+                visual.Race < 0 ||
+                visual.Race > MaximumVisualRace ||
+                visual.SkeletonType < 0 ||
+                visual.SkeletonType > MaximumSkeletonType ||
+                visual.RightWieldedItemIndex < -1 ||
+                visual.RightWieldedItemIndex >= EquipmentSlotCount ||
+                visual.LeftWieldedItemIndex < -1 ||
+                visual.LeftWieldedItemIndex >= EquipmentSlotCount ||
+                visual.EquipmentItemIds == null ||
+                visual.EquipmentItemIds.Length != EquipmentSlotCount)
+            {
+                return false;
+            }
+
+            foreach (string itemId in visual.EquipmentItemIds)
+            {
+                if (!IsSafeBoundedText(
+                        itemId,
+                        MaxVisualItemIdCharacters,
+                        allowEmpty: true))
+                {
+                    return false;
+                }
             }
 
             return true;

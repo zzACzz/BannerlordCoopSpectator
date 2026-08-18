@@ -68,6 +68,21 @@ namespace CoopSpectator.Infrastructure
                 lines.Add(prefix + "PrimaryColor=" + (entity?.PrimaryColor ?? 0u).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "SecondaryColor=" + (entity?.SecondaryColor ?? 0u).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "BannerCode=" + EncodeText(entity?.BannerCode));
+                lines.Add(prefix + "VisualCharacterId=" + EncodeText(entity?.VisualCharacterId));
+                lines.Add(prefix + "CultureId=" + EncodeText(entity?.CultureId));
+                lines.Add(prefix + "PartyVisualKind=" + (entity != null ? (int)entity.PartyVisualKind : 0).ToString(CultureInfo.InvariantCulture));
+                SerializeAgentVisual(
+                    lines,
+                    prefix + "HumanVisual.",
+                    entity?.HumanVisual);
+                SerializeAgentVisual(
+                    lines,
+                    prefix + "MountVisual.",
+                    entity?.MountVisual);
+                SerializeAgentVisual(
+                    lines,
+                    prefix + "CaravanMountVisual.",
+                    entity?.CaravanMountVisual);
             }
 
             lines.Add(
@@ -184,7 +199,24 @@ namespace CoopSpectator.Infrastructure
                     !TryReadUInt(values, prefix + "PrimaryColor", out uint primaryColor) ||
                     !TryReadUInt(values, prefix + "SecondaryColor", out uint secondaryColor) ||
                     !values.TryGetValue(prefix + "BannerCode", out string encodedBannerCode) ||
-                    !TryDecodeText(encodedBannerCode, out string bannerCode))
+                    !TryDecodeText(encodedBannerCode, out string bannerCode) ||
+                    !values.TryGetValue(prefix + "VisualCharacterId", out string encodedVisualCharacterId) ||
+                    !TryDecodeText(encodedVisualCharacterId, out string visualCharacterId) ||
+                    !values.TryGetValue(prefix + "CultureId", out string encodedCultureId) ||
+                    !TryDecodeText(encodedCultureId, out string cultureId) ||
+                    !TryReadInt(values, prefix + "PartyVisualKind", out int partyVisualKind) ||
+                    !TryParseAgentVisual(
+                        values,
+                        prefix + "HumanVisual.",
+                        out CoopCampaignMapPrototypeAgentVisualState humanVisual) ||
+                    !TryParseAgentVisual(
+                        values,
+                        prefix + "MountVisual.",
+                        out CoopCampaignMapPrototypeAgentVisualState mountVisual) ||
+                    !TryParseAgentVisual(
+                        values,
+                        prefix + "CaravanMountVisual.",
+                        out CoopCampaignMapPrototypeAgentVisualState caravanMountVisual))
                 {
                     return Fail("malformed-visible-entity", out reason);
                 }
@@ -203,7 +235,14 @@ namespace CoopSpectator.Infrastructure
                     PartySize = partySize,
                     PrimaryColor = primaryColor,
                     SecondaryColor = secondaryColor,
-                    BannerCode = bannerCode
+                    BannerCode = bannerCode,
+                    VisualCharacterId = visualCharacterId,
+                    CultureId = cultureId,
+                    PartyVisualKind =
+                        (CoopCampaignMapPrototypePartyVisualKind)partyVisualKind,
+                    HumanVisual = humanVisual,
+                    MountVisual = mountVisual,
+                    CaravanMountVisual = caravanMountVisual
                 };
                 if (!CoopCampaignMapPrototypeContract.IsValidVisibleEntity(entity))
                     return Fail("invalid-visible-entity", out reason);
@@ -250,6 +289,93 @@ namespace CoopSpectator.Infrastructure
                        NumberStyles.Integer,
                        CultureInfo.InvariantCulture,
                        out value);
+        }
+
+        private static void SerializeAgentVisual(
+            ICollection<string> lines,
+            string prefix,
+            CoopCampaignMapPrototypeAgentVisualState visual)
+        {
+            lines.Add(prefix + "Present=" + (visual != null));
+            if (visual == null)
+                return;
+
+            lines.Add(prefix + "BodyProperties=" + EncodeText(visual.BodyProperties));
+            lines.Add(prefix + "IsFemale=" + visual.IsFemale);
+            lines.Add(prefix + "Race=" + visual.Race.ToString(CultureInfo.InvariantCulture));
+            lines.Add(prefix + "SkeletonType=" + visual.SkeletonType.ToString(CultureInfo.InvariantCulture));
+            lines.Add(prefix + "RightWieldedItemIndex=" + visual.RightWieldedItemIndex.ToString(CultureInfo.InvariantCulture));
+            lines.Add(prefix + "LeftWieldedItemIndex=" + visual.LeftWieldedItemIndex.ToString(CultureInfo.InvariantCulture));
+            lines.Add(prefix + "MountCreationKey=" + EncodeText(visual.MountCreationKey));
+            lines.Add(prefix + "HasBanner=" + visual.HasBanner);
+            lines.Add(prefix + "AddColorRandomness=" + visual.AddColorRandomness);
+            string[] itemIds = visual.EquipmentItemIds ?? Array.Empty<string>();
+            for (int slot = 0;
+                 slot < CoopCampaignMapPrototypeContract.EquipmentSlotCount;
+                 slot++)
+            {
+                lines.Add(
+                    prefix + "EquipmentItem." +
+                    slot.ToString(CultureInfo.InvariantCulture) + "=" +
+                    EncodeText(slot < itemIds.Length ? itemIds[slot] : string.Empty));
+            }
+        }
+
+        private static bool TryParseAgentVisual(
+            IReadOnlyDictionary<string, string> values,
+            string prefix,
+            out CoopCampaignMapPrototypeAgentVisualState visual)
+        {
+            visual = null;
+            if (!TryReadBool(values, prefix + "Present", out bool present))
+                return false;
+            if (!present)
+                return true;
+
+            if (!values.TryGetValue(prefix + "BodyProperties", out string encodedBodyProperties) ||
+                !TryDecodeText(encodedBodyProperties, out string bodyProperties) ||
+                !TryReadBool(values, prefix + "IsFemale", out bool isFemale) ||
+                !TryReadInt(values, prefix + "Race", out int race) ||
+                !TryReadInt(values, prefix + "SkeletonType", out int skeletonType) ||
+                !TryReadInt(values, prefix + "RightWieldedItemIndex", out int rightWieldedItemIndex) ||
+                !TryReadInt(values, prefix + "LeftWieldedItemIndex", out int leftWieldedItemIndex) ||
+                !values.TryGetValue(prefix + "MountCreationKey", out string encodedMountCreationKey) ||
+                !TryDecodeText(encodedMountCreationKey, out string mountCreationKey) ||
+                !TryReadBool(values, prefix + "HasBanner", out bool hasBanner) ||
+                !TryReadBool(values, prefix + "AddColorRandomness", out bool addColorRandomness))
+            {
+                return false;
+            }
+
+            var itemIds = new string[
+                CoopCampaignMapPrototypeContract.EquipmentSlotCount];
+            for (int slot = 0; slot < itemIds.Length; slot++)
+            {
+                string key = prefix + "EquipmentItem." +
+                             slot.ToString(CultureInfo.InvariantCulture);
+                if (!values.TryGetValue(key, out string encodedItemId) ||
+                    !TryDecodeText(encodedItemId, out itemIds[slot]))
+                {
+                    return false;
+                }
+            }
+
+            visual = new CoopCampaignMapPrototypeAgentVisualState
+            {
+                BodyProperties = bodyProperties,
+                IsFemale = isFemale,
+                Race = race,
+                SkeletonType = skeletonType,
+                RightWieldedItemIndex = rightWieldedItemIndex,
+                LeftWieldedItemIndex = leftWieldedItemIndex,
+                MountCreationKey = mountCreationKey,
+                HasBanner = hasBanner,
+                AddColorRandomness = addColorRandomness,
+                EquipmentItemIds = itemIds
+            };
+            return CoopCampaignMapPrototypeContract.IsValidAgentVisualState(
+                visual,
+                requireBodyProperties: bodyProperties.Length != 0);
         }
 
         private static bool TryReadBool(

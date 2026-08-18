@@ -2,15 +2,18 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using CoopSpectator.Infrastructure;
+using Helpers;
 using SandBox.View.Map;
 using SandBox.View.Map.Managers;
 using SandBox.View.Map.Visuals;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Settlements;
+using TaleWorlds.Core;
 using TaleWorlds.Engine;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
+using TaleWorlds.MountAndBlade.View;
 
 namespace CoopSpectator.Campaign
 {
@@ -249,15 +252,6 @@ namespace CoopSpectator.Campaign
             Vec2 maximum)
         {
             var candidates = new List<VisibleEntityCandidate>();
-            AddMobilePartyCandidate(
-                candidates,
-                mainParty,
-                mainParty,
-                minimum,
-                maximum,
-                CoopCampaignMapPrototypeEntityKind.MainParty,
-                isVisible: true);
-
             MobilePartyVisualManager partyVisualManager = null;
             SettlementVisualManager settlementVisualManager = null;
             try
@@ -268,6 +262,19 @@ namespace CoopSpectator.Campaign
             catch
             {
             }
+
+            MobilePartyVisual mainPartyVisual = TryGetMobilePartyVisual(
+                partyVisualManager,
+                mainParty?.Party);
+            AddMobilePartyCandidate(
+                candidates,
+                mainParty,
+                mainParty,
+                minimum,
+                maximum,
+                CoopCampaignMapPrototypeEntityKind.MainParty,
+                isVisible: true,
+                mainPartyVisual);
 
             if (partyVisualManager != null)
             {
@@ -282,11 +289,13 @@ namespace CoopSpectator.Campaign
                     }
 
                     bool visible = false;
+                    MobilePartyVisual mobilePartyVisual = null;
                     try
                     {
                         MapEntityVisual<PartyBase> visual =
                             partyVisualManager.GetVisualOfEntity(party.Party);
                         visible = visual?.IsVisibleOrFadingOut() == true;
+                        mobilePartyVisual = visual as MobilePartyVisual;
                     }
                     catch
                     {
@@ -301,7 +310,8 @@ namespace CoopSpectator.Campaign
                         minimum,
                         maximum,
                         CoopCampaignMapPrototypeEntityKind.MobileParty,
-                        isVisible: true);
+                        isVisible: true,
+                        mobilePartyVisual);
                 }
             }
 
@@ -343,6 +353,13 @@ namespace CoopSpectator.Campaign
                             primaryColor,
                             secondaryColor,
                             bannerCode,
+                            visualCharacterId: string.Empty,
+                            cultureId: string.Empty,
+                            partyVisualKind:
+                                CoopCampaignMapPrototypePartyVisualKind.None,
+                            humanVisual: null,
+                            mountVisual: null,
+                            caravanMountVisual: null,
                             minimum,
                             maximum,
                             out CoopCampaignMapPrototypeEntityState entity))
@@ -383,7 +400,8 @@ namespace CoopSpectator.Campaign
             Vec2 minimum,
             Vec2 maximum,
             CoopCampaignMapPrototypeEntityKind kind,
-            bool isVisible)
+            bool isVisible,
+            MobilePartyVisual nativeVisual)
         {
             if (!isVisible || party?.Party == null)
                 return;
@@ -406,6 +424,15 @@ namespace CoopSpectator.Campaign
                 out uint primaryColor,
                 out uint secondaryColor,
                 out string bannerCode);
+            ResolvePartyVisualState(
+                party,
+                nativeVisual,
+                out string visualCharacterId,
+                out string cultureId,
+                out CoopCampaignMapPrototypePartyVisualKind partyVisualKind,
+                out CoopCampaignMapPrototypeAgentVisualState humanVisual,
+                out CoopCampaignMapPrototypeAgentVisualState mountVisual,
+                out CoopCampaignMapPrototypeAgentVisualState caravanMountVisual);
             if (!TryCreateEntityState(
                     entityId,
                     party.Name?.ToString(),
@@ -417,6 +444,12 @@ namespace CoopSpectator.Campaign
                     primaryColor,
                     secondaryColor,
                     bannerCode,
+                    visualCharacterId,
+                    cultureId,
+                    partyVisualKind,
+                    humanVisual,
+                    mountVisual,
+                    caravanMountVisual,
                     minimum,
                     maximum,
                     out CoopCampaignMapPrototypeEntityState entity))
@@ -444,6 +477,12 @@ namespace CoopSpectator.Campaign
             uint primaryColor,
             uint secondaryColor,
             string bannerCode,
+            string visualCharacterId,
+            string cultureId,
+            CoopCampaignMapPrototypePartyVisualKind partyVisualKind,
+            CoopCampaignMapPrototypeAgentVisualState humanVisual,
+            CoopCampaignMapPrototypeAgentVisualState mountVisual,
+            CoopCampaignMapPrototypeAgentVisualState caravanMountVisual,
             Vec2 minimum,
             Vec2 maximum,
             out CoopCampaignMapPrototypeEntityState entity)
@@ -491,7 +530,21 @@ namespace CoopSpectator.Campaign
                 BannerCode = CoopCampaignMapPrototypeContract.BoundEntityText(
                     bannerCode,
                     CoopCampaignMapPrototypeContract.MaxBannerCodeCharacters,
-                    string.Empty)
+                    string.Empty),
+                VisualCharacterId =
+                    CoopCampaignMapPrototypeContract.BoundEntityText(
+                        visualCharacterId,
+                        CoopCampaignMapPrototypeContract
+                            .MaxVisualCharacterIdCharacters,
+                        string.Empty),
+                CultureId = CoopCampaignMapPrototypeContract.BoundEntityText(
+                    cultureId,
+                    CoopCampaignMapPrototypeContract.MaxCultureIdCharacters,
+                    string.Empty),
+                PartyVisualKind = partyVisualKind,
+                HumanVisual = humanVisual?.Clone(),
+                MountVisual = mountVisual?.Clone(),
+                CaravanMountVisual = caravanMountVisual?.Clone()
             };
             return CoopCampaignMapPrototypeContract.IsValidVisibleEntity(entity);
         }
@@ -524,6 +577,182 @@ namespace CoopSpectator.Campaign
             }
             catch
             {
+            }
+        }
+
+        private static void ResolvePartyVisualState(
+            MobileParty party,
+            MobilePartyVisual nativeVisual,
+            out string visualCharacterId,
+            out string cultureId,
+            out CoopCampaignMapPrototypePartyVisualKind partyVisualKind,
+            out CoopCampaignMapPrototypeAgentVisualState humanVisual,
+            out CoopCampaignMapPrototypeAgentVisualState mountVisual,
+            out CoopCampaignMapPrototypeAgentVisualState caravanMountVisual)
+        {
+            visualCharacterId = string.Empty;
+            cultureId = string.Empty;
+            partyVisualKind = CoopCampaignMapPrototypePartyVisualKind.None;
+            humanVisual = null;
+            mountVisual = null;
+            caravanMountVisual = null;
+            if (party?.Party == null)
+                return;
+
+            try
+            {
+                CharacterObject visualLeader =
+                    PartyBaseHelper.GetVisualPartyLeader(party.Party);
+                humanVisual = CaptureAgentVisual(
+                    nativeVisual?.HumanAgentVisuals,
+                    includeBodyProperties: true);
+                mountVisual = CaptureAgentVisual(
+                    nativeVisual?.MountAgentVisuals,
+                    includeBodyProperties: false);
+                caravanMountVisual = CaptureAgentVisual(
+                    nativeVisual?.CaravanMountAgentVisuals,
+                    includeBodyProperties: false);
+                visualCharacterId =
+                    nativeVisual?.HumanAgentVisuals?.GetCharacterObjectID() ??
+                    visualLeader?.StringId ??
+                    string.Empty;
+                cultureId = visualLeader?.Culture?.StringId ??
+                            party.Party.Culture?.StringId ??
+                            string.Empty;
+
+                if (humanVisual != null &&
+                    party.IsCaravan &&
+                    (caravanMountVisual != null || mountVisual != null))
+                {
+                    partyVisualKind =
+                        CoopCampaignMapPrototypePartyVisualKind.Caravan;
+                }
+                else if (humanVisual != null && mountVisual != null)
+                {
+                    partyVisualKind =
+                        CoopCampaignMapPrototypePartyVisualKind.Mounted;
+                }
+                else if (humanVisual != null)
+                {
+                    partyVisualKind =
+                        CoopCampaignMapPrototypePartyVisualKind.Foot;
+                }
+                else if (party.IsCaravan)
+                {
+                    partyVisualKind =
+                        CoopCampaignMapPrototypePartyVisualKind.Caravan;
+                }
+                else if (visualLeader?.HasMount() == true)
+                {
+                    partyVisualKind =
+                        CoopCampaignMapPrototypePartyVisualKind.Mounted;
+                }
+                else if (visualLeader != null)
+                {
+                    partyVisualKind =
+                        CoopCampaignMapPrototypePartyVisualKind.Foot;
+                }
+            }
+            catch
+            {
+                visualCharacterId = string.Empty;
+                cultureId = party.Party.Culture?.StringId ?? string.Empty;
+                partyVisualKind = party.IsCaravan
+                    ? CoopCampaignMapPrototypePartyVisualKind.Caravan
+                    : CoopCampaignMapPrototypePartyVisualKind.None;
+                humanVisual = null;
+                mountVisual = null;
+                caravanMountVisual = null;
+            }
+        }
+
+        private static MobilePartyVisual TryGetMobilePartyVisual(
+            MobilePartyVisualManager visualManager,
+            PartyBase party)
+        {
+            if (visualManager == null || party == null)
+                return null;
+            try
+            {
+                return visualManager.GetVisualOfEntity(party) as MobilePartyVisual;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static CoopCampaignMapPrototypeAgentVisualState CaptureAgentVisual(
+            AgentVisuals visual,
+            bool includeBodyProperties)
+        {
+            if (visual == null)
+                return null;
+
+            try
+            {
+                AgentVisualsData data = visual.GetCopyAgentVisualsData();
+                Equipment equipment = visual.GetEquipment() ?? data?.EquipmentData;
+                if (data == null || equipment == null)
+                    return null;
+
+                var itemIds = new string[
+                    CoopCampaignMapPrototypeContract.EquipmentSlotCount];
+                for (int slot = 0; slot < itemIds.Length; slot++)
+                {
+                    if (!includeBodyProperties &&
+                        slot != (int)EquipmentIndex.Horse &&
+                        slot != (int)EquipmentIndex.HorseHarness)
+                    {
+                        itemIds[slot] = string.Empty;
+                        continue;
+                    }
+
+                    EquipmentElement element = equipment[(EquipmentIndex)slot];
+                    ItemObject visualItem = element.CosmeticItem ?? element.Item;
+                    itemIds[slot] =
+                        CoopCampaignMapPrototypeContract.BoundEntityText(
+                            visualItem?.StringId,
+                            CoopCampaignMapPrototypeContract
+                                .MaxVisualItemIdCharacters,
+                            string.Empty);
+                }
+
+                string bodyProperties = includeBodyProperties
+                    ? visual.GetBodyProperties().ToString()
+                    : string.Empty;
+                var captured = new CoopCampaignMapPrototypeAgentVisualState
+                {
+                    BodyProperties =
+                        CoopCampaignMapPrototypeContract.BoundEntityText(
+                            bodyProperties,
+                            CoopCampaignMapPrototypeContract
+                                .MaxBodyPropertiesCharacters,
+                            string.Empty),
+                    IsFemale = visual.GetIsFemale(),
+                    Race = data.RaceData,
+                    SkeletonType = (int)data.SkeletonTypeData,
+                    RightWieldedItemIndex = data.RightWieldedItemIndexData,
+                    LeftWieldedItemIndex = data.LeftWieldedItemIndexData,
+                    MountCreationKey =
+                        CoopCampaignMapPrototypeContract.BoundEntityText(
+                            data.MountCreationKeyData,
+                            CoopCampaignMapPrototypeContract
+                                .MaxMountCreationKeyCharacters,
+                            string.Empty),
+                    HasBanner = data.BannerData != null,
+                    AddColorRandomness = data.AddColorRandomnessData,
+                    EquipmentItemIds = itemIds
+                };
+                return CoopCampaignMapPrototypeContract.IsValidAgentVisualState(
+                    captured,
+                    includeBodyProperties)
+                    ? captured
+                    : null;
+            }
+            catch
+            {
+                return null;
             }
         }
 

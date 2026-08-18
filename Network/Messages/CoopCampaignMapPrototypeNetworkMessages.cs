@@ -286,6 +286,8 @@ namespace CoopSpectator.Network.Messages
         private static readonly CompressionInfo.Integer
             SettlementNameplateSizeCompression =
                 new CompressionInfo.Integer(0, 3, maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer PartyVisualKindCompression =
+            new CompressionInfo.Integer(0, 3, maximumValueGiven: true);
         private static readonly CompressionInfo.Integer UnitCompression =
             new CompressionInfo.Integer(
                 0,
@@ -298,6 +300,21 @@ namespace CoopSpectator.Network.Messages
                 maximumValueGiven: true);
         private static readonly CompressionInfo.UnsignedInteger ColorCompression =
             new CompressionInfo.UnsignedInteger(0u, 32);
+        private static readonly CompressionInfo.Integer VisualRaceCompression =
+            new CompressionInfo.Integer(
+                0,
+                CoopCampaignMapPrototypeContract.MaximumVisualRace,
+                maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer SkeletonTypeCompression =
+            new CompressionInfo.Integer(
+                0,
+                CoopCampaignMapPrototypeContract.MaximumSkeletonType,
+                maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer WieldedIndexCompression =
+            new CompressionInfo.Integer(
+                0,
+                CoopCampaignMapPrototypeContract.EquipmentSlotCount,
+                maximumValueGiven: true);
 
         public CoopCampaignMapPrototypeEntityStateMessage(
             int revision,
@@ -344,17 +361,27 @@ namespace CoopSpectator.Network.Messages
             string entityId = ReadStringFromPacket(ref valid) ?? string.Empty;
             string displayName = ReadStringFromPacket(ref valid) ?? string.Empty;
             string bannerCode = ReadStringFromPacket(ref valid) ?? string.Empty;
+            string visualCharacterId =
+                ReadStringFromPacket(ref valid) ?? string.Empty;
+            string cultureId = ReadStringFromPacket(ref valid) ?? string.Empty;
             Entity = new CoopCampaignMapPrototypeEntityState
             {
                 EntityId = entityId,
                 DisplayName = displayName,
                 BannerCode = bannerCode,
+                VisualCharacterId = visualCharacterId,
+                CultureId = cultureId,
                 Kind = (CoopCampaignMapPrototypeEntityKind)
                     ReadIntFromPacket(KindCompression, ref valid),
                 SettlementNameplateSize =
                     (CoopCampaignMapPrototypeSettlementNameplateSize)
                         ReadIntFromPacket(
                             SettlementNameplateSizeCompression,
+                            ref valid),
+                PartyVisualKind =
+                    (CoopCampaignMapPrototypePartyVisualKind)
+                        ReadIntFromPacket(
+                            PartyVisualKindCompression,
                             ref valid),
                 NormalizedX = ReadIntFromPacket(UnitCompression, ref valid),
                 NormalizedY = ReadIntFromPacket(UnitCompression, ref valid),
@@ -367,7 +394,10 @@ namespace CoopSpectator.Network.Messages
                     ref valid),
                 SecondaryColor = ReadUintFromPacket(
                     ColorCompression,
-                    ref valid)
+                    ref valid),
+                HumanVisual = ReadAgentVisual(ref valid),
+                MountVisual = ReadAgentVisual(ref valid),
+                CaravanMountVisual = ReadAgentVisual(ref valid)
             };
             return valid &&
                    ExpectedCount > 0 &&
@@ -382,7 +412,12 @@ namespace CoopSpectator.Network.Messages
                 {
                     EntityId = "invalid",
                     DisplayName = "Invalid",
-                    Kind = CoopCampaignMapPrototypeEntityKind.MobileParty
+                    Kind = CoopCampaignMapPrototypeEntityKind.MobileParty,
+                    BannerCode = string.Empty,
+                    VisualCharacterId = string.Empty,
+                    CultureId = string.Empty,
+                    PartyVisualKind =
+                        CoopCampaignMapPrototypePartyVisualKind.None
                 };
             WriteIntToPacket(ProtocolVersion, ProtocolCompression);
             WriteIntToPacket(Math.Max(0, Revision), RevisionCompression);
@@ -415,10 +450,23 @@ namespace CoopSpectator.Network.Messages
                     safeEntity.BannerCode,
                     CoopCampaignMapPrototypeContract.MaxBannerCodeCharacters,
                     string.Empty));
+            WriteStringToPacket(
+                CoopCampaignMapPrototypeContract.BoundEntityText(
+                    safeEntity.VisualCharacterId,
+                    CoopCampaignMapPrototypeContract.MaxVisualCharacterIdCharacters,
+                    string.Empty));
+            WriteStringToPacket(
+                CoopCampaignMapPrototypeContract.BoundEntityText(
+                    safeEntity.CultureId,
+                    CoopCampaignMapPrototypeContract.MaxCultureIdCharacters,
+                    string.Empty));
             WriteIntToPacket((int)safeEntity.Kind, KindCompression);
             WriteIntToPacket(
                 (int)safeEntity.SettlementNameplateSize,
                 SettlementNameplateSizeCompression);
+            WriteIntToPacket(
+                (int)safeEntity.PartyVisualKind,
+                PartyVisualKindCompression);
             WriteIntToPacket(ClampUnit(safeEntity.NormalizedX), UnitCompression);
             WriteIntToPacket(ClampUnit(safeEntity.NormalizedY), UnitCompression);
             WriteIntToPacket(ClampUnit(safeEntity.Heading), UnitCompression);
@@ -431,6 +479,9 @@ namespace CoopSpectator.Network.Messages
                 PartySizeCompression);
             WriteUintToPacket(safeEntity.PrimaryColor, ColorCompression);
             WriteUintToPacket(safeEntity.SecondaryColor, ColorCompression);
+            WriteAgentVisual(safeEntity.HumanVisual);
+            WriteAgentVisual(safeEntity.MountVisual);
+            WriteAgentVisual(safeEntity.CaravanMountVisual);
         }
 
         protected override MultiplayerMessageFilter OnGetLogFilter() =>
@@ -449,6 +500,111 @@ namespace CoopSpectator.Network.Messages
                 ? 0
                 : value > CoopCampaignMapPrototypeContract.UnitScale
                     ? CoopCampaignMapPrototypeContract.UnitScale
+                    : value;
+        }
+
+        private CoopCampaignMapPrototypeAgentVisualState ReadAgentVisual(
+            ref bool valid)
+        {
+            if (!ReadBoolFromPacket(ref valid))
+                return null;
+
+            string bodyProperties =
+                ReadStringFromPacket(ref valid) ?? string.Empty;
+            bool isFemale = ReadBoolFromPacket(ref valid);
+            int race = ReadIntFromPacket(VisualRaceCompression, ref valid);
+            int skeletonType =
+                ReadIntFromPacket(SkeletonTypeCompression, ref valid);
+            int rightWieldedItemIndex =
+                ReadIntFromPacket(WieldedIndexCompression, ref valid) - 1;
+            int leftWieldedItemIndex =
+                ReadIntFromPacket(WieldedIndexCompression, ref valid) - 1;
+            string mountCreationKey =
+                ReadStringFromPacket(ref valid) ?? string.Empty;
+            bool hasBanner = ReadBoolFromPacket(ref valid);
+            bool addColorRandomness = ReadBoolFromPacket(ref valid);
+            var itemIds = new string[
+                CoopCampaignMapPrototypeContract.EquipmentSlotCount];
+            for (int slot = 0; slot < itemIds.Length; slot++)
+                itemIds[slot] = ReadStringFromPacket(ref valid) ?? string.Empty;
+
+            return new CoopCampaignMapPrototypeAgentVisualState
+            {
+                BodyProperties = bodyProperties,
+                IsFemale = isFemale,
+                Race = race,
+                SkeletonType = skeletonType,
+                RightWieldedItemIndex = rightWieldedItemIndex,
+                LeftWieldedItemIndex = leftWieldedItemIndex,
+                MountCreationKey = mountCreationKey,
+                HasBanner = hasBanner,
+                AddColorRandomness = addColorRandomness,
+                EquipmentItemIds = itemIds
+            };
+        }
+
+        private void WriteAgentVisual(
+            CoopCampaignMapPrototypeAgentVisualState visual)
+        {
+            bool isValid = visual != null &&
+                           CoopCampaignMapPrototypeContract.IsValidAgentVisualState(
+                               visual,
+                               requireBodyProperties: false);
+            WriteBoolToPacket(isValid);
+            if (!isValid)
+                return;
+
+            WriteStringToPacket(
+                CoopCampaignMapPrototypeContract.BoundEntityText(
+                    visual.BodyProperties,
+                    CoopCampaignMapPrototypeContract.MaxBodyPropertiesCharacters,
+                    string.Empty));
+            WriteBoolToPacket(visual.IsFemale);
+            WriteIntToPacket(
+                Math.Max(
+                    0,
+                    Math.Min(
+                        CoopCampaignMapPrototypeContract.MaximumVisualRace,
+                        visual.Race)),
+                VisualRaceCompression);
+            WriteIntToPacket(
+                Math.Max(
+                    0,
+                    Math.Min(
+                        CoopCampaignMapPrototypeContract.MaximumSkeletonType,
+                        visual.SkeletonType)),
+                SkeletonTypeCompression);
+            WriteIntToPacket(
+                ClampWieldedIndex(visual.RightWieldedItemIndex) + 1,
+                WieldedIndexCompression);
+            WriteIntToPacket(
+                ClampWieldedIndex(visual.LeftWieldedItemIndex) + 1,
+                WieldedIndexCompression);
+            WriteStringToPacket(
+                CoopCampaignMapPrototypeContract.BoundEntityText(
+                    visual.MountCreationKey,
+                    CoopCampaignMapPrototypeContract.MaxMountCreationKeyCharacters,
+                    string.Empty));
+            WriteBoolToPacket(visual.HasBanner);
+            WriteBoolToPacket(visual.AddColorRandomness);
+            for (int slot = 0;
+                 slot < CoopCampaignMapPrototypeContract.EquipmentSlotCount;
+                 slot++)
+            {
+                WriteStringToPacket(
+                    CoopCampaignMapPrototypeContract.BoundEntityText(
+                        visual.EquipmentItemIds[slot],
+                        CoopCampaignMapPrototypeContract.MaxVisualItemIdCharacters,
+                        string.Empty));
+            }
+        }
+
+        private static int ClampWieldedIndex(int value)
+        {
+            return value < -1
+                ? -1
+                : value >= CoopCampaignMapPrototypeContract.EquipmentSlotCount
+                    ? CoopCampaignMapPrototypeContract.EquipmentSlotCount - 1
                     : value;
         }
     }
