@@ -20,9 +20,6 @@ namespace CoopSpectator.Infrastructure
     internal static class CoopSiegeSceneOcclusionSafetyContract
     {
         private const string SiegeMissionWithDeploymentShell = "SiegeMissionWithDeployment";
-        private const string SiegeAmbushSubtype = "SiegeAmbush";
-        private const string SiegeAssaultSubtype = "SiegeAssault";
-        private const string UnsafeSiegeAssaultScene = "empire_castle_g";
 
         public static CoopSiegeSceneOcclusionSafetyDecision Resolve(
             bool isRemoteClient,
@@ -46,18 +43,7 @@ namespace CoopSpectator.Infrastructure
                 return KeepEnabled("mission-shell-not-siege-with-deployment");
             }
 
-            if (EqualsNormalized(siegeSubtype, SiegeAmbushSubtype))
-            {
-                return Disable("exact-siege-ambush");
-            }
-
-            if (EqualsNormalized(siegeSubtype, SiegeAssaultSubtype) &&
-                EqualsNormalized(runtimeScene, UnsafeSiegeAssaultScene))
-            {
-                return Disable("known-unsafe-software-occlusion-scene");
-            }
-
-            return KeepEnabled("scene-occlusion-supported");
+            return Disable("remote-client-siege-software-occlusion-safety");
         }
 
         private static CoopSiegeSceneOcclusionSafetyDecision Disable(string reason)

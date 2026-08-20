@@ -7,13 +7,12 @@ internal static class Program
     {
         try
         {
-            ValidateKnownUnsafeSiegeAssaultSceneIsDisabled();
-            ValidateKnownSafeSiegeAssaultSceneRemainsEnabled();
+            ValidateAllRemoteSiegeAssaultScenesAreDisabled();
             ValidateSiegeAmbushRemainsDisabled();
             ValidateNonRemoteAndNonSiegeContextsRemainEnabled();
-            ValidateUnknownSiegeSubtypeRemainsEnabled();
+            ValidateUnknownSiegeSubtypeIsDisabled();
             ValidateWrongMissionShellRemainsEnabled();
-            ValidateMatchingIsNormalized();
+            ValidateMissionShellMatchingIsNormalized();
             Console.WriteLine("Coop siege scene occlusion contract tests passed.");
             return 0;
         }
@@ -24,34 +23,30 @@ internal static class Program
         }
     }
 
-    private static void ValidateKnownUnsafeSiegeAssaultSceneIsDisabled()
+    private static void ValidateAllRemoteSiegeAssaultScenesAreDisabled()
     {
-        CoopSiegeSceneOcclusionSafetyDecision decision = Resolve(
-            runtimeScene: "empire_castle_g",
-            siegeSubtype: "SiegeAssault");
+        string[] scenes =
+        {
+            "empire_castle_g",
+            "empire_siege_001",
+            "empire_town_d",
+            "future_campaign_siege_scene"
+        };
 
-        Assert(
-            decision.DisableSceneOcclusion,
-            "The known unsafe external siege scene must disable software occlusion on a remote client.");
-        AssertEqual(
-            "known-unsafe-software-occlusion-scene",
-            decision.Reason,
-            "The unsafe scene decision must remain diagnosable.");
-    }
+        foreach (string scene in scenes)
+        {
+            CoopSiegeSceneOcclusionSafetyDecision decision = Resolve(
+                runtimeScene: scene,
+                siegeSubtype: "SiegeAssault");
 
-    private static void ValidateKnownSafeSiegeAssaultSceneRemainsEnabled()
-    {
-        CoopSiegeSceneOcclusionSafetyDecision decision = Resolve(
-            runtimeScene: "empire_town_d",
-            siegeSubtype: "SiegeAssault");
-
-        Assert(
-            !decision.DisableSceneOcclusion,
-            "Previously successful external siege scenes must keep occlusion enabled.");
-        AssertEqual(
-            "scene-occlusion-supported",
-            decision.Reason,
-            "A supported scene must report the non-mitigation reason.");
+            Assert(
+                decision.DisableSceneOcclusion,
+                "Every remote-client siege assault scene must disable software occlusion. Scene=" + scene + ".");
+            AssertEqual(
+                "remote-client-siege-software-occlusion-safety",
+                decision.Reason,
+                "The all-scene siege safety decision must remain diagnosable. Scene=" + scene + ".");
+        }
     }
 
     private static void ValidateSiegeAmbushRemainsDisabled()
@@ -64,9 +59,9 @@ internal static class Program
             decision.DisableSceneOcclusion,
             "The existing exact siege ambush safety policy must remain active.");
         AssertEqual(
-            "exact-siege-ambush",
+            "remote-client-siege-software-occlusion-safety",
             decision.Reason,
-            "The siege ambush decision must keep its distinct reason.");
+            "The siege ambush decision must report the shared remote-client siege safety reason.");
     }
 
     private static void ValidateNonRemoteAndNonSiegeContextsRemainEnabled()
@@ -109,18 +104,22 @@ internal static class Program
             "A non-deployment mission shell must fail closed and preserve occlusion.");
     }
 
-    private static void ValidateUnknownSiegeSubtypeRemainsEnabled()
+    private static void ValidateUnknownSiegeSubtypeIsDisabled()
     {
         CoopSiegeSceneOcclusionSafetyDecision decision = Resolve(
             runtimeScene: "empire_castle_g",
             siegeSubtype: "UnknownSiegeSubtype");
 
         Assert(
-            !decision.DisableSceneOcclusion,
-            "An unknown siege subtype must not activate the scene-specific workaround.");
+            decision.DisableSceneOcclusion,
+            "An unknown future siege subtype must remain protected by the mission-shell safety policy.");
+        AssertEqual(
+            "remote-client-siege-software-occlusion-safety",
+            decision.Reason,
+            "An unknown future siege subtype must report the shared safety reason.");
     }
 
-    private static void ValidateMatchingIsNormalized()
+    private static void ValidateMissionShellMatchingIsNormalized()
     {
         CoopSiegeSceneOcclusionSafetyDecision decision =
             CoopSiegeSceneOcclusionSafetyContract.Resolve(
@@ -132,7 +131,7 @@ internal static class Program
 
         Assert(
             decision.DisableSceneOcclusion,
-            "Contract matching must tolerate casing and transport whitespace differences.");
+            "Mission-shell matching must tolerate casing and transport whitespace differences.");
     }
 
     private static CoopSiegeSceneOcclusionSafetyDecision Resolve(
