@@ -160,6 +160,10 @@
       <HintPath>$(BannerlordBinDir)\TaleWorlds.CampaignSystem.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="TaleWorlds.CampaignSystem.ViewModelCollection">
+      <HintPath>$(BannerlordBinDir)\TaleWorlds.CampaignSystem.ViewModelCollection.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <!-- TaleWorlds.DotNet потрібен для типів на кшталт DotNetObject, які використовує CampaignSystem -->
     <Reference Include="TaleWorlds.DotNet">
       <HintPath>$(BannerlordBinDir)\TaleWorlds.DotNet.dll</HintPath>
@@ -255,6 +259,10 @@
     <!-- Campaign API (Campaign, MobileParty, тощо) -->
     <Reference Include="TaleWorlds.CampaignSystem">
       <HintPath>TaleWorlds.CampaignSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.CampaignSystem.ViewModelCollection" Condition="Exists('TaleWorlds.CampaignSystem.ViewModelCollection.dll')">
+      <HintPath>TaleWorlds.CampaignSystem.ViewModelCollection.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <!-- Локальний fallback DotNet: додаємо тільки якщо DLL існує в репозиторії -->

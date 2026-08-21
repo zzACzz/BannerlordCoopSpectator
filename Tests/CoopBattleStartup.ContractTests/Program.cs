@@ -73,6 +73,7 @@ internal static class Program
             ValidateNetworkRuntimeUsesOnlyReadyPreloadedCraftingCatalog();
             ValidateUnavailableCraftingCatalogIsRejected();
             ValidateCraftingPieceCanonicalityContract();
+            ValidateCampaignSmithyCraftingPieceSelectionContract();
             ValidateRejectedCraftedMirrorIsNotRetried();
             ValidateCraftedMirrorFailureUsesSafeWeaponSlotFallback();
             ValidateBundledBannerlord148CraftingCatalog();
@@ -215,6 +216,45 @@ internal static class Program
                 isReady: false,
                 isValid: true),
             "An unready crafting piece must not enter crafted weapon generation.");
+    }
+
+    private static void ValidateCampaignSmithyCraftingPieceSelectionContract()
+    {
+        Assert(ExactCampaignCraftingRuntimeSafetyContract.ShouldAllowCampaignSmithyPieceSelection(
+                isCampaignSmithy: true,
+                belongsToTemplate: true,
+                resolvesToSameObject: true,
+                isReady: true,
+                isValid: true),
+            "A ready canonical campaign smithy piece must remain selectable.");
+        Assert(!ExactCampaignCraftingRuntimeSafetyContract.ShouldAllowCampaignSmithyPieceSelection(
+                isCampaignSmithy: true,
+                belongsToTemplate: true,
+                resolvesToSameObject: true,
+                isReady: false,
+                isValid: false),
+            "An unmaterialized multiplayer campaign smithy placeholder must be rejected.");
+        Assert(!ExactCampaignCraftingRuntimeSafetyContract.ShouldAllowCampaignSmithyPieceSelection(
+                isCampaignSmithy: true,
+                belongsToTemplate: true,
+                resolvesToSameObject: false,
+                isReady: true,
+                isValid: true),
+            "A duplicate campaign smithy piece instance must be rejected.");
+        Assert(!ExactCampaignCraftingRuntimeSafetyContract.ShouldAllowCampaignSmithyPieceSelection(
+                isCampaignSmithy: true,
+                belongsToTemplate: false,
+                resolvesToSameObject: true,
+                isReady: true,
+                isValid: true),
+            "A piece outside the active campaign smithy template must be rejected.");
+        Assert(ExactCampaignCraftingRuntimeSafetyContract.ShouldAllowCampaignSmithyPieceSelection(
+                isCampaignSmithy: false,
+                belongsToTemplate: false,
+                resolvesToSameObject: false,
+                isReady: false,
+                isValid: false),
+            "The campaign smithy guard must not intercept non-campaign crafting flows.");
     }
 
     private static void ValidateRejectedCraftedMirrorIsNotRetried()

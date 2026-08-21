@@ -35,6 +35,20 @@ namespace CoopSpectator.Infrastructure
             return belongsToTemplate && resolvesToSameObject && isReady && isValid;
         }
 
+        public static bool ShouldAllowCampaignSmithyPieceSelection(
+            bool isCampaignSmithy,
+            bool belongsToTemplate,
+            bool resolvesToSameObject,
+            bool isReady,
+            bool isValid)
+        {
+            return !isCampaignSmithy || IsCanonicalCraftingPiece(
+                belongsToTemplate,
+                resolvesToSameObject,
+                isReady,
+                isValid);
+        }
+
         public static bool ShouldRetryRejectedCraftedMirror(bool wasRejected)
         {
             return !wasRejected;
