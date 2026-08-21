@@ -136,6 +136,25 @@ namespace CoopSpectator.Infrastructure.Hideout
                    hasSelectedRosterContract;
         }
 
+        public static bool ShouldTreatReservedPlayerSelectionSourceAsReady(
+            string scenarioKind,
+            CoopHideoutAmbushPhase controllerPhase,
+            bool hasController,
+            bool isPlayerSide,
+            bool isPrebattlePhase,
+            string selectableSource)
+        {
+            return hasController &&
+                   isPlayerSide &&
+                   isPrebattlePhase &&
+                   controllerPhase == CoopHideoutAmbushPhase.Stealth &&
+                   IsHideoutAmbushScenario(scenarioKind) &&
+                   !string.IsNullOrWhiteSpace(selectableSource) &&
+                   selectableSource.StartsWith(
+                       "allowed-prebattle",
+                       StringComparison.OrdinalIgnoreCase);
+        }
+
         public static bool ShouldCountHostedNightReinforcementSelectionAsReady(
             bool isHostedPeer,
             bool hasActiveControlledAgent,

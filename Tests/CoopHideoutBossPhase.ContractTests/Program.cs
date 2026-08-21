@@ -11,6 +11,7 @@ internal static class Program
             ValidateScenePolicy();
             ValidatePreOpenMissionContractPolicy();
             ValidateNightAmbushContractPolicy();
+            ValidateNightReservedSelectionReadinessPolicy();
             ValidateNightDeferredHostBattleStartPolicy();
             ValidateNightAlarmFailureCounterPolicy();
             ValidateNightMainHeroDefeatPolicy();
@@ -702,6 +703,65 @@ internal static class Program
                 hasHideoutDayRuntimeMarker: true,
                 null),
             "A missing native battle shell source must remain suppressed.");
+    }
+
+    private static void ValidateNightReservedSelectionReadinessPolicy()
+    {
+        Assert(
+            CoopHideoutAmbushContract.ShouldTreatReservedPlayerSelectionSourceAsReady(
+                CoopHideoutAmbushContract.ScenarioKind,
+                CoopHideoutAmbushPhase.Stealth,
+                hasController: true,
+                isPlayerSide: true,
+                isPrebattlePhase: true,
+                selectableSource: "allowed-prebattle-live-empty-fallback"),
+            "A materialized nighttime hideout must keep reserved player entries ready for side selection.");
+        Assert(
+            !CoopHideoutAmbushContract.ShouldTreatReservedPlayerSelectionSourceAsReady(
+                CoopHideoutAmbushContract.ScenarioKind,
+                CoopHideoutAmbushPhase.WaitingForMaterialization,
+                hasController: true,
+                isPlayerSide: true,
+                isPrebattlePhase: true,
+                selectableSource: "allowed-prebattle-live-empty-fallback") &&
+            !CoopHideoutAmbushContract.ShouldTreatReservedPlayerSelectionSourceAsReady(
+                CoopHideoutAmbushContract.ScenarioKind,
+                CoopHideoutAmbushPhase.Faulted,
+                hasController: true,
+                isPlayerSide: true,
+                isPrebattlePhase: true,
+                selectableSource: "allowed-prebattle-live-empty-fallback"),
+            "Nighttime hideout selection must remain blocked before materialization and after a controller fault.");
+        Assert(
+            !CoopHideoutAmbushContract.ShouldTreatReservedPlayerSelectionSourceAsReady(
+                CoopHideoutAmbushContract.ScenarioKind,
+                CoopHideoutAmbushPhase.Stealth,
+                hasController: true,
+                isPlayerSide: false,
+                isPrebattlePhase: true,
+                selectableSource: "allowed-prebattle-live-empty-fallback") &&
+            !CoopHideoutAmbushContract.ShouldTreatReservedPlayerSelectionSourceAsReady(
+                "Hideout",
+                CoopHideoutAmbushPhase.Stealth,
+                hasController: true,
+                isPlayerSide: true,
+                isPrebattlePhase: true,
+                selectableSource: "allowed-prebattle-live-empty-fallback") &&
+            !CoopHideoutAmbushContract.ShouldTreatReservedPlayerSelectionSourceAsReady(
+                CoopHideoutAmbushContract.ScenarioKind,
+                CoopHideoutAmbushPhase.Stealth,
+                hasController: true,
+                isPlayerSide: true,
+                isPrebattlePhase: false,
+                selectableSource: "allowed-prebattle-live-empty-fallback") &&
+            !CoopHideoutAmbushContract.ShouldTreatReservedPlayerSelectionSourceAsReady(
+                CoopHideoutAmbushContract.ScenarioKind,
+                CoopHideoutAmbushPhase.Stealth,
+                hasController: true,
+                isPlayerSide: true,
+                isPrebattlePhase: true,
+                selectableSource: "live-prebattle-materialized-empty"),
+            "Reserved-entry readiness must not leak to the enemy side, other scenarios, active battle, or live-only sources.");
     }
 
     private static void ValidateNightBossIdentityAndPlacementPolicy()

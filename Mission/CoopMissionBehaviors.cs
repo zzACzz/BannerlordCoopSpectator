@@ -42737,14 +42737,39 @@ namespace CoopSpectator.MissionBehaviors
             CoopBattlePhase currentPhase,
             string selectableSource)
         {
+            if (string.IsNullOrWhiteSpace(selectableSource) ||
+                currentPhase >= CoopBattlePhase.BattleEnded)
+            {
+                return false;
+            }
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            CoopExactCampaignHideoutAmbushMissionController nightHideoutController =
+                mission?.GetMissionBehavior<CoopExactCampaignHideoutAmbushMissionController>();
+            bool allowNightHideoutReservedPlayerReadiness =
+                CoopHideoutAmbushContract.ShouldTreatReservedPlayerSelectionSourceAsReady(
+                    scenarioContext?.ScenarioKind,
+                    nightHideoutController?.Phase ??
+                        CoopHideoutAmbushPhase.WaitingForMaterialization,
+                    nightHideoutController != null,
+                    nightHideoutController != null &&
+                        side == nightHideoutController.PlayerSide,
+                    currentPhase >= CoopBattlePhase.SideSelection &&
+                        currentPhase < CoopBattlePhase.BattleActive,
+                    selectableSource);
+            if (allowNightHideoutReservedPlayerReadiness)
+                return true;
+
             bool allowExactSiegeDeploymentSelectableReadiness =
                 mission != null &&
                 currentPhase >= CoopBattlePhase.SideSelection &&
                 currentPhase < CoopBattlePhase.BattleEnded &&
                 ExactCampaignCommanderDeploymentRuntime.IsDeploymentRuntimeActive(mission);
-            if (string.IsNullOrWhiteSpace(selectableSource) ||
-                (currentPhase < CoopBattlePhase.PreBattleHold && !allowExactSiegeDeploymentSelectableReadiness) ||
-                currentPhase >= CoopBattlePhase.BattleEnded)
+            if (currentPhase < CoopBattlePhase.PreBattleHold &&
+                !allowExactSiegeDeploymentSelectableReadiness)
             {
                 return false;
             }
@@ -42752,10 +42777,6 @@ namespace CoopSpectator.MissionBehaviors
             if (selectableSource.StartsWith("live-prebattle-materialized", StringComparison.OrdinalIgnoreCase))
                 return true;
 
-            BattleScenarioContextMessage scenarioContext =
-                BattleSnapshotRuntimeState.GetScenarioContext() ??
-                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
-                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
             bool isValidatedSallyOut =
                 mission != null &&
                 SallyOutScenarioContract.IsValidatedScenario(
