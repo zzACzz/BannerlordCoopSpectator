@@ -141,6 +141,7 @@
     <Compile Include="..\Infrastructure\SiegeAssault\SiegeMissionObjectIdMapRuntime.cs" Link="Infrastructure\SiegeAssault\SiegeMissionObjectIdMapRuntime.cs" />
     <Compile Include="..\Infrastructure\SiegeAssault\SiegeAssaultMissionOpenBridge.cs" Link="Infrastructure\SiegeAssault\SiegeAssaultMissionOpenBridge.cs" />
     <Compile Include="..\Infrastructure\SiegeAssault\CoopSiegeSceneOcclusionSafetyContract.cs" Link="Infrastructure\SiegeAssault\CoopSiegeSceneOcclusionSafetyContract.cs" />
+    <Compile Include="..\Infrastructure\SiegeAssault\CoopSiegeFormationMembershipSafetyContract.cs" Link="Infrastructure\SiegeAssault\CoopSiegeFormationMembershipSafetyContract.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" Link="Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignItemCatalogLoadPolicy.cs" Link="Infrastructure\ExactCampaignItemCatalogLoadPolicy.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignRuntimeItemRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeItemRegistry.cs" />
@@ -214,6 +215,7 @@
     <Compile Include="..\Patches\PreMissionTopologyContractPatch.cs" Link="Patches\PreMissionTopologyContractPatch.cs" />
     <Compile Include="..\Patches\MissionStateOpenNewPatches.cs" Link="Patches\MissionStateOpenNewPatches.cs" />
     <Compile Include="..\Patches\ExactCampaignArmyBootstrapPatch.cs" Link="Patches\ExactCampaignArmyBootstrapPatch.cs" />
+    <Compile Include="..\Patches\CoopSiegeFormationMembershipSafetyPatch.cs" Link="Patches\CoopSiegeFormationMembershipSafetyPatch.cs" />
     <Compile Include="..\Patches\ExactSiegeAmbushDeploymentControllerPatch.cs" Link="Patches\ExactSiegeAmbushDeploymentControllerPatch.cs" />
     <Compile Include="..\Patches\ExactCampaignPreSpawnLoadoutPatch.cs" Link="Patches\ExactCampaignPreSpawnLoadoutPatch.cs" />
     <Compile Include="..\Patches\ExactCampaignNetworkObjectBootstrapPatch.cs" Link="Patches\ExactCampaignNetworkObjectBootstrapPatch.cs" />

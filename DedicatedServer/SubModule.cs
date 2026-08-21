@@ -430,6 +430,7 @@ namespace CoopSpectator
                     TryApplyGameModeOverridePatch();
                     TryApplyMissionStateOpenNewPatches();
                     TryApplyExactCampaignArmyBootstrapPatch();
+                    TryApplyCoopSiegeFormationMembershipSafetyPatch();
                     TryApplyExactSiegeAmbushDeploymentControllerPatch();
                     TryApplyExactCampaignPreSpawnLoadoutPatch();
                     TryApplyExactCampaignNetworkObjectBootstrapPatch();
@@ -548,6 +549,22 @@ namespace CoopSpectator
             catch (Exception ex)
             {
                 ModLogger.Info("CoopSpectatorDedicated: ExactCampaignArmyBootstrap patch apply failed: " + ex.Message);
+            }
+        }
+
+        private static void TryApplyCoopSiegeFormationMembershipSafetyPatch()
+        {
+            try
+            {
+                if (_harmony == null)
+                    _harmony = new Harmony("com.coopspectator.dedicated");
+                CoopSiegeFormationMembershipSafetyPatch.Apply(_harmony);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopSpectatorDedicated: siege formation membership safety patch apply failed: " +
+                    ex.Message);
             }
         }
 
