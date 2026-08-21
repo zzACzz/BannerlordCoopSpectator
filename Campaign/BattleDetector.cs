@@ -1211,11 +1211,20 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 }
 
                 summary.ResolvedPartyAggregates++;
+                bool normalizeUnclassifiedDefenderRemoval =
+                    FinalSiegeDefenderEliminationContract.ShouldNormalizeDefenderRemoval(
+                        result.BattleStage,
+                        result.WinnerSide,
+                        result.DefenderPushedBack,
+                        result.IsFinalStage,
+                        result.CompletionReason,
+                        aggregate.SideId);
                 TryApplyAggregateToPartyRoster(
                     partyState,
                     aggregate,
                     summary,
-                    skipMainPartyHeroHitPointWriteback && partyState.IsMainParty);
+                    skipMainPartyHeroHitPointWriteback && partyState.IsMainParty,
+                    normalizeUnclassifiedDefenderRemoval);
             }
 
             TryApplyCombatXpWriteback(result, encounterParties, summary);
@@ -1376,7 +1385,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             EncounterPartyWritebackState partyState,
             BattleResultCharacterAggregate aggregate,
             BattleResultWritebackSummary summary,
-            bool skipHeroHitPointsWriteback = false)
+            bool skipHeroHitPointsWriteback = false,
+            bool normalizeUnclassifiedRemovalAsWounded = false)
         {
             if (partyState?.MemberRoster == null || aggregate == null)
                 return;
@@ -1409,7 +1419,13 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 {
                     AddWritebackSample(summary.AdjustedSamples, heroDeathSample);
                 }
-                else if (aggregate.HeroShouldBeWounded &&
+                else if ((aggregate.HeroShouldBeWounded ||
+                          FinalSiegeDefenderEliminationContract.ShouldWoundUnclassifiedRemovedHero(
+                              aggregate.ActiveCount,
+                              aggregate.KilledCount,
+                              aggregate.UnconsciousCount,
+                              aggregate.OtherRemovedCount,
+                              normalizeUnclassifiedRemovalAsWounded)) &&
                     TryApplyHeroWoundWriteback(
                         rosterHero,
                         summary,
@@ -1427,7 +1443,13 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
 
             int desiredCount = Math.Max(0, aggregate.DesiredCount);
-            int desiredWounded = Math.Max(0, Math.Min(desiredCount, aggregate.DesiredWoundedCount));
+            int desiredWounded =
+                FinalSiegeDefenderEliminationContract.ResolveDesiredWoundedCount(
+                    desiredCount,
+                    aggregate.SnapshotWoundedCount,
+                    aggregate.UnconsciousCount,
+                    aggregate.OtherRemovedCount,
+                    normalizeUnclassifiedRemovalAsWounded);
             bool changed = false;
 
             if (currentCount != desiredCount)
@@ -4257,10 +4279,21 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                              .ThenBy(item => item.OriginalCharacterId, StringComparer.OrdinalIgnoreCase)
                              .ThenBy(item => item.CharacterId, StringComparer.OrdinalIgnoreCase))
                 {
+                    bool normalizeUnclassifiedDefenderRemoval =
+                        FinalSiegeDefenderEliminationContract.ShouldNormalizeDefenderRemoval(
+                            result.BattleStage,
+                            result.WinnerSide,
+                            result.DefenderPushedBack,
+                            result.IsFinalStage,
+                            result.CompletionReason,
+                            aggregate.SideId);
                     TryApplyAggregateToPartyRoster(
                         mainPartyState,
                         aggregate,
-                        summary);
+                        summary,
+                        skipHeroHitPointsWriteback: false,
+                        normalizeUnclassifiedRemovalAsWounded:
+                            normalizeUnclassifiedDefenderRemoval);
                     if (aggregate.IsHero &&
                         TryResolvePartyRosterCharacter(
                             mainPartyState.MemberRoster,
@@ -4374,12 +4407,37 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     if (partyState.IsMainParty)
                         continue;
 
+                    bool normalizeUnclassifiedDefenderRemoval =
+                        FinalSiegeDefenderEliminationContract.ShouldNormalizeDefenderRemoval(
+                            result.BattleStage,
+                            result.WinnerSide,
+                            result.DefenderPushedBack,
+                            result.IsFinalStage,
+                            result.CompletionReason,
+                            aggregate.SideId);
+                    bool shouldWoundUnclassifiedRemovedHero =
+                        FinalSiegeDefenderEliminationContract.ShouldWoundUnclassifiedRemovedHero(
+                            aggregate.ActiveCount,
+                            aggregate.KilledCount,
+                            aggregate.UnconsciousCount,
+                            aggregate.OtherRemovedCount,
+                            normalizeUnclassifiedDefenderRemoval);
+
                     // Healthy heroes do not affect the casualty preview; avoid applying their partial HP early.
-                    if (aggregate.IsHero && !aggregate.HeroShouldBeKilled && !aggregate.HeroShouldBeWounded)
+                    if (aggregate.IsHero &&
+                        !aggregate.HeroShouldBeKilled &&
+                        !aggregate.HeroShouldBeWounded &&
+                        !shouldWoundUnclassifiedRemovedHero)
                         continue;
 
                     summary.ResolvedPartyAggregates++;
-                    TryApplyAggregateToPartyRoster(partyState, aggregate, summary);
+                    TryApplyAggregateToPartyRoster(
+                        partyState,
+                        aggregate,
+                        summary,
+                        skipHeroHitPointsWriteback: false,
+                        normalizeUnclassifiedRemovalAsWounded:
+                            normalizeUnclassifiedDefenderRemoval);
                 }
 
                 _cachedHostAftermathFinalSiegeDefenderPreviewResultKey = resultKey;
@@ -4608,6 +4666,18 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
                 PlayerEncounter.CampaignBattleResult = campaignBattleResult;
                 BattleSideEnum winnerSide = TryResolveWinnerSideEnum(result.WinnerSide);
+                bool terminalSiegeWinnerOverridden = false;
+                if (winnerSide != BattleSideEnum.None &&
+                    FinalSiegeDefenderEliminationContract.IsTerminalDefenderElimination(
+                        result.BattleStage,
+                        result.WinnerSide,
+                        result.DefenderPushedBack,
+                        result.IsFinalStage,
+                        result.CompletionReason))
+                {
+                    PlayerEncounter.Battle.SetOverrideWinner(winnerSide);
+                    terminalSiegeWinnerOverridden = true;
+                }
                 bool finalLordsHallWinnerOverridden = false;
                 if (ShouldUseNativeFinalLordsHallAftermath(result))
                 {
@@ -4643,6 +4713,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     " Defeat=" + campaignBattleResult.PlayerDefeat +
                     " EnemyPulledBack=" + campaignBattleResult.EnemyPulledBack +
                     " EnemyRetreated=" + campaignBattleResult.EnemyRetreated + "] " +
+                    "TerminalSiegeWinnerOverridden=" + terminalSiegeWinnerOverridden + " " +
                     "FinalLordsHallWinnerOverridden=" + finalLordsHallWinnerOverridden + " " +
                     "LandBattleWinnerOverridden=" + landBattleWinnerOverridden + " " +
                     "ContinueReset=" + continueReset + ".");

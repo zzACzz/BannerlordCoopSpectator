@@ -15,6 +15,7 @@ internal static class Program
             ValidateHideoutCasualtyLedgerPlan();
             ValidateEffectiveHideoutPopulationPlan();
             ValidateTerminalAgentReconciliationPolicy();
+            ValidateFinalSiegeDefenderEliminationPolicy();
             ValidateCampaignCasualtyScenarioPolicy();
             ValidateCampaignHeroDeathPolicy();
             ValidateNativeAftermathContributionPolicy();
@@ -309,6 +310,87 @@ internal static class Program
             ExactCasualtyLedgerMath.PlanMissingDelta(-1, 10, 4, 9);
         Assert(delta.NumberDelta == 4 && delta.WoundedDelta == 4,
             "Invalid wounded totals must be clamped to the planned member total.");
+    }
+
+    private static void ValidateFinalSiegeDefenderEliminationPolicy()
+    {
+        Assert(
+            FinalSiegeDefenderEliminationContract.IsTerminalDefenderElimination(
+                "SiegeAssault",
+                "Attacker",
+                defenderPushedBack: false,
+                isFinalStage: true,
+                completionReason: "defender-eliminated"),
+            "A terminal outer-siege defender elimination must commit the attacker winner.");
+        Assert(
+            FinalSiegeDefenderEliminationContract.ShouldNormalizeDefenderRemoval(
+                "SiegeAssault",
+                "Attacker",
+                defenderPushedBack: false,
+                isFinalStage: true,
+                completionReason: "defender-eliminated",
+                aggregateSide: "Defender"),
+            "Unclassified removals must be normalized only for the defeated terminal siege side.");
+
+        int desiredWounded =
+            FinalSiegeDefenderEliminationContract.ResolveDesiredWoundedCount(
+                desiredCount: 44,
+                snapshotWoundedCount: 0,
+                unconsciousCount: 43,
+                otherRemovedCount: 1,
+                normalizeUnclassifiedRemoval: true);
+        Assert(
+            desiredWounded == 44,
+            "The observed 43 wounded plus one unclassified defender must leave zero healthy defenders.");
+        Assert(
+            FinalSiegeDefenderEliminationContract.ResolveDesiredWoundedCount(
+                desiredCount: 44,
+                snapshotWoundedCount: 0,
+                unconsciousCount: 43,
+                otherRemovedCount: 1,
+                normalizeUnclassifiedRemoval: false) == 43,
+            "Non-terminal scenarios must preserve the existing unclassified-removal behavior.");
+        Assert(
+            FinalSiegeDefenderEliminationContract.ShouldWoundUnclassifiedRemovedHero(
+                activeCount: 0,
+                killedCount: 0,
+                unconsciousCount: 0,
+                otherRemovedCount: 1,
+                normalizeUnclassifiedRemoval: true) &&
+            !FinalSiegeDefenderEliminationContract.ShouldWoundUnclassifiedRemovedHero(
+                activeCount: 1,
+                killedCount: 0,
+                unconsciousCount: 0,
+                otherRemovedCount: 1,
+                normalizeUnclassifiedRemoval: true),
+            "Only an inactive unclassified terminal defender hero may be conservatively wounded.");
+
+        Assert(
+            !FinalSiegeDefenderEliminationContract.IsTerminalDefenderElimination(
+                "SiegeAssault",
+                "Attacker",
+                defenderPushedBack: true,
+                isFinalStage: false,
+                completionReason: "defender-eliminated") &&
+            !FinalSiegeDefenderEliminationContract.IsTerminalDefenderElimination(
+                "LordsHall",
+                "Attacker",
+                defenderPushedBack: false,
+                isFinalStage: true,
+                completionReason: "defender-eliminated") &&
+            !FinalSiegeDefenderEliminationContract.IsTerminalDefenderElimination(
+                "SiegeAssault",
+                "Defender",
+                defenderPushedBack: false,
+                isFinalStage: true,
+                completionReason: "defender-eliminated") &&
+            !FinalSiegeDefenderEliminationContract.IsTerminalDefenderElimination(
+                "SiegeAssault",
+                "Attacker",
+                defenderPushedBack: false,
+                isFinalStage: true,
+                completionReason: "time-expired"),
+            "Intermediate, lords-hall, defender-victory, and non-elimination results must remain unchanged.");
     }
 
     private static void Assert(bool condition, string message)
