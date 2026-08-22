@@ -660,7 +660,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             {
                 Mission mission = Mission.Current;
                 MapEvent battle = PlayerEncounter.Battle ?? PlayerEncounter.EncounteredBattle ?? MobileParty.MainParty?.MapEvent;
-                Settlement encounterSettlement = PlayerEncounter.EncounterSettlement ?? battle?.MapEventSettlement ?? MobileParty.MainParty?.CurrentSettlement;
+                Settlement encounterSettlement = ResolveEncounterSettlementSafe(battle);
                 string missionScene = mission?.SceneName ?? string.Empty;
                 bool isHideoutBattle = battle?.IsHideoutBattle ?? false;
                 bool isHideoutSettlement = encounterSettlement?.IsHideout ?? false;
@@ -5868,7 +5868,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             try
             {
                 MapEvent battle = TryGetCurrentMapEventSafe();
-                Settlement encounterSettlement = PlayerEncounter.EncounterSettlement ?? battle?.MapEventSettlement ?? MobileParty.MainParty?.CurrentSettlement;
+                Settlement encounterSettlement = ResolveEncounterSettlementSafe(battle);
                 string siegeSubtype = ResolveSiegeSubtype(battle, encounterSettlement, missionScene);
                 bool isReliefBattle = string.Equals(
                     siegeSubtype,
@@ -5923,6 +5923,24 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         private static MapEvent TryGetCurrentMapEventSafe()
         {
             return PlayerEncounter.Battle ?? PlayerEncounter.EncounteredBattle ?? MobileParty.MainParty?.MapEvent;
+        }
+
+        private static Settlement ResolveEncounterSettlementSafe(MapEvent battle)
+        {
+            if (ExactReliefCampaignBattleAdapter.IsCampaignBattle(battle))
+            {
+                return ExactReliefCampaignBattleAdapter.TryResolveSettlement(
+                    battle,
+                    out Settlement reliefSettlement,
+                    out _,
+                    out _)
+                    ? reliefSettlement
+                    : null;
+            }
+
+            return PlayerEncounter.EncounterSettlement ??
+                   battle?.MapEventSettlement ??
+                   MobileParty.MainParty?.CurrentSettlement;
         }
 
         private static string ResolveScenarioKind(
@@ -11830,7 +11848,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 Mission mission = Mission.Current;
                 string missionSceneName = mission?.SceneName ?? string.Empty;
                 MapEvent battle = PlayerEncounter.Battle ?? PlayerEncounter.EncounteredBattle ?? MobileParty.MainParty?.MapEvent;
-                Settlement encounterSettlement = PlayerEncounter.EncounterSettlement ?? battle?.MapEventSettlement ?? MobileParty.MainParty?.CurrentSettlement;
+                Settlement encounterSettlement = ResolveEncounterSettlementSafe(battle);
 
                 if (LordsHallCampaignBattleAdapter.IsCampaignStage(battle, encounterSettlement))
                 {

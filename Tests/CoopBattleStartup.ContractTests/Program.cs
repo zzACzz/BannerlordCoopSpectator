@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Xml;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.Infrastructure.Relief;
 
 internal static class Program
 {
@@ -11,6 +12,16 @@ internal static class Program
     {
         try
         {
+            ValidateExactReliefUniqueSettlementResolution();
+            ValidateExactReliefResolutionIsSideOrderIndependent();
+            ValidateExactReliefAttachedPartyMatchesArmyLeader();
+            ValidateExactReliefRejectsUnrelatedActiveSiege();
+            ValidateExactReliefRejectsOtherBattleTypes();
+            ValidateExactReliefRejectsCompletedSiege();
+            ValidateExactReliefRejectsZeroAndAmbiguousCandidates();
+            ValidateExactReliefRejectsBothSidesInSameBesiegerArmy();
+            ValidateExactReliefResolutionIsIdempotentAndNonMutating();
+            ValidateExactReliefSnapshotAndServerSourceFlow();
             ValidateCompleteApplication();
             ValidatePartialRejection();
             ValidateEntryCountMismatch();
@@ -86,6 +97,356 @@ internal static class Program
             Console.Error.WriteLine(ex.Message);
             return 1;
         }
+    }
+
+    private static void ValidateExactReliefUniqueSettlementResolution()
+    {
+        ExactReliefSettlementResolution resolution =
+            ExactReliefSettlementResolutionPolicy.Resolve(
+                "SiegeOutside",
+                new[] { Party("relief_army") },
+                new[] { Party("host_besieger") },
+                new[]
+                {
+                    Siege(
+                        "castle_a",
+                        isActive: true,
+                        Party("host_besieger"))
+                });
+
+        Assert(
+            resolution.Status == ExactReliefSettlementResolutionStatus.Resolved &&
+            resolution.SettlementId == "castle_a" &&
+            resolution.MatchingCandidateCount == 1,
+            "One active siege explained by exactly one battle side must resolve its settlement.");
+        Assert(
+            resolution.BesiegerBattleSide == ExactReliefBesiegerBattleSide.Defender,
+            "The resolver must report the live defender as the besieger side without remapping it.");
+    }
+
+    private static void ValidateExactReliefResolutionIsSideOrderIndependent()
+    {
+        ExactReliefSiegeCandidateDescriptor candidate = Siege(
+            "castle_a",
+            isActive: true,
+            Party("host_besieger"));
+        ExactReliefSettlementResolution original =
+            ExactReliefSettlementResolutionPolicy.Resolve(
+                "SiegeOutside",
+                new[] { Party("relief_army") },
+                new[] { Party("host_besieger") },
+                new[] { candidate });
+        ExactReliefSettlementResolution swapped =
+            ExactReliefSettlementResolutionPolicy.Resolve(
+                "SiegeOutside",
+                new[] { Party("host_besieger") },
+                new[] { Party("relief_army") },
+                new[] { candidate });
+
+        Assert(
+            original.Status == ExactReliefSettlementResolutionStatus.Resolved &&
+            swapped.Status == ExactReliefSettlementResolutionStatus.Resolved &&
+            original.SettlementId == swapped.SettlementId,
+            "Swapping attacker and defender inputs must not change the resolved relief settlement.");
+        Assert(
+            original.BesiegerBattleSide == ExactReliefBesiegerBattleSide.Defender &&
+            swapped.BesiegerBattleSide == ExactReliefBesiegerBattleSide.Attacker,
+            "Swapping inputs may change the reported live side but must not invent campaign roles.");
+    }
+
+    private static void ValidateExactReliefAttachedPartyMatchesArmyLeader()
+    {
+        ExactReliefSettlementResolution resolution =
+            ExactReliefSettlementResolutionPolicy.Resolve(
+                "SiegeOutside",
+                new[] { Party("relief_army") },
+                new[] { Party("host_attached_party", "host_army_leader") },
+                new[]
+                {
+                    Siege(
+                        "castle_attached",
+                        isActive: true,
+                        Party("host_army_leader", "host_army_leader"))
+                });
+
+        Assert(
+            resolution.Status == ExactReliefSettlementResolutionStatus.Resolved &&
+            resolution.SettlementId == "castle_attached",
+            "An attached battle party must match the besieger army through its leader party.");
+    }
+
+    private static void ValidateExactReliefRejectsUnrelatedActiveSiege()
+    {
+        ExactReliefSettlementResolution resolution =
+            ExactReliefSettlementResolutionPolicy.Resolve(
+                "SiegeOutside",
+                new[] { Party("field_attacker") },
+                new[] { Party("field_defender") },
+                new[]
+                {
+                    Siege(
+                        "nearby_castle",
+                        isActive: true,
+                        Party("unrelated_besieger"))
+                });
+
+        Assert(
+            resolution.Status == ExactReliefSettlementResolutionStatus.NoMatch,
+            "An active nearby siege must not match when neither live battle side belongs to it.");
+    }
+
+    private static void ValidateExactReliefRejectsOtherBattleTypes()
+    {
+        ExactReliefSiegeCandidateDescriptor candidate = Siege(
+            "castle_a",
+            isActive: true,
+            Party("host_besieger"));
+        foreach (string battleType in new[] { "FieldBattle", "Siege", "SallyOut" })
+        {
+            ExactReliefSettlementResolution resolution =
+                ExactReliefSettlementResolutionPolicy.Resolve(
+                    battleType,
+                    new[] { Party("relief_army") },
+                    new[] { Party("host_besieger") },
+                    new[] { candidate });
+            Assert(
+                resolution.Status == ExactReliefSettlementResolutionStatus.NoMatch,
+                battleType + " must never be reclassified as an exact SiegeOutside relief battle.");
+        }
+    }
+
+    private static void ValidateExactReliefRejectsCompletedSiege()
+    {
+        ExactReliefSettlementResolution resolution =
+            ExactReliefSettlementResolutionPolicy.Resolve(
+                "SiegeOutside",
+                new[] { Party("relief_army") },
+                new[] { Party("host_besieger") },
+                new[]
+                {
+                    Siege(
+                        "completed_castle",
+                        isActive: false,
+                        Party("host_besieger"))
+                });
+
+        Assert(
+            resolution.Status == ExactReliefSettlementResolutionStatus.NoMatch,
+            "A completed or cancelled siege event must never resolve a relief settlement.");
+    }
+
+    private static void ValidateExactReliefRejectsZeroAndAmbiguousCandidates()
+    {
+        ExactReliefSettlementResolution zero =
+            ExactReliefSettlementResolutionPolicy.Resolve(
+                "SiegeOutside",
+                new[] { Party("relief_army") },
+                new[] { Party("host_besieger") },
+                Array.Empty<ExactReliefSiegeCandidateDescriptor>());
+        Assert(
+            zero.Status == ExactReliefSettlementResolutionStatus.NoMatch &&
+            zero.MatchingCandidateCount == 0,
+            "Zero matching active sieges must fail without a proximity guess.");
+
+        ExactReliefSettlementResolution missingOpponent =
+            ExactReliefSettlementResolutionPolicy.Resolve(
+                "SiegeOutside",
+                Array.Empty<ExactReliefPartyDescriptor>(),
+                new[] { Party("host_besieger") },
+                new[]
+                {
+                    Siege("castle_a", true, Party("host_besieger"))
+                });
+        Assert(
+            missingOpponent.Status == ExactReliefSettlementResolutionStatus.NoMatch,
+            "A siege side without a proven opposing battle side must fail closed.");
+
+        ExactReliefSettlementResolution ambiguous =
+            ExactReliefSettlementResolutionPolicy.Resolve(
+                "SiegeOutside",
+                new[] { Party("relief_army") },
+                new[] { Party("host_besieger") },
+                new[]
+                {
+                    Siege("castle_a", true, Party("host_besieger")),
+                    Siege("castle_b", true, Party("host_besieger"))
+                });
+        Assert(
+            ambiguous.Status == ExactReliefSettlementResolutionStatus.Ambiguous &&
+            ambiguous.MatchingCandidateCount == 2 &&
+            string.IsNullOrEmpty(ambiguous.SettlementId),
+            "Two equally valid active sieges must be rejected as ambiguous.");
+    }
+
+    private static void ValidateExactReliefRejectsBothSidesInSameBesiegerArmy()
+    {
+        ExactReliefSettlementResolution resolution =
+            ExactReliefSettlementResolutionPolicy.Resolve(
+                "SiegeOutside",
+                new[] { Party("army_party_a", "shared_army_leader") },
+                new[] { Party("army_party_b", "shared_army_leader") },
+                new[]
+                {
+                    Siege(
+                        "castle_a",
+                        true,
+                        Party("shared_army_leader", "shared_army_leader"))
+                });
+
+        Assert(
+            resolution.Status == ExactReliefSettlementResolutionStatus.NoMatch,
+            "A candidate explained by both battle sides must be rejected instead of guessing a besieger side.");
+    }
+
+    private static void ValidateExactReliefResolutionIsIdempotentAndNonMutating()
+    {
+        var attacker = new List<ExactReliefPartyDescriptor>
+        {
+            Party("relief_army")
+        };
+        var defender = new List<ExactReliefPartyDescriptor>
+        {
+            Party("host_attached", "host_leader")
+        };
+        var candidates = new List<ExactReliefSiegeCandidateDescriptor>
+        {
+            Siege("castle_a", true, Party("host_leader", "host_leader"))
+        };
+
+        ExactReliefSettlementResolution first =
+            ExactReliefSettlementResolutionPolicy.Resolve(
+                "SiegeOutside",
+                attacker,
+                defender,
+                candidates);
+        ExactReliefSettlementResolution second =
+            ExactReliefSettlementResolutionPolicy.Resolve(
+                "SiegeOutside",
+                attacker,
+                defender,
+                candidates);
+
+        Assert(
+            first.Status == second.Status &&
+            first.SettlementId == second.SettlementId &&
+            first.BesiegerBattleSide == second.BesiegerBattleSide,
+            "Repeated resolution over the same campaign state must be deterministic and idempotent.");
+        Assert(
+            attacker.Count == 1 &&
+            defender.Count == 1 &&
+            candidates.Count == 1 &&
+            defender[0].PartyId == "host_attached" &&
+            candidates[0].SettlementId == "castle_a",
+            "Settlement resolution must not mutate the supplied battle or siege descriptors.");
+    }
+
+    private static void ValidateExactReliefSnapshotAndServerSourceFlow()
+    {
+        string repositoryRoot = FindRepositoryRoot();
+        string detectorSource = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "Campaign",
+            "BattleDetector.cs"));
+        string adapterSource = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "Campaign",
+            "Relief",
+            "ExactReliefCampaignBattleAdapter.cs"));
+        string scenarioSource = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "Infrastructure",
+            "Relief",
+            "ExactReliefScenarioContract.cs"));
+        string dedicatedSource = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "DedicatedHelper",
+            "DedicatedServerCommands.cs"));
+
+        Assert(
+            CountOccurrences(
+                detectorSource,
+                "Settlement encounterSettlement = ResolveEncounterSettlementSafe(battle);") == 3,
+            "Mission validation, scenario context, and scene selection must use one relief settlement resolver.");
+        Assert(
+            detectorSource.Contains(
+                "CampaignBattleType = battle?.EventType.ToString()",
+                StringComparison.Ordinal) &&
+            detectorSource.Contains(
+                "SettlementId = encounterSettlement?.StringId ?? string.Empty",
+                StringComparison.Ordinal) &&
+            detectorSource.Contains(
+                "message.Snapshot.ScenarioContext = scenarioContext?.Clone();",
+                StringComparison.Ordinal),
+            "The resolved SiegeOutside identity and settlement id must reach the battle snapshot.");
+        Assert(
+            detectorSource.Contains(
+                "TryGetPropertyValue(battle, \"AttackerSide\")",
+                StringComparison.Ordinal) &&
+            detectorSource.Contains(
+                "TryGetPropertyValue(battle, \"DefenderSide\")",
+                StringComparison.Ordinal),
+            "Snapshot construction must preserve Bannerlord's live attacker and defender sides.");
+        Assert(
+            adapterSource.Contains(
+                "ExactReliefSettlementResolutionPolicy.Resolve",
+                StringComparison.Ordinal) &&
+            adapterSource.Contains(
+                "mobileParty.Army?.LeaderParty",
+                StringComparison.Ordinal) &&
+            adapterSource.Contains(
+                "mobileParty.AttachedTo",
+                StringComparison.Ordinal) &&
+            !adapterSource.Contains("FindNearest", StringComparison.Ordinal),
+            "The campaign adapter must use active siege and army membership without a nearest-settlement guess.");
+        Assert(
+            scenarioSource.Contains(
+                "public const string CampaignBattleType = \"SiegeOutside\";",
+                StringComparison.Ordinal) &&
+            scenarioSource.Contains(
+                "!scenarioContext.IsSiegeBattle",
+                StringComparison.Ordinal),
+            "Exact relief must retain the SiegeOutside campaign identity in the field-battle mission shell.");
+        Assert(
+            dedicatedSource.Contains(
+                "string requestedGameType = snapshot.MultiplayerGameType;",
+                StringComparison.Ordinal) &&
+            dedicatedSource.Contains(
+                "? CoopGameModeIds.OfficialBattle",
+                StringComparison.Ordinal),
+            "The dedicated helper must continue consuming the snapshot and selecting the official Battle game type.");
+    }
+
+    private static ExactReliefPartyDescriptor Party(
+        string partyId,
+        string armyLeaderPartyId = null)
+    {
+        return new ExactReliefPartyDescriptor(
+            partyId,
+            armyLeaderPartyId ?? partyId);
+    }
+
+    private static ExactReliefSiegeCandidateDescriptor Siege(
+        string settlementId,
+        bool isActive,
+        params ExactReliefPartyDescriptor[] besiegerParties)
+    {
+        return new ExactReliefSiegeCandidateDescriptor(
+            settlementId,
+            isActive,
+            besiegerParties);
+    }
+
+    private static int CountOccurrences(string source, string value)
+    {
+        int count = 0;
+        int index = 0;
+        while ((index = source.IndexOf(value, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += value.Length;
+        }
+
+        return count;
     }
 
     private static void ValidateMissingItemCatalogExcludesLoadedItems()
