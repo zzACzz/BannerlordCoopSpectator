@@ -57,6 +57,13 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         private string _lastConsumedBattleResultKey;
         private string _lastMissionExitRequestedBattleResultKey;
         private string _lastMissionExitFailedBattleResultKey;
+        private string _battleResultCampaignContextId;
+        private CoopBattleResultApplicationLease _battleResultApplicationLease;
+        private bool _battleResultApplicationLeaseIsLegacy;
+        private string _preExitBattleResultWritebackAppliedKey;
+        private BattleResultWritebackSummary _preExitBattleResultWritebackSummary;
+        private readonly CoopBattleResultApplicationGate _battleResultApplicationGate =
+            new CoopBattleResultApplicationGate();
         private string _cachedHostAftermathRewardResultKey;
         private BattleResultWritebackSummary.RewardProjectionSummary _cachedHostAftermathRewardProjection;
         private string _cachedHostAftermathRewardAuditResultKey;
@@ -453,6 +460,8 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
         public void Tick() // Метод, який треба викликати кожен кадр з головного потоку (наприклад з SubModule.OnApplicationTick)
         { // Починаємо блок методу
+            RefreshBattleResultCampaignContext();
+
             if (GameNetwork.IsClient) // MP-клієнт не повинен керувати dedicated helper під час join/load місії.
             {
                 bool isHostedCampaignBattleClient = IsHostedLocalCampaignBattleClient();
@@ -985,6 +994,35 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                    normalized.Contains("keep_");
         }
 
+        private void RefreshBattleResultCampaignContext()
+        {
+            string activeCampaignId = null;
+            BattleResultWritebackJournalBehavior.TryGetActiveCampaignId(
+                out activeCampaignId);
+
+            if (string.Equals(
+                    _battleResultCampaignContextId,
+                    activeCampaignId,
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _battleResultApplicationGate.Reset();
+            _battleResultApplicationLease = null;
+            _battleResultApplicationLeaseIsLegacy = false;
+            _preExitBattleResultWritebackAppliedKey = null;
+            _preExitBattleResultWritebackSummary = null;
+            _lastConsumedBattleResultKey = null;
+            _activeBattleInstanceId = null;
+            _wasInMissionLastTick = false;
+            _hasSentBattleStartForThisMission = false;
+            _hasSuppressedBattleStartForUnsupportedMission = false;
+            ResetMissionExitState();
+            ClearPendingLordsHallStageState();
+            _battleResultCampaignContextId = activeCampaignId;
+        }
+
         private static void TryAttachCampaignBattleDamageDiagnosticsMissionLogic()
         {
             try
@@ -1022,16 +1060,37 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 if (result == null)
                     return;
 
-                string resultKey = BuildBattleResultKey(result);
-                if (BattleResultWritebackJournalBehavior.IsConsumed(resultKey))
+                CoopBattleResultCampaignEvaluation campaignEvaluation =
+                    EvaluateBattleResultForActiveCampaign(
+                        result,
+                        requireModernBattleInstanceMatch: false,
+                        allowReservedLegacyContinuation: true);
+                if (campaignEvaluation.Decision ==
+                    CoopBattleResultCampaignDecision.AlreadyApplied)
                 {
-                    _lastConsumedBattleResultKey = resultKey;
+                    _lastConsumedBattleResultKey = campaignEvaluation.JournalKey;
+                    if (_battleResultApplicationGate.IsOwned(
+                            _battleResultApplicationLease) &&
+                        string.Equals(
+                            _battleResultApplicationLease.JournalKey,
+                            campaignEvaluation.JournalKey,
+                            StringComparison.Ordinal))
+                    {
+                        CompleteBattleResultApplicationLease();
+                    }
+
                     return;
                 }
-                if (string.Equals(_lastConsumedBattleResultKey, resultKey, StringComparison.Ordinal))
-                    return;
 
-                _lastConsumedBattleResultKey = resultKey;
+                if (!campaignEvaluation.IsAllowed ||
+                    result.Entries == null ||
+                    result.Entries.Count == 0 ||
+                    !TryEnsureBattleResultApplicationLease(campaignEvaluation))
+                {
+                    return;
+                }
+
+                string resultKey = campaignEvaluation.JournalKey;
 
                 RewardStateAuditSnapshot rewardAuditBefore =
                     string.Equals(_cachedHostAftermathRewardAuditResultKey, resultKey, StringComparison.Ordinal)
@@ -1040,17 +1099,24 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 bool nativeFinalLandBattleAftermathConsumed =
                     ExactLandBattleCampaignBattleAdapter.WasFinalEncounterCompletionConsumed(resultKey);
 
-                BattleResultWritebackSummary writebackSummary = ApplyBattleResultWriteback(
-                    result,
-                    string.Equals(_cachedHostAftermathRewardResultKey, resultKey, StringComparison.Ordinal)
-                        ? CloneRewardProjectionSummary(_cachedHostAftermathRewardProjection)
-                        : null,
-                    string.Equals(_cachedHostAftermathLootResultKey, resultKey, StringComparison.Ordinal)
-                        ? CloneLootAftermathSummary(_cachedHostAftermathLootSummary)
-                        : null,
-                    string.Equals(_cachedHostAftermathMainPartyPreviewResultKey, resultKey, StringComparison.Ordinal) &&
-                    _cachedHostAftermathMainPartyPreviewHeroHpApplied,
-                    nativeFinalLandBattleAftermathConsumed);
+                BattleResultWritebackSummary writebackSummary =
+                    string.Equals(
+                        _preExitBattleResultWritebackAppliedKey,
+                        resultKey,
+                        StringComparison.Ordinal) &&
+                    _preExitBattleResultWritebackSummary != null
+                        ? _preExitBattleResultWritebackSummary
+                        : ApplyBattleResultWriteback(
+                            result,
+                            string.Equals(_cachedHostAftermathRewardResultKey, resultKey, StringComparison.Ordinal)
+                                ? CloneRewardProjectionSummary(_cachedHostAftermathRewardProjection)
+                                : null,
+                            string.Equals(_cachedHostAftermathLootResultKey, resultKey, StringComparison.Ordinal)
+                                ? CloneLootAftermathSummary(_cachedHostAftermathLootSummary)
+                                : null,
+                            string.Equals(_cachedHostAftermathMainPartyPreviewResultKey, resultKey, StringComparison.Ordinal) &&
+                            _cachedHostAftermathMainPartyPreviewHeroHpApplied,
+                            nativeFinalLandBattleAftermathConsumed);
                 if (ShouldDeferFinalBattleAftermath(result))
                 {
                     CapturePendingLordsHallStageState(result);
@@ -1059,9 +1125,16 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 {
                     ClearPendingLordsHallStageState();
                 }
-                BattleResultWritebackJournalBehavior.MarkConsumed(resultKey);
-
                 ApplyRewardStateAuditDeltas(rewardAuditBefore, writebackSummary);
+
+                if (!BattleResultWritebackJournalBehavior.TryMarkConsumedAfterSuccess(resultKey))
+                {
+                    throw new InvalidOperationException(
+                        "The active campaign could not persist the battle result journal entry.");
+                }
+
+                _lastConsumedBattleResultKey = resultKey;
+                CompleteBattleResultApplicationLease();
 
                 int removedTotal = result.Entries?.Sum(entry => entry?.RemovedCount ?? 0) ?? 0;
                 int killedTotal = result.Entries?.Sum(entry => entry?.KilledCount ?? 0) ?? 0;
@@ -1171,6 +1244,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
             catch (Exception ex)
             {
+                FailBattleResultApplicationLease();
                 ModLogger.Info("BattleDetector: failed to consume battle_result audit: " + ex.Message);
             }
         }
@@ -3722,22 +3796,21 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             if (result == null)
                 return;
 
-            string resultKey = BuildBattleResultKey(result);
-            if (string.IsNullOrEmpty(resultKey))
+            CoopBattleResultCampaignEvaluation campaignEvaluation =
+                EvaluateBattleResultForActiveCampaign(
+                    result,
+                    requireModernBattleInstanceMatch: true,
+                    allowReservedLegacyContinuation: true);
+            if (!campaignEvaluation.IsAllowed)
                 return;
 
             if (result.UpdatedUtc <= _missionEnteredUtc)
                 return;
 
-            if (!string.IsNullOrWhiteSpace(_activeBattleInstanceId) &&
-                !string.IsNullOrWhiteSpace(result.BattleInstanceId) &&
-                !string.Equals(
-                    _activeBattleInstanceId,
-                    result.BattleInstanceId,
-                    StringComparison.Ordinal))
-            {
+            if (!TryEnsureBattleResultApplicationLease(campaignEvaluation))
                 return;
-            }
+
+            string resultKey = campaignEvaluation.JournalKey;
 
             if (string.Equals(_lastMissionExitRequestedBattleResultKey, resultKey, StringComparison.Ordinal))
                 return;
@@ -4844,16 +4917,160 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                        StringComparison.OrdinalIgnoreCase);
         }
 
-        private static string BuildBattleResultKey(CoopBattleResultBridgeFile.BattleResultSnapshot result)
+        private CoopBattleResultCampaignEvaluation EvaluateBattleResultForActiveCampaign(
+            CoopBattleResultBridgeFile.BattleResultSnapshot result,
+            bool requireModernBattleInstanceMatch,
+            bool allowReservedLegacyContinuation)
         {
+            bool hasActiveCampaign =
+                BattleResultWritebackJournalBehavior.TryGetActiveCampaignId(
+                    out string activeCampaignId);
+            BattleSnapshotMessage currentSnapshot =
+                BattleSnapshotRuntimeState.GetCurrent() ??
+                BattleSnapshotRuntimeState.GetState()?.Snapshot;
+            bool hasStrongActiveBattleIdentity =
+                Mission.Current != null &&
+                !string.IsNullOrWhiteSpace(_activeBattleInstanceId) &&
+                !string.IsNullOrWhiteSpace(currentSnapshot?.BattleInstanceId) &&
+                string.Equals(
+                    _activeBattleInstanceId,
+                    currentSnapshot.BattleInstanceId,
+                    StringComparison.Ordinal);
+            string activeBattleInstanceId = _activeBattleInstanceId;
+
+            if (!hasStrongActiveBattleIdentity &&
+                allowReservedLegacyContinuation &&
+                _battleResultApplicationLeaseIsLegacy &&
+                _battleResultApplicationGate.IsOwned(_battleResultApplicationLease) &&
+                TryBuildLegacyResultKey(result, out string reservedLegacyKey) &&
+                string.Equals(
+                    reservedLegacyKey,
+                    _battleResultApplicationLease?.JournalKey,
+                    StringComparison.Ordinal))
+            {
+                hasStrongActiveBattleIdentity = true;
+                activeBattleInstanceId = result?.BattleInstanceId;
+            }
+
+            return CoopBattleResultCampaignGuardContract.Evaluate(
+                result?.CampaignBindingVersion ?? 0,
+                hasActiveCampaign,
+                activeCampaignId,
+                result?.CampaignId,
+                result?.ResultId,
+                result?.BattleInstanceId,
+                hasStrongActiveBattleIdentity,
+                activeBattleInstanceId,
+                requireModernBattleInstanceMatch,
+                BattleResultWritebackJournalBehavior.IsConsumed);
+        }
+
+        private bool TryEnsureBattleResultApplicationLease(
+            CoopBattleResultCampaignEvaluation evaluation)
+        {
+            if (evaluation == null || !evaluation.IsAllowed ||
+                !BattleResultWritebackJournalBehavior.TryGetActiveCampaignId(
+                    out string activeCampaignId))
+            {
+                return false;
+            }
+
+            if (_battleResultApplicationGate.IsOwned(_battleResultApplicationLease) &&
+                string.Equals(
+                    _battleResultApplicationLease.CampaignId,
+                    activeCampaignId,
+                    StringComparison.Ordinal) &&
+                string.Equals(
+                    _battleResultApplicationLease.JournalKey,
+                    evaluation.JournalKey,
+                    StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            if (_battleResultApplicationLease != null)
+                _battleResultApplicationGate.Fail(_battleResultApplicationLease);
+
+            _battleResultApplicationLease = null;
+            _battleResultApplicationLeaseIsLegacy = false;
+            if (!_battleResultApplicationGate.TryBegin(
+                    activeCampaignId,
+                    evaluation.JournalKey,
+                    out CoopBattleResultApplicationLease lease))
+            {
+                return false;
+            }
+
+            _battleResultApplicationLease = lease;
+            _battleResultApplicationLeaseIsLegacy = evaluation.IsLegacy;
+            return true;
+        }
+
+        private void CompleteBattleResultApplicationLease()
+        {
+            string completedKey = _battleResultApplicationLease?.JournalKey;
+            _battleResultApplicationGate.Complete(_battleResultApplicationLease);
+            _battleResultApplicationLease = null;
+            _battleResultApplicationLeaseIsLegacy = false;
+            if (string.Equals(
+                    _preExitBattleResultWritebackAppliedKey,
+                    completedKey,
+                    StringComparison.Ordinal))
+            {
+                _preExitBattleResultWritebackAppliedKey = null;
+                _preExitBattleResultWritebackSummary = null;
+            }
+        }
+
+        private void FailBattleResultApplicationLease()
+        {
+            _battleResultApplicationGate.Fail(_battleResultApplicationLease);
+            _battleResultApplicationLease = null;
+            _battleResultApplicationLeaseIsLegacy = false;
+        }
+
+        private static bool IsModernBattleResultCampaignBindingCompatible(
+            CoopBattleResultBridgeFile.BattleResultSnapshot result)
+        {
+            bool hasActiveCampaign =
+                BattleResultWritebackJournalBehavior.TryGetActiveCampaignId(
+                    out string activeCampaignId);
+            CoopBattleResultCampaignEvaluation evaluation =
+                CoopBattleResultCampaignGuardContract.Evaluate(
+                    result?.CampaignBindingVersion ?? 0,
+                    hasActiveCampaign,
+                    activeCampaignId,
+                    result?.CampaignId,
+                    result?.ResultId,
+                    result?.BattleInstanceId,
+                    hasStrongActiveBattleIdentity: false,
+                    activeBattleInstanceId: null,
+                    requireModernBattleInstanceMatch: false,
+                    isAlreadyApplied: null);
+            return evaluation.Decision ==
+                   CoopBattleResultCampaignDecision.AllowModern;
+        }
+
+        private static bool TryBuildLegacyResultKey(
+            CoopBattleResultBridgeFile.BattleResultSnapshot result,
+            out string resultKey)
+        {
+            resultKey = null;
             if (result == null)
-                return null;
+                return false;
 
             if (!string.IsNullOrWhiteSpace(result.ResultId))
-                return result.ResultId;
-            if (!string.IsNullOrWhiteSpace(result.BattleInstanceId))
-                return result.BattleInstanceId;
-            return (result.BattleId ?? "null") + "|" + result.UpdatedUtc.ToString("O");
+            {
+                if (!CoopBattleResultCampaignGuardContract.IsValidResultId(result.ResultId))
+                    return false;
+
+                resultKey = result.ResultId;
+                return true;
+            }
+
+            return CoopBattleResultCampaignGuardContract.TryBuildLegacyDeduplicationKey(
+                result.BattleInstanceId,
+                out resultKey);
         }
 
         private static bool ShouldDeferFinalBattleAftermath(CoopBattleResultBridgeFile.BattleResultSnapshot result)
@@ -4905,10 +5122,18 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             if (BattleResultWritebackJournalBehavior.IsConsumed(resultKey))
                 return;
 
+            if (string.Equals(
+                    _preExitBattleResultWritebackAppliedKey,
+                    resultKey,
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
+
             BattleResultWritebackSummary summary =
                 ApplyBattleResultWriteback(result);
-            BattleResultWritebackJournalBehavior.MarkConsumed(resultKey);
-            _lastConsumedBattleResultKey = resultKey;
+            _preExitBattleResultWritebackAppliedKey = resultKey;
+            _preExitBattleResultWritebackSummary = summary;
             ModLogger.Info(
                 "BattleDetector: applied siege-ambush casualty and combat progression writeback before native mission exit. " +
                 "BattleId=" + (result.BattleId ?? "null") +
@@ -5236,7 +5461,6 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 if (!IsBattleStartPayloadReady(payload, "network-host", out _))
                     return false;
 
-                CoopBattleResultBridgeFile.ClearResult("BattleDetector.TrySendBattleStart");
                 TryWriteBattleRosterFile(payload); // Варіант A: зберігаємо roster у спільний файл для dedicated на цьому ж ПК.
                 string wireMessage = BattleStartMessageCodec.BuildBattleStartMessage(payload); // Серіалізуємо DTO в `BATTLE_START:{json}`
                 CoopRuntime.Network.BroadcastToClients(wireMessage); // Відправляємо повідомлення всім підключеним клієнтам
@@ -5262,7 +5486,6 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     return false;
 
                 ModLogger.Info("BattleDetector: not TCP host — sending start_mission to dedicated (campaign host path).");
-                CoopBattleResultBridgeFile.ClearResult("BattleDetector.Tick campaign-host start_mission");
                 TryWriteBattleRosterFile(payload); // Для host-only campaign path теж пишемо battle_roster.json перед start_mission.
                 bool sent = DedicatedServerCommands.SendStartMission();
                 _hasSentBattleStartForThisMission = true;
@@ -5482,6 +5705,13 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     _activeBattleInstanceId = Guid.NewGuid().ToString("N");
 
                 message.Snapshot.BattleInstanceId = _activeBattleInstanceId;
+                if (BattleResultWritebackJournalBehavior.TryGetActiveCampaignId(
+                        out string activeCampaignId))
+                {
+                    message.Snapshot.CampaignBindingVersion =
+                        CoopBattleResultCampaignGuardContract.CurrentCampaignBindingVersion;
+                    message.Snapshot.CampaignId = activeCampaignId;
+                }
                 if (string.Equals(
                         message.Snapshot.ScenarioContext?.SiegeContext?.SiegeSubtype,
                         "LordsHall",
@@ -5492,8 +5722,12 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     {
                         CoopBattleResultBridgeFile.BattleResultSnapshot previousStageResult =
                             CoopBattleResultBridgeFile.ReadResult(logRead: false);
-                        if (ShouldDeferFinalBattleAftermath(previousStageResult))
+                        if (IsModernBattleResultCampaignBindingCompatible(
+                                previousStageResult) &&
+                            ShouldDeferFinalBattleAftermath(previousStageResult))
+                        {
                             CapturePendingLordsHallStageState(previousStageResult);
+                        }
                     }
 
                     message.Snapshot.FrozenCaptainEntryIds =

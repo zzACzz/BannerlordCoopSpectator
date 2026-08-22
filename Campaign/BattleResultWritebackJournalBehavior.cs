@@ -1,21 +1,16 @@
 using System;
 using System.Collections.Generic;
+using CoopSpectator.Infrastructure;
 using TaleWorlds.CampaignSystem;
 
 namespace CoopSpectator.Campaign
 {
     public sealed class BattleResultWritebackJournalBehavior : CampaignBehaviorBase
     {
-        private const int MaxRememberedResultIds = 64;
-        private static BattleResultWritebackJournalBehavior _instance;
-
+        private readonly object _sync = new object();
+        private string _campaignId;
         private List<string> _consumedResultIds = new List<string>();
         private readonly HashSet<string> _consumedResultIdSet = new HashSet<string>(StringComparer.Ordinal);
-
-        public BattleResultWritebackJournalBehavior()
-        {
-            _instance = this;
-        }
 
         public override void RegisterEvents()
         {
@@ -23,37 +18,106 @@ namespace CoopSpectator.Campaign
 
         public override void SyncData(IDataStore dataStore)
         {
-            dataStore.SyncData("CoopSpectatorConsumedBattleResultIds", ref _consumedResultIds);
-            if (_consumedResultIds == null)
-                _consumedResultIds = new List<string>();
+            if (dataStore == null)
+                return;
 
-            _consumedResultIdSet.Clear();
-            foreach (string resultId in _consumedResultIds)
+            lock (_sync)
             {
-                if (!string.IsNullOrWhiteSpace(resultId))
-                    _consumedResultIdSet.Add(resultId);
+                if (dataStore.IsSaving)
+                    EnsureCampaignIdLocked();
+
+                dataStore.SyncData("CoopSpectatorBattleResultCampaignId", ref _campaignId);
+                dataStore.SyncData("CoopSpectatorConsumedBattleResultIds", ref _consumedResultIds);
+
+                EnsureCampaignIdLocked();
+                RebuildJournalLocked();
+            }
+        }
+
+        public static bool TryGetActiveCampaignId(out string campaignId)
+        {
+            campaignId = null;
+            BattleResultWritebackJournalBehavior behavior = ResolveActiveBehavior();
+            if (behavior == null)
+                return false;
+
+            lock (behavior._sync)
+            {
+                behavior.EnsureCampaignIdLocked();
+                campaignId = behavior._campaignId;
+                return CoopBattleResultCampaignGuardContract.IsValidCampaignId(campaignId);
             }
         }
 
         public static bool IsConsumed(string resultId)
         {
-            return !string.IsNullOrWhiteSpace(resultId) &&
-                   _instance != null &&
-                   _instance._consumedResultIdSet.Contains(resultId);
+            if (string.IsNullOrWhiteSpace(resultId))
+                return false;
+
+            BattleResultWritebackJournalBehavior behavior = ResolveActiveBehavior();
+            if (behavior == null)
+                return false;
+
+            lock (behavior._sync)
+                return behavior._consumedResultIdSet.Contains(resultId);
         }
 
         public static void MarkConsumed(string resultId)
         {
-            if (string.IsNullOrWhiteSpace(resultId) || _instance == null || !_instance._consumedResultIdSet.Add(resultId))
-                return;
+            TryMarkConsumedAfterSuccess(resultId);
+        }
 
-            _instance._consumedResultIds.Add(resultId);
-            while (_instance._consumedResultIds.Count > MaxRememberedResultIds)
+        public static bool TryMarkConsumedAfterSuccess(string resultId)
+        {
+            if (string.IsNullOrWhiteSpace(resultId))
+                return false;
+
+            BattleResultWritebackJournalBehavior behavior = ResolveActiveBehavior();
+            if (behavior == null)
+                return false;
+
+            lock (behavior._sync)
             {
-                string removed = _instance._consumedResultIds[0];
-                _instance._consumedResultIds.RemoveAt(0);
-                _instance._consumedResultIdSet.Remove(removed);
+                if (behavior._consumedResultIdSet.Contains(resultId))
+                    return true;
+
+                behavior._consumedResultIds.Add(resultId);
+                behavior.RebuildJournalLocked();
+                return behavior._consumedResultIdSet.Contains(resultId);
             }
+        }
+
+        private static BattleResultWritebackJournalBehavior ResolveActiveBehavior()
+        {
+            TaleWorlds.CampaignSystem.Campaign campaign =
+                TaleWorlds.CampaignSystem.Campaign.Current;
+            if (campaign == null)
+                return null;
+
+            try
+            {
+                return campaign.GetCampaignBehavior<BattleResultWritebackJournalBehavior>();
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private void EnsureCampaignIdLocked()
+        {
+            if (!CoopBattleResultCampaignGuardContract.IsValidCampaignId(_campaignId))
+                _campaignId = Guid.NewGuid().ToString("N");
+        }
+
+        private void RebuildJournalLocked()
+        {
+            _consumedResultIds = CoopBattleResultCampaignGuardContract.NormalizeJournal(
+                _consumedResultIds);
+
+            _consumedResultIdSet.Clear();
+            foreach (string resultId in _consumedResultIds)
+                _consumedResultIdSet.Add(resultId);
         }
     }
 }

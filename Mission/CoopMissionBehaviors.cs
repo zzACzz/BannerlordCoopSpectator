@@ -7673,7 +7673,6 @@ namespace CoopSpectator.MissionBehaviors
             CoopBattlePeerLifecycleRuntimeState.Reset();
             CoopBattleAgentControlRuntimeState.ResetServer(source + " init");
             CoopBattlePhaseRuntimeState.Clear(source + " init");
-            CoopBattleResultBridgeFile.ClearResult(source + " init");
             CoopBattleSelectionBridgeFile.ClearAll(source + " init");
             CoopBattleSpawnBridgeFile.ClearPendingRequests(source + " init");
             _diagnosticAllowedAgent = null;
@@ -27099,10 +27098,25 @@ namespace CoopSpectator.MissionBehaviors
                 string.IsNullOrWhiteSpace(_authoritativeBattleWinnerSide)
                     ? BattleSideEnum.Defender.ToString()
                     : ResolveBattleResultWinnerSide(mission);
+            if (!CoopBattleResultCampaignGuardContract.TryBuildStableResultId(
+                    snapshot?.BattleInstanceId,
+                    battleStage,
+                    out string stableResultId))
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: battle result snapshot rejected because the battle result identity is invalid. " +
+                    "BattleInstanceId=" + (snapshot?.BattleInstanceId ?? "null") +
+                    " BattleStage=" + (battleStage ?? "null") + ".");
+                return null;
+            }
+
             var result = new CoopBattleResultBridgeFile.BattleResultSnapshot
             {
                 BattleId = snapshot?.BattleId,
                 BattleInstanceId = snapshot?.BattleInstanceId,
+                CampaignBindingVersion = snapshot?.CampaignBindingVersion ?? 0,
+                CampaignId = snapshot?.CampaignId,
+                ResultId = stableResultId,
                 BattleType = snapshot?.BattleType,
                 MapScene = mission.SceneName ?? snapshot?.MapScene ?? string.Empty,
                 Source = source ?? "unknown",
@@ -27193,10 +27207,6 @@ namespace CoopSpectator.MissionBehaviors
                 isSiegeAmbushStage ||
                 isLordsHallStage ||
                 !result.DefenderPushedBack;
-            result.ResultId =
-                (snapshot?.BattleInstanceId ?? snapshot?.BattleId ?? Guid.NewGuid().ToString("N")) +
-                "|" + battleStage;
-
             ExactSiegeMoraleDiagnostics.LogSummary(source);
 
             return result;

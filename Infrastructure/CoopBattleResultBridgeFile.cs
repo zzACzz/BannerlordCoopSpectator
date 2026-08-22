@@ -17,6 +17,8 @@ namespace CoopSpectator.Infrastructure
         {
             public string BattleId { get; set; }
             public string BattleInstanceId { get; set; }
+            public int CampaignBindingVersion { get; set; }
+            public string CampaignId { get; set; }
             public string ResultId { get; set; }
             public string BattleType { get; set; }
             public string MapScene { get; set; }

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="..\..\Campaign\BattleResultWritebackJournalBehavior.cs" Link="BattleResultWritebackJournalBehavior.cs" />
+    <Compile Include="..\..\Infrastructure\CoopBattleResultCampaignGuardContract.cs" Link="CoopBattleResultCampaignGuardContract.cs" />
+    <Compile Include="..\..\Infrastructure\CoopBattleResultReadCacheContract.cs" Link="CoopBattleResultReadCacheContract.cs" />
+    <Compile Include="..\..\Infrastructure\CoopBattleResultBridgeFile.cs" Link="CoopBattleResultBridgeFile.cs" />
+    <Compile Include="..\..\Network\Messages\BattleStartMessage.cs" Link="BattleStartMessage.cs" />
+  </ItemGroup>
+</Project>

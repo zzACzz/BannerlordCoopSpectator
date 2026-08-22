@@ -36,6 +36,8 @@ namespace CoopSpectator.Network.Messages
     {
         public string BattleId { get; set; }
         public string BattleInstanceId { get; set; }
+        public int CampaignBindingVersion { get; set; }
+        public string CampaignId { get; set; }
         public int CasualtyRulesVersion { get; set; }
         public int BattleDeathDifficulty { get; set; } = 2;
         public float ClanMemberDeathChanceMultiplier { get; set; }
