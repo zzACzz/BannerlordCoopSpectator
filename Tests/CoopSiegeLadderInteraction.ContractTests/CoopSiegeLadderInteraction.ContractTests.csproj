@@ -6,6 +6,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
-    <Compile Include="..\..\Infrastructure\SiegeAssault\CoopSiegeSceneOcclusionSafetyContract.cs" Link="CoopSiegeSceneOcclusionSafetyContract.cs" />
+    <Compile Include="..\..\Infrastructure\SiegeAssault\CoopSiegeLadderInteractionContract.cs" Link="CoopSiegeLadderInteractionContract.cs" />
   </ItemGroup>
 </Project>

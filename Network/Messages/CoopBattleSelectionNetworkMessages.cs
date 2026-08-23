@@ -1,4 +1,5 @@
 using System;
+using CoopSpectator.Infrastructure;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
@@ -585,6 +586,127 @@ namespace CoopSpectator.Network.Messages
                 " ObjectType=" + (ObjectTypeName ?? string.Empty) +
                 " Entity=" + (EntityName ?? string.Empty) +
                 " SignatureLength=" + (Signature?.Length ?? 0);
+        }
+    }
+
+    [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromServer)]
+    public sealed class CoopSiegeLadderInteractionPointStateMessage : GameNetworkMessage
+    {
+        private static readonly CompressionInfo.Integer NavMeshIdCompressionInfo =
+            new CompressionInfo.Integer(-1, int.MaxValue, maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer RoleCompressionInfo =
+            new CompressionInfo.Integer(
+                (int)CoopSiegeLadderInteractionPointRole.Invalid,
+                (int)CoopSiegeLadderInteractionPointRole.RightFront,
+                maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer LadderStateCompressionInfo =
+            new CompressionInfo.Integer(0, 9, maximumValueGiven: true);
+
+        public CoopSiegeLadderInteractionPointStateMessage(
+            int onWallNavMeshId,
+            MissionObjectId serverLadderId,
+            MissionObjectId serverStandingPointId,
+            CoopSiegeLadderInteractionPointRole role,
+            int ladderState,
+            bool rootDisabled,
+            bool rootDestroyed,
+            bool rootDeactivated,
+            bool rootVisible,
+            bool pointDeactivated,
+            bool pointDisabledForPlayers,
+            bool pointHasUser,
+            int pointUserAgentIndex)
+        {
+            OnWallNavMeshId = onWallNavMeshId;
+            ServerLadderId = serverLadderId;
+            ServerStandingPointId = serverStandingPointId;
+            Role = role;
+            LadderState = ladderState;
+            RootDisabled = rootDisabled;
+            RootDestroyed = rootDestroyed;
+            RootDeactivated = rootDeactivated;
+            RootVisible = rootVisible;
+            PointDeactivated = pointDeactivated;
+            PointDisabledForPlayers = pointDisabledForPlayers;
+            PointHasUser = pointHasUser;
+            PointUserAgentIndex = pointHasUser ? pointUserAgentIndex : -1;
+        }
+
+        public CoopSiegeLadderInteractionPointStateMessage()
+        {
+            ServerLadderId = MissionObjectId.Invalid;
+            ServerStandingPointId = MissionObjectId.Invalid;
+            Role = CoopSiegeLadderInteractionPointRole.Invalid;
+            PointUserAgentIndex = -1;
+        }
+
+        public int OnWallNavMeshId { get; private set; }
+        public MissionObjectId ServerLadderId { get; private set; }
+        public MissionObjectId ServerStandingPointId { get; private set; }
+        public CoopSiegeLadderInteractionPointRole Role { get; private set; }
+        public int LadderState { get; private set; }
+        public bool RootDisabled { get; private set; }
+        public bool RootDestroyed { get; private set; }
+        public bool RootDeactivated { get; private set; }
+        public bool RootVisible { get; private set; }
+        public bool PointDeactivated { get; private set; }
+        public bool PointDisabledForPlayers { get; private set; }
+        public bool PointHasUser { get; private set; }
+        public int PointUserAgentIndex { get; private set; }
+
+        protected override bool OnRead()
+        {
+            bool bufferReadValid = true;
+            OnWallNavMeshId = ReadIntFromPacket(NavMeshIdCompressionInfo, ref bufferReadValid);
+            ServerLadderId = ReadMissionObjectIdFromPacket(ref bufferReadValid);
+            ServerStandingPointId = ReadMissionObjectIdFromPacket(ref bufferReadValid);
+            Role = (CoopSiegeLadderInteractionPointRole)ReadIntFromPacket(
+                RoleCompressionInfo,
+                ref bufferReadValid);
+            LadderState = ReadIntFromPacket(LadderStateCompressionInfo, ref bufferReadValid);
+            RootDisabled = ReadBoolFromPacket(ref bufferReadValid);
+            RootDestroyed = ReadBoolFromPacket(ref bufferReadValid);
+            RootDeactivated = ReadBoolFromPacket(ref bufferReadValid);
+            RootVisible = ReadBoolFromPacket(ref bufferReadValid);
+            PointDeactivated = ReadBoolFromPacket(ref bufferReadValid);
+            PointDisabledForPlayers = ReadBoolFromPacket(ref bufferReadValid);
+            PointHasUser = ReadBoolFromPacket(ref bufferReadValid);
+            PointUserAgentIndex = PointHasUser
+                ? ReadAgentIndexFromPacket(ref bufferReadValid)
+                : -1;
+            return bufferReadValid;
+        }
+
+        protected override void OnWrite()
+        {
+            WriteIntToPacket(OnWallNavMeshId, NavMeshIdCompressionInfo);
+            WriteMissionObjectIdToPacket(ServerLadderId);
+            WriteMissionObjectIdToPacket(ServerStandingPointId);
+            WriteIntToPacket((int)Role, RoleCompressionInfo);
+            WriteIntToPacket(LadderState, LadderStateCompressionInfo);
+            WriteBoolToPacket(RootDisabled);
+            WriteBoolToPacket(RootDestroyed);
+            WriteBoolToPacket(RootDeactivated);
+            WriteBoolToPacket(RootVisible);
+            WriteBoolToPacket(PointDeactivated);
+            WriteBoolToPacket(PointDisabledForPlayers);
+            WriteBoolToPacket(PointHasUser);
+            if (PointHasUser)
+                WriteAgentIndexToPacket(PointUserAgentIndex);
+        }
+
+        protected override MultiplayerMessageFilter OnGetLogFilter()
+        {
+            return MultiplayerMessageFilter.Mission;
+        }
+
+        protected override string OnGetLogFormat()
+        {
+            return "CoopSiegeLadderInteractionPointState NavMesh=" + OnWallNavMeshId +
+                " Ladder=" + ServerLadderId +
+                " Point=" + ServerStandingPointId +
+                " Role=" + Role +
+                " State=" + LadderState;
         }
     }
 

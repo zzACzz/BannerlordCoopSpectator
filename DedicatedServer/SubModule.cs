@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using HarmonyLib;
+using CoopSpectator.DedicatedServer;
 using CoopSpectator.DedicatedServer.MissionOverrides;
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
@@ -413,6 +414,7 @@ namespace CoopSpectator
                 try { AssemblyDiagnostics.LogRuntimeLoadPaths(); AssemblyDiagnostics.WarnIfAssemblyPathUnexpected(); } catch (Exception ex) { ModLogger.Info("[DedicatedDiag] AssemblyDiagnostics failed: " + ex.Message); }
 
                 base.OnSubModuleLoad();
+                SandBoxSceneScriptTypeRegistrar.RegisterOrThrow();
                 CoopBattlePeerReconnectState.EnsureHooksInstalled();
                 LogDedicatedStartupInfo();
 

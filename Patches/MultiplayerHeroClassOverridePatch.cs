@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.MissionBehaviors;
+using CoopSpectator.Network.Messages;
 using HarmonyLib;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
@@ -132,7 +133,7 @@ namespace CoopSpectator.Patches
             MissionPeer missionPeer,
             ref List<List<IReadOnlyPerkObject>> __result)
         {
-            if (!GameNetwork.IsClient || missionPeer?.Team == null)
+            if (missionPeer?.Team == null)
                 return true;
 
             Mission mission = Mission.Current;
@@ -141,6 +142,17 @@ namespace CoopSpectator.Patches
             {
                 return true;
             }
+
+            if (ShouldSuppressDedicatedExactSiegeInvalidPeerPerkResolution(
+                    mission,
+                    missionPeer))
+            {
+                __result = new List<List<IReadOnlyPerkObject>>();
+                return false;
+            }
+
+            if (!GameNetwork.IsClient)
+                return true;
 
             try
             {
@@ -153,6 +165,54 @@ namespace CoopSpectator.Patches
 
             __result = new List<List<IReadOnlyPerkObject>>();
             return false;
+        }
+
+        private static bool ShouldSuppressDedicatedExactSiegeInvalidPeerPerkResolution(
+            Mission mission,
+            MissionPeer missionPeer)
+        {
+            if (!GameNetwork.IsServer ||
+                !GameNetwork.IsDedicatedServer ||
+                mission == null ||
+                missionPeer == null)
+            {
+                return false;
+            }
+
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            bool isExactCampaignSiegeAssault =
+                ExactCampaignSiegeAssaultWithDeploymentRuntime
+                    .IsSiegeAssaultScenario(scenarioContext);
+
+            int cultureClassCount = 0;
+            if (missionPeer.Culture != null)
+            {
+                try
+                {
+                    cultureClassCount = MultiplayerClassDivisions
+                        .GetMPHeroClasses(missionPeer.Culture)
+                        .Count();
+                }
+                catch
+                {
+                    cultureClassCount = 0;
+                }
+            }
+
+            int perkStorageCount = missionPeer.Perks?.Count ?? 0;
+            return ExactCampaignSiegePeerPerkSafetyContract
+                .ShouldSuppressNativePerkResolution(
+                    new ExactCampaignSiegePeerPerkSafetyInput(
+                        isExactCampaignSiegeAssault,
+                        GameNetwork.IsDedicatedServer,
+                        missionPeer.Team != null,
+                        missionPeer.ControlledAgent != null,
+                        missionPeer.Culture != null,
+                        missionPeer.SelectedTroopIndex,
+                        perkStorageCount,
+                        cultureClassCount));
         }
 
         private static bool IsPeerCultureHeroClassIndexValid(MissionPeer peer, int selectedTroopIndex)

@@ -41,6 +41,8 @@
   <ItemGroup>
     <Compile Include="SubModule.cs" />
     <Compile Include="SceneContractProbe.cs" />
+    <Compile Include="SandBoxSceneScriptRegistrationContract.cs" />
+    <Compile Include="SandBoxSceneScriptTypeRegistrar.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopBattleMode.cs" Link="GameMode\MissionMultiplayerCoopBattleMode.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopSiegeAssaultWithDeploymentMode.cs" Link="GameMode\MissionMultiplayerCoopSiegeAssaultWithDeploymentMode.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopSiegeAssaultWithDeployment.cs" Link="GameMode\MissionMultiplayerCoopSiegeAssaultWithDeployment.cs" />
@@ -137,10 +139,12 @@
     <Compile Include="..\Infrastructure\SiegeAssault\ExactCampaignSiegeAssaultNoDeploymentRuntime.cs" Link="Infrastructure\SiegeAssault\ExactCampaignSiegeAssaultNoDeploymentRuntime.cs" />
     <Compile Include="..\Infrastructure\SiegeAssault\ExactCampaignSiegeAssaultWithDeploymentRuntime.cs" Link="Infrastructure\SiegeAssault\ExactCampaignSiegeAssaultWithDeploymentRuntime.cs" />
     <Compile Include="..\Infrastructure\SiegeAssault\ExactSiegeAssaultInitialMaterializationRuntime.cs" Link="Infrastructure\SiegeAssault\ExactSiegeAssaultInitialMaterializationRuntime.cs" />
+    <Compile Include="..\Infrastructure\SiegeAssault\CoopSiegeLadderInteractionContract.cs" Link="Infrastructure\SiegeAssault\CoopSiegeLadderInteractionContract.cs" />
+    <Compile Include="..\Infrastructure\SiegeAssault\ExactCampaignSiegePeerPerkSafetyContract.cs" Link="Infrastructure\SiegeAssault\ExactCampaignSiegePeerPerkSafetyContract.cs" />
+    <Compile Include="..\Infrastructure\SiegeAssault\CoopSiegeLadderInteractionRuntime.cs" Link="Infrastructure\SiegeAssault\CoopSiegeLadderInteractionRuntime.cs" />
     <Compile Include="..\Infrastructure\SiegeAssault\SiegeMissionObjectIdBridge.cs" Link="Infrastructure\SiegeAssault\SiegeMissionObjectIdBridge.cs" />
     <Compile Include="..\Infrastructure\SiegeAssault\SiegeMissionObjectIdMapRuntime.cs" Link="Infrastructure\SiegeAssault\SiegeMissionObjectIdMapRuntime.cs" />
     <Compile Include="..\Infrastructure\SiegeAssault\SiegeAssaultMissionOpenBridge.cs" Link="Infrastructure\SiegeAssault\SiegeAssaultMissionOpenBridge.cs" />
-    <Compile Include="..\Infrastructure\SiegeAssault\CoopSiegeSceneOcclusionSafetyContract.cs" Link="Infrastructure\SiegeAssault\CoopSiegeSceneOcclusionSafetyContract.cs" />
     <Compile Include="..\Infrastructure\SiegeAssault\CoopSiegeFormationMembershipSafetyContract.cs" Link="Infrastructure\SiegeAssault\CoopSiegeFormationMembershipSafetyContract.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" Link="Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignItemCatalogLoadPolicy.cs" Link="Infrastructure\ExactCampaignItemCatalogLoadPolicy.cs" />
@@ -220,6 +224,7 @@
     <Compile Include="..\Patches\ExactSiegeAmbushDeploymentControllerPatch.cs" Link="Patches\ExactSiegeAmbushDeploymentControllerPatch.cs" />
     <Compile Include="..\Patches\ExactCampaignPreSpawnLoadoutPatch.cs" Link="Patches\ExactCampaignPreSpawnLoadoutPatch.cs" />
     <Compile Include="..\Patches\ExactCampaignNetworkObjectBootstrapPatch.cs" Link="Patches\ExactCampaignNetworkObjectBootstrapPatch.cs" />
+    <Compile Include="..\Patches\CoopSiegeLadderInteractionPatch.cs" Link="Patches\CoopSiegeLadderInteractionPatch.cs" />
     <Compile Include="..\Patches\BattleMapSpawnHandoffPatch.cs" Link="Patches\BattleMapSpawnHandoffPatch.cs" />
     <Compile Include="..\Patches\CoopBotsControlledCountPatch.cs" Link="Patches\CoopBotsControlledCountPatch.cs" />
     <Compile Include="..\Patches\CoopMissionLobbySpawnPeriodGuardPatch.cs" Link="Patches\CoopMissionLobbySpawnPeriodGuardPatch.cs" />
@@ -343,6 +348,16 @@
     <Warning Text="[CoopSpectatorDedicated] Runtime Harmony override path=$(DedicatedHarmonyRuntimeAsset) exists=false" Condition="!Exists('$(DedicatedHarmonyRuntimeAsset)')" />
     <Copy SourceFiles="$(DedicatedHarmonyRuntimeAsset)" DestinationFiles="$(OutputPath)0Harmony.dll" SkipUnchangedFiles="false" Condition="Exists('$(DedicatedHarmonyRuntimeAsset)')" />
     <Message Text="[CoopSpectatorDedicated] Runtime Harmony override copied to $(OutputPath)0Harmony.dll" Importance="high" Condition="Exists('$(DedicatedHarmonyRuntimeAsset)')" />
+  </Target>
+
+  <Target Name="StageDedicatedSandBoxSceneScriptRuntime" AfterTargets="Build" BeforeTargets="DiagnoseDeployPaths;DeployServerToDedicated">
+    <ItemGroup>
+      <_DedicatedSandBoxSceneScriptRuntime Include="$(BannerlordRootDir)\Modules\SandBox\bin\Win64_Shipping_Client\SandBox.dll" />
+      <_DedicatedSandBoxSceneScriptRuntime Include="$(BannerlordRootDir)\bin\Win64_Shipping_Client\TaleWorlds.CampaignSystem.dll" />
+    </ItemGroup>
+    <Error Text="[CoopSpectatorDedicated] Required Bannerlord 1.4.8 SandBox scene-script runtime file is missing: %(_DedicatedSandBoxSceneScriptRuntime.Identity)" Condition="!Exists('%(_DedicatedSandBoxSceneScriptRuntime.Identity)')" />
+    <Copy SourceFiles="@(_DedicatedSandBoxSceneScriptRuntime)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+    <Message Text="[CoopSpectatorDedicated] Staged SandBox scene-script runtime: %(_DedicatedSandBoxSceneScriptRuntime.Filename)%(_DedicatedSandBoxSceneScriptRuntime.Extension)" Importance="high" />
   </Target>
 
   <Target Name="DiagnoseDeployPaths" AfterTargets="Build">

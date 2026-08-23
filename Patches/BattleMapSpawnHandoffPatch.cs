@@ -719,6 +719,7 @@ namespace CoopSpectator.Patches
 
         public static void Apply(Harmony harmony)
         {
+            TryApplyPatchStep(nameof(CoopSiegeLadderInteractionPatch), () => CoopSiegeLadderInteractionPatch.Apply(harmony));
             TryApplyPatchStep(nameof(CoopBotsControlledCountPatch), () => CoopBotsControlledCountPatch.Apply(harmony));
             TryApplyPatchStep(nameof(CoopMissionLobbySpawnPeriodGuardPatch), () => CoopMissionLobbySpawnPeriodGuardPatch.Apply(harmony));
             TryApplyPatchStep(nameof(PatchMissionPeerFollowedAgent), () => PatchMissionPeerFollowedAgent(harmony));
@@ -813,6 +814,8 @@ namespace CoopSpectator.Patches
             bool preserveDeferredClientBootstrapState = false)
         {
             ExactCreateAgentCorridorDiagnostics.ResetRuntimeState(source);
+            CoopSiegeLadderInteractionRuntime.Reset(
+                source ?? "BattleMapSpawnHandoffPatch.ResetRuntimeState");
             if (!preserveDeferredClientBootstrapState)
             {
                 SiegeMissionObjectIdBridge.Reset(source);

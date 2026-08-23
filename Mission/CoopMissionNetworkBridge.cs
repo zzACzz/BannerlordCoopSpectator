@@ -6083,6 +6083,8 @@ namespace CoopSpectator.MissionBehaviors
                 registerer.RegisterBaseHandler<CoopCommanderDeploymentFormationLayoutStateMessage>(HandleServerCommanderDeploymentFormationLayoutState);
                 registerer.RegisterBaseHandler<CoopCommanderDeploymentSiegeMachineStateMessage>(HandleServerCommanderDeploymentSiegeMachineState);
                 registerer.RegisterBaseHandler<CoopSiegeMissionObjectIdMapMessage>(HandleServerSiegeMissionObjectIdMap);
+                registerer.RegisterBaseHandler<CoopSiegeLadderInteractionPointStateMessage>(
+                    HandleServerSiegeLadderInteractionPointState);
                 registerer.RegisterBaseHandler<CoopMaterializedReinforcementBatchBeginMessage>(
                     HandleServerMaterializedReinforcementBatchBegin);
                 registerer.RegisterBaseHandler<CoopMaterializedReinforcementBatchContractMessage>(
@@ -7098,6 +7100,8 @@ namespace CoopSpectator.MissionBehaviors
             }
             ExactVillageBattleDeploymentBoundaryRuntime.Reset(
                 "CoopMissionNetworkBridge.OnRemoveBehavior");
+            CoopSiegeLadderInteractionRuntime.Reset(
+                "CoopMissionNetworkBridge.OnRemoveBehavior");
             base.OnRemoveBehavior();
         }
 
@@ -7645,6 +7649,11 @@ namespace CoopSpectator.MissionBehaviors
                 synchronizedMode,
                 synchronizedAgentIndex,
                 out string mainAgentSyncResult);
+            CoopSiegeLadderInteractionRuntime.TryApplyCachedAuthoritativeState(
+                Mission,
+                acceptedState.Side,
+                acceptedState.Mode == CoopBattleAgentControlMode.PlayerControlled,
+                out _);
             if (!changed)
                 return;
 
@@ -8211,6 +8220,39 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
+        private void HandleServerSiegeLadderInteractionPointState(
+            GameNetworkMessage baseMessage)
+        {
+            if (!(baseMessage is CoopSiegeLadderInteractionPointStateMessage message))
+                return;
+
+            try
+            {
+                CoopSiegeLadderInteractionRuntime.ObserveAuthoritativePointState(
+                    Mission,
+                    message.OnWallNavMeshId,
+                    message.ServerLadderId,
+                    message.ServerStandingPointId,
+                    message.Role,
+                    message.LadderState,
+                    message.RootDisabled,
+                    message.RootDestroyed,
+                    message.RootDeactivated,
+                    message.RootVisible,
+                    message.PointDeactivated,
+                    message.PointDisabledForPlayers,
+                    message.PointHasUser,
+                    message.PointUserAgentIndex,
+                    out _);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopMissionNetworkBridge: siege ladder interaction state handling failed. " +
+                    "Error=" + ex.GetType().Name + ":" + ex.Message);
+            }
+        }
+
         private bool TryApplyServerCommanderDeploymentSiegeMachineState(
             CoopCommanderDeploymentSiegeMachineStateMessage message)
         {
@@ -8747,11 +8789,30 @@ namespace CoopSpectator.MissionBehaviors
             List<NetworkCommunicator> peers = GameNetwork.NetworkPeers
                 .Where(IsEligibleRemotePeer)
                 .ToList();
-            bool idMapPublished = TryBroadcastSiegeMissionObjectIdMap(
-                side,
-                peers,
-                out string idMapDiagnostics,
-                source);
+            BattleScenarioContextMessage scenarioContext =
+                BattleSnapshotRuntimeState.GetScenarioContext() ??
+                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
+                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+            bool useLadderSpecificContract =
+                SceneRuntimeClassifier.IsExactSiegeAssaultWithDeploymentScene(
+                    Mission.SceneName ?? string.Empty) &&
+                ExactCampaignSiegeAssaultWithDeploymentRuntime.IsSiegeAssaultScenario(
+                    scenarioContext);
+            bool idMapPublished;
+            string idMapDiagnostics;
+            if (useLadderSpecificContract)
+            {
+                idMapPublished = true;
+                idMapDiagnostics = "skipped-exact-siege-assault-ladder-specific-contract";
+            }
+            else
+            {
+                idMapPublished = TryBroadcastSiegeMissionObjectIdMap(
+                    side,
+                    peers,
+                    out idMapDiagnostics,
+                    source);
+            }
             string stateDiagnostics = "not-attempted";
             bool statePublished =
                 idMapPublished &&
@@ -8966,6 +9027,58 @@ namespace CoopSpectator.MissionBehaviors
                 " Build={" + mapBuildDiagnostics + "}" +
                 " Details=[" + string.Join("; ", details.ToArray()) + "]";
             return failedCount == 0;
+        }
+
+        private bool TrySendSiegeLadderInteractionStatesToPeer(
+            NetworkCommunicator peer,
+            string source)
+        {
+            if (!GameNetwork.IsServer || Mission == null || peer == null)
+                return false;
+
+            List<CoopSiegeLadderInteractionPointSnapshot> snapshots =
+                CoopSiegeLadderInteractionRuntime.BuildServerSnapshots(
+                    Mission,
+                    out _);
+            if (snapshots.Count == 0)
+                return false;
+
+            bool sentAny = false;
+            foreach (CoopSiegeLadderInteractionPointSnapshot snapshot in snapshots)
+            {
+                try
+                {
+                    GameNetwork.BeginModuleEventAsServer(peer);
+                    GameNetwork.WriteMessage(
+                        new CoopSiegeLadderInteractionPointStateMessage(
+                            snapshot.OnWallNavMeshId,
+                            snapshot.ServerLadderId,
+                            snapshot.ServerStandingPointId,
+                            snapshot.Role,
+                            snapshot.LadderState,
+                            snapshot.RootDisabled,
+                            snapshot.RootDestroyed,
+                            snapshot.RootDeactivated,
+                            snapshot.RootVisible,
+                            snapshot.PointDeactivated,
+                            snapshot.PointDisabledForPlayers,
+                            snapshot.PointHasUser,
+                            snapshot.PointUserAgentIndex));
+                    GameNetwork.EndModuleEventAsServer();
+                    sentAny = true;
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Info(
+                        "CoopMissionNetworkBridge: siege ladder interaction state send failed. " +
+                        "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
+                        " Source=" + (source ?? "unknown") +
+                        " Error=" + ex.GetType().Name + ":" + ex.Message);
+                    return false;
+                }
+            }
+
+            return sentAny;
         }
 
         private void TrySyncEarlySiegeMissionObjectIdMaps()
@@ -14372,6 +14485,9 @@ namespace CoopSpectator.MissionBehaviors
             if (IsValidatedInitialSiegeAssaultMaterializationScenario(Mission) &&
                 CoopBattlePhaseRuntimeState.GetPhase() >= CoopBattlePhase.BattleActive)
             {
+                TrySendSiegeLadderInteractionStatesToPeer(
+                    peer,
+                    "active-battle SiegeAssault materialization ready");
                 return true;
             }
 
@@ -14402,6 +14518,9 @@ namespace CoopSpectator.MissionBehaviors
             {
                 _acknowledgedInitialSiegeAssaultMaterializationTransmissionIdByPeer[peer.Index] =
                     message.TransmissionId;
+                TrySendSiegeLadderInteractionStatesToPeer(
+                    peer,
+                    "initial SiegeAssault materialization ready");
             }
 
             if (!accepted || ExperimentalFeatures.EnableExactBattleAgentContractDiagnostics)
