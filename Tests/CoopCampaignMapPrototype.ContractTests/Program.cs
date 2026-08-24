@@ -9,6 +9,13 @@ internal static class Program
         try
         {
             ValidateProtocolVersion();
+            ValidateVisibilityPolicy();
+            ValidateDynamicBatchTransportPolicy();
+            ValidateDynamicDeltaPolicy();
+            ValidateCatalogDeltaPolicy();
+            ValidateCatalogBinaryChunkTransport();
+            ValidateLargeCatalogChunkTransport();
+            ValidateCatalogTransferSupersessionPolicy();
             ValidateSyntheticPathBounds();
             ValidateRevisionAndPayloadPolicy();
             ValidateQuantizationAndInterpolation();
@@ -96,9 +103,660 @@ internal static class Program
     private static void ValidateProtocolVersion()
     {
         Assert(
-            CoopCampaignMapPrototypeContract.ProtocolVersion == 10 &&
+            CoopCampaignMapPrototypeContract.ProtocolVersion == 14 &&
             CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion == 10,
-            "The full campaign-map replica requires protocol and bridge schema 9.");
+            "The incremental campaign-map replica requires protocol 14 and bridge schema 10.");
+    }
+
+    private static void ValidateVisibilityPolicy()
+    {
+        Assert(
+            CoopCampaignMapPrototypeVisibilityPolicy
+                .ShouldReplicateMobileParty(
+                    isMainParty: true,
+                    isActive: false,
+                    isGarrison: true,
+                    isMilitia: true,
+                    hasCurrentSettlement: true,
+                    isSpotted: false),
+            "The main party must remain in the replica independently of spotting state.");
+        Assert(
+            CoopCampaignMapPrototypeVisibilityPolicy
+                .ShouldReplicateMobileParty(
+                    isMainParty: false,
+                    isActive: true,
+                    isGarrison: false,
+                    isMilitia: false,
+                    hasCurrentSettlement: false,
+                    isSpotted: true),
+            "A spotted active field party must be replicated.");
+        Assert(
+            !CoopCampaignMapPrototypeVisibilityPolicy
+                .ShouldReplicateMobileParty(
+                    isMainParty: false,
+                    isActive: true,
+                    isGarrison: false,
+                    isMilitia: false,
+                    hasCurrentSettlement: false,
+                    isSpotted: false),
+            "An unspotted field party must fail closed.");
+        Assert(
+            !CoopCampaignMapPrototypeVisibilityPolicy
+                .ShouldReplicateMobileParty(
+                    isMainParty: false,
+                    isActive: true,
+                    isGarrison: true,
+                    isMilitia: false,
+                    hasCurrentSettlement: false,
+                    isSpotted: true),
+            "A garrison must not be duplicated as a field-party replica.");
+        Assert(
+            CoopCampaignMapPrototypeVisibilityPolicy
+                .ShouldReplicateSettlement(
+                    isVisible: true,
+                    isSpottable: false,
+                    isSpotted: false),
+            "A visible regular settlement must be replicated.");
+        Assert(
+            !CoopCampaignMapPrototypeVisibilityPolicy
+                .ShouldReplicateSettlement(
+                    isVisible: false,
+                    isSpottable: false,
+                    isSpotted: false),
+            "A hidden regular settlement must fail closed.");
+        Assert(
+            !CoopCampaignMapPrototypeVisibilityPolicy
+                .ShouldReplicateSettlement(
+                    isVisible: true,
+                    isSpottable: true,
+                    isSpotted: false),
+            "An unspotted hideout must not leak through Settlement.IsVisible.");
+        Assert(
+            CoopCampaignMapPrototypeVisibilityPolicy
+                .ShouldReplicateSettlement(
+                    isVisible: false,
+                    isSpottable: true,
+                    isSpotted: true),
+            "A spotted hideout must follow its native spottable state.");
+
+        Assert(
+            CoopCampaignMapPrototypeVisibilityPolicy.ShouldShowParty(
+                cameraHeight: 199.999d,
+                projectedDepth: 99.999d,
+                isInsideViewport: true),
+            "A nearby party below the native zoom limits must be visible.");
+        Assert(
+            !CoopCampaignMapPrototypeVisibilityPolicy.ShouldShowParty(
+                cameraHeight: 200d,
+                projectedDepth: 50d,
+                isInsideViewport: true),
+            "A party must be hidden at the native camera-height boundary.");
+        Assert(
+            !CoopCampaignMapPrototypeVisibilityPolicy.ShouldShowParty(
+                cameraHeight: 100d,
+                projectedDepth: 100d,
+                isInsideViewport: true),
+            "A party must be hidden at the native projected-depth boundary.");
+        Assert(
+            !CoopCampaignMapPrototypeVisibilityPolicy.ShouldShowParty(
+                cameraHeight: 100d,
+                projectedDepth: 50d,
+                isInsideViewport: false),
+            "An off-screen party must be hidden.");
+
+        Assert(
+            CoopCampaignMapPrototypeVisibilityPolicy.ShouldShowSettlement(
+                CoopCampaignMapPrototypeSettlementNameplateSize.Small,
+                cameraHeight: 200d,
+                distanceToCamera: 299.999d,
+                isInFront: true,
+                isInsideViewport: true),
+            "A nearby village must remain visible at camera height 200.");
+        Assert(
+            !CoopCampaignMapPrototypeVisibilityPolicy.ShouldShowSettlement(
+                CoopCampaignMapPrototypeSettlementNameplateSize.Small,
+                cameraHeight: 200.001d,
+                distanceToCamera: 50d,
+                isInFront: true,
+                isInsideViewport: true),
+            "Villages must be hidden above the fortification-only threshold.");
+        Assert(
+            CoopCampaignMapPrototypeVisibilityPolicy.ShouldShowSettlement(
+                CoopCampaignMapPrototypeSettlementNameplateSize.Medium,
+                cameraHeight: 400d,
+                distanceToCamera: 1000d,
+                isInFront: true,
+                isInsideViewport: true),
+            "Castles must remain visible at camera height 400.");
+        Assert(
+            !CoopCampaignMapPrototypeVisibilityPolicy.ShouldShowSettlement(
+                CoopCampaignMapPrototypeSettlementNameplateSize.Medium,
+                cameraHeight: 400.001d,
+                distanceToCamera: 50d,
+                isInFront: true,
+                isInsideViewport: true),
+            "Castles must be hidden above the town-only threshold.");
+        Assert(
+            CoopCampaignMapPrototypeVisibilityPolicy.ShouldShowSettlement(
+                CoopCampaignMapPrototypeSettlementNameplateSize.Large,
+                cameraHeight: 500d,
+                distanceToCamera: 1000d,
+                isInFront: true,
+                isInsideViewport: true),
+            "Towns must remain visible above the town-only threshold.");
+        Assert(
+            !CoopCampaignMapPrototypeVisibilityPolicy.ShouldShowSettlement(
+                CoopCampaignMapPrototypeSettlementNameplateSize.Large,
+                cameraHeight: 100d,
+                distanceToCamera: 200d,
+                isInFront: true,
+                isInsideViewport: true),
+            "A non-tracked settlement outside the native near-distance limit must be hidden.");
+        Assert(
+            !CoopCampaignMapPrototypeVisibilityPolicy.ShouldShowSettlement(
+                CoopCampaignMapPrototypeSettlementNameplateSize.Large,
+                cameraHeight: 500d,
+                distanceToCamera: 10d,
+                isInFront: false,
+                isInsideViewport: true),
+            "A settlement behind the camera must be hidden.");
+    }
+
+    private static void ValidateCatalogBinaryChunkTransport()
+    {
+        var expected = new List<
+            CoopCampaignMapPrototypeCatalogEntityState>
+        {
+            CreateCatalogParty(0),
+            CreateCatalogParty(1),
+            new CoopCampaignMapPrototypeCatalogEntityState
+            {
+                EntityId = "settlement:town_V1",
+                DisplayName = "Vostrum",
+                Kind = CoopCampaignMapPrototypeEntityKind.Settlement,
+                SettlementNameplateSize =
+                    CoopCampaignMapPrototypeSettlementNameplateSize.Large,
+                SettlementKind =
+                    CoopCampaignMapPrototypeSettlementKind.Town,
+                PrimaryColor = 0xFF102030u,
+                SecondaryColor = 0xFF405060u,
+                BannerCode = "settlement-banner",
+                VisualCharacterId = string.Empty,
+                CultureId = string.Empty,
+                PartyVisualKind =
+                    CoopCampaignMapPrototypePartyVisualKind.None,
+                FactionId = "empire",
+                FactionName = "Empire",
+                OwnerName = "Owner clan",
+                LeaderName = "Governor",
+                ArmyId = string.Empty,
+                ArmyName = string.Empty,
+                SelectionRadius = 30000
+            }
+        };
+
+        Assert(
+            CoopCampaignMapCatalogBinarySerializer.TrySerialize(
+                37,
+                expected,
+                out byte[] logicalBytes,
+                out string reason),
+            "A valid catalog must serialize. Reason=" + reason);
+        Assert(
+            CoopCampaignMapCatalogBinarySerializer.TryDeserialize(
+                logicalBytes,
+                out int decodedRevision,
+                out List<CoopCampaignMapPrototypeCatalogEntityState>
+                    decoded,
+                out reason),
+            "A serialized catalog must deserialize. Reason=" + reason);
+        Assert(
+            decodedRevision == 37 &&
+            CatalogEntitiesEqual(expected, decoded),
+            "The binary catalog serializer must preserve every field.");
+
+        Assert(
+            CoopCampaignMapCatalogChunkCodec.TryEncode(
+                logicalBytes,
+                out CoopCampaignMapCatalogChunkedPayload payload,
+                out reason),
+            "A serialized catalog must encode into chunks. Reason=" + reason);
+        Assert(
+            payload.ChunkCount > 0 &&
+            payload.WireByteCount <=
+                CoopCampaignMapCatalogChunkCodec.MaxWireBytes &&
+            CoopCampaignMapCatalogChunkCodec.MaxChunkBytes == 256,
+            "The catalog transport must use the native-safe 256-byte ceiling.");
+        foreach (byte[] chunk in payload.Chunks)
+        {
+            Assert(
+                chunk.Length > 0 &&
+                chunk.Length <=
+                    CoopCampaignMapCatalogChunkCodec.MaxChunkBytes,
+                "Every catalog chunk must remain within the wire ceiling.");
+        }
+
+        Assert(
+            CoopCampaignMapCatalogChunkAccumulator.TryCreate(
+                19,
+                37,
+                payload.LogicalByteCount,
+                payload.WireByteCount,
+                payload.ChunkCount,
+                payload.CompressionKind,
+                payload.PayloadHash,
+                out CoopCampaignMapCatalogChunkAccumulator accumulator,
+                out reason),
+            "A valid catalog manifest must create an accumulator. Reason=" +
+            reason);
+        for (int index = payload.ChunkCount - 1; index >= 0; index--)
+        {
+            Assert(
+                accumulator.TryAccept(
+                    index,
+                    payload.ChunkCount,
+                    payload.Chunks[index],
+                    out reason),
+                "Out-of-order chunks must be accepted. Reason=" + reason);
+        }
+        Assert(
+            accumulator.ReceivedChunkCount == payload.ChunkCount &&
+            accumulator.HighestContiguousChunkIndex ==
+                payload.ChunkCount - 1,
+            "The accumulator must track a complete out-of-order payload.");
+        Assert(
+            accumulator.TryAccept(
+                0,
+                payload.ChunkCount,
+                payload.Chunks[0],
+                out reason),
+            "An identical duplicate chunk must be idempotent. Reason=" +
+            reason);
+        Assert(
+            accumulator.TryComplete(
+                out byte[] completedLogicalBytes,
+                out reason) &&
+            ByteArraysEqual(logicalBytes, completedLogicalBytes),
+            "A complete verified catalog must restore the logical payload. Reason=" +
+            reason);
+
+        Assert(
+            CoopCampaignMapCatalogChunkAccumulator.TryCreate(
+                20,
+                37,
+                payload.LogicalByteCount,
+                payload.WireByteCount,
+                payload.ChunkCount,
+                payload.CompressionKind,
+                payload.PayloadHash,
+                out CoopCampaignMapCatalogChunkAccumulator missing,
+                out reason),
+            "The missing-chunk test manifest must be valid.");
+        for (int index = 0; index < payload.ChunkCount - 1; index++)
+        {
+            Assert(
+                missing.TryAccept(
+                    index,
+                    payload.ChunkCount,
+                    payload.Chunks[index],
+                    out reason),
+                "A bounded partial payload must be accepted.");
+        }
+        Assert(
+            !missing.TryComplete(out _, out reason) &&
+            reason == "missing-chunks",
+            "An incomplete catalog must never become visible atomically.");
+
+        Assert(
+            CoopCampaignMapCatalogChunkAccumulator.TryCreate(
+                21,
+                37,
+                payload.LogicalByteCount,
+                payload.WireByteCount,
+                payload.ChunkCount,
+                payload.CompressionKind,
+                payload.PayloadHash,
+                out CoopCampaignMapCatalogChunkAccumulator conflicting,
+                out reason),
+            "The conflicting-duplicate test manifest must be valid.");
+        Assert(
+            conflicting.TryAccept(
+                0,
+                payload.ChunkCount,
+                payload.Chunks[0],
+                out reason),
+            "The first chunk instance must be accepted.");
+        byte[] changedChunk = (byte[])payload.Chunks[0].Clone();
+        changedChunk[0] ^= 0x5A;
+        Assert(
+            !conflicting.TryAccept(
+                0,
+                payload.ChunkCount,
+                changedChunk,
+                out reason) &&
+            reason == "conflicting-duplicate",
+            "A conflicting duplicate chunk must be rejected.");
+
+        string wrongHash = new string('0', 64);
+        if (string.Equals(
+                wrongHash,
+                payload.PayloadHash,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            wrongHash = new string('1', 64);
+        }
+        Assert(
+            CoopCampaignMapCatalogChunkAccumulator.TryCreate(
+                22,
+                37,
+                payload.LogicalByteCount,
+                payload.WireByteCount,
+                payload.ChunkCount,
+                payload.CompressionKind,
+                wrongHash,
+                out CoopCampaignMapCatalogChunkAccumulator corrupted,
+                out reason),
+            "A syntactically valid hash must create an accumulator.");
+        for (int index = 0; index < payload.ChunkCount; index++)
+        {
+            Assert(
+                corrupted.TryAccept(
+                    index,
+                    payload.ChunkCount,
+                    payload.Chunks[index],
+                    out reason),
+                "The corruption test chunks must assemble.");
+        }
+        Assert(
+            !corrupted.TryComplete(out _, out reason) && reason == "hash",
+            "A payload with the wrong SHA-256 must fail closed.");
+
+        byte[] truncated = new byte[logicalBytes.Length - 1];
+        Buffer.BlockCopy(
+            logicalBytes,
+            0,
+            truncated,
+            0,
+            truncated.Length);
+        Assert(
+            !CoopCampaignMapCatalogBinarySerializer.TryDeserialize(
+                truncated,
+                out _,
+                out _,
+                out _),
+            "A truncated binary catalog must be rejected.");
+    }
+
+    private static void ValidateLargeCatalogChunkTransport()
+    {
+        const int observedCatalogCount = 1197;
+        var expected = new List<
+            CoopCampaignMapPrototypeCatalogEntityState>(
+                observedCatalogCount);
+        for (int index = 0; index < observedCatalogCount; index++)
+            expected.Add(CreateCatalogParty(index));
+
+        Assert(
+            CoopCampaignMapCatalogBinarySerializer.TrySerialize(
+                124,
+                expected,
+                out byte[] logicalBytes,
+                out string reason),
+            "The observed 1197-entity catalog must serialize. Reason=" +
+            reason);
+        Assert(
+            logicalBytes.Length >
+                CoopCampaignMapCatalogChunkCodec.MaxChunkBytes,
+            "The observed catalog must exercise multi-chunk transport.");
+        Assert(
+            CoopCampaignMapCatalogChunkCodec.TryEncode(
+                logicalBytes,
+                out CoopCampaignMapCatalogChunkedPayload payload,
+                out reason),
+            "The observed catalog must fit the bounded chunk transport. Reason=" +
+            reason);
+        Assert(
+            payload.ChunkCount > 1 &&
+            payload.ChunkCount <=
+                CoopCampaignMapCatalogChunkCodec.MaxChunkCount,
+            "The observed catalog must split into a bounded chunk sequence.");
+
+        Assert(
+            CoopCampaignMapCatalogChunkAccumulator.TryCreate(
+                125,
+                124,
+                payload.LogicalByteCount,
+                payload.WireByteCount,
+                payload.ChunkCount,
+                payload.CompressionKind,
+                payload.PayloadHash,
+                out CoopCampaignMapCatalogChunkAccumulator accumulator,
+                out reason),
+            "The observed catalog manifest must be accepted.");
+        for (int index = payload.ChunkCount - 1; index >= 0; index--)
+        {
+            Assert(
+                accumulator.TryAccept(
+                    index,
+                    payload.ChunkCount,
+                    payload.Chunks[index],
+                    out reason),
+                "Every observed catalog chunk must assemble. Reason=" +
+                reason);
+        }
+        Assert(
+            accumulator.TryComplete(
+                out byte[] completedLogicalBytes,
+                out reason) &&
+            CoopCampaignMapCatalogBinarySerializer.TryDeserialize(
+                completedLogicalBytes,
+                out int decodedRevision,
+                out List<CoopCampaignMapPrototypeCatalogEntityState>
+                    decoded,
+                out reason) &&
+            decodedRevision == 124 &&
+            decoded.Count == observedCatalogCount &&
+            decoded[observedCatalogCount - 1].EntityId ==
+                expected[observedCatalogCount - 1].EntityId,
+            "The full observed catalog must survive compression, chunks and decoding. Reason=" +
+            reason);
+    }
+
+    private static void ValidateCatalogTransferSupersessionPolicy()
+    {
+        Assert(
+            CoopCampaignMapCatalogTransferPolicy
+                .ShouldStartPreparedTransfer(0, -1, false, 1, 1),
+            "A peer without an active catalog transfer must start the prepared transfer.");
+
+        for (int preparedRevision = 2;
+             preparedRevision <= 125;
+             preparedRevision++)
+        {
+            Assert(
+                !CoopCampaignMapCatalogTransferPolicy
+                    .ShouldStartPreparedTransfer(
+                        1,
+                        1,
+                        false,
+                        preparedRevision,
+                        preparedRevision),
+                "A newer catalog must not supersede an incomplete transfer.");
+        }
+
+        Assert(
+            CoopCampaignMapCatalogTransferPolicy
+                .ShouldStartPreparedTransfer(1, 1, true, 125, 125),
+            "After completion, only the latest prepared catalog may start.");
+        Assert(
+            !CoopCampaignMapCatalogTransferPolicy
+                .ShouldStartPreparedTransfer(125, 125, true, 125, 125),
+            "A completed catalog must not be queued again without a newer generation.");
+        Assert(
+            !CoopCampaignMapCatalogTransferPolicy
+                .ShouldStartPreparedTransfer(1, 1, false, 0, 126),
+            "An invalid prepared transfer must never replace an active transfer.");
+    }
+
+    private static void ValidateDynamicBatchTransportPolicy()
+    {
+        Assert(
+            CoopCampaignMapPrototypeContract.DynamicBatchCompressionMaximum == 32,
+            "The dynamic batch wire range must remain compatible with protocol 10 readers.");
+        Assert(
+            CoopCampaignMapPrototypeContract.MaxDynamicBatchSize == 8,
+            "The Bannerlord 1.4.8 packet writer requires batches of at most eight dynamic entities.");
+        Assert(
+            CoopCampaignMapPrototypeContract.MaxDynamicBatchSize <
+            CoopCampaignMapPrototypeContract.DynamicBatchCompressionMaximum,
+            "The safe send limit must remain below the encoded wire ceiling.");
+
+        const int observedReplicaEntityCount = 1180;
+        int batchCount =
+            (observedReplicaEntityCount +
+             CoopCampaignMapPrototypeContract.MaxDynamicBatchSize - 1) /
+            CoopCampaignMapPrototypeContract.MaxDynamicBatchSize;
+        int finalBatchSize =
+            observedReplicaEntityCount %
+            CoopCampaignMapPrototypeContract.MaxDynamicBatchSize;
+        Assert(
+            batchCount == 148 && finalBatchSize == 4,
+            "The observed 1180-entity replica must split into 148 bounded batches without loss.");
+    }
+
+    private static void ValidateDynamicDeltaPolicy()
+    {
+        var previous = new List<CoopCampaignMapPrototypeDynamicEntityState>
+        {
+            new CoopCampaignMapPrototypeDynamicEntityState
+            {
+                EntityId = "party:main",
+                NormalizedX = 100,
+                NormalizedY = 200,
+                Heading = 300,
+                PartySize = 30,
+                IsVisible = true,
+                IsMoving = false
+            },
+            new CoopCampaignMapPrototypeDynamicEntityState
+            {
+                EntityId = "party:scout",
+                NormalizedX = 400,
+                NormalizedY = 500,
+                Heading = 600,
+                PartySize = 15,
+                IsVisible = true,
+                IsMoving = true
+            },
+            new CoopCampaignMapPrototypeDynamicEntityState
+            {
+                EntityId = "settlement:vostrum",
+                NormalizedX = 700,
+                NormalizedY = 800,
+                Heading = 0,
+                PartySize = 120,
+                IsVisible = true,
+                IsMoving = false
+            }
+        };
+        var current = new List<CoopCampaignMapPrototypeDynamicEntityState>
+        {
+            previous[0].Clone(),
+            previous[2].Clone()
+        };
+        current[0].NormalizedX = 125;
+        current[0].IsMoving = true;
+
+        List<CoopCampaignMapPrototypeDynamicEntityState> delta =
+            CoopCampaignMapPrototypeDynamicDeltaPolicy.BuildDelta(
+                previous,
+                current);
+        Assert(
+            delta.Count == 2,
+            "Only the moved main party and the hidden party may enter the dynamic delta.");
+
+        var deltaById = new Dictionary<
+            string,
+            CoopCampaignMapPrototypeDynamicEntityState>(
+                StringComparer.OrdinalIgnoreCase);
+        foreach (CoopCampaignMapPrototypeDynamicEntityState entity in delta)
+            deltaById[entity.EntityId] = entity;
+
+        Assert(
+            deltaById.TryGetValue(
+                "party:main",
+                out CoopCampaignMapPrototypeDynamicEntityState mainUpdate) &&
+            mainUpdate.NormalizedX == 125 &&
+            mainUpdate.IsMoving,
+            "A moving main party must be represented by one current dynamic update.");
+        Assert(
+            deltaById.TryGetValue(
+                "party:scout",
+                out CoopCampaignMapPrototypeDynamicEntityState hiddenUpdate) &&
+            !hiddenUpdate.IsVisible &&
+            !hiddenUpdate.IsMoving,
+            "A no-longer-observed party must become an incremental visibility tombstone.");
+        Assert(
+            !deltaById.ContainsKey("settlement:vostrum"),
+            "An unchanged settlement must not be retransmitted.");
+        Assert(
+            CoopCampaignMapPrototypeDynamicDeltaPolicy.BuildDelta(
+                previous,
+                previous).Count == 0,
+            "An unchanged authoritative snapshot must produce no network update.");
+
+        int oneEntityBatchCount =
+            (1 + CoopCampaignMapPrototypeContract.MaxDynamicBatchSize - 1) /
+            CoopCampaignMapPrototypeContract.MaxDynamicBatchSize;
+        Assert(
+            oneEntityBatchCount == 1,
+            "A normal one-party movement update must fit in one network batch.");
+    }
+
+    private static void ValidateCatalogDeltaPolicy()
+    {
+        var previous = new List<CoopCampaignMapPrototypeCatalogEntityState>
+        {
+            CreateCatalogParty(0),
+            CreateCatalogParty(1),
+            CreateCatalogParty(3)
+        };
+        var current = new List<CoopCampaignMapPrototypeCatalogEntityState>
+        {
+            previous[0].Clone(),
+            previous[1].Clone(),
+            CreateCatalogParty(2)
+        };
+        current[1].LeaderName = "Updated leader";
+
+        List<CoopCampaignMapPrototypeCatalogEntityState> delta =
+            CoopCampaignMapPrototypeCatalogDeltaPolicy.BuildDelta(
+                previous,
+                current);
+        Assert(
+            delta.Count == 2 &&
+            delta[0].EntityId == current[1].EntityId &&
+            delta[1].EntityId == current[2].EntityId,
+            "Only a changed and a newly discovered catalog entry may enter the live delta.");
+        Assert(
+            CoopCampaignMapPrototypeCatalogDeltaPolicy.BuildDelta(
+                previous,
+                previous).Count == 0,
+            "An unchanged catalog must not trigger a live network update.");
+        Assert(
+            !CoopCampaignMapPrototypeCatalogDeltaPolicy.AreEquivalent(
+                previous[0],
+                ChangeFirstEquipmentItem(previous[0])),
+            "Exact visual equipment changes must invalidate catalog equivalence.");
+    }
+
+    private static CoopCampaignMapPrototypeCatalogEntityState
+        ChangeFirstEquipmentItem(
+            CoopCampaignMapPrototypeCatalogEntityState source)
+    {
+        CoopCampaignMapPrototypeCatalogEntityState changed = source.Clone();
+        changed.HumanVisual.EquipmentItemIds[0] = "changed_visual_item";
+        return changed;
     }
 
     private static void ValidateMapVisualStateQuantization()
@@ -853,6 +1511,106 @@ internal static class Program
                 Camera = CreateCameraState(),
                 UpdatedUtc = updatedUtc
             };
+    }
+
+    private static CoopCampaignMapPrototypeCatalogEntityState
+        CreateCatalogParty(int index)
+    {
+        return new CoopCampaignMapPrototypeCatalogEntityState
+        {
+            EntityId = "party:CharacterObject_1600_party_" + index,
+            DisplayName = "Wahan of the Beni Zilal's Party " + index,
+            Kind = CoopCampaignMapPrototypeEntityKind.MobileParty,
+            SettlementNameplateSize =
+                CoopCampaignMapPrototypeSettlementNameplateSize.None,
+            SettlementKind = CoopCampaignMapPrototypeSettlementKind.None,
+            PrimaryColor = 0xFF102030u,
+            SecondaryColor = 0xFF405060u,
+            BannerCode =
+                "11.163.166.1528.1528.764.764.1.0.0.133.171.171.483.483.764.764.0.0.0",
+            VisualCharacterId = "lord_1_1",
+            CultureId = "aserai",
+            PartyVisualKind =
+                CoopCampaignMapPrototypePartyVisualKind.Mounted,
+            HumanVisual = CreateHumanVisualState(),
+            MountVisual = CreateMountVisualState(
+                "campaign_horse",
+                "campaign_harness"),
+            CaravanMountVisual = null,
+            FactionId = "aserai",
+            FactionName = "Aserai",
+            OwnerName = "Beni Zilal",
+            LeaderName = "Wahan",
+            ArmyId = index % 7 == 0 ? "army:aserai-main" : string.Empty,
+            ArmyName = index % 7 == 0 ? "Aserai Army" : string.Empty,
+            IsArmyLeader = index % 7 == 0,
+            SelectionRadius = 18000
+        };
+    }
+
+    private static bool CatalogEntitiesEqual(
+        IReadOnlyList<CoopCampaignMapPrototypeCatalogEntityState> left,
+        IReadOnlyList<CoopCampaignMapPrototypeCatalogEntityState> right)
+    {
+        if (left == null || right == null || left.Count != right.Count)
+            return false;
+        for (int index = 0; index < left.Count; index++)
+        {
+            CoopCampaignMapPrototypeCatalogEntityState leftEntity =
+                left[index];
+            CoopCampaignMapPrototypeCatalogEntityState rightEntity =
+                right[index];
+            if (leftEntity == null ||
+                rightEntity == null ||
+                leftEntity.EntityId != rightEntity.EntityId ||
+                leftEntity.DisplayName != rightEntity.DisplayName ||
+                leftEntity.Kind != rightEntity.Kind ||
+                leftEntity.SettlementNameplateSize !=
+                    rightEntity.SettlementNameplateSize ||
+                leftEntity.SettlementKind != rightEntity.SettlementKind ||
+                leftEntity.PrimaryColor != rightEntity.PrimaryColor ||
+                leftEntity.SecondaryColor != rightEntity.SecondaryColor ||
+                leftEntity.BannerCode != rightEntity.BannerCode ||
+                leftEntity.VisualCharacterId !=
+                    rightEntity.VisualCharacterId ||
+                leftEntity.CultureId != rightEntity.CultureId ||
+                leftEntity.PartyVisualKind != rightEntity.PartyVisualKind ||
+                !AgentVisualsEqual(
+                    leftEntity.HumanVisual,
+                    rightEntity.HumanVisual) ||
+                !AgentVisualsEqual(
+                    leftEntity.MountVisual,
+                    rightEntity.MountVisual) ||
+                !AgentVisualsEqual(
+                    leftEntity.CaravanMountVisual,
+                    rightEntity.CaravanMountVisual) ||
+                leftEntity.FactionId != rightEntity.FactionId ||
+                leftEntity.FactionName != rightEntity.FactionName ||
+                leftEntity.OwnerName != rightEntity.OwnerName ||
+                leftEntity.LeaderName != rightEntity.LeaderName ||
+                leftEntity.ArmyId != rightEntity.ArmyId ||
+                leftEntity.ArmyName != rightEntity.ArmyName ||
+                leftEntity.IsArmyLeader != rightEntity.IsArmyLeader ||
+                leftEntity.SelectionRadius != rightEntity.SelectionRadius)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static bool ByteArraysEqual(byte[] left, byte[] right)
+    {
+        if (ReferenceEquals(left, right))
+            return true;
+        if (left == null || right == null || left.Length != right.Length)
+            return false;
+        for (int index = 0; index < left.Length; index++)
+        {
+            if (left[index] != right[index])
+                return false;
+        }
+        return true;
     }
 
     private static List<CoopCampaignMapPrototypeEntityState>

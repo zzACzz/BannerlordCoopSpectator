@@ -33,6 +33,8 @@ namespace CoopSpectator.UI
         private const int MaximumPartyVisualCreationAttempts = 3;
         private const float PartyVisualRetryDelaySeconds = 0.25f;
         private const float PartyVisualStableResetSeconds = 2f;
+        private const float StaticOverlayUpdateIntervalSeconds = 0.05f;
+        private const double WorldPositionRefreshNormalizedEpsilon = 0.0000005d;
 
         private sealed class EntityReplica
         {
@@ -45,6 +47,12 @@ namespace CoopSpectator.UI
             public double DisplayedHeading { get; set; }
 
             public Vec3 WorldPosition { get; set; }
+
+            public double WorldPositionX { get; set; }
+
+            public double WorldPositionY { get; set; }
+
+            public bool HasWorldPosition { get; set; }
 
             public GameEntity Marker { get; set; }
 
@@ -61,6 +69,10 @@ namespace CoopSpectator.UI
             public Vec3 PreviousWorldPosition { get; set; }
 
             public bool HasPreviousWorldPosition { get; set; }
+
+            public bool TargetIsMoving { get; set; }
+
+            public float VisualSpeed { get; set; }
         }
 
         private sealed class PassiveSceneLayer : SceneLayer
@@ -138,6 +150,8 @@ namespace CoopSpectator.UI
         private bool _renderStateProbeFailed;
         private bool _mapSceneReadyToRender;
         private bool _mainPartyVisualActive;
+        private bool _mainPartyRenderVisible;
+        private float _staticOverlayUpdateRemaining;
         private int _appliedNormalizedTimeOfDay = -1;
         private int _appliedSeasonTimeFactor = -1;
 
@@ -150,6 +164,8 @@ namespace CoopSpectator.UI
                 OnClientVisibleEntitiesChanged;
             CoopCampaignMapPrototypeNetworkController.ClientCatalogChanged +=
                 OnClientCatalogChanged;
+            CoopCampaignMapPrototypeNetworkController.ClientCatalogDeltaChanged +=
+                OnClientCatalogDeltaChanged;
             CoopCampaignMapPrototypeNetworkController.ClientDynamicChanged +=
                 OnClientDynamicChanged;
         }
@@ -220,6 +236,8 @@ namespace CoopSpectator.UI
                 OnClientVisibleEntitiesChanged;
             CoopCampaignMapPrototypeNetworkController.ClientCatalogChanged -=
                 OnClientCatalogChanged;
+            CoopCampaignMapPrototypeNetworkController.ClientCatalogDeltaChanged -=
+                OnClientCatalogDeltaChanged;
             CoopCampaignMapPrototypeNetworkController.ClientDynamicChanged -=
                 OnClientDynamicChanged;
             ReleaseSceneLayer();
@@ -253,17 +271,44 @@ namespace CoopSpectator.UI
             }
         }
 
+        private void OnClientCatalogDeltaChanged(
+            int revision,
+            IReadOnlyList<CoopCampaignMapPrototypeCatalogEntityState> entities)
+        {
+            if (entities == null)
+                return;
+            foreach (CoopCampaignMapPrototypeCatalogEntityState entity in entities)
+            {
+                if (entity == null)
+                    continue;
+
+                CoopCampaignMapPrototypeCatalogEntityState update = entity.Clone();
+                _catalogById[update.EntityId] = update;
+                if (_mapScene != null &&
+                    _dynamicById.TryGetValue(
+                        update.EntityId,
+                        out CoopCampaignMapPrototypeDynamicEntityState dynamicState))
+                {
+                    ApplyDynamicEntityUpdate(dynamicState);
+                }
+            }
+        }
+
         private void OnClientDynamicChanged(
             int revision,
             IReadOnlyList<CoopCampaignMapPrototypeDynamicEntityState> entities)
         {
-            _dynamicById.Clear();
             if (entities == null)
                 return;
             foreach (CoopCampaignMapPrototypeDynamicEntityState entity in entities)
             {
-                if (entity != null)
-                    _dynamicById[entity.EntityId] = entity.Clone();
+                if (entity == null)
+                    continue;
+
+                CoopCampaignMapPrototypeDynamicEntityState update = entity.Clone();
+                _dynamicById[update.EntityId] = update;
+                if (_mapScene != null)
+                    ApplyDynamicEntityUpdate(update);
             }
         }
 
@@ -363,18 +408,15 @@ namespace CoopSpectator.UI
                     CoopCampaignMapPrototypeNetworkController.CurrentClientState;
                 if (initialState != null)
                     _targetState = initialState;
-                QueueVisibleEntities(
-                    CoopCampaignMapPrototypeNetworkController
-                        .CurrentClientVisibleEntitiesRevision,
-                    CoopCampaignMapPrototypeNetworkController
-                        .CurrentClientVisibleEntities);
                 OnClientCatalogChanged(
                     0,
                     CoopCampaignMapPrototypeNetworkController.CurrentClientCatalog);
+                _dynamicById.Clear();
+                _pendingVisibleEntitiesRevision = -1;
+                _pendingVisibleEntities = null;
                 OnClientDynamicChanged(
                     0,
                     CoopCampaignMapPrototypeNetworkController.CurrentClientDynamic);
-                ApplyPendingVisibleEntities();
                 UpdateEntityReplicas(0f);
                 UpdateMarkerAndCamera();
                 InitializeLocalFreeCamera();
@@ -488,54 +530,7 @@ namespace CoopSpectator.UI
                 {
                     continue;
                 }
-
-                if (!_entityReplicas.TryGetValue(
-                        entity.EntityId,
-                        out EntityReplica replica))
-                {
-                    replica = new EntityReplica
-                    {
-                        DisplayedX =
-                            CoopCampaignMapPrototypeContract.DequantizeUnit(
-                                entity.NormalizedX),
-                        DisplayedY =
-                            CoopCampaignMapPrototypeContract.DequantizeUnit(
-                                entity.NormalizedY),
-                        DisplayedHeading =
-                            CoopCampaignMapPrototypeContract.DequantizeHeading(
-                                entity.Heading),
-                        Marker = entity.Kind ==
-                                 CoopCampaignMapPrototypeEntityKind.MobileParty
-                            ? CreateHostMarker(_mapScene)
-                            : null
-                    };
-                    _entityReplicas.Add(entity.EntityId, replica);
-                }
-                string visualAttemptKey = BuildPartyVisualAttemptKey(entity);
-                if (!string.Equals(
-                        replica.PartyVisualAttemptKey,
-                        visualAttemptKey,
-                        StringComparison.Ordinal))
-                {
-                    ResetPartyVisual(replica);
-                    replica.PartyVisualAttemptKey = visualAttemptKey;
-                    replica.PartyVisualAttemptCount = 0;
-                    replica.PartyVisualRetryDelayRemaining = 0f;
-                }
-                if (entity.Kind !=
-                    CoopCampaignMapPrototypeEntityKind.MobileParty &&
-                    replica.Marker != null)
-                {
-                    RemoveMarker(replica.Marker);
-                    replica.Marker = null;
-                }
-                else if (entity.Kind ==
-                         CoopCampaignMapPrototypeEntityKind.MobileParty &&
-                         replica.Marker == null)
-                {
-                    replica.Marker = CreateHostMarker(_mapScene);
-                }
-                replica.Target = entity.Clone();
+                UpsertEntityReplica(entity, updateOverlay: false);
             }
 
             var removed = new List<string>();
@@ -545,12 +540,7 @@ namespace CoopSpectator.UI
                     removed.Add(pair.Key);
             }
             foreach (string entityId in removed)
-            {
-                EntityReplica replica = _entityReplicas[entityId];
-                ResetPartyVisual(replica);
-                RemoveMarker(replica.Marker);
-                _entityReplicas.Remove(entityId);
-            }
+                RemoveEntityReplica(entityId, updateOverlay: false);
 
             _entityOverlayViewModel?.Synchronize(_pendingVisibleEntities);
             _settlementOverlayViewModel?.Synchronize(_pendingVisibleEntities);
@@ -559,12 +549,189 @@ namespace CoopSpectator.UI
             _pendingVisibleEntities = null;
         }
 
+        private void ApplyDynamicEntityUpdate(
+            CoopCampaignMapPrototypeDynamicEntityState dynamicState)
+        {
+            if (dynamicState == null ||
+                string.IsNullOrWhiteSpace(dynamicState.EntityId))
+            {
+                return;
+            }
+
+            if (!dynamicState.IsVisible)
+            {
+                RemoveEntityReplica(dynamicState.EntityId, updateOverlay: true);
+                return;
+            }
+
+            if (!_catalogById.TryGetValue(
+                    dynamicState.EntityId,
+                    out CoopCampaignMapPrototypeCatalogEntityState catalog))
+            {
+                return;
+            }
+
+            CoopCampaignMapPrototypeEntityState merged = MergeReplicaState(
+                catalog,
+                dynamicState);
+            if (merged != null)
+            {
+                UpsertEntityReplica(merged, updateOverlay: true);
+                if (_entityReplicas.TryGetValue(
+                        dynamicState.EntityId,
+                        out EntityReplica replica))
+                {
+                    replica.TargetIsMoving = dynamicState.IsMoving;
+                }
+            }
+        }
+
+        private void UpsertEntityReplica(
+            CoopCampaignMapPrototypeEntityState entity,
+            bool updateOverlay)
+        {
+            if (entity == null || _mapScene == null)
+                return;
+
+            if (!_entityReplicas.TryGetValue(
+                    entity.EntityId,
+                    out EntityReplica replica))
+            {
+                replica = new EntityReplica
+                {
+                    DisplayedX =
+                        CoopCampaignMapPrototypeContract.DequantizeUnit(
+                            entity.NormalizedX),
+                    DisplayedY =
+                        CoopCampaignMapPrototypeContract.DequantizeUnit(
+                            entity.NormalizedY),
+                    DisplayedHeading =
+                        CoopCampaignMapPrototypeContract.DequantizeHeading(
+                            entity.Heading),
+                    Marker = entity.Kind ==
+                             CoopCampaignMapPrototypeEntityKind.MobileParty
+                        ? CreateHostMarker(_mapScene)
+                        : null
+                };
+                _entityReplicas.Add(entity.EntityId, replica);
+            }
+
+            string visualAttemptKey = BuildPartyVisualAttemptKey(entity);
+            if (!string.Equals(
+                    replica.PartyVisualAttemptKey,
+                    visualAttemptKey,
+                    StringComparison.Ordinal))
+            {
+                ResetPartyVisual(replica);
+                replica.PartyVisualAttemptKey = visualAttemptKey;
+                replica.PartyVisualAttemptCount = 0;
+                replica.PartyVisualRetryDelayRemaining = 0f;
+            }
+            if (entity.Kind !=
+                CoopCampaignMapPrototypeEntityKind.MobileParty &&
+                replica.Marker != null)
+            {
+                RemoveMarker(replica.Marker);
+                replica.Marker = null;
+            }
+            else if (entity.Kind ==
+                     CoopCampaignMapPrototypeEntityKind.MobileParty &&
+                     replica.Marker == null)
+            {
+                replica.Marker = CreateHostMarker(_mapScene);
+            }
+            replica.Target = entity.Clone();
+            if (_dynamicById.TryGetValue(
+                    entity.EntityId,
+                    out CoopCampaignMapPrototypeDynamicEntityState dynamicState))
+            {
+                replica.TargetIsMoving = dynamicState.IsMoving;
+            }
+
+            if (!updateOverlay)
+                return;
+            if (entity.Kind == CoopCampaignMapPrototypeEntityKind.Settlement)
+                _settlementOverlayViewModel?.Upsert(entity);
+            else
+                _entityOverlayViewModel?.Upsert(entity);
+        }
+
+        private void RemoveEntityReplica(string entityId, bool updateOverlay)
+        {
+            if (string.IsNullOrWhiteSpace(entityId))
+                return;
+
+            if (_entityReplicas.TryGetValue(entityId, out EntityReplica replica))
+            {
+                ResetPartyVisual(replica);
+                RemoveMarker(replica.Marker);
+                _entityReplicas.Remove(entityId);
+            }
+            if (!updateOverlay)
+                return;
+            _entityOverlayViewModel?.Remove(entityId);
+            _settlementOverlayViewModel?.Remove(entityId);
+            if (string.Equals(
+                    _selectedReplicaId,
+                    entityId,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                _selectedReplicaId = null;
+                _replicaInfoViewModel?.Hide();
+            }
+        }
+
+        private static CoopCampaignMapPrototypeEntityState MergeReplicaState(
+            CoopCampaignMapPrototypeCatalogEntityState catalog,
+            CoopCampaignMapPrototypeDynamicEntityState dynamicState)
+        {
+            if (catalog == null || dynamicState == null ||
+                !dynamicState.IsVisible ||
+                !string.Equals(
+                    catalog.EntityId,
+                    dynamicState.EntityId,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            return new CoopCampaignMapPrototypeEntityState
+            {
+                EntityId = catalog.EntityId,
+                DisplayName = catalog.DisplayName,
+                Kind = catalog.Kind,
+                SettlementNameplateSize = catalog.SettlementNameplateSize,
+                NormalizedX = dynamicState.NormalizedX,
+                NormalizedY = dynamicState.NormalizedY,
+                Heading = dynamicState.Heading,
+                PartySize = dynamicState.PartySize,
+                PrimaryColor = catalog.PrimaryColor,
+                SecondaryColor = catalog.SecondaryColor,
+                BannerCode = catalog.BannerCode,
+                VisualCharacterId = catalog.VisualCharacterId,
+                CultureId = catalog.CultureId,
+                PartyVisualKind = catalog.PartyVisualKind,
+                HumanVisual = catalog.HumanVisual?.Clone(),
+                MountVisual = catalog.MountVisual?.Clone(),
+                CaravanMountVisual = catalog.CaravanMountVisual?.Clone()
+            };
+        }
+
         private void UpdateEntityReplicas(float dt)
         {
             if (_mapScene == null || _camera == null)
                 return;
 
             _mainPartyVisualActive = false;
+            _mainPartyRenderVisible = false;
+            _staticOverlayUpdateRemaining -= Math.Max(0f, dt);
+            bool updateStaticOverlays =
+                dt <= 0f || _staticOverlayUpdateRemaining <= 0f;
+            if (updateStaticOverlays)
+            {
+                _staticOverlayUpdateRemaining =
+                    StaticOverlayUpdateIntervalSeconds;
+            }
             double amount = dt <= 0f ? 1d : Math.Min(1d, dt * 6d);
             float horizontalSpan = Math.Max(
                 _sceneMaximum.x - _sceneMinimum.x,
@@ -604,65 +771,141 @@ namespace CoopSpectator.UI
                         amount);
                 }
 
-                replica.WorldPosition = ResolveMapWorldPosition(
-                    replica.DisplayedX,
-                    replica.DisplayedY);
-                Vec3 movement = replica.HasPreviousWorldPosition
-                    ? replica.WorldPosition - replica.PreviousWorldPosition
-                    : Vec3.Zero;
+                bool worldPositionChanged =
+                    !replica.HasWorldPosition ||
+                    Math.Abs(replica.WorldPositionX - replica.DisplayedX) >=
+                        WorldPositionRefreshNormalizedEpsilon ||
+                    Math.Abs(replica.WorldPositionY - replica.DisplayedY) >=
+                        WorldPositionRefreshNormalizedEpsilon;
+                Vec3 movement = Vec3.Zero;
+                if (worldPositionChanged)
+                {
+                    replica.WorldPosition = ResolveMapWorldPosition(
+                        replica.DisplayedX,
+                        replica.DisplayedY);
+                    replica.WorldPositionX = replica.DisplayedX;
+                    replica.WorldPositionY = replica.DisplayedY;
+                    replica.HasWorldPosition = true;
+                    movement = replica.HasPreviousWorldPosition
+                        ? replica.WorldPosition - replica.PreviousWorldPosition
+                        : Vec3.Zero;
+                }
                 float movementDistance = (float)Math.Sqrt(
                     movement.x * movement.x +
                     movement.y * movement.y +
                     movement.z * movement.z);
                 bool isMoving =
+                    replica.TargetIsMoving ||
                     replica.HasPreviousWorldPosition &&
                     dt > 0f &&
                     movementDistance > 0.0005f;
+                if (dt > 0f && movementDistance > 0.0005f)
+                    replica.VisualSpeed = movementDistance / dt;
+                else if (!replica.TargetIsMoving)
+                    replica.VisualSpeed = 0f;
                 float visualSpeed = isMoving
-                    ? movementDistance / dt
+                    ? Math.Max(0.1f, replica.VisualSpeed)
                     : 0f;
-                replica.PreviousWorldPosition = replica.WorldPosition;
-                replica.HasPreviousWorldPosition = true;
+                if (worldPositionChanged)
+                {
+                    replica.PreviousWorldPosition = replica.WorldPosition;
+                    replica.HasPreviousWorldPosition = true;
+                }
+
+                if (target.Kind ==
+                    CoopCampaignMapPrototypeEntityKind.Settlement)
+                {
+                    if (updateStaticOverlays)
+                    {
+                        if (IsSettlementProjectionCandidate(
+                                target.SettlementNameplateSize,
+                                replica.WorldPosition,
+                                _camera))
+                        {
+                            _settlementOverlayViewModel?.UpdatePosition(
+                                pair.Key,
+                                replica.WorldPosition,
+                                _camera);
+                        }
+                        else
+                        {
+                            _settlementOverlayViewModel?.Hide(pair.Key);
+                        }
+                    }
+                    continue;
+                }
 
                 MatrixFrame visualFrame = MatrixFrame.Identity;
                 visualFrame.rotation.RotateAboutUp(
                     (float)replica.DisplayedHeading);
                 visualFrame.origin = replica.WorldPosition;
+                Vec3 nameplateWorldPosition =
+                    replica.WorldPosition + Vec3.Up * (markerScale * 1.2f);
+                bool projectionCandidate = IsPartyProjectionCandidate(
+                    replica.WorldPosition,
+                    _camera);
+                bool shouldRenderParty;
+                if (projectionCandidate)
+                {
+                    shouldRenderParty = _entityOverlayViewModel != null
+                        ? _entityOverlayViewModel.UpdatePosition(
+                            pair.Key,
+                            replica.WorldPosition,
+                            nameplateWorldPosition,
+                            _camera)
+                        : ShouldShowPartyAtCamera(
+                            replica.WorldPosition,
+                            _camera);
+                }
+                else
+                {
+                    _entityOverlayViewModel?.Hide(pair.Key);
+                    shouldRenderParty = false;
+                }
                 replica.PartyVisualRetryDelayRemaining = Math.Max(
                     0f,
                     replica.PartyVisualRetryDelayRemaining - Math.Max(0f, dt));
-                TryEnsurePartyVisual(replica, target, visualFrame);
-                if (replica.PartyVisual != null)
+                if (shouldRenderParty)
                 {
-                    try
+                    TryEnsurePartyVisual(replica, target, visualFrame);
+                    if (replica.PartyVisual != null)
                     {
-                        replica.PartyVisual.Update(
-                            visualFrame,
-                            dt,
-                            isMoving,
-                            visualSpeed);
-                        if (!replica.PartyVisual.IsUsable)
+                        try
+                        {
+                            replica.PartyVisual.SetVisible(true);
+                            replica.PartyVisual.Update(
+                                visualFrame,
+                                dt,
+                                isMoving,
+                                visualSpeed);
+                            if (!replica.PartyVisual.IsUsable)
+                            {
+                                ResetPartyVisual(replica);
+                                replica.PartyVisualRetryDelayRemaining =
+                                    PartyVisualRetryDelaySeconds;
+                            }
+                            else
+                            {
+                                replica.PartyVisualStableSeconds +=
+                                    Math.Max(0f, dt);
+                                if (replica.PartyVisualStableSeconds >=
+                                    PartyVisualStableResetSeconds)
+                                {
+                                    replica.PartyVisualAttemptCount = 0;
+                                }
+                            }
+                        }
+                        catch
                         {
                             ResetPartyVisual(replica);
                             replica.PartyVisualRetryDelayRemaining =
                                 PartyVisualRetryDelaySeconds;
                         }
-                        else
-                        {
-                            replica.PartyVisualStableSeconds += Math.Max(0f, dt);
-                            if (replica.PartyVisualStableSeconds >=
-                                PartyVisualStableResetSeconds)
-                            {
-                                replica.PartyVisualAttemptCount = 0;
-                            }
-                        }
                     }
-                    catch
-                    {
-                        ResetPartyVisual(replica);
-                        replica.PartyVisualRetryDelayRemaining =
-                            PartyVisualRetryDelaySeconds;
-                    }
+                }
+                else
+                {
+                    replica.PartyVisual?.SetVisible(false);
                 }
 
                 bool hasPartyVisual =
@@ -670,7 +913,9 @@ namespace CoopSpectator.UI
                 if (target.Kind ==
                     CoopCampaignMapPrototypeEntityKind.MainParty)
                 {
-                    _mainPartyVisualActive = hasPartyVisual;
+                    _mainPartyVisualActive =
+                        shouldRenderParty && hasPartyVisual;
+                    _mainPartyRenderVisible = shouldRenderParty;
                 }
                 if (replica.Marker != null)
                 {
@@ -683,18 +928,8 @@ namespace CoopSpectator.UI
                     markerFrame.Scale(in scale);
                     replica.Marker.SetFrame(ref markerFrame, true);
                     replica.Marker.SetVisibilityExcludeParents(
-                        !hasPartyVisual);
+                        shouldRenderParty && !hasPartyVisual);
                 }
-
-                _entityOverlayViewModel?.UpdatePosition(
-                    pair.Key,
-                    replica.WorldPosition,
-                    replica.WorldPosition + Vec3.Up * (markerScale * 1.2f),
-                    _camera);
-                _settlementOverlayViewModel?.UpdatePosition(
-                    pair.Key,
-                    replica.WorldPosition,
-                    _camera);
             }
         }
 
@@ -925,6 +1160,96 @@ namespace CoopSpectator.UI
             }
         }
 
+        private static bool ShouldShowPartyAtCamera(
+            Vec3 worldPosition,
+            Camera camera)
+        {
+            if (camera == null)
+                return false;
+
+            try
+            {
+                float x = -500f;
+                float y = -500f;
+                float depth = 0f;
+                MBWindowManager.WorldToScreenInsideUsableArea(
+                    camera,
+                    worldPosition,
+                    ref x,
+                    ref y,
+                    ref depth);
+                if (!IsFinite(x) || !IsFinite(y) || !IsFinite(depth))
+                    return false;
+
+                bool isInsideViewport =
+                    x >= -180f &&
+                    x <= Screen.RealScreenResolutionWidth + 180f &&
+                    y >= -120f &&
+                    y <= Screen.RealScreenResolutionHeight + 120f;
+                return CoopCampaignMapPrototypeVisibilityPolicy
+                    .ShouldShowParty(
+                        camera.Position.z,
+                        depth,
+                        isInsideViewport);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool IsPartyProjectionCandidate(
+            Vec3 worldPosition,
+            Camera camera)
+        {
+            if (camera == null ||
+                camera.Position.z >=
+                    CoopCampaignMapPrototypeVisibilityPolicy
+                        .PartyMaximumCameraHeight)
+            {
+                return false;
+            }
+
+            Vec3 toEntity = worldPosition - camera.Position;
+            return Vec3.DotProduct(toEntity, camera.Direction) > 0f;
+        }
+
+        private static bool IsSettlementProjectionCandidate(
+            CoopCampaignMapPrototypeSettlementNameplateSize size,
+            Vec3 worldPosition,
+            Camera camera)
+        {
+            if (camera == null)
+                return false;
+
+            Vec3 toEntity = worldPosition - camera.Position;
+            if (Vec3.DotProduct(toEntity, camera.Direction) <= 0f)
+                return false;
+
+            float cameraHeight = camera.Position.z;
+            if (cameraHeight >
+                CoopCampaignMapPrototypeVisibilityPolicy
+                    .SettlementTownOnlyCameraHeight)
+            {
+                return size ==
+                       CoopCampaignMapPrototypeSettlementNameplateSize.Large;
+            }
+            if (cameraHeight >
+                CoopCampaignMapPrototypeVisibilityPolicy
+                    .SettlementFortificationOnlyCameraHeight)
+            {
+                return size ==
+                           CoopCampaignMapPrototypeSettlementNameplateSize.Large ||
+                       size ==
+                           CoopCampaignMapPrototypeSettlementNameplateSize.Medium;
+            }
+
+            return worldPosition.Distance(camera.Position) <
+                   cameraHeight +
+                   CoopCampaignMapPrototypeVisibilityPolicy
+                       .SettlementNearDistanceMargin;
+        }
+
         private void UpdateRenderReadiness(float dt)
         {
             if (_sceneLayer == null || _renderStateProbeFailed)
@@ -1133,7 +1458,7 @@ namespace CoopSpectator.UI
             markerFrame.Scale(in scale);
             _hostMarker.SetFrame(ref markerFrame, true);
             _hostMarker.SetVisibilityExcludeParents(
-                !_mainPartyVisualActive);
+                _mainPartyRenderVisible && !_mainPartyVisualActive);
 
             float farPlane = Math.Max(5000f, horizontalSpan * 10f);
             if (_hasDisplayedCamera)
@@ -1263,6 +1588,8 @@ namespace CoopSpectator.UI
             _mapScene = null;
             _mapSceneReadyToRender = false;
             _mainPartyVisualActive = false;
+            _mainPartyRenderVisible = false;
+            _staticOverlayUpdateRemaining = 0f;
             _appliedNormalizedTimeOfDay = -1;
             _appliedSeasonTimeFactor = -1;
             _hostMarker = null;

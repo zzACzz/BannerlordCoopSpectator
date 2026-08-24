@@ -41,7 +41,6 @@ namespace CoopSpectator.Campaign
             new List<CoopCampaignMapPrototypeEntityState>();
         private CoopCampaignMapPrototypeCatalogSnapshot _cachedCatalog;
         private CoopCampaignMapPrototypeDynamicSnapshot _cachedDynamic;
-        private string _catalogFingerprint = string.Empty;
         private bool _catalogDirty;
         private bool _dynamicDirty;
         private readonly Dictionary<string, int> _entityHeadings =
@@ -49,6 +48,32 @@ namespace CoopSpectator.Campaign
         private readonly Dictionary<string, ReplicaInformation> _replicaInformation =
             new Dictionary<string, ReplicaInformation>(
                 StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<
+            string,
+            CoopCampaignMapPrototypeCatalogEntityState> _knownCatalogById =
+                new Dictionary<
+                    string,
+                    CoopCampaignMapPrototypeCatalogEntityState>(
+                        StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<
+            string,
+            CoopCampaignMapPrototypeDynamicEntityState> _knownDynamicById =
+                new Dictionary<
+                    string,
+                    CoopCampaignMapPrototypeDynamicEntityState>(
+                        StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, AgentVisuals>
+            _knownHumanVisualReferenceById =
+                new Dictionary<string, AgentVisuals>(
+                    StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, AgentVisuals>
+            _knownMountVisualReferenceById =
+                new Dictionary<string, AgentVisuals>(
+                    StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, AgentVisuals>
+            _knownCaravanVisualReferenceById =
+                new Dictionary<string, AgentVisuals>(
+                    StringComparer.OrdinalIgnoreCase);
         private bool _initialPublishLogged;
         private DateTime _nextFailureLogUtc = DateTime.MinValue;
 
@@ -315,12 +340,18 @@ namespace CoopSpectator.Campaign
 
             foreach (MobileParty party in MobileParty.All)
             {
-                if (party == null ||
-                    party == mainParty ||
-                    party.IsGarrison ||
-                    party.IsMilitia ||
-                    party.CurrentSettlement != null ||
-                    !party.IsActive)
+                if (party == null || party == mainParty)
+                    continue;
+
+                if (!CoopCampaignMapPrototypeVisibilityPolicy
+                        .ShouldReplicateMobileParty(
+                            isMainParty: false,
+                            isActive: party.IsActive,
+                            isGarrison: party.IsGarrison,
+                            isMilitia: party.IsMilitia,
+                            hasCurrentSettlement:
+                                party.CurrentSettlement != null,
+                            isSpotted: party.IsSpotted()))
                 {
                     continue;
                 }
@@ -343,6 +374,17 @@ namespace CoopSpectator.Campaign
             {
                 if (settlement == null)
                     continue;
+
+                ISpottable spottable =
+                    settlement.SettlementComponent as ISpottable;
+                if (!CoopCampaignMapPrototypeVisibilityPolicy
+                        .ShouldReplicateSettlement(
+                            settlement.IsVisible,
+                            spottable != null,
+                            spottable?.IsSpotted == true))
+                {
+                    continue;
+                }
 
                 Vec2 settlementPosition = settlement.GetPosition2D;
                 ResolveAppearance(
@@ -405,9 +447,9 @@ namespace CoopSpectator.Campaign
             IReadOnlyList<CoopCampaignMapPrototypeEntityState> entities)
         {
             DateTime updatedUtc = DateTime.UtcNow;
-            var catalogEntities = new List<
+            var currentCatalogEntities = new List<
                 CoopCampaignMapPrototypeCatalogEntityState>(entities?.Count ?? 0);
-            var dynamicEntities = new List<
+            var currentDynamicEntities = new List<
                 CoopCampaignMapPrototypeDynamicEntityState>(entities?.Count ?? 0);
 
             if (entities != null)
@@ -476,29 +518,109 @@ namespace CoopSpectator.Campaign
                         continue;
                     }
 
-                    catalogEntities.Add(catalogEntity);
-                    dynamicEntities.Add(dynamicEntity);
+                    currentCatalogEntities.Add(catalogEntity);
+                    currentDynamicEntities.Add(dynamicEntity);
                 }
             }
 
-            var fingerprintSnapshot = new CoopCampaignMapPrototypeCatalogSnapshot
+            var currentDynamicById = new Dictionary<
+                string,
+                CoopCampaignMapPrototypeDynamicEntityState>(
+                    StringComparer.OrdinalIgnoreCase);
+            foreach (CoopCampaignMapPrototypeDynamicEntityState dynamicEntity in
+                     currentDynamicEntities)
             {
-                SchemaVersion = CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion,
-                SessionId = _sessionId,
-                Revision = 0,
-                Entities = catalogEntities,
-                UpdatedUtc = new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc)
-            };
-            string fingerprint = string.Join(
-                "\n",
-                CoopCampaignMapPrototypeBridgeCodec.SerializeCatalog(
-                    fingerprintSnapshot));
-            if (!string.Equals(
-                    fingerprint,
-                    _catalogFingerprint,
-                    StringComparison.Ordinal))
+                currentDynamicById[dynamicEntity.EntityId] = dynamicEntity;
+            }
+
+            foreach (CoopCampaignMapPrototypeCatalogEntityState catalogEntity in
+                     currentCatalogEntities)
             {
-                _catalogFingerprint = fingerprint;
+                bool alreadyKnown = _knownCatalogById.TryGetValue(
+                    catalogEntity.EntityId,
+                    out CoopCampaignMapPrototypeCatalogEntityState knownCatalog);
+                if (!alreadyKnown &&
+                    _knownCatalogById.Count >=
+                    CoopCampaignMapPrototypeContract.MaxCatalogEntities)
+                {
+                    continue;
+                }
+
+                if (!alreadyKnown ||
+                    !CoopCampaignMapPrototypeCatalogDeltaPolicy.AreEquivalent(
+                        knownCatalog,
+                        catalogEntity))
+                {
+                    _knownCatalogById[catalogEntity.EntityId] =
+                        catalogEntity.Clone();
+                    _catalogDirty = true;
+                }
+                if (currentDynamicById.TryGetValue(
+                        catalogEntity.EntityId,
+                        out CoopCampaignMapPrototypeDynamicEntityState currentDynamic))
+                {
+                    _knownDynamicById[catalogEntity.EntityId] =
+                        currentDynamic.Clone();
+                }
+            }
+
+            var knownIds = new List<string>(_knownDynamicById.Keys);
+            foreach (string entityId in knownIds)
+            {
+                if (currentDynamicById.ContainsKey(entityId))
+                    continue;
+
+                CoopCampaignMapPrototypeDynamicEntityState hidden =
+                    _knownDynamicById[entityId].Clone();
+                hidden.IsVisible = false;
+                hidden.IsMoving = false;
+                _knownDynamicById[entityId] = hidden;
+            }
+
+            List<CoopCampaignMapPrototypeCatalogEntityState> catalogEntities;
+            if (_catalogDirty || _cachedCatalog == null)
+            {
+                catalogEntities = new List<
+                    CoopCampaignMapPrototypeCatalogEntityState>(
+                        _knownCatalogById.Count);
+                foreach (CoopCampaignMapPrototypeCatalogEntityState catalogEntity in
+                         _knownCatalogById.Values)
+                {
+                    catalogEntities.Add(catalogEntity.Clone());
+                }
+                catalogEntities.Sort(
+                    (left, right) =>
+                    {
+                        int kindComparison = left.Kind.CompareTo(right.Kind);
+                        return kindComparison != 0
+                            ? kindComparison
+                            : string.Compare(
+                                left.EntityId,
+                                right.EntityId,
+                                StringComparison.OrdinalIgnoreCase);
+                    });
+            }
+            else
+            {
+                catalogEntities = _cachedCatalog.Entities;
+            }
+
+            var dynamicEntities = new List<
+                CoopCampaignMapPrototypeDynamicEntityState>(
+                    catalogEntities.Count);
+            foreach (CoopCampaignMapPrototypeCatalogEntityState catalogEntity in
+                     catalogEntities)
+            {
+                if (_knownDynamicById.TryGetValue(
+                        catalogEntity.EntityId,
+                        out CoopCampaignMapPrototypeDynamicEntityState dynamicEntity))
+                {
+                    dynamicEntities.Add(dynamicEntity.Clone());
+                }
+            }
+
+            if (_catalogDirty || _cachedCatalog == null)
+            {
                 if (_catalogRevision == int.MaxValue)
                     _catalogRevision = 0;
                 _catalogRevision++;
@@ -574,7 +696,9 @@ namespace CoopSpectator.Campaign
                 out uint primaryColor,
                 out uint secondaryColor,
                 out string bannerCode);
-            ResolvePartyVisualState(
+            ResolvePartyVisualStateCached(
+                entityId,
+                kind,
                 party,
                 nativeVisual,
                 out string visualCharacterId,
@@ -829,6 +953,108 @@ namespace CoopSpectator.Campaign
             return settlement == null
                 ? CoopCampaignMapPrototypeSettlementKind.None
                 : CoopCampaignMapPrototypeSettlementKind.Special;
+        }
+
+        private void ResolvePartyVisualStateCached(
+            string entityId,
+            CoopCampaignMapPrototypeEntityKind entityKind,
+            MobileParty party,
+            MobilePartyVisual nativeVisual,
+            out string visualCharacterId,
+            out string cultureId,
+            out CoopCampaignMapPrototypePartyVisualKind partyVisualKind,
+            out CoopCampaignMapPrototypeAgentVisualState humanVisual,
+            out CoopCampaignMapPrototypeAgentVisualState mountVisual,
+            out CoopCampaignMapPrototypeAgentVisualState caravanMountVisual)
+        {
+            if (entityKind != CoopCampaignMapPrototypeEntityKind.MainParty &&
+                CanReusePartyVisualState(
+                    entityId,
+                    party,
+                    nativeVisual,
+                    out CoopCampaignMapPrototypeCatalogEntityState cached))
+            {
+                visualCharacterId = cached.VisualCharacterId;
+                cultureId = cached.CultureId;
+                partyVisualKind = cached.PartyVisualKind;
+                humanVisual = cached.HumanVisual?.Clone();
+                mountVisual = cached.MountVisual?.Clone();
+                caravanMountVisual = cached.CaravanMountVisual?.Clone();
+                return;
+            }
+
+            ResolvePartyVisualState(
+                party,
+                nativeVisual,
+                out visualCharacterId,
+                out cultureId,
+                out partyVisualKind,
+                out humanVisual,
+                out mountVisual,
+                out caravanMountVisual);
+            RememberPartyVisualReferences(entityId, nativeVisual);
+        }
+
+        private bool CanReusePartyVisualState(
+            string entityId,
+            MobileParty party,
+            MobilePartyVisual nativeVisual,
+            out CoopCampaignMapPrototypeCatalogEntityState cached)
+        {
+            cached = null;
+            if (string.IsNullOrWhiteSpace(entityId) ||
+                party?.Party == null ||
+                party.Party.IsVisualDirty ||
+                !_knownCatalogById.TryGetValue(entityId, out cached) ||
+                !_knownHumanVisualReferenceById.TryGetValue(
+                    entityId,
+                    out AgentVisuals knownHuman) ||
+                !_knownMountVisualReferenceById.TryGetValue(
+                    entityId,
+                    out AgentVisuals knownMount) ||
+                !_knownCaravanVisualReferenceById.TryGetValue(
+                    entityId,
+                    out AgentVisuals knownCaravan))
+            {
+                return false;
+            }
+
+            AgentVisuals currentHuman = nativeVisual?.HumanAgentVisuals;
+            AgentVisuals currentMount = nativeVisual?.MountAgentVisuals;
+            AgentVisuals currentCaravan = nativeVisual?.CaravanMountAgentVisuals;
+            if (!ReferenceEquals(currentHuman, knownHuman) ||
+                !ReferenceEquals(currentMount, knownMount) ||
+                !ReferenceEquals(currentCaravan, knownCaravan))
+            {
+                return false;
+            }
+
+            string currentCharacterId = currentHuman?.GetCharacterObjectID();
+            if (!string.IsNullOrWhiteSpace(currentCharacterId) &&
+                !string.Equals(
+                    currentCharacterId,
+                    cached.VisualCharacterId,
+                    StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        private void RememberPartyVisualReferences(
+            string entityId,
+            MobilePartyVisual nativeVisual)
+        {
+            if (string.IsNullOrWhiteSpace(entityId))
+                return;
+
+            _knownHumanVisualReferenceById[entityId] =
+                nativeVisual?.HumanAgentVisuals;
+            _knownMountVisualReferenceById[entityId] =
+                nativeVisual?.MountAgentVisuals;
+            _knownCaravanVisualReferenceById[entityId] =
+                nativeVisual?.CaravanMountAgentVisuals;
         }
 
         private static void ResolvePartyVisualState(

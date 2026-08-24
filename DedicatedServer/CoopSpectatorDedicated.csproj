@@ -169,6 +169,8 @@
     <Compile Include="..\Infrastructure\CoopBattlePowerContract.cs" Link="Infrastructure\CoopBattlePowerContract.cs" />
     <Compile Include="..\Infrastructure\CoopMaterializedAgentEntrySnapshotContract.cs" Link="Infrastructure\CoopMaterializedAgentEntrySnapshotContract.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMapPrototypeContract.cs" Link="Infrastructure\CoopCampaignMapPrototypeContract.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapCatalogBinarySerializer.cs" Link="Infrastructure\CoopCampaignMapCatalogBinarySerializer.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapCatalogChunkCodec.cs" Link="Infrastructure\CoopCampaignMapCatalogChunkCodec.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMapPrototypeBridgeCodec.cs" Link="Infrastructure\CoopCampaignMapPrototypeBridgeCodec.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMapPrototypeBridgeFile.cs" Link="Infrastructure\CoopCampaignMapPrototypeBridgeFile.cs" />
     <Compile Include="..\Infrastructure\CoopMountedHeroMountLinkContract.cs" Link="Infrastructure\CoopMountedHeroMountLinkContract.cs" />

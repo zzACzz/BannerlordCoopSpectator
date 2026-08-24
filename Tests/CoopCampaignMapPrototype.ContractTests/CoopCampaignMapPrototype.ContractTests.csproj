@@ -8,5 +8,7 @@
     <Compile Include="Program.cs" />
     <Compile Include="..\..\Infrastructure\CoopCampaignMapPrototypeContract.cs" Link="CoopCampaignMapPrototypeContract.cs" />
     <Compile Include="..\..\Infrastructure\CoopCampaignMapPrototypeBridgeCodec.cs" Link="CoopCampaignMapPrototypeBridgeCodec.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapCatalogBinarySerializer.cs" Link="CoopCampaignMapCatalogBinarySerializer.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapCatalogChunkCodec.cs" Link="CoopCampaignMapCatalogChunkCodec.cs" />
   </ItemGroup>
 </Project>

@@ -106,6 +106,51 @@ namespace CoopSpectator.UI
             }
         }
 
+        internal void Upsert(CoopCampaignMapPrototypeEntityState entity)
+        {
+            if (!CoopCampaignMapPrototypeContract.IsValidVisibleEntity(entity) ||
+                entity.Kind != CoopCampaignMapPrototypeEntityKind.Settlement)
+            {
+                return;
+            }
+
+            if (!_nameplatesById.TryGetValue(
+                    entity.EntityId,
+                    out CoopCampaignMapPrototypeSettlementNameplateVM nameplate))
+            {
+                nameplate = new CoopCampaignMapPrototypeSettlementNameplateVM(
+                    entity.EntityId);
+                nameplate.UpdateIdentity(entity);
+                _nameplatesById.Add(entity.EntityId, nameplate);
+                GetNameplateList(nameplate.Size)?.Add(nameplate);
+                return;
+            }
+
+            if (nameplate.Size != entity.SettlementNameplateSize)
+            {
+                GetNameplateList(nameplate.Size)?.Remove(nameplate);
+                nameplate.UpdateIdentity(entity);
+                GetNameplateList(nameplate.Size)?.Add(nameplate);
+                return;
+            }
+            nameplate.UpdateIdentity(entity);
+        }
+
+        internal void Remove(string entityId)
+        {
+            if (string.IsNullOrWhiteSpace(entityId) ||
+                !_nameplatesById.TryGetValue(
+                    entityId,
+                    out CoopCampaignMapPrototypeSettlementNameplateVM nameplate))
+            {
+                return;
+            }
+
+            _nameplatesById.Remove(entityId);
+            GetNameplateList(nameplate.Size)?.Remove(nameplate);
+            nameplate.OnFinalize();
+        }
+
         internal void UpdatePosition(
             string entityId,
             Vec3 worldPosition,
@@ -119,6 +164,18 @@ namespace CoopSpectator.UI
                 return;
             }
             nameplate.UpdatePosition(worldPosition, camera);
+        }
+
+        internal void Hide(string entityId)
+        {
+            if (string.IsNullOrEmpty(entityId) ||
+                !_nameplatesById.TryGetValue(
+                    entityId,
+                    out CoopCampaignMapPrototypeSettlementNameplateVM nameplate))
+            {
+                return;
+            }
+            nameplate.Hide();
         }
 
         internal void HideAll()
@@ -416,10 +473,19 @@ namespace CoopSpectator.UI
                     ? new Vec2(x, y)
                     : new Vec2(-1000f, -1000f);
                 IsInside = isInside;
-                IsVisibleOnMap = isInFront && isInside;
+                float distanceToCamera =
+                    worldPosition.Distance(camera.Position);
+                IsVisibleOnMap =
+                    CoopCampaignMapPrototypeVisibilityPolicy
+                        .ShouldShowSettlement(
+                            Size,
+                            camera.Position.z,
+                            distanceToCamera,
+                            isInFront,
+                            isInside);
                 WPos = isInFront ? 1.1f : -1f;
                 WSign = isInFront ? 1 : -1;
-                DistanceToCamera = worldPosition.Distance(camera.Position);
+                DistanceToCamera = distanceToCamera;
             }
             catch
             {

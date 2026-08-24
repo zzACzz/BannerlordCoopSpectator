@@ -300,6 +300,434 @@ namespace CoopSpectator.Network.Messages
     }
 
     [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromServer)]
+    public sealed class CoopCampaignMapCatalogManifestMessage :
+        GameNetworkMessage
+    {
+        private static readonly CompressionInfo.Integer ProtocolCompression =
+            new CompressionInfo.Integer(0, 15, true);
+        private static readonly CompressionInfo.Integer TransferCompression =
+            new CompressionInfo.Integer(
+                0,
+                CoopCampaignMapCatalogChunkCodec.MaxTransferId,
+                true);
+        private static readonly CompressionInfo.Integer RevisionCompression =
+            new CompressionInfo.Integer(0, int.MaxValue, true);
+        private static readonly CompressionInfo.Integer SchemaCompression =
+            new CompressionInfo.Integer(0, 255, true);
+        private static readonly CompressionInfo.Integer LogicalSizeCompression =
+            new CompressionInfo.Integer(
+                0,
+                CoopCampaignMapPrototypeContract.MaxCatalogLogicalBytes,
+                true);
+        private static readonly CompressionInfo.Integer WireSizeCompression =
+            new CompressionInfo.Integer(
+                0,
+                CoopCampaignMapCatalogChunkCodec.MaxWireBytes,
+                true);
+        private static readonly CompressionInfo.Integer ChunkCountCompression =
+            new CompressionInfo.Integer(
+                1,
+                CoopCampaignMapCatalogChunkCodec.MaxChunkCount,
+                true);
+        private static readonly CompressionInfo.Integer CompressionCompression =
+            new CompressionInfo.Integer(0, 1, true);
+
+        public CoopCampaignMapCatalogManifestMessage(
+            int transferId,
+            int revision,
+            int logicalByteCount,
+            int wireByteCount,
+            int chunkCount,
+            CoopCampaignMapCatalogCompressionKind compressionKind,
+            string payloadHash)
+        {
+            ProtocolVersion =
+                CoopCampaignMapPrototypeContract.ProtocolVersion;
+            TransferId = transferId;
+            Revision = revision;
+            SchemaVersion =
+                CoopCampaignMapCatalogBinarySerializer.SchemaVersion;
+            LogicalByteCount = logicalByteCount;
+            WireByteCount = wireByteCount;
+            ChunkCount = chunkCount;
+            CompressionKind = compressionKind;
+            PayloadHash = payloadHash ?? string.Empty;
+        }
+
+        public CoopCampaignMapCatalogManifestMessage()
+        {
+            ChunkCount = 1;
+            PayloadHash = string.Empty;
+        }
+
+        public int ProtocolVersion { get; private set; }
+
+        public int TransferId { get; private set; }
+
+        public int Revision { get; private set; }
+
+        public int SchemaVersion { get; private set; }
+
+        public int LogicalByteCount { get; private set; }
+
+        public int WireByteCount { get; private set; }
+
+        public int ChunkCount { get; private set; }
+
+        public CoopCampaignMapCatalogCompressionKind CompressionKind
+        {
+            get;
+            private set;
+        }
+
+        public string PayloadHash { get; private set; }
+
+        protected override bool OnRead()
+        {
+            bool valid = true;
+            ProtocolVersion = ReadIntFromPacket(
+                ProtocolCompression,
+                ref valid);
+            TransferId = ReadIntFromPacket(TransferCompression, ref valid);
+            Revision = ReadIntFromPacket(RevisionCompression, ref valid);
+            SchemaVersion = ReadIntFromPacket(SchemaCompression, ref valid);
+            LogicalByteCount = ReadIntFromPacket(
+                LogicalSizeCompression,
+                ref valid);
+            WireByteCount = ReadIntFromPacket(
+                WireSizeCompression,
+                ref valid);
+            ChunkCount = ReadIntFromPacket(
+                ChunkCountCompression,
+                ref valid);
+            CompressionKind = (CoopCampaignMapCatalogCompressionKind)
+                ReadIntFromPacket(CompressionCompression, ref valid);
+            PayloadHash = ReadStringFromPacket(ref valid) ?? string.Empty;
+            return valid;
+        }
+
+        protected override void OnWrite()
+        {
+            WriteIntToPacket(ProtocolVersion, ProtocolCompression);
+            WriteIntToPacket(TransferId, TransferCompression);
+            WriteIntToPacket(Revision, RevisionCompression);
+            WriteIntToPacket(SchemaVersion, SchemaCompression);
+            WriteIntToPacket(
+                LogicalByteCount,
+                LogicalSizeCompression);
+            WriteIntToPacket(WireByteCount, WireSizeCompression);
+            WriteIntToPacket(ChunkCount, ChunkCountCompression);
+            WriteIntToPacket(
+                (int)CompressionKind,
+                CompressionCompression);
+            WriteStringToPacket(PayloadHash ?? string.Empty);
+        }
+
+        protected override MultiplayerMessageFilter OnGetLogFilter() =>
+            MultiplayerMessageFilter.Mission;
+
+        protected override string OnGetLogFormat() =>
+            "CoopCampaignMapCatalogManifest TransferId=" + TransferId +
+            " Revision=" + Revision +
+            " LogicalBytes=" + LogicalByteCount +
+            " WireBytes=" + WireByteCount +
+            " Chunks=" + ChunkCount;
+    }
+
+    [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromServer)]
+    public sealed class CoopCampaignMapCatalogChunkMessage : GameNetworkMessage
+    {
+        public const int MaxChunkBytes =
+            CoopCampaignMapCatalogChunkCodec.MaxChunkBytes;
+
+        private static readonly CompressionInfo.Integer ProtocolCompression =
+            new CompressionInfo.Integer(0, 15, true);
+        private static readonly CompressionInfo.Integer TransferCompression =
+            new CompressionInfo.Integer(
+                0,
+                CoopCampaignMapCatalogChunkCodec.MaxTransferId,
+                true);
+        private static readonly CompressionInfo.Integer ChunkIndexCompression =
+            new CompressionInfo.Integer(
+                0,
+                CoopCampaignMapCatalogChunkCodec.MaxChunkCount,
+                true);
+        private static readonly CompressionInfo.Integer ChunkCountCompression =
+            new CompressionInfo.Integer(
+                1,
+                CoopCampaignMapCatalogChunkCodec.MaxChunkCount,
+                true);
+
+        public CoopCampaignMapCatalogChunkMessage(
+            int transferId,
+            int chunkIndex,
+            int chunkCount,
+            byte[] payloadBytes)
+        {
+            ProtocolVersion =
+                CoopCampaignMapPrototypeContract.ProtocolVersion;
+            TransferId = transferId;
+            ChunkIndex = chunkIndex;
+            ChunkCount = chunkCount;
+            PayloadBytes = payloadBytes ?? Array.Empty<byte>();
+        }
+
+        public CoopCampaignMapCatalogChunkMessage()
+        {
+            ChunkCount = 1;
+            PayloadBytes = Array.Empty<byte>();
+        }
+
+        public int ProtocolVersion { get; private set; }
+
+        public int TransferId { get; private set; }
+
+        public int ChunkIndex { get; private set; }
+
+        public int ChunkCount { get; private set; }
+
+        public byte[] PayloadBytes { get; private set; }
+
+        protected override bool OnRead()
+        {
+            bool valid = true;
+            ProtocolVersion = ReadIntFromPacket(
+                ProtocolCompression,
+                ref valid);
+            TransferId = ReadIntFromPacket(TransferCompression, ref valid);
+            ChunkIndex = ReadIntFromPacket(
+                ChunkIndexCompression,
+                ref valid);
+            ChunkCount = ReadIntFromPacket(
+                ChunkCountCompression,
+                ref valid);
+            var buffer = new byte[MaxChunkBytes];
+            int bytesRead = ReadByteArrayFromPacket(
+                buffer,
+                0,
+                buffer.Length,
+                ref valid);
+            if (bytesRead <= 0)
+            {
+                PayloadBytes = Array.Empty<byte>();
+            }
+            else if (bytesRead == buffer.Length)
+            {
+                PayloadBytes = buffer;
+            }
+            else
+            {
+                PayloadBytes = new byte[bytesRead];
+                Buffer.BlockCopy(buffer, 0, PayloadBytes, 0, bytesRead);
+            }
+            return valid;
+        }
+
+        protected override void OnWrite()
+        {
+            byte[] payloadBytes = PayloadBytes ?? Array.Empty<byte>();
+            int payloadLength = Math.Min(
+                payloadBytes.Length,
+                MaxChunkBytes);
+            WriteIntToPacket(ProtocolVersion, ProtocolCompression);
+            WriteIntToPacket(TransferId, TransferCompression);
+            WriteIntToPacket(ChunkIndex, ChunkIndexCompression);
+            WriteIntToPacket(ChunkCount, ChunkCountCompression);
+            if (payloadLength > 0)
+                WriteByteArrayToPacket(payloadBytes, 0, payloadLength);
+        }
+
+        protected override MultiplayerMessageFilter OnGetLogFilter() =>
+            MultiplayerMessageFilter.Mission;
+
+        protected override string OnGetLogFormat() =>
+            "CoopCampaignMapCatalogChunk TransferId=" + TransferId +
+            " Chunk=" + ChunkIndex + "/" + ChunkCount +
+            " Bytes=" + (PayloadBytes?.Length ?? 0);
+    }
+
+    [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromClient)]
+    public sealed class CoopCampaignMapCatalogRangeAckMessage :
+        GameNetworkMessage
+    {
+        private static readonly CompressionInfo.Integer ProtocolCompression =
+            new CompressionInfo.Integer(0, 15, true);
+        private static readonly CompressionInfo.Integer TransferCompression =
+            new CompressionInfo.Integer(
+                0,
+                CoopCampaignMapCatalogChunkCodec.MaxTransferId,
+                true);
+        private static readonly CompressionInfo.Integer ChunkIndexCompression =
+            new CompressionInfo.Integer(
+                -1,
+                CoopCampaignMapCatalogChunkCodec.MaxChunkCount,
+                true);
+        private static readonly CompressionInfo.Integer ChunkCountCompression =
+            new CompressionInfo.Integer(
+                0,
+                CoopCampaignMapCatalogChunkCodec.MaxChunkCount,
+                true);
+
+        public CoopCampaignMapCatalogRangeAckMessage(
+            int transferId,
+            int requestedStartChunkIndex,
+            int requestedEndChunkIndex,
+            int highestContiguousChunkIndex,
+            int receivedChunkCount)
+        {
+            ProtocolVersion =
+                CoopCampaignMapPrototypeContract.ProtocolVersion;
+            TransferId = transferId;
+            RequestedStartChunkIndex = requestedStartChunkIndex;
+            RequestedEndChunkIndex = requestedEndChunkIndex;
+            HighestContiguousChunkIndex = highestContiguousChunkIndex;
+            ReceivedChunkCount = receivedChunkCount;
+        }
+
+        public CoopCampaignMapCatalogRangeAckMessage()
+        {
+            RequestedStartChunkIndex = -1;
+            RequestedEndChunkIndex = -1;
+            HighestContiguousChunkIndex = -1;
+        }
+
+        public int ProtocolVersion { get; private set; }
+
+        public int TransferId { get; private set; }
+
+        public int RequestedStartChunkIndex { get; private set; }
+
+        public int RequestedEndChunkIndex { get; private set; }
+
+        public int HighestContiguousChunkIndex { get; private set; }
+
+        public int ReceivedChunkCount { get; private set; }
+
+        protected override bool OnRead()
+        {
+            bool valid = true;
+            ProtocolVersion = ReadIntFromPacket(
+                ProtocolCompression,
+                ref valid);
+            TransferId = ReadIntFromPacket(TransferCompression, ref valid);
+            RequestedStartChunkIndex = ReadIntFromPacket(
+                ChunkIndexCompression,
+                ref valid);
+            RequestedEndChunkIndex = ReadIntFromPacket(
+                ChunkIndexCompression,
+                ref valid);
+            HighestContiguousChunkIndex = ReadIntFromPacket(
+                ChunkIndexCompression,
+                ref valid);
+            ReceivedChunkCount = ReadIntFromPacket(
+                ChunkCountCompression,
+                ref valid);
+            return valid;
+        }
+
+        protected override void OnWrite()
+        {
+            WriteIntToPacket(ProtocolVersion, ProtocolCompression);
+            WriteIntToPacket(TransferId, TransferCompression);
+            WriteIntToPacket(
+                RequestedStartChunkIndex,
+                ChunkIndexCompression);
+            WriteIntToPacket(
+                RequestedEndChunkIndex,
+                ChunkIndexCompression);
+            WriteIntToPacket(
+                HighestContiguousChunkIndex,
+                ChunkIndexCompression);
+            WriteIntToPacket(
+                ReceivedChunkCount,
+                ChunkCountCompression);
+        }
+
+        protected override MultiplayerMessageFilter OnGetLogFilter() =>
+            MultiplayerMessageFilter.Mission;
+
+        protected override string OnGetLogFormat() =>
+            "CoopCampaignMapCatalogRangeAck TransferId=" + TransferId +
+            " Request=" + RequestedStartChunkIndex + "-" +
+            RequestedEndChunkIndex +
+            " HighestContiguous=" + HighestContiguousChunkIndex;
+    }
+
+    [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromClient)]
+    public sealed class CoopCampaignMapCatalogCompleteAckMessage :
+        GameNetworkMessage
+    {
+        private static readonly CompressionInfo.Integer ProtocolCompression =
+            new CompressionInfo.Integer(0, 15, true);
+        private static readonly CompressionInfo.Integer TransferCompression =
+            new CompressionInfo.Integer(
+                0,
+                CoopCampaignMapCatalogChunkCodec.MaxTransferId,
+                true);
+        private static readonly CompressionInfo.Integer RevisionCompression =
+            new CompressionInfo.Integer(0, int.MaxValue, true);
+
+        public CoopCampaignMapCatalogCompleteAckMessage(
+            int transferId,
+            int revision,
+            bool appliedSuccessfully,
+            string payloadHash)
+        {
+            ProtocolVersion =
+                CoopCampaignMapPrototypeContract.ProtocolVersion;
+            TransferId = transferId;
+            Revision = revision;
+            AppliedSuccessfully = appliedSuccessfully;
+            PayloadHash = payloadHash ?? string.Empty;
+        }
+
+        public CoopCampaignMapCatalogCompleteAckMessage()
+        {
+            PayloadHash = string.Empty;
+        }
+
+        public int ProtocolVersion { get; private set; }
+
+        public int TransferId { get; private set; }
+
+        public int Revision { get; private set; }
+
+        public bool AppliedSuccessfully { get; private set; }
+
+        public string PayloadHash { get; private set; }
+
+        protected override bool OnRead()
+        {
+            bool valid = true;
+            ProtocolVersion = ReadIntFromPacket(
+                ProtocolCompression,
+                ref valid);
+            TransferId = ReadIntFromPacket(TransferCompression, ref valid);
+            Revision = ReadIntFromPacket(RevisionCompression, ref valid);
+            AppliedSuccessfully = ReadBoolFromPacket(ref valid);
+            PayloadHash = ReadStringFromPacket(ref valid) ?? string.Empty;
+            return valid;
+        }
+
+        protected override void OnWrite()
+        {
+            WriteIntToPacket(ProtocolVersion, ProtocolCompression);
+            WriteIntToPacket(TransferId, TransferCompression);
+            WriteIntToPacket(Revision, RevisionCompression);
+            WriteBoolToPacket(AppliedSuccessfully);
+            WriteStringToPacket(PayloadHash ?? string.Empty);
+        }
+
+        protected override MultiplayerMessageFilter OnGetLogFilter() =>
+            MultiplayerMessageFilter.Mission;
+
+        protected override string OnGetLogFormat() =>
+            "CoopCampaignMapCatalogCompleteAck TransferId=" + TransferId +
+            " Revision=" + Revision +
+            " Applied=" + AppliedSuccessfully;
+    }
+
+    [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromServer)]
     public sealed class CoopCampaignMapDynamicSnapshotMessage : GameNetworkMessage
     {
         private static readonly CompressionInfo.Integer ProtocolCompression =
@@ -351,7 +779,7 @@ namespace CoopSpectator.Network.Messages
         private static readonly CompressionInfo.Integer RevisionCompression = new CompressionInfo.Integer(0, int.MaxValue, true);
         private static readonly CompressionInfo.Integer TotalCompression = new CompressionInfo.Integer(0, CoopCampaignMapPrototypeContract.MaxDynamicEntities, true);
         private static readonly CompressionInfo.Integer IndexCompression = new CompressionInfo.Integer(0, CoopCampaignMapPrototypeContract.MaxDynamicEntities - 1, true);
-        private static readonly CompressionInfo.Integer BatchCompression = new CompressionInfo.Integer(0, CoopCampaignMapPrototypeContract.MaxDynamicBatchSize, true);
+        private static readonly CompressionInfo.Integer BatchCompression = new CompressionInfo.Integer(0, CoopCampaignMapPrototypeContract.DynamicBatchCompressionMaximum, true);
         private static readonly CompressionInfo.Integer UnitCompression = new CompressionInfo.Integer(0, CoopCampaignMapPrototypeContract.UnitScale, true);
         private static readonly CompressionInfo.Integer SizeCompression = new CompressionInfo.Integer(0, CoopCampaignMapPrototypeContract.MaximumPartySize, true);
 
@@ -394,6 +822,9 @@ namespace CoopSpectator.Network.Messages
             StartIndex = ReadIntFromPacket(IndexCompression, ref valid);
             ExpectedCount = ReadIntFromPacket(TotalCompression, ref valid);
             int batchCount = ReadIntFromPacket(BatchCompression, ref valid);
+            valid = valid &&
+                    batchCount <=
+                    CoopCampaignMapPrototypeContract.MaxDynamicBatchSize;
             var entities = new List<CoopCampaignMapPrototypeDynamicEntityState>(batchCount);
             for (int index = 0; index < batchCount; index++)
             {

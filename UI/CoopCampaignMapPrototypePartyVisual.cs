@@ -19,6 +19,8 @@ namespace CoopSpectator.UI
         private AgentVisuals _humanVisual;
         private AgentVisuals _mountVisual;
         private AgentVisuals _caravanMountVisual;
+        private MatrixFrame _lastAppliedWorldFrame;
+        private bool _hasLastAppliedWorldFrame;
 
         internal bool IsUsable =>
             HasValidEntity(_humanVisual) &&
@@ -77,18 +79,10 @@ namespace CoopSpectator.UI
                 ? Math.Max(0f, Math.Min(20f, speed))
                 : 0f;
 
-            SetFrame(_mountVisual, worldFrame);
-            SetFrame(_humanVisual, worldFrame);
-            MatrixFrame caravanFrame = worldFrame;
-            caravanFrame.origin +=
-                worldFrame.rotation.s * CaravanMountOffset.x +
-                worldFrame.rotation.f * CaravanMountOffset.y +
-                worldFrame.rotation.u * CaravanMountOffset.z;
-            SetFrame(_caravanMountVisual, caravanFrame);
-
             _humanVisual?.Tick(_mountVisual, safeDt, isMoving, safeSpeed);
             _mountVisual?.Tick(null, safeDt, isMoving, safeSpeed);
             _caravanMountVisual?.Tick(null, safeDt, isMoving, safeSpeed);
+            ApplyFrame(worldFrame, force: false);
         }
 
         internal void SetVisible(bool visible)
@@ -106,6 +100,7 @@ namespace CoopSpectator.UI
             _humanVisual = null;
             _mountVisual = null;
             _caravanMountVisual = null;
+            _hasLastAppliedWorldFrame = false;
 
             ResetVisual(humanVisual);
             ResetVisual(mountVisual);
@@ -236,11 +231,9 @@ namespace CoopSpectator.UI
             MatrixFrame initialFrame,
             out CoopCampaignMapPrototypePartyVisual visual)
         {
-            SetFrame(candidate._mountVisual, initialFrame);
             candidate._mountVisual?.Tick(null, 0.0001f, false, 0f);
             ForceUpdateBoneFrames(candidate._mountVisual);
 
-            SetFrame(candidate._humanVisual, initialFrame);
             candidate._humanVisual?.Tick(
                 candidate._mountVisual,
                 0.0001f,
@@ -248,14 +241,9 @@ namespace CoopSpectator.UI
                 0f);
             ForceUpdateBoneFrames(candidate._humanVisual);
 
-            MatrixFrame caravanFrame = initialFrame;
-            caravanFrame.origin +=
-                initialFrame.rotation.s * CaravanMountOffset.x +
-                initialFrame.rotation.f * CaravanMountOffset.y +
-                initialFrame.rotation.u * CaravanMountOffset.z;
-            SetFrame(candidate._caravanMountVisual, caravanFrame);
             candidate._caravanMountVisual?.Tick(null, 0.0001f, false, 0f);
             ForceUpdateBoneFrames(candidate._caravanMountVisual);
+            candidate.ApplyFrame(initialFrame, force: true);
             candidate.SetVisible(true);
             if (!candidate.IsUsable)
                 return FailCandidate(candidate, out visual);
@@ -566,6 +554,27 @@ namespace CoopSpectator.UI
             }
         }
 
+        private void ApplyFrame(MatrixFrame worldFrame, bool force)
+        {
+            if (!force &&
+                _hasLastAppliedWorldFrame &&
+                _lastAppliedWorldFrame.NearlyEquals(worldFrame))
+            {
+                return;
+            }
+
+            SetFrame(_mountVisual, worldFrame);
+            SetFrame(_humanVisual, worldFrame);
+            MatrixFrame caravanFrame = worldFrame;
+            caravanFrame.origin +=
+                worldFrame.rotation.s * CaravanMountOffset.x +
+                worldFrame.rotation.f * CaravanMountOffset.y +
+                worldFrame.rotation.u * CaravanMountOffset.z;
+            SetFrame(_caravanMountVisual, caravanFrame);
+            _lastAppliedWorldFrame = worldFrame;
+            _hasLastAppliedWorldFrame = true;
+        }
+
         private static void SetFrame(
             AgentVisuals visual,
             MatrixFrame worldFrame)
@@ -573,13 +582,17 @@ namespace CoopSpectator.UI
             if (visual == null)
                 return;
 
+            worldFrame.rotation.ApplyScaleLocal(visual.GetScale());
             WeakGameEntity weakEntity = visual.GetWeakEntity();
-            if (weakEntity == WeakGameEntity.Invalid)
+            if (weakEntity != WeakGameEntity.Invalid)
+            {
+                weakEntity.SetFrame(ref worldFrame, true);
                 return;
+            }
 
-            Vec3 scale = Vec3.One * visual.GetScale();
-            worldFrame.Scale(in scale);
-            weakEntity.SetFrame(ref worldFrame, true);
+            GameEntity entity = visual.GetEntity();
+            if (entity != null)
+                entity.SetFrame(ref worldFrame, true);
         }
 
         private static void SetVisualVisible(

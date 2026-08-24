@@ -90,7 +90,42 @@ namespace CoopSpectator.UI
             }
         }
 
-        internal void UpdatePosition(
+        internal void Upsert(CoopCampaignMapPrototypeEntityState entity)
+        {
+            if (!CoopCampaignMapPrototypeContract.IsValidVisibleEntity(entity) ||
+                entity.Kind == CoopCampaignMapPrototypeEntityKind.Settlement)
+            {
+                return;
+            }
+
+            if (!_nameplatesById.TryGetValue(
+                    entity.EntityId,
+                    out CoopCampaignMapPrototypeEntityNameplateVM nameplate))
+            {
+                nameplate = new CoopCampaignMapPrototypeEntityNameplateVM(
+                    entity.EntityId);
+                _nameplatesById.Add(entity.EntityId, nameplate);
+                Nameplates.Add(nameplate);
+            }
+            nameplate.UpdateIdentity(entity);
+        }
+
+        internal void Remove(string entityId)
+        {
+            if (string.IsNullOrWhiteSpace(entityId) ||
+                !_nameplatesById.TryGetValue(
+                    entityId,
+                    out CoopCampaignMapPrototypeEntityNameplateVM nameplate))
+            {
+                return;
+            }
+
+            _nameplatesById.Remove(entityId);
+            Nameplates.Remove(nameplate);
+            nameplate.OnFinalize();
+        }
+
+        internal bool UpdatePosition(
             string entityId,
             Vec3 worldPosition,
             Vec3 headWorldPosition,
@@ -101,9 +136,24 @@ namespace CoopSpectator.UI
                     entityId,
                     out CoopCampaignMapPrototypeEntityNameplateVM nameplate))
             {
+                return false;
+            }
+            return nameplate.UpdatePosition(
+                worldPosition,
+                headWorldPosition,
+                camera);
+        }
+
+        internal void Hide(string entityId)
+        {
+            if (string.IsNullOrEmpty(entityId) ||
+                !_nameplatesById.TryGetValue(
+                    entityId,
+                    out CoopCampaignMapPrototypeEntityNameplateVM nameplate))
+            {
                 return;
             }
-            nameplate.UpdatePosition(worldPosition, headWorldPosition, camera);
+            nameplate.Hide();
         }
 
         internal void HideAll()
@@ -320,7 +370,7 @@ namespace CoopSpectator.UI
             UpdateBanner(entity.BannerCode, primaryColor, secondaryColor);
         }
 
-        internal void UpdatePosition(
+        internal bool UpdatePosition(
             Vec3 worldPosition,
             Vec3 headWorldPosition,
             Camera camera)
@@ -328,7 +378,7 @@ namespace CoopSpectator.UI
             if (camera == null)
             {
                 Hide();
-                return;
+                return false;
             }
 
             try
@@ -359,28 +409,35 @@ namespace CoopSpectator.UI
                     !IsFinite(headDepth))
                 {
                     Hide();
-                    return;
+                    return false;
                 }
 
                 IsBehind = depth <= 0f || headDepth <= 0f;
                 if (IsBehind)
                 {
                     Hide();
-                    return;
+                    return false;
                 }
 
                 Position = new Vec2(x, y);
                 HeadPosition = new Vec2(headX, headY);
                 DistanceToCamera = depth;
-                IsVisibleOnMap =
+                bool isInsideViewport =
                     x >= -180f &&
                     x <= Screen.RealScreenResolutionWidth + 180f &&
                     y >= -120f &&
                     y <= Screen.RealScreenResolutionHeight + 120f;
+                IsVisibleOnMap =
+                    CoopCampaignMapPrototypeVisibilityPolicy.ShouldShowParty(
+                        camera.Position.z,
+                        depth,
+                        isInsideViewport);
+                return IsVisibleOnMap;
             }
             catch
             {
                 Hide();
+                return false;
             }
         }
 

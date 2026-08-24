@@ -10,8 +10,14 @@ namespace CoopSpectator.MissionBehaviors
     public sealed class CoopCampaignMapPrototypeNetworkController : MissionNetwork
     {
         private const float BridgePollIntervalSeconds = 0.1f;
+        private const int CatalogRequestWindowChunks = 4;
+        private const int MaxCatalogChunksPerPeerPerTick = 2;
         private static readonly TimeSpan MaximumHostStateAge =
             TimeSpan.FromSeconds(2d);
+        private static readonly TimeSpan CatalogManifestRetryDelay =
+            TimeSpan.FromSeconds(2d);
+        private static readonly TimeSpan CatalogRangeRetryDelay =
+            TimeSpan.FromMilliseconds(500d);
 
         private CoopCampaignMapPrototypeState _serverState;
         private float _nextBridgePollAt;
@@ -27,6 +33,13 @@ namespace CoopSpectator.MissionBehaviors
             new List<CoopCampaignMapPrototypeCatalogEntityState>();
         private List<CoopCampaignMapPrototypeDynamicEntityState> _serverDynamic =
             new List<CoopCampaignMapPrototypeDynamicEntityState>();
+        private readonly Dictionary<int, ServerCatalogTransportState>
+            _serverCatalogTransportByPeer =
+                new Dictionary<int, ServerCatalogTransportState>();
+        private CoopCampaignMapCatalogChunkedPayload
+            _preparedCatalogPayload;
+        private int _preparedCatalogRevision = -1;
+        private int _catalogTransferId;
         private static readonly CoopCampaignMapPrototypeEntitySnapshotAssembler
             ClientEntityAssembler =
                 new CoopCampaignMapPrototypeEntitySnapshotAssembler();
@@ -42,6 +55,11 @@ namespace CoopSpectator.MissionBehaviors
             int,
             IReadOnlyList<CoopCampaignMapPrototypeCatalogEntityState>>
             ClientCatalogChanged;
+
+        public static event Action<
+            int,
+            IReadOnlyList<CoopCampaignMapPrototypeCatalogEntityState>>
+            ClientCatalogDeltaChanged;
 
         public static event Action<
             int,
@@ -67,9 +85,26 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly Dictionary<int, CoopCampaignMapPrototypeCatalogEntityState>
             ClientCatalogByIndex =
                 new Dictionary<int, CoopCampaignMapPrototypeCatalogEntityState>();
+        private static readonly Dictionary<
+            string,
+            CoopCampaignMapPrototypeCatalogEntityState> ClientCatalogById =
+                new Dictionary<
+                    string,
+                    CoopCampaignMapPrototypeCatalogEntityState>(
+                        StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<int, CoopCampaignMapPrototypeDynamicEntityState>
             ClientDynamicByIndex =
                 new Dictionary<int, CoopCampaignMapPrototypeDynamicEntityState>();
+        private static readonly Dictionary<
+            string,
+            CoopCampaignMapPrototypeDynamicEntityState> ClientDynamicById =
+                new Dictionary<
+                    string,
+                    CoopCampaignMapPrototypeDynamicEntityState>(
+                        StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, int>
+            ClientDynamicListIndexById =
+                new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private static int _clientCatalogActiveRevision = -1;
         private static int _clientCatalogExpectedCount;
         private static int _clientCatalogCompletedRevision = -1;
@@ -77,6 +112,11 @@ namespace CoopSpectator.MissionBehaviors
         private static int _clientDynamicExpectedCount;
         private static int _clientDynamicCompletedRevision = -1;
         private static int _clientMergedRevision;
+        private static ClientCatalogTransportState _clientCatalogTransport;
+        private static int _clientCompletedCatalogTransferId;
+        private static int _clientCompletedCatalogTransferRevision = -1;
+        private static string _clientCompletedCatalogTransferHash =
+            string.Empty;
 
         public override void OnBehaviorInitialize()
         {
@@ -100,6 +140,10 @@ namespace CoopSpectator.MissionBehaviors
             _networkDynamicRevision = 0;
             _serverCatalog.Clear();
             _serverDynamic.Clear();
+            _serverCatalogTransportByPeer.Clear();
+            _preparedCatalogPayload = null;
+            _preparedCatalogRevision = -1;
+            _catalogTransferId = 0;
             _lastAvailabilityReason = null;
             ModLogger.Info(
                 "CoopCampaignMapPrototypeNetworkController: awaiting authoritative host map bridge state.");
@@ -120,18 +164,35 @@ namespace CoopSpectator.MissionBehaviors
                     HandleServerCatalogSnapshot);
                 registerer.RegisterBaseHandler<CoopCampaignMapCatalogEntityMessage>(
                     HandleServerCatalogEntity);
+                registerer.RegisterBaseHandler<CoopCampaignMapCatalogManifestMessage>(
+                    HandleServerCatalogManifest);
+                registerer.RegisterBaseHandler<CoopCampaignMapCatalogChunkMessage>(
+                    HandleServerCatalogChunk);
                 registerer.RegisterBaseHandler<CoopCampaignMapDynamicSnapshotMessage>(
                     HandleServerDynamicSnapshot);
                 registerer.RegisterBaseHandler<CoopCampaignMapDynamicBatchMessage>(
                     HandleServerDynamicBatch);
+            }
+            else if (GameNetwork.IsServer)
+            {
+                registerer.RegisterBaseHandler<CoopCampaignMapCatalogRangeAckMessage>(
+                    HandleClientCatalogRangeAck);
+                registerer.RegisterBaseHandler<CoopCampaignMapCatalogCompleteAckMessage>(
+                    HandleClientCatalogCompleteAck);
             }
         }
 
         public override void OnMissionTick(float dt)
         {
             base.OnMissionTick(dt);
+            if (GameNetwork.IsClient)
+            {
+                TickClientCatalogTransport();
+                return;
+            }
             if (!GameNetwork.IsServer)
                 return;
+            TickServerCatalogTransports();
             if (Mission.CurrentTime < _nextBridgePollAt)
                 return;
 
@@ -204,6 +265,10 @@ namespace CoopSpectator.MissionBehaviors
                 _lastBridgeDynamicRevision = -1;
                 _serverCatalog.Clear();
                 _serverDynamic.Clear();
+                _serverCatalogTransportByPeer.Clear();
+                _preparedCatalogPayload = null;
+                _preparedCatalogRevision = -1;
+                _catalogTransferId = 0;
             }
 
             _lastBridgeSessionId = snapshot.SessionId;
@@ -216,19 +281,54 @@ namespace CoopSpectator.MissionBehaviors
             if (_serverState == null)
                 return;
 
+            List<CoopCampaignMapPrototypeCatalogEntityState> catalogDelta = null;
+            int previousNetworkCatalogRevision = _networkCatalogRevision;
             if (catalogChanged)
             {
                 _lastBridgeCatalogRevision = snapshot.CatalogRevision;
-                if (_networkCatalogRevision < int.MaxValue)
-                    _networkCatalogRevision++;
-                _serverCatalog = CloneCatalog(catalogSnapshot?.Entities);
+                List<CoopCampaignMapPrototypeCatalogEntityState> incomingCatalog =
+                    CloneCatalog(catalogSnapshot?.Entities);
+                if (!sameSession)
+                {
+                    if (_networkCatalogRevision < int.MaxValue)
+                        _networkCatalogRevision++;
+                    _serverCatalog = incomingCatalog;
+                    PrepareCatalogTransport(
+                        _networkCatalogRevision,
+                        _serverCatalog);
+                }
+                else
+                {
+                    catalogDelta =
+                        CoopCampaignMapPrototypeCatalogDeltaPolicy.BuildDelta(
+                            _serverCatalog,
+                            incomingCatalog);
+                    _serverCatalog = incomingCatalog;
+                    if (catalogDelta.Count > 0)
+                    {
+                        if (_networkCatalogRevision < int.MaxValue)
+                            _networkCatalogRevision++;
+                        _preparedCatalogPayload = null;
+                        _preparedCatalogRevision = -1;
+                    }
+                }
             }
+            List<CoopCampaignMapPrototypeDynamicEntityState> dynamicDelta = null;
             if (dynamicChanged)
             {
                 _lastBridgeDynamicRevision = snapshot.DynamicRevision;
-                if (_networkDynamicRevision < int.MaxValue)
+                List<CoopCampaignMapPrototypeDynamicEntityState> incomingDynamic =
+                    CloneDynamic(dynamicSnapshot?.Entities);
+                dynamicDelta =
+                    CoopCampaignMapPrototypeDynamicDeltaPolicy.BuildDelta(
+                        _serverDynamic,
+                        incomingDynamic);
+                _serverDynamic = incomingDynamic;
+                if (dynamicDelta.Count > 0 &&
+                    _networkDynamicRevision < int.MaxValue)
+                {
                     _networkDynamicRevision++;
-                _serverDynamic = CloneDynamic(dynamicSnapshot?.Entities);
+                }
             }
             _serverState.VisibleEntitiesRevision = _networkDynamicRevision;
             _serverState.CatalogRevision = _networkCatalogRevision;
@@ -238,10 +338,15 @@ namespace CoopSpectator.MissionBehaviors
                 "authoritative:session=" + snapshot.SessionId);
             BroadcastState(_serverState);
 
-            if (catalogChanged)
-                BroadcastCatalog(_networkCatalogRevision, _serverCatalog);
-            if (dynamicChanged)
-                BroadcastDynamic(_networkDynamicRevision, _serverDynamic);
+            if (catalogChanged && !sameSession)
+                QueueCatalogTransportForAllPeers();
+            else if (catalogDelta != null && catalogDelta.Count > 0)
+                SendCatalogDeltaToReadyPeers(
+                    previousNetworkCatalogRevision,
+                    _networkCatalogRevision,
+                    catalogDelta);
+            if (dynamicDelta != null && dynamicDelta.Count > 0)
+                BroadcastDynamic(_networkDynamicRevision, dynamicDelta);
         }
 
         protected override void HandleNewClientAfterSynchronized(
@@ -254,10 +359,7 @@ namespace CoopSpectator.MissionBehaviors
                 _serverState != null)
             {
                 SendState(networkPeer, _serverState);
-                SendCatalog(
-                    networkPeer,
-                    _networkCatalogRevision,
-                    _serverCatalog);
+                QueueCatalogTransport(networkPeer);
                 SendDynamic(
                     networkPeer,
                     _networkDynamicRevision,
@@ -282,8 +384,20 @@ namespace CoopSpectator.MissionBehaviors
             _networkDynamicRevision = 0;
             _serverCatalog.Clear();
             _serverDynamic.Clear();
+            _serverCatalogTransportByPeer.Clear();
+            _preparedCatalogPayload = null;
+            _preparedCatalogRevision = -1;
+            _catalogTransferId = 0;
             _lastAvailabilityReason = null;
             base.OnMissionStateFinalized();
+        }
+
+        protected override void HandlePlayerDisconnect(
+            NetworkCommunicator networkPeer)
+        {
+            base.HandlePlayerDisconnect(networkPeer);
+            if (networkPeer != null)
+                _serverCatalogTransportByPeer.Remove(networkPeer.Index);
         }
 
         private void LogAvailabilityTransition(string reason)
@@ -397,7 +511,7 @@ namespace CoopSpectator.MissionBehaviors
             _clientCatalogExpectedCount = message.EntityCount;
             ClientCatalogByIndex.Clear();
             if (message.EntityCount == 0)
-                ApplyCompletedCatalog(message.Revision,
+                ApplyCompletedCatalogDelta(message.Revision,
                     new List<CoopCampaignMapPrototypeCatalogEntityState>());
         }
 
@@ -437,7 +551,191 @@ namespace CoopSpectator.MissionBehaviors
                 }
                 completed.Add(entity.Clone());
             }
-            ApplyCompletedCatalog(message.Revision, completed);
+            ApplyCompletedCatalogDelta(message.Revision, completed);
+        }
+
+        private static void HandleServerCatalogManifest(
+            GameNetworkMessage baseMessage)
+        {
+            CoopCampaignMapCatalogManifestMessage message =
+                baseMessage as CoopCampaignMapCatalogManifestMessage;
+            if (message == null ||
+                message.ProtocolVersion !=
+                    CoopCampaignMapPrototypeContract.ProtocolVersion ||
+                message.SchemaVersion !=
+                    CoopCampaignMapCatalogBinarySerializer.SchemaVersion)
+            {
+                return;
+            }
+
+            if (message.Revision <= _clientCatalogCompletedRevision)
+            {
+                if (message.TransferId ==
+                        _clientCompletedCatalogTransferId &&
+                    message.Revision ==
+                        _clientCompletedCatalogTransferRevision &&
+                    string.Equals(
+                        message.PayloadHash,
+                        _clientCompletedCatalogTransferHash,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    SendClientCatalogCompleteAck(
+                        message.TransferId,
+                        message.Revision,
+                        message.PayloadHash,
+                        true);
+                }
+                return;
+            }
+
+            if (_clientCatalogTransport != null &&
+                _clientCatalogTransport.Accumulator.TransferId ==
+                    message.TransferId &&
+                _clientCatalogTransport.Accumulator.Revision ==
+                    message.Revision &&
+                string.Equals(
+                    _clientCatalogTransport.Accumulator.PayloadHash,
+                    message.PayloadHash,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                SendClientCatalogRangeAck(_clientCatalogTransport);
+                return;
+            }
+
+            if (!CoopCampaignMapCatalogChunkAccumulator.TryCreate(
+                    message.TransferId,
+                    message.Revision,
+                    message.LogicalByteCount,
+                    message.WireByteCount,
+                    message.ChunkCount,
+                    message.CompressionKind,
+                    message.PayloadHash,
+                    out CoopCampaignMapCatalogChunkAccumulator accumulator,
+                    out _))
+            {
+                return;
+            }
+
+            _clientCatalogTransport =
+                new ClientCatalogTransportState(accumulator);
+            SendClientCatalogRangeAck(_clientCatalogTransport);
+        }
+
+        private static void HandleServerCatalogChunk(
+            GameNetworkMessage baseMessage)
+        {
+            CoopCampaignMapCatalogChunkMessage message =
+                baseMessage as CoopCampaignMapCatalogChunkMessage;
+            ClientCatalogTransportState state = _clientCatalogTransport;
+            if (message == null ||
+                state == null ||
+                message.ProtocolVersion !=
+                    CoopCampaignMapPrototypeContract.ProtocolVersion ||
+                message.TransferId != state.Accumulator.TransferId)
+            {
+                return;
+            }
+
+            int receivedBefore = state.Accumulator.ReceivedChunkCount;
+            if (!state.Accumulator.TryAccept(
+                    message.ChunkIndex,
+                    message.ChunkCount,
+                    message.PayloadBytes,
+                    out _))
+            {
+                return;
+            }
+            if (state.Accumulator.ReceivedChunkCount > receivedBefore)
+                state.LastUsefulChunkUtc = DateTime.UtcNow;
+
+            if (state.Accumulator.IsComplete)
+            {
+                CompleteClientCatalogTransport(state);
+                return;
+            }
+
+            if (state.Accumulator.HighestContiguousChunkIndex <
+                state.RequestedEndChunkIndex)
+            {
+                return;
+            }
+
+            state.AdvanceRequestedWindow();
+            SendClientCatalogRangeAck(state);
+        }
+
+        private bool HandleClientCatalogRangeAck(
+            NetworkCommunicator peer,
+            GameNetworkMessage baseMessage)
+        {
+            CoopCampaignMapCatalogRangeAckMessage message =
+                baseMessage as CoopCampaignMapCatalogRangeAckMessage;
+            if (peer == null ||
+                message == null ||
+                message.ProtocolVersion !=
+                    CoopCampaignMapPrototypeContract.ProtocolVersion ||
+                !_serverCatalogTransportByPeer.TryGetValue(
+                    peer.Index,
+                    out ServerCatalogTransportState state) ||
+                message.TransferId != state.TransferId ||
+                message.RequestedStartChunkIndex < 0 ||
+                message.RequestedEndChunkIndex <
+                    message.RequestedStartChunkIndex ||
+                message.RequestedEndChunkIndex >= state.Payload.ChunkCount ||
+                message.RequestedEndChunkIndex -
+                    message.RequestedStartChunkIndex + 1 >
+                    CatalogRequestWindowChunks ||
+                message.HighestContiguousChunkIndex < -1 ||
+                message.HighestContiguousChunkIndex >=
+                    state.Payload.ChunkCount ||
+                message.ReceivedChunkCount < 0 ||
+                message.ReceivedChunkCount > state.Payload.ChunkCount)
+            {
+                return false;
+            }
+
+            state.RequestRange(
+                message.RequestedStartChunkIndex,
+                message.RequestedEndChunkIndex,
+                message.HighestContiguousChunkIndex,
+                message.ReceivedChunkCount);
+            return true;
+        }
+
+        private bool HandleClientCatalogCompleteAck(
+            NetworkCommunicator peer,
+            GameNetworkMessage baseMessage)
+        {
+            CoopCampaignMapCatalogCompleteAckMessage message =
+                baseMessage as CoopCampaignMapCatalogCompleteAckMessage;
+            if (peer == null ||
+                message == null ||
+                message.ProtocolVersion !=
+                    CoopCampaignMapPrototypeContract.ProtocolVersion ||
+                !_serverCatalogTransportByPeer.TryGetValue(
+                    peer.Index,
+                    out ServerCatalogTransportState state) ||
+                message.TransferId != state.TransferId ||
+                message.Revision != state.Revision ||
+                !string.Equals(
+                    message.PayloadHash,
+                    state.Payload.PayloadHash,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (message.AppliedSuccessfully)
+            {
+                state.MarkCompleted();
+                if (state.AppliedRevision < _networkCatalogRevision)
+                    QueueCatalogTransport(peer);
+            }
+            else
+            {
+                state.ResetForRetry();
+            }
+            return true;
         }
 
         private static void HandleServerDynamicSnapshot(
@@ -510,12 +808,137 @@ namespace CoopSpectator.MissionBehaviors
             ApplyCompletedDynamic(message.Revision, completed);
         }
 
+        private static void TickClientCatalogTransport()
+        {
+            ClientCatalogTransportState state = _clientCatalogTransport;
+            if (state == null || state.Accumulator.IsComplete)
+                return;
+            DateTime nowUtc = DateTime.UtcNow;
+            if (state.LastRangeRequestUtc != DateTime.MinValue &&
+                nowUtc - state.LastRangeRequestUtc < CatalogRangeRetryDelay)
+            {
+                return;
+            }
+            SendClientCatalogRangeAck(state);
+        }
+
+        private static void CompleteClientCatalogTransport(
+            ClientCatalogTransportState state)
+        {
+            bool applied = false;
+            if (state != null &&
+                state.Accumulator.TryComplete(
+                    out byte[] logicalBytes,
+                    out _) &&
+                CoopCampaignMapCatalogBinarySerializer.TryDeserialize(
+                    logicalBytes,
+                    out int decodedRevision,
+                    out List<CoopCampaignMapPrototypeCatalogEntityState>
+                        decodedEntities,
+                    out _) &&
+                decodedRevision == state.Accumulator.Revision &&
+                decodedRevision > _clientCatalogCompletedRevision)
+            {
+                ApplyCompletedCatalog(decodedRevision, decodedEntities);
+                _clientCompletedCatalogTransferId =
+                    state.Accumulator.TransferId;
+                _clientCompletedCatalogTransferRevision = decodedRevision;
+                _clientCompletedCatalogTransferHash =
+                    state.Accumulator.PayloadHash;
+                applied = true;
+            }
+
+            SendClientCatalogCompleteAck(state, applied);
+            _clientCatalogTransport = null;
+        }
+
+        private static void SendClientCatalogRangeAck(
+            ClientCatalogTransportState state)
+        {
+            if (state == null ||
+                state.RequestedStartChunkIndex < 0 ||
+                state.RequestedEndChunkIndex <
+                    state.RequestedStartChunkIndex ||
+                !GameNetwork.IsClient ||
+                !GameNetwork.IsSessionActive)
+            {
+                return;
+            }
+
+            try
+            {
+                GameNetwork.BeginModuleEventAsClient();
+                GameNetwork.WriteMessage(
+                    new CoopCampaignMapCatalogRangeAckMessage(
+                        state.Accumulator.TransferId,
+                        state.RequestedStartChunkIndex,
+                        state.RequestedEndChunkIndex,
+                        state.Accumulator.HighestContiguousChunkIndex,
+                        state.Accumulator.ReceivedChunkCount));
+                GameNetwork.EndModuleEventAsClient();
+                state.LastRangeRequestUtc = DateTime.UtcNow;
+            }
+            catch
+            {
+                // The bounded retry timer will attempt the same range again.
+            }
+        }
+
+        private static void SendClientCatalogCompleteAck(
+            ClientCatalogTransportState state,
+            bool appliedSuccessfully)
+        {
+            if (state == null)
+                return;
+            SendClientCatalogCompleteAck(
+                state.Accumulator.TransferId,
+                state.Accumulator.Revision,
+                state.Accumulator.PayloadHash,
+                appliedSuccessfully);
+        }
+
+        private static void SendClientCatalogCompleteAck(
+            int transferId,
+            int revision,
+            string payloadHash,
+            bool appliedSuccessfully)
+        {
+            if (
+                !GameNetwork.IsClient ||
+                !GameNetwork.IsSessionActive)
+            {
+                return;
+            }
+
+            try
+            {
+                GameNetwork.BeginModuleEventAsClient();
+                GameNetwork.WriteMessage(
+                    new CoopCampaignMapCatalogCompleteAckMessage(
+                        transferId,
+                        revision,
+                        appliedSuccessfully,
+                        payloadHash));
+                GameNetwork.EndModuleEventAsClient();
+            }
+            catch
+            {
+                // Mission shutdown can close the connection during completion.
+            }
+        }
+
         private static void ApplyCompletedCatalog(
             int revision,
             IReadOnlyList<CoopCampaignMapPrototypeCatalogEntityState> entities)
         {
             List<CoopCampaignMapPrototypeCatalogEntityState> snapshot =
                 CloneCatalog(entities);
+            ClientCatalogById.Clear();
+            foreach (CoopCampaignMapPrototypeCatalogEntityState entity in snapshot)
+            {
+                if (entity != null)
+                    ClientCatalogById[entity.EntityId] = entity.Clone();
+            }
             _clientCatalogCompletedRevision = revision;
             _clientCatalogActiveRevision = -1;
             _clientCatalogExpectedCount = 0;
@@ -534,20 +957,101 @@ namespace CoopSpectator.MissionBehaviors
             ApplyMergedReplica();
         }
 
+        private static void ApplyCompletedCatalogDelta(
+            int revision,
+            IReadOnlyList<CoopCampaignMapPrototypeCatalogEntityState> entities)
+        {
+            List<CoopCampaignMapPrototypeCatalogEntityState> updates =
+                CloneCatalog(entities);
+            foreach (CoopCampaignMapPrototypeCatalogEntityState update in updates)
+            {
+                if (update != null)
+                    ClientCatalogById[update.EntityId] = update.Clone();
+            }
+
+            var current = new List<CoopCampaignMapPrototypeCatalogEntityState>(
+                ClientCatalogById.Count);
+            foreach (CoopCampaignMapPrototypeCatalogEntityState entity in
+                     ClientCatalogById.Values)
+            {
+                current.Add(entity.Clone());
+            }
+            current.Sort(
+                (left, right) =>
+                {
+                    int kindComparison = left.Kind.CompareTo(right.Kind);
+                    return kindComparison != 0
+                        ? kindComparison
+                        : string.Compare(
+                            left.EntityId,
+                            right.EntityId,
+                            StringComparison.OrdinalIgnoreCase);
+                });
+
+            _clientCatalogCompletedRevision = revision;
+            _clientCatalogActiveRevision = -1;
+            _clientCatalogExpectedCount = 0;
+            ClientCatalogByIndex.Clear();
+            CurrentClientCatalog = current;
+            try
+            {
+                ClientCatalogDeltaChanged?.Invoke(
+                    revision,
+                    CloneCatalog(updates));
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Error(
+                    "CoopCampaignMapPrototypeNetworkController: catalog delta dispatch failed.",
+                    ex);
+            }
+            ApplyMergedReplica();
+        }
+
         private static void ApplyCompletedDynamic(
             int revision,
             IReadOnlyList<CoopCampaignMapPrototypeDynamicEntityState> entities)
         {
-            List<CoopCampaignMapPrototypeDynamicEntityState> snapshot =
+            List<CoopCampaignMapPrototypeDynamicEntityState> updates =
                 CloneDynamic(entities);
             _clientDynamicCompletedRevision = revision;
             _clientDynamicActiveRevision = -1;
             _clientDynamicExpectedCount = 0;
             ClientDynamicByIndex.Clear();
-            CurrentClientDynamic = snapshot;
+            List<CoopCampaignMapPrototypeDynamicEntityState> current =
+                CurrentClientDynamic as
+                    List<CoopCampaignMapPrototypeDynamicEntityState>;
+            if (current == null)
+            {
+                current = CloneDynamic(CurrentClientDynamic);
+                ClientDynamicListIndexById.Clear();
+                for (int index = 0; index < current.Count; index++)
+                {
+                    CoopCampaignMapPrototypeDynamicEntityState existing =
+                        current[index];
+                    if (existing != null)
+                        ClientDynamicListIndexById[existing.EntityId] = index;
+                }
+            }
+            foreach (CoopCampaignMapPrototypeDynamicEntityState update in updates)
+            {
+                ClientDynamicById[update.EntityId] = update.Clone();
+                if (ClientDynamicListIndexById.TryGetValue(
+                        update.EntityId,
+                        out int index))
+                {
+                    current[index] = update.Clone();
+                }
+                else
+                {
+                    ClientDynamicListIndexById[update.EntityId] = current.Count;
+                    current.Add(update.Clone());
+                }
+            }
+            CurrentClientDynamic = current;
             try
             {
-                ClientDynamicChanged?.Invoke(revision, CloneDynamic(snapshot));
+                ClientDynamicChanged?.Invoke(revision, CloneDynamic(updates));
             }
             catch (Exception ex)
             {
@@ -555,7 +1059,11 @@ namespace CoopSpectator.MissionBehaviors
                     "CoopCampaignMapPrototypeNetworkController: dynamic dispatch failed.",
                     ex);
             }
-            ApplyMergedReplica();
+            if (CurrentClientCatalog.Count > 0 &&
+                CurrentClientVisibleEntities.Count == 0)
+            {
+                ApplyMergedReplica();
+            }
         }
 
         private static void ApplyMergedReplica()
@@ -637,7 +1145,10 @@ namespace CoopSpectator.MissionBehaviors
         {
             ClientEntityAssembler.Reset();
             ClientCatalogByIndex.Clear();
+            ClientCatalogById.Clear();
             ClientDynamicByIndex.Clear();
+            ClientDynamicById.Clear();
+            ClientDynamicListIndexById.Clear();
             _clientCatalogActiveRevision = -1;
             _clientCatalogExpectedCount = 0;
             _clientCatalogCompletedRevision = -1;
@@ -645,6 +1156,10 @@ namespace CoopSpectator.MissionBehaviors
             _clientDynamicExpectedCount = 0;
             _clientDynamicCompletedRevision = -1;
             _clientMergedRevision = 0;
+            _clientCatalogTransport = null;
+            _clientCompletedCatalogTransferId = 0;
+            _clientCompletedCatalogTransferRevision = -1;
+            _clientCompletedCatalogTransferHash = string.Empty;
             CurrentClientCatalog =
                 new List<CoopCampaignMapPrototypeCatalogEntityState>();
             CurrentClientDynamic =
@@ -713,40 +1228,287 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        private static void BroadcastCatalog(
+        private bool PrepareCatalogTransport(
             int revision,
             IReadOnlyList<CoopCampaignMapPrototypeCatalogEntityState> entities)
         {
-            if (revision < 0)
+            _preparedCatalogPayload = null;
+            _preparedCatalogRevision = -1;
+            if (!CoopCampaignMapCatalogBinarySerializer.TrySerialize(
+                    revision,
+                    entities,
+                    out byte[] logicalBytes,
+                    out string reason) ||
+                !CoopCampaignMapCatalogChunkCodec.TryEncode(
+                    logicalBytes,
+                    out CoopCampaignMapCatalogChunkedPayload payload,
+                    out reason))
+            {
+                ModLogger.Info(
+                    "CoopCampaignMapPrototypeNetworkController: catalog transport preparation failed. Reason=" +
+                    (reason ?? "unknown") + ".");
+                return false;
+            }
+
+            int nextTransferId = _catalogTransferId >=
+                                 CoopCampaignMapCatalogChunkCodec.MaxTransferId
+                ? 1
+                : _catalogTransferId + 1;
+            if (nextTransferId <= 0)
+                nextTransferId = 1;
+            _catalogTransferId = nextTransferId;
+            _preparedCatalogRevision = revision;
+            _preparedCatalogPayload = payload;
+            ModLogger.Info(
+                "CoopCampaignMapPrototypeNetworkController: prepared chunked catalog. " +
+                "Revision=" + revision +
+                " Entities=" + (entities?.Count ?? 0) +
+                " LogicalBytes=" + payload.LogicalByteCount +
+                " WireBytes=" + payload.WireByteCount +
+                " Chunks=" + payload.ChunkCount + ".");
+            return true;
+        }
+
+        private void QueueCatalogTransportForAllPeers()
+        {
+            if (GameNetwork.NetworkPeers == null)
                 return;
+            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+                QueueCatalogTransport(peer);
+        }
+
+        private void QueueCatalogTransport(NetworkCommunicator peer)
+        {
+            if (peer == null ||
+                peer.IsServerPeer ||
+                !peer.IsConnectionActive ||
+                !peer.IsSynchronized)
+            {
+                return;
+            }
+
+            if ((_preparedCatalogPayload == null ||
+                 _preparedCatalogRevision != _networkCatalogRevision) &&
+                !PrepareCatalogTransport(
+                    _networkCatalogRevision,
+                    _serverCatalog))
+            {
+                return;
+            }
+            if (_catalogTransferId <= 0)
+                return;
+
+            if (_serverCatalogTransportByPeer.TryGetValue(
+                    peer.Index,
+                    out ServerCatalogTransportState existing) &&
+                !CoopCampaignMapCatalogTransferPolicy
+                    .ShouldStartPreparedTransfer(
+                        existing.TransferId,
+                        existing.Revision,
+                        existing.IsCompleted,
+                        _catalogTransferId,
+                        _preparedCatalogRevision))
+            {
+                return;
+            }
+
+            _serverCatalogTransportByPeer[peer.Index] =
+                new ServerCatalogTransportState(
+                    peer.Index,
+                    _catalogTransferId,
+                    _preparedCatalogRevision,
+                    _preparedCatalogPayload);
+        }
+
+        private void TickServerCatalogTransports()
+        {
+            if (GameNetwork.NetworkPeers == null)
+                return;
+
+            DateTime nowUtc = DateTime.UtcNow;
+            var states = new List<ServerCatalogTransportState>(
+                _serverCatalogTransportByPeer.Values);
+            foreach (ServerCatalogTransportState state in states)
+            {
+                NetworkCommunicator peer = FindNetworkPeer(state.PeerIndex);
+                if (peer == null ||
+                    !peer.IsConnectionActive ||
+                    !peer.IsSynchronized ||
+                    state.IsCompleted)
+                {
+                    continue;
+                }
+
+                if (!state.ManifestSent ||
+                    !state.HasActiveRange &&
+                    nowUtc - state.LastManifestSentUtc >=
+                        CatalogManifestRetryDelay)
+                {
+                    if (SendCatalogManifest(peer, state))
+                        state.MarkManifestSent(nowUtc);
+                }
+
+                int sentThisTick = 0;
+                while (sentThisTick < MaxCatalogChunksPerPeerPerTick &&
+                       state.TryGetNextChunkIndex(out int chunkIndex))
+                {
+                    if (!SendCatalogChunk(peer, state, chunkIndex))
+                        break;
+                    state.MarkChunkSent(chunkIndex);
+                    sentThisTick++;
+                }
+            }
+        }
+
+        private static NetworkCommunicator FindNetworkPeer(int peerIndex)
+        {
+            if (GameNetwork.NetworkPeers == null)
+                return null;
+            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+            {
+                if (peer != null && peer.Index == peerIndex)
+                    return peer;
+            }
+            return null;
+        }
+
+        private static bool SendCatalogManifest(
+            NetworkCommunicator peer,
+            ServerCatalogTransportState state)
+        {
             try
             {
-                int count = Math.Min(
-                    CoopCampaignMapPrototypeContract.MaxCatalogEntities,
-                    entities?.Count ?? 0);
-                GameNetwork.BeginBroadcastModuleEvent();
+                GameNetwork.BeginModuleEventAsServer(peer);
+                GameNetwork.WriteMessage(
+                    new CoopCampaignMapCatalogManifestMessage(
+                        state.TransferId,
+                        state.Revision,
+                        state.Payload.LogicalByteCount,
+                        state.Payload.WireByteCount,
+                        state.Payload.ChunkCount,
+                        state.Payload.CompressionKind,
+                        state.Payload.PayloadHash));
+                GameNetwork.EndModuleEventAsServer();
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool SendCatalogChunk(
+            NetworkCommunicator peer,
+            ServerCatalogTransportState state,
+            int chunkIndex)
+        {
+            if (chunkIndex < 0 ||
+                chunkIndex >= state.Payload.ChunkCount)
+            {
+                return false;
+            }
+
+            try
+            {
+                GameNetwork.BeginModuleEventAsServer(peer);
+                GameNetwork.WriteMessage(
+                    new CoopCampaignMapCatalogChunkMessage(
+                        state.TransferId,
+                        chunkIndex,
+                        state.Payload.ChunkCount,
+                        state.Payload.Chunks[chunkIndex]));
+                GameNetwork.EndModuleEventAsServer();
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void SendCatalogDeltaToReadyPeers(
+            int previousRevision,
+            int revision,
+            IReadOnlyList<CoopCampaignMapPrototypeCatalogEntityState> entities)
+        {
+            if (GameNetwork.NetworkPeers == null ||
+                entities == null ||
+                entities.Count == 0)
+            {
+                return;
+            }
+
+            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+            {
+                if (peer == null ||
+                    peer.IsServerPeer ||
+                    !peer.IsConnectionActive ||
+                    !peer.IsSynchronized)
+                {
+                    continue;
+                }
+
+                if (!_serverCatalogTransportByPeer.TryGetValue(
+                        peer.Index,
+                        out ServerCatalogTransportState state))
+                {
+                    QueueCatalogTransport(peer);
+                    continue;
+                }
+                if (!state.IsCompleted)
+                    continue;
+                if (state.AppliedRevision != previousRevision)
+                {
+                    QueueCatalogTransport(peer);
+                    continue;
+                }
+
+                if (SendCatalogDelta(peer, revision, entities))
+                    state.MarkCatalogRevision(revision);
+                else
+                    QueueCatalogTransport(peer);
+            }
+        }
+
+        private static bool SendCatalogDelta(
+            NetworkCommunicator peer,
+            int revision,
+            IReadOnlyList<CoopCampaignMapPrototypeCatalogEntityState> entities)
+        {
+            if (peer == null || revision < 0 || entities == null)
+                return false;
+
+            int count = Math.Min(
+                CoopCampaignMapPrototypeContract.MaxCatalogEntities,
+                entities.Count);
+            if (count <= 0)
+                return true;
+
+            try
+            {
+                GameNetwork.BeginModuleEventAsServer(peer);
                 GameNetwork.WriteMessage(
                     new CoopCampaignMapCatalogSnapshotMessage(revision, count));
-                GameNetwork.EndBroadcastModuleEvent(
-                    GameNetwork.EventBroadcastFlags.None);
+                GameNetwork.EndModuleEventAsServer();
                 for (int index = 0; index < count; index++)
                 {
-                    GameNetwork.BeginBroadcastModuleEvent();
+                    GameNetwork.BeginModuleEventAsServer(peer);
                     GameNetwork.WriteMessage(
                         new CoopCampaignMapCatalogEntityMessage(
                             revision,
                             index,
                             count,
                             entities[index]));
-                    GameNetwork.EndBroadcastModuleEvent(
-                        GameNetwork.EventBroadcastFlags.None);
+                    GameNetwork.EndModuleEventAsServer();
                 }
+                return true;
             }
             catch (Exception ex)
             {
                 ModLogger.Info(
-                    "CoopCampaignMapPrototypeNetworkController: catalog broadcast failed. Error=" +
-                    ex.Message + ".");
+                    "CoopCampaignMapPrototypeNetworkController: catalog delta direct send failed. Peer=" +
+                    peer.Index + " Error=" + ex.Message + ".");
+                return false;
             }
         }
 
@@ -856,42 +1618,6 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        private static void SendCatalog(
-            NetworkCommunicator peer,
-            int revision,
-            IReadOnlyList<CoopCampaignMapPrototypeCatalogEntityState> entities)
-        {
-            if (peer == null || revision < 0)
-                return;
-            try
-            {
-                int count = Math.Min(
-                    CoopCampaignMapPrototypeContract.MaxCatalogEntities,
-                    entities?.Count ?? 0);
-                GameNetwork.BeginModuleEventAsServer(peer);
-                GameNetwork.WriteMessage(
-                    new CoopCampaignMapCatalogSnapshotMessage(revision, count));
-                GameNetwork.EndModuleEventAsServer();
-                for (int index = 0; index < count; index++)
-                {
-                    GameNetwork.BeginModuleEventAsServer(peer);
-                    GameNetwork.WriteMessage(
-                        new CoopCampaignMapCatalogEntityMessage(
-                            revision,
-                            index,
-                            count,
-                            entities[index]));
-                    GameNetwork.EndModuleEventAsServer();
-                }
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info(
-                    "CoopCampaignMapPrototypeNetworkController: catalog direct send failed. Peer=" +
-                    peer.Index + " Error=" + ex.Message + ".");
-            }
-        }
-
         private static void SendDynamic(
             NetworkCommunicator peer,
             int revision,
@@ -984,6 +1710,172 @@ namespace CoopSpectator.MissionBehaviors
                     clone.Add(entity.Clone());
             }
             return clone;
+        }
+
+        private sealed class ServerCatalogTransportState
+        {
+            public ServerCatalogTransportState(
+                int peerIndex,
+                int transferId,
+                int revision,
+                CoopCampaignMapCatalogChunkedPayload payload)
+            {
+                PeerIndex = peerIndex;
+                TransferId = transferId;
+                Revision = revision;
+                Payload = payload;
+                NextChunkIndex = -1;
+            }
+
+            public int PeerIndex { get; }
+
+            public int TransferId { get; }
+
+            public int Revision { get; }
+
+            public int AppliedRevision { get; private set; } = -1;
+
+            public CoopCampaignMapCatalogChunkedPayload Payload { get; }
+
+            public bool ManifestSent { get; private set; }
+
+            public DateTime LastManifestSentUtc { get; private set; }
+
+            public bool HasActiveRange { get; private set; }
+
+            public int RequestedStartChunkIndex { get; private set; } = -1;
+
+            public int RequestedEndChunkIndex { get; private set; } = -1;
+
+            public int NextChunkIndex { get; private set; }
+
+            public int HighestClientContiguousChunkIndex { get; private set; } =
+                -1;
+
+            public int ClientReceivedChunkCount { get; private set; }
+
+            public bool IsCompleted { get; private set; }
+
+            public void MarkManifestSent(DateTime nowUtc)
+            {
+                ManifestSent = true;
+                LastManifestSentUtc = nowUtc;
+            }
+
+            public void RequestRange(
+                int startChunkIndex,
+                int endChunkIndex,
+                int highestContiguousChunkIndex,
+                int receivedChunkCount)
+            {
+                RequestedStartChunkIndex = startChunkIndex;
+                RequestedEndChunkIndex = endChunkIndex;
+                NextChunkIndex = startChunkIndex;
+                HighestClientContiguousChunkIndex = Math.Max(
+                    HighestClientContiguousChunkIndex,
+                    highestContiguousChunkIndex);
+                ClientReceivedChunkCount = Math.Max(
+                    ClientReceivedChunkCount,
+                    receivedChunkCount);
+                HasActiveRange = true;
+            }
+
+            public bool TryGetNextChunkIndex(out int chunkIndex)
+            {
+                chunkIndex = -1;
+                if (IsCompleted ||
+                    !HasActiveRange ||
+                    NextChunkIndex < RequestedStartChunkIndex ||
+                    NextChunkIndex > RequestedEndChunkIndex)
+                {
+                    return false;
+                }
+                chunkIndex = NextChunkIndex;
+                return true;
+            }
+
+            public void MarkChunkSent(int chunkIndex)
+            {
+                if (!HasActiveRange || chunkIndex != NextChunkIndex)
+                    return;
+                NextChunkIndex++;
+                if (NextChunkIndex > RequestedEndChunkIndex)
+                {
+                    HasActiveRange = false;
+                    NextChunkIndex = -1;
+                }
+            }
+
+            public void MarkCompleted()
+            {
+                IsCompleted = true;
+                AppliedRevision = Revision;
+                HasActiveRange = false;
+                NextChunkIndex = -1;
+            }
+
+            public void MarkCatalogRevision(int revision)
+            {
+                if (IsCompleted && revision > AppliedRevision)
+                    AppliedRevision = revision;
+            }
+
+            public void ResetForRetry()
+            {
+                ManifestSent = false;
+                LastManifestSentUtc = DateTime.MinValue;
+                HasActiveRange = false;
+                RequestedStartChunkIndex = -1;
+                RequestedEndChunkIndex = -1;
+                NextChunkIndex = -1;
+                HighestClientContiguousChunkIndex = -1;
+                ClientReceivedChunkCount = 0;
+                IsCompleted = false;
+                AppliedRevision = -1;
+            }
+        }
+
+        private sealed class ClientCatalogTransportState
+        {
+            public ClientCatalogTransportState(
+                CoopCampaignMapCatalogChunkAccumulator accumulator)
+            {
+                Accumulator = accumulator;
+                RequestedStartChunkIndex = 0;
+                RequestedEndChunkIndex = Math.Min(
+                    accumulator.ChunkCount - 1,
+                    CatalogRequestWindowChunks - 1);
+                LastUsefulChunkUtc = DateTime.UtcNow;
+            }
+
+            public CoopCampaignMapCatalogChunkAccumulator Accumulator
+            {
+                get;
+            }
+
+            public int RequestedStartChunkIndex { get; private set; }
+
+            public int RequestedEndChunkIndex { get; private set; }
+
+            public DateTime LastRangeRequestUtc { get; set; }
+
+            public DateTime LastUsefulChunkUtc { get; set; }
+
+            public void AdvanceRequestedWindow()
+            {
+                int nextStart = RequestedEndChunkIndex + 1;
+                if (nextStart >= Accumulator.ChunkCount)
+                {
+                    RequestedStartChunkIndex = -1;
+                    RequestedEndChunkIndex = -1;
+                    return;
+                }
+                RequestedStartChunkIndex = nextStart;
+                RequestedEndChunkIndex = Math.Min(
+                    Accumulator.ChunkCount - 1,
+                    nextStart + CatalogRequestWindowChunks - 1);
+                LastRangeRequestUtc = DateTime.MinValue;
+            }
         }
     }
 }

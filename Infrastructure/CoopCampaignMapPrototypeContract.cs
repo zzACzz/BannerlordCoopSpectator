@@ -36,6 +36,94 @@ namespace CoopSpectator.Infrastructure
         Special = 5
     }
 
+    /// <summary>
+    /// Pure host-disclosure and client camera rules matching the campaign-map
+    /// nameplate behavior used by Bannerlord 1.4.8.
+    /// </summary>
+    public static class CoopCampaignMapPrototypeVisibilityPolicy
+    {
+        public const double PartyMaximumCameraHeight = 200d;
+        public const double PartyMaximumProjectedDepth = 100d;
+        public const double SettlementFortificationOnlyCameraHeight = 200d;
+        public const double SettlementTownOnlyCameraHeight = 400d;
+        public const double SettlementNearDistanceMargin = 100d;
+
+        public static bool ShouldReplicateMobileParty(
+            bool isMainParty,
+            bool isActive,
+            bool isGarrison,
+            bool isMilitia,
+            bool hasCurrentSettlement,
+            bool isSpotted)
+        {
+            return isMainParty ||
+                   isActive &&
+                   !isGarrison &&
+                   !isMilitia &&
+                   !hasCurrentSettlement &&
+                   isSpotted;
+        }
+
+        public static bool ShouldReplicateSettlement(
+            bool isVisible,
+            bool isSpottable,
+            bool isSpotted)
+        {
+            return isSpottable ? isSpotted : isVisible;
+        }
+
+        public static bool ShouldShowParty(
+            double cameraHeight,
+            double projectedDepth,
+            bool isInsideViewport)
+        {
+            return IsFinite(cameraHeight) &&
+                   IsFinite(projectedDepth) &&
+                   isInsideViewport &&
+                   cameraHeight < PartyMaximumCameraHeight &&
+                   projectedDepth > 0d &&
+                   projectedDepth < PartyMaximumProjectedDepth;
+        }
+
+        public static bool ShouldShowSettlement(
+            CoopCampaignMapPrototypeSettlementNameplateSize size,
+            double cameraHeight,
+            double distanceToCamera,
+            bool isInFront,
+            bool isInsideViewport)
+        {
+            if (!IsFinite(cameraHeight) ||
+                !IsFinite(distanceToCamera) ||
+                !isInFront ||
+                !isInsideViewport)
+            {
+                return false;
+            }
+
+            if (cameraHeight > SettlementTownOnlyCameraHeight)
+            {
+                return size ==
+                       CoopCampaignMapPrototypeSettlementNameplateSize.Large;
+            }
+
+            if (cameraHeight > SettlementFortificationOnlyCameraHeight)
+            {
+                return size ==
+                           CoopCampaignMapPrototypeSettlementNameplateSize.Large ||
+                       size ==
+                           CoopCampaignMapPrototypeSettlementNameplateSize.Medium;
+            }
+
+            return distanceToCamera <
+                   cameraHeight + SettlementNearDistanceMargin;
+        }
+
+        private static bool IsFinite(double value)
+        {
+            return !double.IsNaN(value) && !double.IsInfinity(value);
+        }
+    }
+
     public sealed class CoopCampaignMapPrototypeAgentVisualState
     {
         public string BodyProperties { get; set; }
@@ -223,6 +311,190 @@ namespace CoopSpectator.Infrastructure
     }
 
     /// <summary>
+    /// Pure comparison and delta construction for slowly changing catalog
+    /// entries. Missing entries are intentionally retained by the stable
+    /// session catalog; visibility removals belong to the dynamic state.
+    /// </summary>
+    public static class CoopCampaignMapPrototypeCatalogDeltaPolicy
+    {
+        public static bool AreEquivalent(
+            CoopCampaignMapPrototypeCatalogEntityState left,
+            CoopCampaignMapPrototypeCatalogEntityState right)
+        {
+            if (ReferenceEquals(left, right))
+                return true;
+            if (left == null || right == null)
+                return false;
+
+            return string.Equals(
+                       left.EntityId,
+                       right.EntityId,
+                       StringComparison.OrdinalIgnoreCase) &&
+                   string.Equals(
+                       left.DisplayName,
+                       right.DisplayName,
+                       StringComparison.Ordinal) &&
+                   left.Kind == right.Kind &&
+                   left.SettlementNameplateSize ==
+                       right.SettlementNameplateSize &&
+                   left.SettlementKind == right.SettlementKind &&
+                   left.PrimaryColor == right.PrimaryColor &&
+                   left.SecondaryColor == right.SecondaryColor &&
+                   string.Equals(
+                       left.BannerCode,
+                       right.BannerCode,
+                       StringComparison.Ordinal) &&
+                   string.Equals(
+                       left.VisualCharacterId,
+                       right.VisualCharacterId,
+                       StringComparison.Ordinal) &&
+                   string.Equals(
+                       left.CultureId,
+                       right.CultureId,
+                       StringComparison.Ordinal) &&
+                   left.PartyVisualKind == right.PartyVisualKind &&
+                   AgentVisualsAreEquivalent(
+                       left.HumanVisual,
+                       right.HumanVisual) &&
+                   AgentVisualsAreEquivalent(
+                       left.MountVisual,
+                       right.MountVisual) &&
+                   AgentVisualsAreEquivalent(
+                       left.CaravanMountVisual,
+                       right.CaravanMountVisual) &&
+                   string.Equals(
+                       left.FactionId,
+                       right.FactionId,
+                       StringComparison.Ordinal) &&
+                   string.Equals(
+                       left.FactionName,
+                       right.FactionName,
+                       StringComparison.Ordinal) &&
+                   string.Equals(
+                       left.OwnerName,
+                       right.OwnerName,
+                       StringComparison.Ordinal) &&
+                   string.Equals(
+                       left.LeaderName,
+                       right.LeaderName,
+                       StringComparison.Ordinal) &&
+                   string.Equals(
+                       left.ArmyId,
+                       right.ArmyId,
+                       StringComparison.Ordinal) &&
+                   string.Equals(
+                       left.ArmyName,
+                       right.ArmyName,
+                       StringComparison.Ordinal) &&
+                   left.IsArmyLeader == right.IsArmyLeader &&
+                   left.SelectionRadius == right.SelectionRadius;
+        }
+
+        public static List<CoopCampaignMapPrototypeCatalogEntityState> BuildDelta(
+            IEnumerable<CoopCampaignMapPrototypeCatalogEntityState> previous,
+            IEnumerable<CoopCampaignMapPrototypeCatalogEntityState> current)
+        {
+            Dictionary<string, CoopCampaignMapPrototypeCatalogEntityState>
+                previousById = ToDictionary(previous);
+            Dictionary<string, CoopCampaignMapPrototypeCatalogEntityState>
+                currentById = ToDictionary(current);
+            var delta = new List<CoopCampaignMapPrototypeCatalogEntityState>();
+
+            foreach (KeyValuePair<
+                         string,
+                         CoopCampaignMapPrototypeCatalogEntityState> pair in
+                     currentById)
+            {
+                if (!previousById.TryGetValue(
+                        pair.Key,
+                        out CoopCampaignMapPrototypeCatalogEntityState oldState) ||
+                    !AreEquivalent(oldState, pair.Value))
+                {
+                    delta.Add(pair.Value.Clone());
+                }
+            }
+
+            delta.Sort(
+                (left, right) => string.Compare(
+                    left?.EntityId,
+                    right?.EntityId,
+                    StringComparison.OrdinalIgnoreCase));
+            return delta;
+        }
+
+        private static bool AgentVisualsAreEquivalent(
+            CoopCampaignMapPrototypeAgentVisualState left,
+            CoopCampaignMapPrototypeAgentVisualState right)
+        {
+            if (ReferenceEquals(left, right))
+                return true;
+            if (left == null || right == null)
+                return false;
+            if (!string.Equals(
+                    left.BodyProperties,
+                    right.BodyProperties,
+                    StringComparison.Ordinal) ||
+                left.IsFemale != right.IsFemale ||
+                left.Race != right.Race ||
+                left.SkeletonType != right.SkeletonType ||
+                left.RightWieldedItemIndex != right.RightWieldedItemIndex ||
+                left.LeftWieldedItemIndex != right.LeftWieldedItemIndex ||
+                !string.Equals(
+                    left.MountCreationKey,
+                    right.MountCreationKey,
+                    StringComparison.Ordinal) ||
+                left.HasBanner != right.HasBanner ||
+                left.AddColorRandomness != right.AddColorRandomness)
+            {
+                return false;
+            }
+
+            string[] leftEquipment = left.EquipmentItemIds;
+            string[] rightEquipment = right.EquipmentItemIds;
+            if (ReferenceEquals(leftEquipment, rightEquipment))
+                return true;
+            if (leftEquipment == null ||
+                rightEquipment == null ||
+                leftEquipment.Length != rightEquipment.Length)
+            {
+                return false;
+            }
+
+            for (int index = 0; index < leftEquipment.Length; index++)
+            {
+                if (!string.Equals(
+                        leftEquipment[index],
+                        rightEquipment[index],
+                        StringComparison.Ordinal))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private static Dictionary<
+            string,
+            CoopCampaignMapPrototypeCatalogEntityState> ToDictionary(
+                IEnumerable<CoopCampaignMapPrototypeCatalogEntityState> entities)
+        {
+            var result = new Dictionary<
+                string,
+                CoopCampaignMapPrototypeCatalogEntityState>(
+                    StringComparer.OrdinalIgnoreCase);
+            if (entities == null)
+                return result;
+
+            foreach (CoopCampaignMapPrototypeCatalogEntityState entity in entities)
+            {
+                if (entity != null && !string.IsNullOrWhiteSpace(entity.EntityId))
+                    result[entity.EntityId] = entity.Clone();
+            }
+            return result;
+        }
+    }
+
+    /// <summary>
     /// Frequently changing position and lightweight information for one
     /// replicated campaign-map object.
     /// </summary>
@@ -255,6 +527,105 @@ namespace CoopSpectator.Infrastructure
         public CoopCampaignMapPrototypeDynamicEntityState Clone()
         {
             return (CoopCampaignMapPrototypeDynamicEntityState)MemberwiseClone();
+        }
+    }
+
+    /// <summary>
+    /// Pure comparison and delta construction for the frequently changing
+    /// campaign-map replica state.
+    /// </summary>
+    public static class CoopCampaignMapPrototypeDynamicDeltaPolicy
+    {
+        public static bool AreEquivalent(
+            CoopCampaignMapPrototypeDynamicEntityState left,
+            CoopCampaignMapPrototypeDynamicEntityState right)
+        {
+            if (ReferenceEquals(left, right))
+                return true;
+            if (left == null || right == null)
+                return false;
+
+            return string.Equals(
+                       left.EntityId,
+                       right.EntityId,
+                       StringComparison.OrdinalIgnoreCase) &&
+                   left.NormalizedX == right.NormalizedX &&
+                   left.NormalizedY == right.NormalizedY &&
+                   left.Heading == right.Heading &&
+                   left.PartySize == right.PartySize &&
+                   left.IsVisible == right.IsVisible &&
+                   left.IsMoving == right.IsMoving &&
+                   left.ArmyPartyCount == right.ArmyPartyCount &&
+                   left.ArmyTotalSize == right.ArmyTotalSize &&
+                   left.ArmyCohesion == right.ArmyCohesion &&
+                   left.AppearanceRevision == right.AppearanceRevision &&
+                   left.InformationRevision == right.InformationRevision;
+        }
+
+        public static List<CoopCampaignMapPrototypeDynamicEntityState> BuildDelta(
+            IEnumerable<CoopCampaignMapPrototypeDynamicEntityState> previous,
+            IEnumerable<CoopCampaignMapPrototypeDynamicEntityState> current)
+        {
+            var previousById = ToDictionary(previous);
+            var currentById = ToDictionary(current);
+            var delta = new List<CoopCampaignMapPrototypeDynamicEntityState>();
+
+            foreach (KeyValuePair<
+                         string,
+                         CoopCampaignMapPrototypeDynamicEntityState> pair in
+                     currentById)
+            {
+                if (!previousById.TryGetValue(
+                        pair.Key,
+                        out CoopCampaignMapPrototypeDynamicEntityState oldState) ||
+                    !AreEquivalent(oldState, pair.Value))
+                {
+                    delta.Add(pair.Value.Clone());
+                }
+            }
+
+            foreach (KeyValuePair<
+                         string,
+                         CoopCampaignMapPrototypeDynamicEntityState> pair in
+                     previousById)
+            {
+                if (currentById.ContainsKey(pair.Key))
+                    continue;
+
+                CoopCampaignMapPrototypeDynamicEntityState hidden =
+                    pair.Value.Clone();
+                hidden.IsVisible = false;
+                hidden.IsMoving = false;
+                if (!AreEquivalent(pair.Value, hidden))
+                    delta.Add(hidden);
+            }
+
+            delta.Sort(
+                (left, right) => string.Compare(
+                    left?.EntityId,
+                    right?.EntityId,
+                    StringComparison.OrdinalIgnoreCase));
+            return delta;
+        }
+
+        private static Dictionary<
+            string,
+            CoopCampaignMapPrototypeDynamicEntityState> ToDictionary(
+                IEnumerable<CoopCampaignMapPrototypeDynamicEntityState> entities)
+        {
+            var result = new Dictionary<
+                string,
+                CoopCampaignMapPrototypeDynamicEntityState>(
+                    StringComparer.OrdinalIgnoreCase);
+            if (entities == null)
+                return result;
+
+            foreach (CoopCampaignMapPrototypeDynamicEntityState entity in entities)
+            {
+                if (entity != null && !string.IsNullOrWhiteSpace(entity.EntityId))
+                    result[entity.EntityId] = entity.Clone();
+            }
+            return result;
         }
     }
 
@@ -613,11 +984,17 @@ namespace CoopSpectator.Infrastructure
     /// </summary>
     public static class CoopCampaignMapPrototypeContract
     {
-        public const int ProtocolVersion = 10;
+        public const int ProtocolVersion = 14;
         public const int HostBridgeSchemaVersion = 10;
         public const int MaxCatalogEntities = 2048;
+        public const int MaxCatalogLogicalBytes = 16777216;
         public const int MaxDynamicEntities = 2048;
-        public const int MaxDynamicBatchSize = 32;
+        // Keep the encoded range stable so an older endpoint can still parse
+        // and reject a protocol-11 packet without losing bit alignment.
+        public const int DynamicBatchCompressionMaximum = 32;
+        // A 32-entity packet overflows Bannerlord 1.4.8's native packet writer
+        // with the full dynamic payload. Eight leaves a conservative margin.
+        public const int MaxDynamicBatchSize = 8;
         // Compatibility alias while the old monolithic renderer is fed from
         // the client replica store.
         public const int MaxVisibleEntities = MaxCatalogEntities;
