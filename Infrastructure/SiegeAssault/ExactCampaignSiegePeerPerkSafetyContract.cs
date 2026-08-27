@@ -1,9 +1,74 @@
 namespace CoopSpectator.Infrastructure
 {
+    internal readonly struct CoopPeerHeroClassSafetyInput
+    {
+        public CoopPeerHeroClassSafetyInput(
+            bool isCoopMission,
+            bool isClient,
+            bool isServer,
+            bool isDedicatedServer,
+            bool hasControlledAgent,
+            bool hasTeam,
+            bool hasActiveTeamSide,
+            bool skipTeamCheck,
+            int selectedTroopIndex,
+            bool hasNativeCultureClassIndex)
+        {
+            IsCoopMission = isCoopMission;
+            IsClient = isClient;
+            IsServer = isServer;
+            IsDedicatedServer = isDedicatedServer;
+            HasControlledAgent = hasControlledAgent;
+            HasTeam = hasTeam;
+            HasActiveTeamSide = hasActiveTeamSide;
+            SkipTeamCheck = skipTeamCheck;
+            SelectedTroopIndex = selectedTroopIndex;
+            HasNativeCultureClassIndex = hasNativeCultureClassIndex;
+        }
+
+        public bool IsCoopMission { get; }
+        public bool IsClient { get; }
+        public bool IsServer { get; }
+        public bool IsDedicatedServer { get; }
+        public bool HasControlledAgent { get; }
+        public bool HasTeam { get; }
+        public bool HasActiveTeamSide { get; }
+        public bool SkipTeamCheck { get; }
+        public int SelectedTroopIndex { get; }
+        public bool HasNativeCultureClassIndex { get; }
+    }
+
+    internal static class CoopPeerHeroClassSafetyContract
+    {
+        public static bool ShouldResolveCanonicalHeroClass(
+            CoopPeerHeroClassSafetyInput input)
+        {
+            bool isGuardedNetworkContext =
+                input.IsClient ||
+                (input.IsServer && input.IsDedicatedServer);
+
+            if (!input.IsCoopMission ||
+                !isGuardedNetworkContext ||
+                input.HasControlledAgent ||
+                input.SelectedTroopIndex < 0)
+            {
+                return false;
+            }
+
+            if (!input.SkipTeamCheck &&
+                (!input.HasTeam || !input.HasActiveTeamSide))
+            {
+                return false;
+            }
+
+            return !input.HasNativeCultureClassIndex;
+        }
+    }
+
     internal readonly struct ExactCampaignSiegePeerPerkSafetyInput
     {
         public ExactCampaignSiegePeerPerkSafetyInput(
-            bool isExactCampaignSiegeAssault,
+            bool isCoopMission,
             bool isDedicatedServer,
             bool hasTeam,
             bool hasControlledAgent,
@@ -12,7 +77,7 @@ namespace CoopSpectator.Infrastructure
             int perkStorageCount,
             int cultureClassCount)
         {
-            IsExactCampaignSiegeAssault = isExactCampaignSiegeAssault;
+            IsCoopMission = isCoopMission;
             IsDedicatedServer = isDedicatedServer;
             HasTeam = hasTeam;
             HasControlledAgent = hasControlledAgent;
@@ -22,7 +87,7 @@ namespace CoopSpectator.Infrastructure
             CultureClassCount = cultureClassCount;
         }
 
-        public bool IsExactCampaignSiegeAssault { get; }
+        public bool IsCoopMission { get; }
         public bool IsDedicatedServer { get; }
         public bool HasTeam { get; }
         public bool HasControlledAgent { get; }
@@ -37,7 +102,7 @@ namespace CoopSpectator.Infrastructure
         public static bool ShouldSuppressNativePerkResolution(
             ExactCampaignSiegePeerPerkSafetyInput input)
         {
-            if (!input.IsExactCampaignSiegeAssault ||
+            if (!input.IsCoopMission ||
                 !input.IsDedicatedServer ||
                 !input.HasTeam ||
                 input.SelectedTroopIndex < 0)

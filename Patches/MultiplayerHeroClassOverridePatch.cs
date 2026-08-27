@@ -72,10 +72,10 @@ namespace CoopSpectator.Patches
                         "Peer-class override remains applied.");
                 }
 
-                ModLogger.Info(
-                    "MultiplayerHeroClassOverridePatch: client detached-peer/canonical-culture guards and server override applied to " +
-                    "MultiplayerClassDivisions.GetMPHeroClassForPeer; client null-class perk guard applied=" +
-                    (availablePerksTarget != null && availablePerksPrefix != null) + ".");
+            ModLogger.Info(
+                "MultiplayerHeroClassOverridePatch: coop detached-peer/canonical-culture guards and server override applied to " +
+                "MultiplayerClassDivisions.GetMPHeroClassForPeer; client null-class perk guard applied=" +
+                (availablePerksTarget != null && availablePerksPrefix != null) + ".");
             }
             catch (Exception ex)
             {
@@ -88,12 +88,19 @@ namespace CoopSpectator.Patches
             bool skipTeamCheck,
             ref MultiplayerClassDivisions.MPHeroClass __result)
         {
-            if (!GameNetwork.IsClient || peer == null || peer.ControlledAgent != null)
+            if (peer == null || peer.ControlledAgent != null)
                 return true;
 
             Mission mission = Mission.Current;
-            if (mission == null ||
-                mission.GetMissionBehavior<CoopMissionNetworkBridge>() == null ||
+            bool isCoopMission =
+                mission != null &&
+                mission.GetMissionBehavior<CoopMissionNetworkBridge>() != null;
+            bool isClient = GameNetwork.IsClient;
+            bool isServer = GameNetwork.IsServer;
+            bool isDedicatedServer = GameNetwork.IsDedicatedServer;
+
+            if (!isCoopMission ||
+                (!isClient && !(isServer && isDedicatedServer)) ||
                 peer.SelectedTroopIndex < 0 ||
                 (!skipTeamCheck &&
                  (peer.Team == null || peer.Team.Side == BattleSideEnum.None)))
@@ -103,8 +110,26 @@ namespace CoopSpectator.Patches
 
             try
             {
-                if (IsPeerCultureHeroClassIndexValid(peer, peer.SelectedTroopIndex))
+                bool hasNativeCultureClassIndex =
+                    IsPeerCultureHeroClassIndexValid(
+                        peer,
+                        peer.SelectedTroopIndex);
+                if (!CoopPeerHeroClassSafetyContract.ShouldResolveCanonicalHeroClass(
+                        new CoopPeerHeroClassSafetyInput(
+                            isCoopMission,
+                            isClient,
+                            isServer,
+                            isDedicatedServer,
+                            peer.ControlledAgent != null,
+                            peer.Team != null,
+                            peer.Team != null &&
+                            peer.Team.Side != BattleSideEnum.None,
+                            skipTeamCheck,
+                            peer.SelectedTroopIndex,
+                            hasNativeCultureClassIndex)))
+                {
                     return true;
+                }
 
                 Agent detachedAgent = ResolveDetachedPeerAgent(mission, peer);
                 __result = detachedAgent == null
@@ -143,9 +168,7 @@ namespace CoopSpectator.Patches
                 return true;
             }
 
-            if (ShouldSuppressDedicatedExactSiegeInvalidPeerPerkResolution(
-                    mission,
-                    missionPeer))
+            if (ShouldSuppressDedicatedCoopInvalidPeerPerkResolution(missionPeer))
             {
                 __result = new List<List<IReadOnlyPerkObject>>();
                 return false;
@@ -167,27 +190,22 @@ namespace CoopSpectator.Patches
             return false;
         }
 
-        private static bool ShouldSuppressDedicatedExactSiegeInvalidPeerPerkResolution(
-            Mission mission,
+        private static bool ShouldSuppressDedicatedCoopInvalidPeerPerkResolution(
             MissionPeer missionPeer)
         {
             if (!GameNetwork.IsServer ||
                 !GameNetwork.IsDedicatedServer ||
-                mission == null ||
                 missionPeer == null)
             {
                 return false;
             }
 
-            BattleScenarioContextMessage scenarioContext =
-                BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
-                BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
-            bool isExactCampaignSiegeAssault =
-                ExactCampaignSiegeAssaultWithDeploymentRuntime
-                    .IsSiegeAssaultScenario(scenarioContext);
-
+            int perkStorageCount = missionPeer.Perks?.Count ?? 0;
             int cultureClassCount = 0;
-            if (missionPeer.Culture != null)
+            if (missionPeer.ControlledAgent == null &&
+                missionPeer.SelectedTroopIndex >= 0 &&
+                missionPeer.SelectedTroopIndex < perkStorageCount &&
+                missionPeer.Culture != null)
             {
                 try
                 {
@@ -201,18 +219,17 @@ namespace CoopSpectator.Patches
                 }
             }
 
-            int perkStorageCount = missionPeer.Perks?.Count ?? 0;
             return ExactCampaignSiegePeerPerkSafetyContract
                 .ShouldSuppressNativePerkResolution(
                     new ExactCampaignSiegePeerPerkSafetyInput(
-                        isExactCampaignSiegeAssault,
-                        GameNetwork.IsDedicatedServer,
-                        missionPeer.Team != null,
-                        missionPeer.ControlledAgent != null,
-                        missionPeer.Culture != null,
-                        missionPeer.SelectedTroopIndex,
-                        perkStorageCount,
-                        cultureClassCount));
+                        isCoopMission: true,
+                        isDedicatedServer: GameNetwork.IsDedicatedServer,
+                        hasTeam: missionPeer.Team != null,
+                        hasControlledAgent: missionPeer.ControlledAgent != null,
+                        hasCulture: missionPeer.Culture != null,
+                        selectedTroopIndex: missionPeer.SelectedTroopIndex,
+                        perkStorageCount: perkStorageCount,
+                        cultureClassCount: cultureClassCount));
         }
 
         private static bool IsPeerCultureHeroClassIndexValid(MissionPeer peer, int selectedTroopIndex)
