@@ -141,11 +141,38 @@ namespace CoopSpectator.GameMode
 
         private static List<MissionBehavior> BuildClientMissionBehaviors(Mission mission, bool isDedicated)
         {
+            bool disableSceneOcclusion = false;
+            string disableSceneOcclusionReason = "dedicated-build";
+#if !COOPSPECTATOR_DEDICATED
+            bool hasMatchingPreMissionTopology =
+                CoopPreMissionTopologyRuntimeState.TryGetActive(
+                    mission?.SceneName ?? string.Empty,
+                    out CoopPreMissionTopologyContract topologyContract,
+                    out _);
+            BattleScenarioContextMessage occlusionScenarioContext =
+                topologyContract?.ScenarioContext ?? ResolveScenarioContext();
+            CoopSiegeSceneOcclusionSafetyDecision occlusionSafetyDecision =
+                CoopSiegeSceneOcclusionSafetyContract.Resolve(
+                    isRemoteClient: GameNetwork.IsClient && !GameNetwork.IsServer,
+                    hasMatchingPreMissionTopology:
+                        hasMatchingPreMissionTopology,
+                    isSiegeBattle:
+                        occlusionScenarioContext?.IsSiegeBattle == true,
+                    missionShell:
+                        occlusionScenarioContext?.SiegeContext?.MissionShell,
+                    runtimeScene: mission?.SceneName,
+                    topologyScene: topologyContract?.RuntimeScene);
+            disableSceneOcclusion = occlusionSafetyDecision.DisableSceneOcclusion;
+            disableSceneOcclusionReason = occlusionSafetyDecision.Reason;
+#endif
+
             var list = new List<MissionBehavior>
             {
                 MissionLobbyComponent.CreateBehavior(),
                 new MultiplayerWarmupComponent(),
-                new MissionMultiplayerCoopSiegeAssaultWithDeploymentClient(),
+                new MissionMultiplayerCoopSiegeAssaultWithDeploymentClient(
+                    disableSceneOcclusion,
+                    disableSceneOcclusionReason),
                 new MultiplayerTimerComponent(),
             };
 
