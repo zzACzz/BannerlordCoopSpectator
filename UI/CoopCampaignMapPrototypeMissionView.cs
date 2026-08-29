@@ -101,6 +101,8 @@ namespace CoopSpectator.UI
         private MBAgentRendererSceneController _agentRendererSceneController;
         private Camera _camera;
         private GameEntity _hostMarker;
+        private GameEntity[] _tickedMapEntities = Array.Empty<GameEntity>();
+        private Mesh[] _tickedMapMeshes = Array.Empty<Mesh>();
         private readonly Dictionary<string, EntityReplica> _entityReplicas =
             new Dictionary<string, EntityReplica>(StringComparer.OrdinalIgnoreCase);
         private IReadOnlyList<CoopCampaignMapPrototypeEntityState>
@@ -222,6 +224,7 @@ namespace CoopSpectator.UI
                     ApplyMapVisualState(current);
                 UpdateDisplayedCamera(current.Camera, interpolationAmount);
             }
+            TickMapSceneVisuals();
             UpdateEntityReplicas(dt);
             TickReplicaFreeCamera(dt);
             UpdateMarkerAndCamera();
@@ -388,6 +391,7 @@ namespace CoopSpectator.UI
                     clearSceneOnFinalize: true,
                     autoToggleSceneView: true);
                 _sceneLayer.SetScene(_mapScene);
+                CollectTickableMapMeshes();
                 _sceneLayer.SetCamera(_camera);
                 _sceneLayer.SetSceneUsesSkybox(true);
                 _sceneLayer.SetSceneUsesShadows(true);
@@ -1524,6 +1528,46 @@ namespace CoopSpectator.UI
             _appliedSeasonTimeFactor = state.SeasonTimeFactor;
         }
 
+        private void CollectTickableMapMeshes()
+        {
+            if (_mapScene == null)
+            {
+                _tickedMapEntities = Array.Empty<GameEntity>();
+                _tickedMapMeshes = Array.Empty<Mesh>();
+                return;
+            }
+
+            var entities = new List<GameEntity>();
+            var meshes = new List<Mesh>();
+            foreach (GameEntity entity in
+                     _mapScene.FindEntitiesWithTag("ticked_map_entity"))
+            {
+                if (entity == null)
+                    continue;
+
+                Mesh mesh = entity.GetFirstMesh();
+                if (mesh == null)
+                    continue;
+
+                entities.Add(entity);
+                meshes.Add(mesh);
+            }
+
+            _tickedMapEntities = entities.ToArray();
+            _tickedMapMeshes = meshes.ToArray();
+        }
+
+        private void TickMapSceneVisuals()
+        {
+            if (!_mapSceneReadyToRender || _mapScene == null)
+                return;
+
+            MBMapScene.TickVisuals(
+                _mapScene,
+                _mapScene.TimeOfDay,
+                _tickedMapMeshes);
+        }
+
         private void ReleaseSceneLayer()
         {
             ReleaseReplicaInfoLayer();
@@ -1541,6 +1585,8 @@ namespace CoopSpectator.UI
             _catalogById.Clear();
             _dynamicById.Clear();
             _selectedReplicaId = null;
+            _tickedMapEntities = Array.Empty<GameEntity>();
+            _tickedMapMeshes = Array.Empty<Mesh>();
 
             if (_agentRendererSceneController != null && _mapScene != null)
             {
