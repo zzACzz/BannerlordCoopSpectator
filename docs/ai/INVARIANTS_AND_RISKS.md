@@ -131,6 +131,24 @@ Temporary diagnostic code must be removed before the task is considered complete
 - native, network, synchronization, and lifecycle risks;
 - the scenarios and runtime roles in which it was validated.
 
+### 14. Campaignless conversation safety does not fabricate campaign state
+
+`CampaignlessConversationMissionSafetyPatch` may short-circuit `ConversationMission.OneToOneConversationAgent` with a null result only when `Campaign.Current` or its `ConversationManager` is unavailable. When both exist, the original native getter must run unchanged.
+
+The dedicated build has no campaign state and therefore always uses the guarded null path if this getter is reached. The patch is a crash guard, not a replacement conversation manager and not permission to run campaign-only conversation behavior on multiplayer/dedicated roles.
+
+### 15. Exact-siege scene occlusion changes only on a matching remote client
+
+`CoopSiegeSceneOcclusionSafetyContract` may disable scene occlusion only when all of these facts are true:
+
+- the role is a remote client, not server/listen server;
+- a matching active pre-mission topology contract exists;
+- the scenario is a siege battle;
+- the mission shell equals `SiegeMissionWithDeployment`;
+- runtime and topology scene names are both present and equal after normalization.
+
+Missing/mismatched topology, non-siege scenarios, different mission shells, and server/listen-server roles must preserve native occlusion. The accepted decision is applied in `MissionMultiplayerCoopSiegeAssaultWithDeploymentClient.OnBehaviorInitialize` before base initialization/renderer activation.
+
 ## Known current limitations and unverified areas
 
 ### Source-verified limitations
@@ -152,6 +170,8 @@ From the July 2026 materialization status:
 - a nonfatal `EquipWeaponFromSpawnedItemEntity` missing mission-object warning remained observable;
 - exact cross-process `MBGUID` identity for crafted weapons was not proven; stable pre-registered mirror keys are the safe path;
 - field-specific materialization/boundary behavior should not be transferred to other scenarios without its own test phase.
+- the campaignless conversation and remote exact-siege occlusion decision contracts passed focused tests on 2026-08-29, but their Harmony/native renderer behavior was not runtime-verified in Bannerlord after the checkpoint commits;
+- campaign-map tagged-mesh visual ticking is source-verified, but its visual result and per-frame cost were not runtime-verified after checkpoint `28ec8ca`.
 
 ### Planned but not source-verified
 
@@ -182,6 +202,9 @@ Project comments mention both Bannerlord 1.3.14 and required 1.4.8 runtime files
 | Exact army/object/item bootstrap | High | unresolved identity, wrong DLL/catalog state | client/dedicated catalogs, stable ordering, fallback policy |
 | Exact pre-spawn loadout | High | wrong body/equipment or native payload incompatibility | hero/troop/mount/crafted item, server/client parity |
 | Siege machine controller | Critical | AI waits forever, invisible active object, bad detachment | both sides, native controller lists, point/weapon identity |
+| Remote exact-siege occlusion guard | High | native renderer crash or over-broad loss of occlusion | remote-only role, accepted topology, exact shell/scene, adjacent scenarios |
+| Campaignless conversation safety patch | High | native getter crash or suppressed valid campaign conversation | Harmony target/version, campaign/null paths, client and dedicated registration |
+| Campaign map prototype visual tick | Medium | stale tagged meshes, missing animation, or excessive per-frame work | tag collection, scene release, render-ready gate, runtime profiling |
 | Deployment boundaries | High | invalid orders, flags in wrong place, client/server mismatch | scenario-specific geometry, version/hash ack, rollback |
 | Control/reconnect state | High | wrong peer controls agent, stale peer index | disconnect/rejoin, index migration, death/respawn |
 | Result bridge/writeback | Critical | lost or duplicated campaign effects | atomic/stable read, IDs, journal timing, stage aggregation |

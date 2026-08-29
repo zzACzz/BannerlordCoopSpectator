@@ -131,10 +131,15 @@ This ordering protects exact campaign scenes whose assets, mission shell, and sc
 1. `SiegeAssaultMissionOpenBridge` chooses the exact native siege initializer profile.
 2. The specialized mode wraps `SiegeMissionWithDeployment`.
 3. Native siege behaviors are created, including siege engines and deployment handlers/controllers.
-4. Cooperative network, power, machine-selection, materialization, and UI layers are appended according to side and feature policy.
-5. Dedicated `CoopMissionSpawnLogic` attachment remains deferred to the stable mission observer.
+4. Client behavior composition resolves `CoopSiegeSceneOcclusionSafetyContract` from the active pre-mission topology, scenario context, role, mission shell, and runtime/topology scene names.
+5. Only a remote client with matching exact-siege topology and the `SiegeMissionWithDeployment` shell disables scene occlusion; `MissionMultiplayerCoopSiegeAssaultWithDeploymentClient.OnBehaviorInitialize` applies the accepted decision before base initialization/renderer activation.
+6. Server/listen-server roles, non-siege scenarios, alternate shells, and missing/mismatched topology preserve native occlusion.
+7. Cooperative network, power, machine-selection, materialization, and UI layers are appended according to side and feature policy.
+8. Dedicated `CoopMissionSpawnLogic` attachment remains deferred to the stable mission observer.
 
 Mission behavior ordering is a compatibility contract. A class being present somewhere in the list does not prove correct startup; native components may query one another during `EarlyStart`, `AfterStart`, or synchronized load callbacks.
+
+Campaignless conversation safety is independent of battle subtype. The client and dedicated startup paths register `CampaignlessConversationMissionSafetyPatch`; if the native `ConversationMission.OneToOneConversationAgent` getter is reached without `Campaign.Current` or `ConversationManager`, the prefix returns null. With valid campaign conversation state, it preserves the original getter.
 
 ## Flow 5: dedicated mission stabilization and bootstrap
 

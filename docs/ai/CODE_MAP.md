@@ -220,6 +220,7 @@ Village boundary data is versioned, hashed, transmitted, applied, and acknowledg
 - `SiegeMissionObjectIdBridge` / `SiegeMissionObjectIdMapRuntime`: stable synchronized object mapping.
 - ladder interaction and merlon parity contracts/runtimes.
 - peer/perk and formation-membership safety contracts.
+- `CoopSiegeSceneOcclusionSafetyContract`: narrow remote-client decision for exact `SiegeMissionWithDeployment` scene occlusion.
 
 Do not combine machine selection, unused-machine finalization, ladder state, scene-object ID mapping, initial army materialization, and reinforcement ownership into one conceptual fix. They touch different owners.
 
@@ -341,6 +342,8 @@ These types overlap deliberately: intent, authoritative request, spawn result, l
 - `CommanderDeploymentMissionNetworkComponentPatch`
 - `CoopBattleEscapeMenuAiControlPatch`
 
+`CampaignlessConversationMissionSafetyPatch` targets the native `ConversationMission.OneToOneConversationAgent` getter. Its pure `CampaignlessConversationMissionSafetyContract` allows the original getter when both campaign and conversation manager exist and returns a null result only when that campaign state is unavailable.
+
 ### Siege-specific
 
 - `CoopSiegeFormationMembershipSafetyPatch`
@@ -369,7 +372,7 @@ Primary views/view-models:
 - `CoopBattlePowerScoreView`, `CoopBattleAiControlHintVM`: battle HUD additions;
 - hero creator view/model/culture selection;
 - day/night hideout objective, stealth, cinematic, conversation, and marker views;
-- campaign map prototype mission view, party visual, overlays, and replica info.
+- `CoopCampaignMapPrototypeMissionView`, party visual, overlays, and replica info. The mission view collects meshes tagged `ticked_map_entity`, calls `MBMapScene.TickVisuals` while the map scene is render-ready, and clears those cached arrays during scene release.
 
 Gauntlet prefabs live in `Module/CoopSpectator/GUI/Prefabs/`. When changing a view-model property or command, search the matching XML binding. `CoopSelection.xml` and `CoopCommanderDeployment.xml` are primary selection/deployment assets.
 
@@ -453,6 +456,7 @@ These tests prove contract logic only. They do not prove native mission loading,
 - `scripts/CoopDevLoop.ps1`: optional client/dedicated builds, process restart/launch, DLL timestamp checks, and log-marker scanning. With no action switches it builds both and checks logs. Its default `ProjectRoot` points to `C:\dev\projects\BannerlordCoopSpectator3`, not necessarily the active Codex worktree; pass `-ProjectRoot` explicitly.
 - `scripts/CreateReleasePackage.ps1`: Release builds unless `-SkipBuild`, then destructively recreates selected `dist/` package directories/ZIPs and assembles client/host payloads.
 - `scripts/DllInventoryAudit.ps1`: scans installed client/dedicated trees and writes repository reports/CSV. Its historical conclusion may not match the current installed version.
+- `scripts/Test-RepositoryHygiene.ps1`: read-only validation of repository-local Git EOL configuration, tracked text EOL state, mixed endings, and optional final working-tree cleanliness.
 
 ## High-risk hotspots
 

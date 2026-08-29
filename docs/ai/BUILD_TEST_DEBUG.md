@@ -47,6 +47,7 @@ The repository does not currently define a documented, verified property that di
 | Contract-test `dotnet run` | Yes | test `bin/`, `obj/`; possible test-specific temporary output | No expected module deployment | No expected module deployment |
 | `scripts/CoopDevLoop.ps1` with no action switches | Yes | build outputs | Yes | Yes |
 | `scripts/CreateReleasePackage.ps1` without `-SkipBuild` | Yes | build outputs and recreated `dist/` packages | Yes through project targets | Yes through project targets |
+| `scripts/Test-RepositoryHygiene.ps1` | No | no content/output writes; Git may refresh index metadata | No | No |
 
 This table records current project/script behavior, not a guarantee that an arbitrary command is safe. Every approved plan containing one of these operations must still state the exact command and resolved destinations.
 
@@ -168,6 +169,42 @@ Test interpretation:
 - A new native/runtime fix should add a pure contract test when its decision can be extracted without native state, then still receive the appropriate real mission run.
 
 No tests were run during the 2026-08-28 documentation pass.
+
+Focused validation recorded on 2026-08-29:
+
+- `CampaignlessConversationMissionSafety.ContractTests` passed for checkpoint `9c939c5`;
+- `CoopRemoteSiegeOcclusionSafety.ContractTests` passed for checkpoint `fcc8920`;
+- no client/dedicated module build, deployment, native mission load, two-machine run, or visual validation was performed for those checkpoints.
+
+## Repository and line-ending hygiene
+
+Source-verified on 2026-08-29.
+
+The canonical repository policy is:
+
+- `.gitattributes` stores text as LF;
+- `.bat` and `.cmd` are the only CRLF text exceptions;
+- known DLL, executable, symbol, dump, archive, and image formats are explicitly binary;
+- `.editorconfig` mirrors the same editor-facing line-ending policy without forcing a repository-wide encoding rewrite;
+- repository-local Git configuration is `core.autocrlf=false`, `core.eol=lf`, and `core.safecrlf=true`.
+
+Validate before a commit while approved changes are still present:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-RepositoryHygiene.ps1 -AllowDirty
+```
+
+Validate again after the commit:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-RepositoryHygiene.ps1
+```
+
+The script checks the repository-local Git configuration, index/worktree EOL metadata reported by `git ls-files --eol`, declared LF/CRLF policy, mixed endings, and final working-tree cleanliness. It treats files classified by Git as binary/non-text as outside text normalization.
+
+`.gitignore` excludes repository-local build checks, `work/`, the known accidental PowerShell host directory, generated root/`dist` ZIP files, and unpacked `dist/BannerlordCoopCampaign_v*/` packages. Tracked release artifacts remain tracked; ignore rules do not hide later modifications to them.
+
+Line-ending policy changes must remain isolated from production fixes. If normalization produces a large content diff rather than metadata-only refresh, stop before commit and inspect the affected paths and encodings.
 
 ## Development helper scripts
 
