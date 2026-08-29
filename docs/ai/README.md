@@ -1,8 +1,8 @@
 # AI Knowledge Base
 
-Last source verification: **2026-08-28**
+Last source verification: **2026-08-29**
 Repository: `BannerlordCoopSpectator3`
-Verification scope: static review of source, project files, module descriptors, tests, scripts, and existing documentation. No build, runtime test, deployment, or Git operation was performed during this documentation pass.
+Verification scope: static review of source, project files, module descriptors, tests, scripts, existing documentation, and selected local server assemblies. No build, runtime test, deployment, or mutating Git operation was performed during this documentation pass.
 
 ## Purpose
 
@@ -18,6 +18,8 @@ The project converts a single-player Bannerlord campaign encounter into a synchr
 | [CODE_MAP.md](CODE_MAP.md) | Finding the correct file, class, subsystem, adapter, patch, UI, bridge, or test |
 | [RUNTIME_FLOWS.md](RUNTIME_FLOWS.md) | Campaign-to-mission startup, topology handshake, snapshot transfer, spawn/materialization, phases, reconnect, completion, and scenario routing |
 | [BUILD_TEST_DEBUG.md](BUILD_TEST_DEBUG.md) | Reference profiles, side-effecting builds, contract tests, scripts, logs, diagnostics, and safe validation |
+| [BATTLE_TEST_AUTOMATION_AUDIT.md](BATTLE_TEST_AUTOMATION_AUDIT.md) | Source-verified feasibility findings, unsafe assumptions in the supplied proposal, and the required evidence ladder |
+| [BATTLE_TEST_AUTOMATION_SPEC.md](BATTLE_TEST_AUTOMATION_SPEC.md) | Canonical staged requirements and acceptance criteria for battle-test automation |
 | [INVARIANTS_AND_RISKS.md](INVARIANTS_AND_RISKS.md) | Protected contracts, known limitations, high-risk files, regression matrix, and change checklists |
 
 The repository-root [AGENTS.md](../../AGENTS.md) is the concise instruction and routing entry point.
@@ -163,6 +165,7 @@ If runtime validation was not performed, use precise language such as “impleme
 | Siege deployment, machines, ladders, or AI | all three core maps | siege mode, siege infrastructure, network bridge, siege patches, latest focused reports |
 | UI or player commands | `CODE_MAP.md` | `UI/`, `Commands/`, matching GUI prefab |
 | Build/runtime mismatch | `BUILD_TEST_DEBUG.md` | both project files, module descriptors, actual DLL stamps and logs |
+| Battle-test automation | `BATTLE_TEST_AUTOMATION_AUDIT.md`, `BATTLE_TEST_AUTOMATION_SPEC.md` | build targets, bridge files, mission readiness, result publication/writeback, scenario adapters |
 | New diagnostics | `INVARIANTS_AND_RISKS.md`, `BUILD_TEST_DEBUG.md` | `ExperimentalFeatures.cs`, `CoopDebugConfig.cs`, target hot path |
 
 ## Maintenance workflow
