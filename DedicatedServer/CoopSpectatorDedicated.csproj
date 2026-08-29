@@ -43,6 +43,7 @@
     <Compile Include="SceneContractProbe.cs" />
     <Compile Include="SandBoxSceneScriptRegistrationContract.cs" />
     <Compile Include="SandBoxSceneScriptTypeRegistrar.cs" />
+    <Compile Include="..\Infrastructure\CampaignlessConversationMissionSafetyContract.cs" Link="Infrastructure\CampaignlessConversationMissionSafetyContract.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopBattleMode.cs" Link="GameMode\MissionMultiplayerCoopBattleMode.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopSiegeAssaultWithDeploymentMode.cs" Link="GameMode\MissionMultiplayerCoopSiegeAssaultWithDeploymentMode.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopSiegeAssaultWithDeployment.cs" Link="GameMode\MissionMultiplayerCoopSiegeAssaultWithDeployment.cs" />
@@ -240,6 +241,7 @@
     <Compile Include="..\Patches\ServerChangeCultureCanonicalizationPatch.cs" Link="Patches\ServerChangeCultureCanonicalizationPatch.cs" />
     <Compile Include="..\Patches\CampaignCombatProfileAgentStatsPatch.cs" Link="Patches\CampaignCombatProfileAgentStatsPatch.cs" />
     <Compile Include="..\Patches\HideoutAmbushArrowBarrelPatch.cs" Link="Patches\HideoutAmbushArrowBarrelPatch.cs" />
+    <Compile Include="..\Patches\CampaignlessConversationMissionSafetyPatch.cs" Link="Patches\CampaignlessConversationMissionSafetyPatch.cs" />
     <Compile Include="..\Network\CoopPreMissionTopologyNetworkComponent.cs" Link="Network\CoopPreMissionTopologyNetworkComponent.cs" />
   </ItemGroup>
 

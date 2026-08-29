@@ -438,6 +438,7 @@ namespace CoopSpectator
                     TryApplyExactCampaignNetworkObjectBootstrapPatch();
                     TryApplyBattleMapSpawnHandoffPatch();
                     TryApplyHideoutAmbushInteractionPatch();
+                    TryApplyCampaignlessConversationMissionSafetyPatch();
                     TryApplyMissionItemUsageSetFlagsGuardPatch();
                     TryApplyCoopNetworkSafeAgentBlowPatch();
                     TryApplyCommanderDeploymentMissionNetworkComponentPatch();
@@ -701,6 +702,22 @@ namespace CoopSpectator
             catch (Exception ex)
             {
                 ModLogger.Info("CoopSpectatorDedicated: hideout ambush interaction patch apply failed: " + ex.Message);
+            }
+        }
+
+        private static void TryApplyCampaignlessConversationMissionSafetyPatch()
+        {
+            try
+            {
+                if (_harmony == null)
+                    _harmony = new Harmony("com.coopspectator.dedicated");
+                CampaignlessConversationMissionSafetyPatch.Apply(_harmony);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Info(
+                    "CoopSpectatorDedicated: campaignless conversation mission safety patch apply failed: " +
+                    ex.Message);
             }
         }
 
