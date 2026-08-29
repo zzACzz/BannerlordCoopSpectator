@@ -1,18 +1,31 @@
 # Documentation Index
 
-Date: 2026-03-31
+Index updated: 2026-08-28
 Project: `BannerlordCoopSpectator3`
+
+## Canonical Living Documentation
+
+For new engineering work, start with `docs/ai/README.md`. The `docs/ai/` set is the maintained, source-oriented knowledge base for Codex:
+
+1. `docs/ai/README.md` — current project snapshot, evidence rules, task routing, and maintenance workflow.
+2. `docs/ai/ARCHITECTURE.md` — authority, system boundaries, component ownership, transports, mission composition, and feature defaults.
+3. `docs/ai/CODE_MAP.md` — source, subsystem, adapter, patch, UI, command, test, and script map.
+4. `docs/ai/RUNTIME_FLOWS.md` — campaign capture, topology handshake, snapshot transfer, materialization, phases, reconnect, and writeback.
+5. `docs/ai/BUILD_TEST_DEBUG.md` — side-effecting build behavior, reference profiles, contract tests, scripts, logs, and diagnostics.
+6. `docs/ai/INVARIANTS_AND_RISKS.md` — protected runtime contracts, known limitations, high-risk files, and regression checklists.
+
+Current source and runtime evidence outrank dated plans. Preserve the remaining documents below as focused investigation history, implementation evidence, and technical specifications; do not assume that a newer dated specification is already implemented.
 
 ## Start Here
 
 Read in this order when opening a new window:
 
-1. `README.md`
-2. `PROJECT_CONTEXT.md`
-3. `HUMAN_NOTES_MULTIPLAYER_PROGRESS.md`
-4. `docs/BATTLE_MAP_STATUS_AND_HANDOFF_2026-03-30.md`
-5. `NEW_CHAT_PROMPT_2026-03-30_BATTLE_MAP_SPAWN_STABLE.md`
-6. `BUILD_RUNBOOK.md`
+1. `docs/ai/README.md`.
+2. The task-specific document under `docs/ai/`.
+3. The current source/configuration files referenced by that document.
+4. The relevant dated report below when historical evidence or a focused investigation is needed.
+
+`PROJECT_CONTEXT.md`, `HUMAN_NOTES_MULTIPLAYER_PROGRESS.md`, old handoff prompts, and `BUILD_RUNBOOK.md` remain useful historical context but no longer define the primary read order.
 
 ## Active Runtime Status
 
