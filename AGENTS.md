@@ -83,6 +83,8 @@ Every implementation plan must state:
 - Warn before commit if LF/CRLF conversion, whole-file rewriting, formatting churn, generated output, or another noisy diff is present.
 - A checkpoint commit must be explicitly identified as a checkpoint, not presented as a clean production fix.
 - Do not run destructive or history-rewriting operations such as `reset --hard`, `clean`, `restore`, `stash`, `rebase`, `commit --amend`, force push, or branch deletion without separate explicit approval for the exact command and targets.
+- The repository canonical line ending is LF for text files, except `.bat` and `.cmd`, which use CRLF. Do not override the policy in `.gitattributes`, `.editorconfig`, or repository-local Git configuration without an approved plan.
+- Before a commit, run `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Test-RepositoryHygiene.ps1 -AllowDirty`; after the commit, run it again without `-AllowDirty`.
 
 ## Diagnostics discipline
 

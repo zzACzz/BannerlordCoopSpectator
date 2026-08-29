@@ -32,3 +32,14 @@ dist/_tmp_host_from_zip*.dll
 
 # Local Codex scratch files
 .codex_tmp/
+
+# Repository-local build and analysis scratch
+/.buildcheck/
+/work/
+/System.Management.Automation.Internal.Host.InternalHost/
+
+# Generated archives and unpacked release packages
+/*.zip
+/dist/*.zip
+/dist/BannerlordCoopCampaign_v*/
+/dist/run_mp_with_mod_from_game_root.bat
