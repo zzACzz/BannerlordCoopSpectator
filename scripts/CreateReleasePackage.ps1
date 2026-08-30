@@ -3,10 +3,23 @@ param(
     [string]$DedicatedServerRootDir = "C:\Program Files (x86)\Steam\steamapps\common\Mount & Blade II Dedicated Server",
     [switch]$SkipBuild,
     [switch]$LightOnly,
-    [switch]$GitHubAssetsOnly
+    [switch]$GitHubAssetsOnly,
+    [switch]$NexusAssetsOnly,
+    [switch]$ReleaseAssetsOnly
 )
 
 $ErrorActionPreference = "Stop"
+
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+$assetOnlyModeCount = [int][bool]$GitHubAssetsOnly +
+    [int][bool]$NexusAssetsOnly +
+    [int][bool]$ReleaseAssetsOnly
+if ($assetOnlyModeCount -gt 1)
+{
+    throw "GitHubAssetsOnly, NexusAssetsOnly, and ReleaseAssetsOnly are mutually exclusive."
+}
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $distRoot = Join-Path $repoRoot "dist"
@@ -41,6 +54,11 @@ $githubClientDir = Join-Path $releaseAssetsRoot (".staging_{0}_Client" -f $relea
 $githubClientZip = Join-Path $releaseAssetsDir ($releaseTag + "_Client.zip")
 $githubHostDir = Join-Path $releaseAssetsRoot (".staging_{0}_Host" -f $releaseTag)
 $githubHostZip = Join-Path $releaseAssetsDir ($releaseTag + "_Host.zip")
+$nexusAssetsDir = Join-Path $releaseAssetsDir "Nexus"
+$nexusClientZip = Join-Path $nexusAssetsDir ($releaseTag + "_Client.zip")
+$nexusHostZip = Join-Path $nexusAssetsDir ($releaseTag + "_HostLite.zip")
+$nexusClientTempZip = Join-Path $nexusAssetsDir (".partial_{0}_Client.zip" -f $releaseTag)
+$nexusHostTempZip = Join-Path $nexusAssetsDir (".partial_{0}_HostLite.zip" -f $releaseTag)
 
 function Reset-Path([string]$targetPath)
 {
@@ -137,6 +155,191 @@ function Get-ProductVersion([string]$filePath)
     }
 
     return [System.Diagnostics.FileVersionInfo]::GetVersionInfo($filePath).ProductVersion
+}
+
+function Get-StreamSha256([System.IO.Stream]$stream)
+{
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try
+    {
+        $hashBytes = $sha256.ComputeHash($stream)
+        return (($hashBytes | ForEach-Object { $_.ToString("x2") }) -join "").ToUpperInvariant()
+    }
+    finally
+    {
+        $sha256.Dispose()
+    }
+}
+
+function Get-ZipFileMap([string]$zipPath)
+{
+    Assert-PathExists $zipPath "ZIP archive"
+
+    $files = @{}
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+    try
+    {
+        foreach ($entry in $archive.Entries)
+        {
+            if ([string]::IsNullOrEmpty($entry.Name))
+            {
+                continue
+            }
+
+            $entryPath = $entry.FullName.Replace('\', '/')
+            $stream = $entry.Open()
+            try
+            {
+                $entryHash = Get-StreamSha256 $stream
+            }
+            finally
+            {
+                $stream.Dispose()
+            }
+
+            $files[$entryPath] = [pscustomobject]@{
+                Length = $entry.Length
+                Sha256 = $entryHash
+            }
+        }
+    }
+    finally
+    {
+        $archive.Dispose()
+    }
+
+    return $files
+}
+
+function Get-ZipEntryText([string]$zipPath, [string]$entryPath)
+{
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+    try
+    {
+        $entry = $archive.GetEntry($entryPath)
+        if ($null -eq $entry)
+        {
+            throw "Required ZIP entry not found: $entryPath in $zipPath"
+        }
+
+        $stream = $entry.Open()
+        try
+        {
+            $reader = New-Object System.IO.StreamReader(
+                $stream,
+                [System.Text.Encoding]::UTF8,
+                $true)
+            try
+            {
+                return $reader.ReadToEnd()
+            }
+            finally
+            {
+                $reader.Dispose()
+            }
+        }
+        finally
+        {
+            $stream.Dispose()
+        }
+    }
+    finally
+    {
+        $archive.Dispose()
+    }
+}
+
+function New-FilteredZipArchive(
+    [string]$sourceZip,
+    [string]$destinationZip,
+    [string[]]$excludedEntries,
+    [object[]]$documents)
+{
+    Assert-PathExists $sourceZip "source ZIP archive"
+    if (Test-Path $destinationZip)
+    {
+        throw "Refusing to overwrite ZIP archive while creating it: $destinationZip"
+    }
+
+    $excluded = New-Object 'System.Collections.Generic.HashSet[string]' (
+        [System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($entryPath in $excludedEntries)
+    {
+        [void]$excluded.Add($entryPath.Replace('\', '/'))
+    }
+
+    $sourceArchive = [System.IO.Compression.ZipFile]::OpenRead($sourceZip)
+    $destinationStream = [System.IO.File]::Open(
+        $destinationZip,
+        [System.IO.FileMode]::CreateNew,
+        [System.IO.FileAccess]::ReadWrite,
+        [System.IO.FileShare]::None)
+    $destinationArchive = New-Object System.IO.Compression.ZipArchive(
+        $destinationStream,
+        [System.IO.Compression.ZipArchiveMode]::Create,
+        $false)
+
+    try
+    {
+        foreach ($sourceEntry in @($sourceArchive.Entries | Sort-Object FullName))
+        {
+            if ([string]::IsNullOrEmpty($sourceEntry.Name))
+            {
+                continue
+            }
+
+            $entryPath = $sourceEntry.FullName.Replace('\', '/')
+            if ($excluded.Contains($entryPath))
+            {
+                continue
+            }
+
+            $destinationEntry = $destinationArchive.CreateEntry(
+                $entryPath,
+                [System.IO.Compression.CompressionLevel]::Optimal)
+            $destinationEntry.LastWriteTime = $sourceEntry.LastWriteTime
+
+            $sourceStream = $sourceEntry.Open()
+            $entryStream = $destinationEntry.Open()
+            try
+            {
+                $sourceStream.CopyTo($entryStream)
+            }
+            finally
+            {
+                $entryStream.Dispose()
+                $sourceStream.Dispose()
+            }
+        }
+
+        foreach ($document in @($documents | Sort-Object EntryName))
+        {
+            Assert-PathExists $document.SourcePath "Nexus package document"
+
+            $documentEntry = $destinationArchive.CreateEntry(
+                $document.EntryName,
+                [System.IO.Compression.CompressionLevel]::Optimal)
+            $documentEntry.LastWriteTime = (Get-Item -LiteralPath $document.SourcePath).LastWriteTime
+
+            $documentStream = [System.IO.File]::OpenRead($document.SourcePath)
+            $entryStream = $documentEntry.Open()
+            try
+            {
+                $documentStream.CopyTo($entryStream)
+            }
+            finally
+            {
+                $entryStream.Dispose()
+                $documentStream.Dispose()
+            }
+        }
+    }
+    finally
+    {
+        $destinationArchive.Dispose()
+        $destinationStream.Dispose()
+        $sourceArchive.Dispose()
+    }
 }
 
 function Assert-PathExists([string]$targetPath, [string]$label)
@@ -291,6 +494,231 @@ function Create-GitHubReleaseAssets
     Write-Host ("Created GitHub host package: {0}" -f $githubHostZip)
 }
 
+function Assert-ZipPayloadMatches(
+    [hashtable]$sourceMap,
+    [hashtable]$outputMap,
+    [string[]]$excludedSourceEntries,
+    [string[]]$documentEntries,
+    [string]$label)
+{
+    $normalizedExclusions = @($excludedSourceEntries | ForEach-Object { $_.Replace('\', '/') })
+    $expectedPayloadEntries = @(
+        $sourceMap.Keys |
+            Where-Object { $_ -notin $normalizedExclusions } |
+            Sort-Object)
+    $actualPayloadEntries = @(
+        $outputMap.Keys |
+            Where-Object { $_ -notin $documentEntries } |
+            Sort-Object)
+    $differences = @(
+        Compare-Object -ReferenceObject $expectedPayloadEntries -DifferenceObject $actualPayloadEntries)
+    if ($differences.Count -ne 0)
+    {
+        throw "Nexus payload validation failed for $label. Entry differences: $($differences | Out-String)"
+    }
+
+    foreach ($entryPath in $expectedPayloadEntries)
+    {
+        $sourceEntry = $sourceMap[$entryPath]
+        $outputEntry = $outputMap[$entryPath]
+        if ($sourceEntry.Length -ne $outputEntry.Length -or
+            -not [string]::Equals(
+                $sourceEntry.Sha256,
+                $outputEntry.Sha256,
+                [System.StringComparison]::OrdinalIgnoreCase))
+        {
+            throw "Nexus payload validation failed for $label. Content mismatch: $entryPath"
+        }
+    }
+}
+
+function Validate-NexusReleasePayload([string]$clientZip, [string]$hostZip)
+{
+    Assert-PathExists $githubClientZip "GitHub client package used as Nexus source"
+    Assert-PathExists $githubHostZip "GitHub host package used as Nexus source"
+    Assert-PathExists $clientZip "Nexus client package"
+    Assert-PathExists $hostZip "Nexus HostLite package"
+
+    $documents = @(
+        [pscustomobject]@{ EntryName = (Split-Path $releaseChangelogEnTemplate -Leaf); SourcePath = $releaseChangelogEnTemplate },
+        [pscustomobject]@{ EntryName = (Split-Path $releaseChangelogUaTemplate -Leaf); SourcePath = $releaseChangelogUaTemplate },
+        [pscustomobject]@{ EntryName = (Split-Path $githubReadmeEnTemplate -Leaf); SourcePath = $githubReadmeEnTemplate },
+        [pscustomobject]@{ EntryName = (Split-Path $githubReadmeUaTemplate -Leaf); SourcePath = $githubReadmeUaTemplate }
+    )
+    foreach ($document in $documents)
+    {
+        Assert-PathExists $document.SourcePath "Nexus package document"
+    }
+
+    $documentEntries = @($documents | ForEach-Object { $_.EntryName })
+    $clientExclusions = @(
+        "run_mp_with_mod_from_game_root.bat",
+        "Modules/CoopSpectator/CoopShaderCacheModeSwitch.ps1")
+    $hostExclusions = @()
+
+    $githubClientMap = Get-ZipFileMap $githubClientZip
+    $githubHostMap = Get-ZipFileMap $githubHostZip
+    $clientMap = Get-ZipFileMap $clientZip
+    $hostMap = Get-ZipFileMap $hostZip
+
+    Assert-ZipPayloadMatches $githubClientMap $clientMap $clientExclusions $documentEntries "Nexus client"
+    Assert-ZipPayloadMatches $githubHostMap $hostMap $hostExclusions $documentEntries "Nexus HostLite"
+
+    $payloads = @(
+        [pscustomobject]@{
+            Label = "Nexus client"
+            Map = $clientMap
+            SourceMap = $githubClientMap
+            Exclusions = $clientExclusions
+            ModulePrefix = "Modules/CoopSpectator/"
+        },
+        [pscustomobject]@{
+            Label = "Nexus HostLite"
+            Map = $hostMap
+            SourceMap = $githubHostMap
+            Exclusions = $hostExclusions
+            ModulePrefix = "Modules/CoopSpectatorDedicated/"
+        })
+
+    foreach ($payload in $payloads)
+    {
+        $expectedCount = $payload.SourceMap.Count - $payload.Exclusions.Count + $documentEntries.Count
+        if ($payload.Map.Count -ne $expectedCount)
+        {
+            throw "Nexus payload validation failed for $($payload.Label). Expected $expectedCount files, found $($payload.Map.Count)."
+        }
+
+        foreach ($document in $documents)
+        {
+            if (-not $payload.Map.ContainsKey($document.EntryName))
+            {
+                throw "Nexus payload validation failed for $($payload.Label). Missing document: $($document.EntryName)"
+            }
+
+            $sourceHash = (Get-FileHash -LiteralPath $document.SourcePath -Algorithm SHA256).Hash
+            if (-not [string]::Equals(
+                    $sourceHash,
+                    $payload.Map[$document.EntryName].Sha256,
+                    [System.StringComparison]::OrdinalIgnoreCase))
+            {
+                throw "Nexus payload validation failed for $($payload.Label). Document mismatch: $($document.EntryName)"
+            }
+        }
+
+        $forbiddenEntries = @(
+            $payload.Map.Keys |
+                Where-Object { $_ -match '(?i)\.(bat|ps1|pdb)$' })
+        if ($forbiddenEntries.Count -ne 0)
+        {
+            throw "Nexus payload validation failed for $($payload.Label). Forbidden files: $($forbiddenEntries -join ', ')"
+        }
+
+        $unexpectedEntries = @(
+            $payload.Map.Keys |
+                Where-Object {
+                    $_ -notin $documentEntries -and
+                    -not $_.StartsWith(
+                        $payload.ModulePrefix,
+                        [System.StringComparison]::Ordinal)
+                })
+        if ($unexpectedEntries.Count -ne 0)
+        {
+            throw "Nexus payload validation failed for $($payload.Label). Unexpected root entries: $($unexpectedEntries -join ', ')"
+        }
+    }
+
+    [xml]$clientXml = Get-ZipEntryText $clientZip "Modules/CoopSpectator/SubModule.xml"
+    [xml]$hostXml = Get-ZipEntryText $hostZip "Modules/CoopSpectatorDedicated/SubModule.xml"
+    if ($clientXml.Module.Version.value -ne $moduleVersion -or
+        $hostXml.Module.Version.value -ne $moduleVersion)
+    {
+        throw "Nexus payload validation failed. SubModule versions do not match $moduleVersion."
+    }
+
+    $sourceClientDll = Join-Path $clientModuleSource "bin\Win64_Shipping_Client\CoopSpectator.dll"
+    $sourceHostDll = Join-Path $dedicatedModuleSource "bin\Win64_Shipping_Server\CoopSpectator.dll"
+    $expectedProductVersion = $releaseVersion -replace '^[vV]', ''
+    Assert-ProductVersionMatches $expectedProductVersion $sourceClientDll "source client CoopSpectator.dll"
+    Assert-ProductVersionMatches $expectedProductVersion $sourceHostDll "source dedicated CoopSpectator.dll"
+
+    $sourceClientDllHash = (Get-FileHash -LiteralPath $sourceClientDll -Algorithm SHA256).Hash
+    $sourceHostDllHash = (Get-FileHash -LiteralPath $sourceHostDll -Algorithm SHA256).Hash
+    if (-not [string]::Equals(
+            $sourceClientDllHash,
+            $clientMap["Modules/CoopSpectator/bin/Win64_Shipping_Client/CoopSpectator.dll"].Sha256,
+            [System.StringComparison]::OrdinalIgnoreCase))
+    {
+        throw "Nexus payload validation failed. Client CoopSpectator.dll does not match the source module."
+    }
+    foreach ($hostDllEntry in @(
+            "Modules/CoopSpectatorDedicated/bin/Win64_Shipping_Client/CoopSpectator.dll",
+            "Modules/CoopSpectatorDedicated/bin/Win64_Shipping_Server/CoopSpectator.dll"))
+    {
+        if (-not [string]::Equals(
+                $sourceHostDllHash,
+                $hostMap[$hostDllEntry].Sha256,
+                [System.StringComparison]::OrdinalIgnoreCase))
+        {
+            throw "Nexus payload validation failed. Host CoopSpectator.dll does not match the source module: $hostDllEntry"
+        }
+    }
+
+    Write-Host (
+        "Validated Nexus release payloads. ModuleVersion={0} ClientFiles={1} HostLiteFiles={2}" -f
+            $moduleVersion,
+            $clientMap.Count,
+            $hostMap.Count)
+}
+
+function Create-NexusReleaseAssets
+{
+    New-Item -ItemType Directory -Path $nexusAssetsDir -Force | Out-Null
+
+    Assert-PathExists $githubClientZip "GitHub client package used as Nexus source"
+    Assert-PathExists $githubHostZip "GitHub host package used as Nexus source"
+    Assert-PathExists $releaseChangelogEnTemplate "English release changelog"
+    Assert-PathExists $releaseChangelogUaTemplate "Ukrainian release changelog"
+    Assert-PathExists $githubReadmeEnTemplate "English release README"
+    Assert-PathExists $githubReadmeUaTemplate "Ukrainian release README"
+
+    $documents = @(
+        [pscustomobject]@{ EntryName = (Split-Path $releaseChangelogEnTemplate -Leaf); SourcePath = $releaseChangelogEnTemplate },
+        [pscustomobject]@{ EntryName = (Split-Path $releaseChangelogUaTemplate -Leaf); SourcePath = $releaseChangelogUaTemplate },
+        [pscustomobject]@{ EntryName = (Split-Path $githubReadmeEnTemplate -Leaf); SourcePath = $githubReadmeEnTemplate },
+        [pscustomobject]@{ EntryName = (Split-Path $githubReadmeUaTemplate -Leaf); SourcePath = $githubReadmeUaTemplate }
+    )
+
+    Reset-Path $nexusClientTempZip
+    Reset-Path $nexusHostTempZip
+    Reset-Path $nexusClientZip
+    Reset-Path $nexusHostZip
+
+    try
+    {
+        New-FilteredZipArchive $githubClientZip $nexusClientTempZip @(
+            "run_mp_with_mod_from_game_root.bat",
+            "Modules/CoopSpectator/CoopShaderCacheModeSwitch.ps1") $documents
+        New-FilteredZipArchive $githubHostZip $nexusHostTempZip @() $documents
+
+        Validate-NexusReleasePayload $nexusClientTempZip $nexusHostTempZip
+
+        Move-Item -LiteralPath $nexusClientTempZip -Destination $nexusClientZip
+        Move-Item -LiteralPath $nexusHostTempZip -Destination $nexusHostZip
+    }
+    finally
+    {
+        Reset-Path $nexusClientTempZip
+        Reset-Path $nexusHostTempZip
+    }
+
+    Write-Host ("Created Nexus client package: {0}" -f $nexusClientZip)
+    Write-Host ("Created Nexus HostLite package: {0}" -f $nexusHostZip)
+    Write-Host ("Nexus client SHA256: {0}" -f (
+        Get-FileHash -LiteralPath $nexusClientZip -Algorithm SHA256).Hash)
+    Write-Host ("Nexus HostLite SHA256: {0}" -f (
+        Get-FileHash -LiteralPath $nexusHostZip -Algorithm SHA256).Hash)
+}
+
 function Copy-HostPayload([string]$hostModulesDir, [bool]$includeBaseSceneModules)
 {
     $hostDedicatedModuleDir = Join-Path $hostModulesDir "CoopSpectatorDedicated"
@@ -340,9 +768,22 @@ if (-not $SkipBuild)
     }
 }
 
+if ($ReleaseAssetsOnly)
+{
+    Create-GitHubReleaseAssets
+    Create-NexusReleaseAssets
+    return
+}
+
 if ($GitHubAssetsOnly)
 {
     Create-GitHubReleaseAssets
+    return
+}
+
+if ($NexusAssetsOnly)
+{
+    Create-NexusReleaseAssets
     return
 }
 
