@@ -21,12 +21,15 @@ $lightReleaseReadmeUaTemplate = Join-Path $distRoot "README_LIGHT_RELEASE_UA.md"
 
 [xml]$moduleXml = Get-Content (Join-Path $clientModuleSource "SubModule.xml")
 $moduleVersion = $moduleXml.Module.Version.value
-$releaseTag = "BannerlordCoopCampaign_{0}" -f $moduleVersion.Trim()
+$releaseVersion = $moduleVersion.Trim()
+$releaseTag = "BannerlordCoopCampaign_{0}" -f $releaseVersion
+$releaseAssetsRoot = Join-Path $distRoot "releases"
+$releaseAssetsDir = Join-Path $releaseAssetsRoot $releaseVersion
 $releaseChangelogTemplate = Join-Path $distRoot ("CHANGELOG_{0}.md" -f $moduleVersion.Trim())
-$releaseChangelogEnTemplate = Join-Path $distRoot ("CHANGELOG_{0}_EN.md" -f $moduleVersion.Trim())
-$releaseChangelogUaTemplate = Join-Path $distRoot ("CHANGELOG_{0}_UA.md" -f $moduleVersion.Trim())
-$githubReadmeEnTemplate = Join-Path $distRoot ("README_{0}_EN.md" -f $moduleVersion.Trim())
-$githubReadmeUaTemplate = Join-Path $distRoot ("README_{0}_UA.md" -f $moduleVersion.Trim())
+$releaseChangelogEnTemplate = Join-Path $releaseAssetsDir ("CHANGELOG_{0}_EN.md" -f $releaseVersion)
+$releaseChangelogUaTemplate = Join-Path $releaseAssetsDir ("CHANGELOG_{0}_UA.md" -f $releaseVersion)
+$githubReadmeEnTemplate = Join-Path $releaseAssetsDir ("README_{0}_EN.md" -f $releaseVersion)
+$githubReadmeUaTemplate = Join-Path $releaseAssetsDir ("README_{0}_UA.md" -f $releaseVersion)
 
 $legacyClientDir = Join-Path $distRoot "CoopSpectator_ClientPackage"
 $legacyClientZip = Join-Path $distRoot "CoopSpectator_ClientPackage.zip"
@@ -34,10 +37,10 @@ $releaseDir = Join-Path $distRoot ($releaseTag + "_Release")
 $releaseZip = Join-Path $distRoot ($releaseTag + "_Release.zip")
 $lightReleaseDir = Join-Path $distRoot ($releaseTag + "_LightRelease")
 $lightReleaseZip = Join-Path $distRoot ($releaseTag + "_LightRelease.zip")
-$githubClientDir = Join-Path $distRoot ($releaseTag + "_Client")
-$githubClientZip = Join-Path $distRoot ($releaseTag + "_Client.zip")
-$githubHostDir = Join-Path $distRoot ($releaseTag + "_Host")
-$githubHostZip = Join-Path $distRoot ($releaseTag + "_Host.zip")
+$githubClientDir = Join-Path $releaseAssetsRoot (".staging_{0}_Client" -f $releaseTag)
+$githubClientZip = Join-Path $releaseAssetsDir ($releaseTag + "_Client.zip")
+$githubHostDir = Join-Path $releaseAssetsRoot (".staging_{0}_Host" -f $releaseTag)
+$githubHostZip = Join-Path $releaseAssetsDir ($releaseTag + "_Host.zip")
 
 function Reset-Path([string]$targetPath)
 {
@@ -250,6 +253,8 @@ function Validate-GitHubReleasePayload([string]$clientRoot, [string]$hostRoot)
 
 function Create-GitHubReleaseAssets
 {
+    New-Item -ItemType Directory -Path $releaseAssetsDir -Force | Out-Null
+
     Assert-PathExists $releaseChangelogEnTemplate "English release changelog"
     Assert-PathExists $releaseChangelogUaTemplate "Ukrainian release changelog"
     Assert-PathExists $githubReadmeEnTemplate "English release README"
@@ -260,22 +265,27 @@ function Create-GitHubReleaseAssets
     Reset-Path $githubHostDir
     Reset-Path $githubHostZip
 
-    New-Item -ItemType Directory -Path (Join-Path $githubClientDir "Modules") -Force | Out-Null
-    Copy-DirectoryContent $clientModuleSource (Join-Path $githubClientDir "Modules\CoopSpectator")
-    Copy-Item -LiteralPath $portableLauncher -Destination (Join-Path $githubClientDir "run_mp_with_mod_from_game_root.bat") -Force
+    try
+    {
+        New-Item -ItemType Directory -Path (Join-Path $githubClientDir "Modules") -Force | Out-Null
+        Copy-DirectoryContent $clientModuleSource (Join-Path $githubClientDir "Modules\CoopSpectator")
+        Copy-Item -LiteralPath $portableLauncher -Destination (Join-Path $githubClientDir "run_mp_with_mod_from_game_root.bat") -Force
 
-    New-Item -ItemType Directory -Path (Join-Path $githubHostDir "Modules") -Force | Out-Null
-    Copy-HostPayload (Join-Path $githubHostDir "Modules") $false
+        New-Item -ItemType Directory -Path (Join-Path $githubHostDir "Modules") -Force | Out-Null
+        Copy-HostPayload (Join-Path $githubHostDir "Modules") $false
 
-    Remove-DebugSymbols $githubClientDir
-    Remove-DebugSymbols $githubHostDir
-    Validate-GitHubReleasePayload $githubClientDir $githubHostDir
+        Remove-DebugSymbols $githubClientDir
+        Remove-DebugSymbols $githubHostDir
+        Validate-GitHubReleasePayload $githubClientDir $githubHostDir
 
-    Compress-Archive -Path (Join-Path $githubClientDir "*") -DestinationPath $githubClientZip -CompressionLevel Optimal
-    Compress-Archive -Path (Join-Path $githubHostDir "*") -DestinationPath $githubHostZip -CompressionLevel Optimal
-
-    Reset-Path $githubClientDir
-    Reset-Path $githubHostDir
+        Compress-Archive -Path (Join-Path $githubClientDir "*") -DestinationPath $githubClientZip -CompressionLevel Optimal
+        Compress-Archive -Path (Join-Path $githubHostDir "*") -DestinationPath $githubHostZip -CompressionLevel Optimal
+    }
+    finally
+    {
+        Reset-Path $githubClientDir
+        Reset-Path $githubHostDir
+    }
 
     Write-Host ("Created GitHub client package: {0}" -f $githubClientZip)
     Write-Host ("Created GitHub host package: {0}" -f $githubHostZip)

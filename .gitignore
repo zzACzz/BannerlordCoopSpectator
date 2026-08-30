@@ -43,3 +43,5 @@ dist/_tmp_host_from_zip*.dll
 /dist/*.zip
 /dist/BannerlordCoopCampaign_v*/
 /dist/run_mp_with_mod_from_game_root.bat
+/dist/releases/**/*.zip
+/dist/releases/.staging_*/
