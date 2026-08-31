@@ -53,6 +53,26 @@ internal static class Program
             source.Contains("Get-CimInstance -ClassName Win32_Process -OperationTimeoutSec 10", StringComparison.Ordinal),
             "Aggregate runner process snapshots must use a bounded CIM operation timeout.");
         Assert(
+            source.Contains("$dedicatedStartInfo.RedirectStandardOutput = $true", StringComparison.Ordinal) &&
+            source.Contains("$dedicatedStartInfo.RedirectStandardError = $true", StringComparison.Ordinal),
+            "Feasibility must capture the exact dedicated process stdout and stderr.");
+        Assert(
+            source.Contains("Wait-CoopCapturedTextMarkers", StringComparison.Ordinal) &&
+            source.Contains("is ready! You can now enter console commands", StringComparison.Ordinal) &&
+            source.Contains("--Game is starting...", StringComparison.Ordinal),
+            "Feasibility must wait for native console readiness and accepted start_game evidence.");
+        Assert(
+            source.Contains("Copy-CoopDedicatedNativeLogs", StringComparison.Ordinal),
+            "Feasibility must retain exact PID-correlated native logs.");
+        Assert(
+            source.Contains("Get-CoopSingularCommandResult", StringComparison.Ordinal),
+            "Aggregate command dispatch must validate a singular structured result.");
+        Assert(
+            source.Contains("Wait-CoopProcessExitNoOutput -Process $process", StringComparison.Ordinal) &&
+            !source.Contains("$process.WaitForExit($GraceSeconds * 1000)", StringComparison.Ordinal) &&
+            !source.Contains("$process.WaitForExit(10000)", StringComparison.Ordinal),
+            "Cleanup waits must not leak Boolean values into the command result pipeline.");
+        Assert(
             !source.Contains("foreach ($serverCommand in @(\n", StringComparison.Ordinal) &&
             !source.Contains("foreach ($serverCommand in @(\r\n", StringComparison.Ordinal),
             "Aggregate runner must not reconstruct the comma-precedence bootstrap bug.");
@@ -196,6 +216,106 @@ Assert-True $limitRejected 'The explicit descendant limit must reject an oversiz
 
 $empty = @(Get-CoopDescendantProcessRecordsFromSnapshot -Snapshot @() -RootProcessIds @(99))
 Assert-True ($empty.Count -eq 0) 'An empty snapshot must produce no descendants.'
+
+$validResult = [ordered]@{ Outcome = 'Timeout'; Reason = 'synthetic'; ArtifactPath = 'synthetic.json' }
+$singular = Get-CoopSingularCommandResult -Results @($validResult) -CommandName 'Synthetic'
+Assert-True ($singular.Outcome -eq 'Timeout' -and $singular.PrimaryOutcome -eq 'Timeout') `
+    'A Windows PowerShell ordered-dictionary result must normalize without losing its primary outcome.'
+
+$zeroRejected = $false
+try { $null = Get-CoopSingularCommandResult -Results @() -CommandName 'Zero' }
+catch { $zeroRejected = $_.Exception.Message -match 'exactly one structured result object; observed 0' }
+Assert-True $zeroRejected 'A zero-result aggregate command must be rejected.'
+
+$multipleRejected = $false
+try { $null = Get-CoopSingularCommandResult -Results @($true, $validResult) -CommandName 'Multiple' }
+catch { $multipleRejected = $_.Exception.Message -match 'exactly one structured result object; observed 2' }
+Assert-True $multipleRejected 'Incidental helper output plus a result object must be rejected.'
+
+$missingPropertyRejected = $false
+try {
+    $null = Get-CoopSingularCommandResult `
+        -Results @([pscustomobject]@{ Outcome = 'Pass'; Reason = 'missing artifact' }) `
+        -CommandName 'MissingProperty'
+}
+catch { $missingPropertyRejected = $_.Exception.Message -match "missing required property 'ArtifactPath'" }
+Assert-True $missingPropertyRejected 'A structurally incomplete aggregate result must be rejected.'
+
+$nativeLogNames = @(Get-CoopPidCorrelatedNativeLogNames -ProcessId 123600)
+Assert-True ($nativeLogNames.Count -eq 3) 'Exactly three PID-correlated native log names are required.'
+Assert-True (($nativeLogNames -join ',') -eq 'rgl_log_123600.txt,rgl_log_errors_123600.txt,watchdog_log_123600.txt') `
+    'Native log selection must use only exact PID-bound file names.'
+
+$captureRoot = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) ('capture-fixture-' + $PID)
+[System.IO.Directory]::CreateDirectory($captureRoot) | Out-Null
+$childScriptPath = Join-Path $captureRoot 'Emit-NativeEvidence.ps1'
+$childScript = @'
+[Console]::Out.WriteLine('Listed server is ready! You can now enter console commands')
+[Console]::Out.Flush()
+Start-Sleep -Milliseconds 500
+[Console]::Out.WriteLine('--Changed: ServerName, to: AC_COOP_CONTRACT')
+[Console]::Out.WriteLine('--Changed: MaxNumberOfPlayers, to: 16')
+[Console]::Out.WriteLine('--Changed: GameType, to: TeamDeathmatch')
+[Console]::Out.WriteLine('--Changed: Map, to: mp_tdm_map_001')
+[Console]::Out.WriteLine('--Game is starting...')
+[Console]::Out.WriteLine('--Selected scene: mp_tdm_map_001')
+[Console]::Out.Flush()
+[Console]::Error.WriteLine('synthetic stderr evidence')
+[Console]::Error.Flush()
+'@
+[System.IO.File]::WriteAllText($childScriptPath, $childScript, (New-Object System.Text.UTF8Encoding($false)))
+$childStartInfo = New-Object System.Diagnostics.ProcessStartInfo
+$childStartInfo.FileName = (Get-Process -Id $PID).Path
+$childStartInfo.UseShellExecute = $false
+$childStartInfo.CreateNoWindow = $true
+$childStartInfo.RedirectStandardInput = $true
+$childStartInfo.RedirectStandardOutput = $true
+$childStartInfo.RedirectStandardError = $true
+$childStartInfo.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $childScriptPath + '"'
+$childProcess = New-Object System.Diagnostics.Process
+$childProcess.StartInfo = $childStartInfo
+Assert-True ($childProcess.Start()) 'Synthetic output process must start.'
+$capture = New-CoopProcessTextCapture `
+    -Process $childProcess `
+    -StandardOutputPath (Join-Path $captureRoot 'stdout.txt') `
+    -StandardErrorPath (Join-Path $captureRoot 'stderr.txt') `
+    -MaximumTailLines 256
+$readyEvidence = Wait-CoopCapturedTextMarkers `
+    -Capture $capture `
+    -RequiredSubstrings @('is ready! You can now enter console commands') `
+    -DeadlineUtc ([DateTime]::UtcNow.AddSeconds(10)) `
+    -EvidenceName 'SyntheticConsoleReady'
+$afterReadySequence = [long]$readyEvidence.Matches[0].Sequence
+$commandEvidence = Wait-CoopCapturedTextMarkers `
+    -Capture $capture `
+    -RequiredSubstrings @(
+        '--Changed: ServerName, to: AC_COOP_CONTRACT',
+        '--Changed: MaxNumberOfPlayers, to: 16',
+        '--Changed: GameType, to: TeamDeathmatch',
+        '--Changed: Map, to: mp_tdm_map_001',
+        '--Game is starting...',
+        '--Selected scene: mp_tdm_map_001') `
+    -AfterSequence $afterReadySequence `
+    -DeadlineUtc ([DateTime]::UtcNow.AddSeconds(10)) `
+    -EvidenceName 'SyntheticBootstrapAccepted'
+Assert-True ($commandEvidence.Matches.Count -eq 6) 'Every synthetic bootstrap marker must be observed after readiness.'
+$waitOutput = @(Wait-CoopProcessExitNoOutput -Process $childProcess -TimeoutMilliseconds 10000)
+Assert-True ($waitOutput.Count -eq 0) 'Process.WaitForExit(Boolean) must not enter the PowerShell output pipeline.'
+Complete-CoopProcessTextCapture -Capture $capture -DrainTimeoutMilliseconds 5000
+$stdoutText = [System.IO.File]::ReadAllText((Join-Path $captureRoot 'stdout.txt'))
+$stderrText = [System.IO.File]::ReadAllText((Join-Path $captureRoot 'stderr.txt'))
+Assert-True ($stdoutText -match 'Selected scene: mp_tdm_map_001') 'Captured stdout must retain native command evidence.'
+Assert-True ($stderrText -match 'synthetic stderr evidence') 'Captured stderr must be drained and retained.'
+$missingEvidenceRejected = $false
+try {
+    $null = Wait-CoopCapturedTextMarkers `
+        -Capture $capture `
+        -RequiredSubstrings @('marker-that-was-never-emitted') `
+        -DeadlineUtc ([DateTime]::UtcNow.AddSeconds(1)) `
+        -EvidenceName 'SyntheticMissingEvidence'
+}
+catch { $missingEvidenceRejected = $true }
+Assert-True $missingEvidenceRejected 'A completed process with incomplete native evidence must be rejected.'
 
 Write-Output ('PASS ' + $PSVersionTable.PSVersion.ToString())
 """;

@@ -622,7 +622,7 @@ function Stop-CoopExactProcessIdentity {
     $evidence.IdentityMatched = $true
     $process = Get-Process -Id ([int]$Identity.ProcessId) -ErrorAction Stop
     try { $evidence.GracefulCloseRequested = [bool]$process.CloseMainWindow() } catch { }
-    try { $process.WaitForExit($GraceSeconds * 1000) } catch { }
+    try { Wait-CoopProcessExitNoOutput -Process $process -TimeoutMilliseconds ($GraceSeconds * 1000) } catch { }
     if (-not $process.HasExited) {
         if (-not (Test-CoopLiveProcessIdentity -Identity $Identity)) {
             $evidence.Outcome = 'IdentityChangedBeforeForcedStop'
@@ -631,7 +631,7 @@ function Stop-CoopExactProcessIdentity {
         }
         $evidence.ForcedStopUsed = $true
         $process.Kill()
-        $process.WaitForExit(10000)
+        Wait-CoopProcessExitNoOutput -Process $process -TimeoutMilliseconds 10000
     }
     $evidence.Outcome = if ($process.HasExited) { 'Stopped' } else { 'StopFailed' }
     $runtimeCleanupEvidence.Add($evidence)
@@ -655,15 +655,90 @@ function Stop-CoopOwnedRuntimeProcesses {
     })
 }
 
+function Copy-CoopDedicatedNativeLogs {
+    param(
+        [Parameter(Mandatory = $true)]$DedicatedIdentity,
+        [Parameter(Mandatory = $true)][string]$DestinationRoot
+    )
+
+    $sourceRoot = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData)) `
+        'Mount and Blade II Bannerlord\logs'
+    if (-not [System.IO.Directory]::Exists($sourceRoot)) {
+        throw "Bannerlord native log root does not exist: $sourceRoot"
+    }
+    [System.IO.Directory]::CreateDirectory($DestinationRoot) | Out-Null
+
+    $processId = [int]$DedicatedIdentity.ProcessId
+    $processStartUtc = [DateTime]::Parse(
+        [string]$DedicatedIdentity.ProcessStartUtc,
+        [Globalization.CultureInfo]::InvariantCulture,
+        [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+    $files = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($fileName in @(Get-CoopPidCorrelatedNativeLogNames -ProcessId $processId)) {
+        $sourcePath = Join-Path $sourceRoot $fileName
+        if (-not [System.IO.File]::Exists($sourcePath)) {
+            throw "Expected PID-correlated native log is missing: $sourcePath"
+        }
+        $sourceItem = Get-Item -LiteralPath $sourcePath
+        if ($sourceItem.LastWriteTimeUtc -lt $processStartUtc.AddSeconds(-10)) {
+            throw "PID-correlated native log predates the exact dedicated process identity: $sourcePath"
+        }
+
+        $destinationPath = Join-Path $DestinationRoot $fileName
+        $copied = $false
+        for ($attempt = 0; $attempt -lt 30 -and -not $copied; $attempt++) {
+            try {
+                [System.IO.File]::Copy($sourcePath, $destinationPath, $true)
+                $copied = $true
+            }
+            catch [System.IO.IOException] {
+                if ($attempt -eq 29) { throw }
+                Start-Sleep -Milliseconds 100
+            }
+            catch [System.UnauthorizedAccessException] {
+                if ($attempt -eq 29) { throw }
+                Start-Sleep -Milliseconds 100
+            }
+        }
+        $destinationItem = Get-Item -LiteralPath $destinationPath
+        $files.Add([ordered]@{
+            FileName = $fileName
+            SourcePath = [System.IO.Path]::GetFullPath($sourcePath)
+            DestinationPath = [System.IO.Path]::GetFullPath($destinationPath)
+            Length = [long]$destinationItem.Length
+            LastWriteTimeUtc = $destinationItem.LastWriteTimeUtc.ToString('O')
+            Sha256 = (Get-FileHash -LiteralPath $destinationPath -Algorithm SHA256).Hash
+        }) | Out-Null
+    }
+
+    $inventory = [ordered]@{
+        Schema = 'coop-native-log-inventory-v1'
+        RunId = $RunId
+        RoleType = [string]$DedicatedIdentity.RoleType
+        RoleInstanceId = [string]$DedicatedIdentity.RoleInstanceId
+        ProcessId = $processId
+        ProcessStartUtc = $processStartUtc.ToString('O')
+        SourceRoot = [System.IO.Path]::GetFullPath($sourceRoot)
+        CapturedUtc = [DateTime]::UtcNow.ToString('O')
+        Files = $files.ToArray()
+    }
+    Write-CoopJsonAtomic -Path (Join-Path $DestinationRoot 'inventory.json') -Value $inventory
+    return $inventory
+}
+
 function Wait-CoopRuntimeRoleReady {
     param(
         [Parameter(Mandatory = $true)][string]$StatusPath,
         [Parameter(Mandatory = $true)][string]$ExpectedRoleType,
         [Parameter(Mandatory = $true)][string]$ExpectedModuleSha256,
-        [Parameter(Mandatory = $true)][DateTime]$DeadlineUtc
+        [Parameter(Mandatory = $true)][DateTime]$DeadlineUtc,
+        $ProcessTextCapture
     )
 
     while ([DateTime]::UtcNow -lt $DeadlineUtc) {
+        if ($null -ne $ProcessTextCapture) {
+            Update-CoopProcessTextCapture -Capture $ProcessTextCapture
+        }
         $status = Read-CoopJsonShared -Path $StatusPath
         if ($null -ne $status) {
             if ([string]$status.RunId -ne $RunId) { throw "Runtime role status RunId mismatch: $StatusPath" }
@@ -691,10 +766,14 @@ function Wait-CoopRuntimeRoleReady {
 function Wait-CoopClientConnection {
     param(
         [Parameter(Mandatory = $true)][string]$StatusPath,
-        [Parameter(Mandatory = $true)][DateTime]$DeadlineUtc
+        [Parameter(Mandatory = $true)][DateTime]$DeadlineUtc,
+        $ProcessTextCapture
     )
 
     while ([DateTime]::UtcNow -lt $DeadlineUtc) {
+        if ($null -ne $ProcessTextCapture) {
+            Update-CoopProcessTextCapture -Capture $ProcessTextCapture
+        }
         $status = Read-CoopJsonShared -Path $StatusPath
         if ($null -ne $status) {
             if ([string]$status.RunId -ne $RunId) { throw 'Client join status RunId mismatch.' }
@@ -1133,16 +1212,16 @@ function Invoke-CoopContracts {
 
     $dotnetCommand = Get-Command dotnet.exe -ErrorAction SilentlyContinue
     if ($null -eq $dotnetCommand) {
-        return [ordered]@{ Outcome = 'EnvironmentBlocked'; Reason = 'dotnet.exe is unavailable.' }
+        return [ordered]@{ Outcome = 'EnvironmentBlocked'; Reason = 'dotnet.exe is unavailable.'; ArtifactPath = '' }
     }
 
     $inventoryPath = Join-Path $repositoryRoot 'Tests\contract-tests.manifest.json'
     if (-not [System.IO.File]::Exists($inventoryPath)) {
-        return [ordered]@{ Outcome = 'PreconditionsFailed'; Reason = 'The canonical contract-test manifest is missing.' }
+        return [ordered]@{ Outcome = 'PreconditionsFailed'; Reason = 'The canonical contract-test manifest is missing.'; ArtifactPath = '' }
     }
     $inventory = Get-Content -LiteralPath $inventoryPath -Raw | ConvertFrom-Json
     if ($inventory.SchemaVersion -ne 1 -or $null -eq $inventory.Projects) {
-        return [ordered]@{ Outcome = 'PreconditionsFailed'; Reason = 'The canonical contract-test manifest schema is invalid.' }
+        return [ordered]@{ Outcome = 'PreconditionsFailed'; Reason = 'The canonical contract-test manifest schema is invalid.'; ArtifactPath = '' }
     }
 
     $declaredPaths = @($inventory.Projects | ForEach-Object { $_.Path.Replace('/', '\') } | Sort-Object)
@@ -1151,7 +1230,7 @@ function Invoke-CoopContracts {
     } | Sort-Object)
     $inventoryDifference = @(Compare-Object -ReferenceObject $declaredPaths -DifferenceObject $discoveredPaths)
     if ($inventoryDifference.Count -ne 0) {
-        return [ordered]@{ Outcome = 'PreconditionsFailed'; Reason = 'The canonical contract-test manifest does not exactly match discovered projects.' }
+        return [ordered]@{ Outcome = 'PreconditionsFailed'; Reason = 'The canonical contract-test manifest does not exactly match discovered projects.'; ArtifactPath = '' }
     }
 
     $contractBuildRoot = Join-Path $runRoot 'work\contract-build'
@@ -1268,11 +1347,11 @@ function Invoke-CoopCompileOnly {
 
     $dotnetCommand = Get-Command dotnet.exe -ErrorAction SilentlyContinue
     if ($null -eq $dotnetCommand) {
-        return [ordered]@{ Outcome = 'EnvironmentBlocked'; Reason = 'dotnet.exe is unavailable.' }
+        return [ordered]@{ Outcome = 'EnvironmentBlocked'; Reason = 'dotnet.exe is unavailable.'; ArtifactPath = '' }
     }
     Resolve-CoopEnvironmentRoots
     if (-not [System.IO.Directory]::Exists($GameRoot) -or -not [System.IO.Directory]::Exists($DedicatedServerRoot)) {
-        return [ordered]@{ Outcome = 'EnvironmentBlocked'; Reason = 'The configured game or dedicated installation root is missing.' }
+        return [ordered]@{ Outcome = 'EnvironmentBlocked'; Reason = 'The configured game or dedicated installation root is missing.'; ArtifactPath = '' }
     }
 
     $identityRoot = Join-Path $runRoot 'artifacts\identity'
@@ -1549,11 +1628,19 @@ function Invoke-CoopFeasibility {
     $reportPath = Join-Path $runRoot 'artifacts\results\feasibility.json'
     $runtimeOutcome = 'RunnerInternalError'
     $runtimeReason = 'Runtime feasibility did not complete.'
+    $primaryRuntimeOutcome = 'RunnerInternalError'
+    $primaryRuntimeReason = 'Runtime feasibility did not complete.'
+    $runtimeSupersession = ''
     $dedicatedRoleStatus = $null
     $clientRoleStatus = $null
     $clientJoinStatus = $null
     $ownedHostStatus = $null
     $dedicatedProcess = $null
+    $dedicatedIdentity = $null
+    $dedicatedTextCapture = $null
+    $nativeConsoleReadinessEvidence = $null
+    $bootstrapCommandEvidence = New-Object 'System.Collections.Generic.List[object]'
+    $nativeLogInventory = $null
 
     try {
         $dedicatedExecutable = Join-Path $DedicatedServerRoot 'bin\Win64_Shipping_Server\DedicatedCustomServer.Starter.exe'
@@ -1565,6 +1652,8 @@ function Invoke-CoopFeasibility {
         $dedicatedStartInfo.UseShellExecute = $false
         $dedicatedStartInfo.CreateNoWindow = $false
         $dedicatedStartInfo.RedirectStandardInput = $true
+        $dedicatedStartInfo.RedirectStandardOutput = $true
+        $dedicatedStartInfo.RedirectStandardError = $true
         $dedicatedStartInfo.Arguments = '--multihome 0.0.0.0 --port ' + $Port +
             ' _MODULES_*Native*SandBoxCore*Sandbox*Multiplayer*CoopSpectatorDedicated*_MODULES_' +
             ' /LogOutputPath "' + $dedicatedLogRoot + '"'
@@ -1581,6 +1670,10 @@ function Invoke-CoopFeasibility {
         if (-not $dedicatedProcess.Start()) { throw 'Dedicated server process creation returned false.' }
         $dedicatedIdentity = Get-CoopProcessIdentity -ProcessId $dedicatedProcess.Id -RoleType 'DedicatedServer' -RoleInstanceId 'dedicated-server-01'
         Add-CoopOwnedRuntimeProcess -Identity $dedicatedIdentity
+        $dedicatedTextCapture = New-CoopProcessTextCapture `
+            -Process $dedicatedProcess `
+            -StandardOutputPath (Join-Path $dedicatedLogRoot 'stdout.txt') `
+            -StandardErrorPath (Join-Path $dedicatedLogRoot 'stderr.txt')
         Add-CoopEvent -EventType 'DedicatedProcessStarted' -Message ("PID=" + $dedicatedProcess.Id + '; awaiting exact module identity.')
 
         $roleDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Min(180, $RuntimeTimeoutSeconds))
@@ -1588,7 +1681,19 @@ function Invoke-CoopFeasibility {
             -StatusPath (Join-Path $runRoot 'status\dedicated-server-01.json') `
             -ExpectedRoleType 'DedicatedServer' `
             -ExpectedModuleSha256 $expectedDedicatedHash `
-            -DeadlineUtc $roleDeadline
+            -DeadlineUtc $roleDeadline `
+            -ProcessTextCapture $dedicatedTextCapture
+
+        $consoleReadyDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Min(180, $RuntimeTimeoutSeconds))
+        $nativeConsoleReadinessEvidence = Wait-CoopCapturedTextMarkers `
+            -Capture $dedicatedTextCapture `
+            -RequiredSubstrings @('is ready! You can now enter console commands') `
+            -AfterSequence 0 `
+            -DeadlineUtc $consoleReadyDeadline `
+            -EvidenceName 'NativeConsoleReady' `
+            -Heartbeat { Update-CoopLease }
+        Add-CoopEvent -EventType 'DedicatedNativeConsoleReady' -Message `
+            'The exact owned process emitted the native InitialListedGameServerState readiness acknowledgement.'
 
         $serverCommands = @(New-CoopDedicatedBootstrapCommands `
             -ServerName $effectiveServerName `
@@ -1596,15 +1701,69 @@ function Invoke-CoopFeasibility {
             -GameType 'TeamDeathmatch' `
             -Map 'mp_tdm_map_001')
         if ($serverCommands.Count -ne 6) { throw 'The dedicated bootstrap command list must contain exactly six commands.' }
-        foreach ($serverCommand in $serverCommands) {
+        $optionEvidenceMarkers = @(
+            ('--Changed: ServerName, to: ' + $effectiveServerName),
+            '--Changed: MaxNumberOfPlayers, to: 16',
+            '--Changed: GameType, to: TeamDeathmatch',
+            '--Changed: Map, to: mp_tdm_map_001')
+        $bootstrapDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Min(180, $RuntimeTimeoutSeconds))
+        for ($commandIndex = 0; $commandIndex -lt 4; $commandIndex++) {
+            Update-CoopProcessTextCapture -Capture $dedicatedTextCapture
+            $afterSequence = [long]$dedicatedTextCapture.Sequence
+            $serverCommand = $serverCommands[$commandIndex]
+            $dedicatedProcess.StandardInput.WriteLine($serverCommand)
+            $dedicatedProcess.StandardInput.Flush()
+            Add-CoopEvent -EventType 'DedicatedConsoleCommandSent' -Message $serverCommand
+            $commandEvidence = Wait-CoopCapturedTextMarkers `
+                -Capture $dedicatedTextCapture `
+                -RequiredSubstrings @($optionEvidenceMarkers[$commandIndex]) `
+                -AfterSequence $afterSequence `
+                -DeadlineUtc $bootstrapDeadline `
+                -EvidenceName ('DedicatedCommandAccepted-' + ($commandIndex + 1)) `
+                -Heartbeat { Update-CoopLease }
+            $bootstrapCommandEvidence.Add([ordered]@{
+                Sequence = $commandIndex + 1
+                Command = $serverCommand
+                Acceptance = 'NativeOptionReadback'
+                Evidence = $commandEvidence
+            }) | Out-Null
+            Add-CoopEvent -EventType 'DedicatedConsoleCommandAccepted' -Message $serverCommand
+        }
+
+        Update-CoopProcessTextCapture -Capture $dedicatedTextCapture
+        $startEvidenceAfterSequence = [long]$dedicatedTextCapture.Sequence
+        foreach ($commandIndex in @(4, 5)) {
+            $serverCommand = $serverCommands[$commandIndex]
             $dedicatedProcess.StandardInput.WriteLine($serverCommand)
             $dedicatedProcess.StandardInput.Flush()
             Add-CoopEvent -EventType 'DedicatedConsoleCommandSent' -Message $serverCommand
         }
+        $startGameEvidence = Wait-CoopCapturedTextMarkers `
+            -Capture $dedicatedTextCapture `
+            -RequiredSubstrings @('--Game is starting...', '--Selected scene: mp_tdm_map_001') `
+            -AfterSequence $startEvidenceAfterSequence `
+            -DeadlineUtc $bootstrapDeadline `
+            -EvidenceName 'DedicatedMapAndStartGameAccepted' `
+            -Heartbeat { Update-CoopLease }
+        $bootstrapCommandEvidence.Add([ordered]@{
+            Sequence = 5
+            Command = $serverCommands[4]
+            Acceptance = 'RequiredByNativeStartGameSuccess'
+            Evidence = $startGameEvidence
+        }) | Out-Null
+        $bootstrapCommandEvidence.Add([ordered]@{
+            Sequence = 6
+            Command = $serverCommands[5]
+            Acceptance = 'NativeStartGameAndSelectedSceneReadback'
+            Evidence = $startGameEvidence
+        }) | Out-Null
+        Add-CoopEvent -EventType 'DedicatedConsoleCommandAccepted' -Message $serverCommands[4]
+        Add-CoopEvent -EventType 'DedicatedConsoleCommandAccepted' -Message $serverCommands[5]
 
         $portDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Min(180, $RuntimeTimeoutSeconds))
         $udpEndpoint = $null
         while ([DateTime]::UtcNow -lt $portDeadline) {
+            Update-CoopProcessTextCapture -Capture $dedicatedTextCapture
             $matches = @(Get-NetUDPEndpoint -LocalPort $Port -ErrorAction SilentlyContinue)
             if ($matches.Count -eq 1) {
                 $candidate = $matches[0]
@@ -1690,10 +1849,12 @@ function Invoke-CoopFeasibility {
             -StatusPath (Join-Path $runRoot 'status\multiplayer-client-01.json') `
             -ExpectedRoleType 'MultiplayerClient' `
             -ExpectedModuleSha256 $expectedClientHash `
-            -DeadlineUtc $clientDeadline
+            -DeadlineUtc $clientDeadline `
+            -ProcessTextCapture $dedicatedTextCapture
         $clientJoinStatus = Wait-CoopClientConnection `
             -StatusPath (Join-Path $runRoot 'state\client-join.status.json') `
-            -DeadlineUtc $clientDeadline
+            -DeadlineUtc $clientDeadline `
+            -ProcessTextCapture $dedicatedTextCapture
 
         $runtimeOutcome = 'Pass'
         $runtimeReason = 'Exact client and dedicated module identities were confirmed and the normal lobby path connected to the owned local server.'
@@ -1705,6 +1866,8 @@ function Invoke-CoopFeasibility {
         else { 'AssertionFailed' }
     }
     finally {
+        $primaryRuntimeOutcome = $runtimeOutcome
+        $primaryRuntimeReason = $runtimeReason
         try {
             $rootProcessIds = @($ownedRuntimeProcesses | Where-Object {
                 [string]$_.RoleType -eq 'DedicatedServer' -or [string]$_.RoleType -eq 'MultiplayerClient'
@@ -1714,12 +1877,34 @@ function Invoke-CoopFeasibility {
         catch {
             $runtimeOutcome = 'RunnerInternalError'
             $runtimeReason = 'Owned descendant discovery failed before cleanup: ' + $_.Exception.Message
+            $runtimeSupersession = 'OwnedDescendantDiscoveryFailed'
             try { Add-CoopEvent -EventType 'OwnedDescendantDiscoveryFailed' -Message $runtimeReason } catch { }
         }
         try { Stop-CoopOwnedRuntimeProcesses }
         catch {
             $runtimeOutcome = 'RunnerInternalError'
             $runtimeReason = 'Exact runtime cleanup failed: ' + $_.Exception.Message
+            $runtimeSupersession = 'RuntimeCleanupFailed'
+        }
+        if ($null -ne $dedicatedTextCapture) {
+            try { Complete-CoopProcessTextCapture -Capture $dedicatedTextCapture }
+            catch {
+                $runtimeOutcome = 'RunnerInternalError'
+                $runtimeReason = 'Dedicated stdout/stderr capture finalization failed: ' + $_.Exception.Message
+                $runtimeSupersession = 'DedicatedTextCaptureFailed'
+            }
+        }
+        if ($null -ne $dedicatedIdentity) {
+            try {
+                $nativeLogInventory = Copy-CoopDedicatedNativeLogs `
+                    -DedicatedIdentity $dedicatedIdentity `
+                    -DestinationRoot (Join-Path $runRoot 'artifacts\logs\dedicated\native')
+            }
+            catch {
+                $runtimeOutcome = 'RunnerInternalError'
+                $runtimeReason = 'PID-correlated native log capture failed: ' + $_.Exception.Message
+                $runtimeSupersession = 'NativeLogCaptureFailed'
+            }
         }
     }
 
@@ -1730,20 +1915,38 @@ function Invoke-CoopFeasibility {
             [string]$globalResultAfter.Sha256,
             [StringComparison]::Ordinal))
     if (-not $globalResultUnchanged) {
-        $runtimeOutcome = 'AssertionFailed'
-        $runtimeReason = 'The protected global battle_result.json changed during connection-only feasibility.'
+        if ($runtimeOutcome -ne 'RunnerInternalError') {
+            $runtimeOutcome = 'AssertionFailed'
+            $runtimeReason = 'The protected global battle_result.json changed during connection-only feasibility.'
+        }
+        else {
+            $runtimeReason += ' The protected global battle_result.json also changed during connection-only feasibility.'
+        }
     }
     $remainingOwnedProcesses = @($ownedRuntimeProcesses | Where-Object { Test-CoopLiveProcessIdentity -Identity $_ })
     if ($remainingOwnedProcesses.Count -gt 0) {
-        $runtimeOutcome = 'AssertionFailed'
-        $runtimeReason = 'One or more exact owned runtime processes remained after cleanup.'
+        if ($runtimeOutcome -ne 'RunnerInternalError') {
+            $runtimeOutcome = 'RunnerInternalError'
+            $runtimeReason = 'One or more exact owned runtime processes remained after cleanup.'
+            $runtimeSupersession = 'OwnedProcessesRemaining'
+        }
+        else {
+            $runtimeReason += ' One or more exact owned runtime processes also remained after cleanup.'
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($runtimeSupersession)) {
+        $primaryRuntimeOutcome = $runtimeOutcome
+        $primaryRuntimeReason = $runtimeReason
     }
 
     $report = [ordered]@{
         Schema = 'coop-runtime-feasibility-v1'
         RunId = $RunId
+        PrimaryOutcome = $primaryRuntimeOutcome
+        PrimaryReason = $primaryRuntimeReason
         Outcome = $runtimeOutcome
         Reason = $runtimeReason
+        OutcomeSupersession = $runtimeSupersession
         ServerName = $effectiveServerName
         ServerPort = $Port
         ServerBootstrapGameType = 'TeamDeathmatch'
@@ -1756,6 +1959,8 @@ function Invoke-CoopFeasibility {
         ExpectedClientModuleSha256 = $expectedClientHash
         ExpectedDedicatedModuleSha256 = $expectedDedicatedHash
         DedicatedRoleStatus = $dedicatedRoleStatus
+        NativeConsoleReadinessEvidence = $nativeConsoleReadinessEvidence
+        BootstrapCommandEvidence = $bootstrapCommandEvidence.ToArray()
         ClientRoleStatus = $clientRoleStatus
         ClientJoinStatus = $clientJoinStatus
         OwnedHostStatus = $ownedHostStatus
@@ -1763,11 +1968,18 @@ function Invoke-CoopFeasibility {
         GlobalBattleResultAfter = $globalResultAfter
         GlobalBattleResultUnchanged = $globalResultUnchanged
         Cleanup = $runtimeCleanupEvidence.ToArray()
+        NativeLogInventory = $nativeLogInventory
         RemainingOwnedProcesses = $remainingOwnedProcesses
         CompletedUtc = [DateTime]::UtcNow.ToString('O')
     }
     Write-CoopJsonAtomic -Path $reportPath -Value $report
-    return [ordered]@{ Outcome = $runtimeOutcome; Reason = $runtimeReason; ArtifactPath = $reportPath }
+    return [ordered]@{
+        PrimaryOutcome = $primaryRuntimeOutcome
+        PrimaryReason = $primaryRuntimeReason
+        Outcome = $runtimeOutcome
+        Reason = $runtimeReason
+        ArtifactPath = $reportPath
+    }
 }
 
 if (-not (Test-CoopRunId -Value $RunId)) {
@@ -1874,6 +2086,8 @@ try {
         }
         StateDeadlinesSeconds = [ordered]@{ Lease = $leaseLifetimeMinutes * 60 }
         ReproductionDescriptorPath = ''
+        PrimaryOutcome = ''
+        PrimaryReason = ''
         TerminalOutcome = ''
         TerminalReason = ''
         CompletedUtc = $null
@@ -1887,14 +2101,25 @@ try {
     })
     Write-CoopRunnerStatus -State 'Running' -Outcome '' -Reason ($Command + ' started.')
 
-    $commandResult = switch ($Command) {
+    $commandResults = @(switch ($Command) {
         'Doctor' { Invoke-CoopDoctor }
         'Contracts' { Invoke-CoopContracts }
         'CompileOnly' { Invoke-CoopCompileOnly }
         'Feasibility' { Invoke-CoopFeasibility }
-    }
+    })
+    $commandResult = Get-CoopSingularCommandResult -Results $commandResults -CommandName $Command
     $finalOutcome = $commandResult.Outcome
     $finalReason = $commandResult.Reason
+    $primaryOutcomeProperty = $commandResult.PSObject.Properties['PrimaryOutcome']
+    $primaryReasonProperty = $commandResult.PSObject.Properties['PrimaryReason']
+    $manifest.PrimaryOutcome = if ($null -ne $primaryOutcomeProperty) {
+        [string]$primaryOutcomeProperty.Value
+    }
+    else { [string]$commandResult.Outcome }
+    $manifest.PrimaryReason = if ($null -ne $primaryReasonProperty) {
+        [string]$primaryReasonProperty.Value
+    }
+    else { [string]$commandResult.Reason }
     if ($finalOutcome -ne 'Pass') {
         $manifest.ReproductionDescriptorPath = Write-CoopReproductionDescriptor -Outcome $finalOutcome -Reason $finalReason
     }
@@ -1910,6 +2135,10 @@ catch {
 if ($null -ne $manifest) {
     try {
         Add-CoopEvent -EventType 'RunCompleted' -Message ($finalOutcome + ': ' + $finalReason)
+        if ([string]::IsNullOrWhiteSpace([string]$manifest.PrimaryOutcome)) {
+            $manifest.PrimaryOutcome = $finalOutcome
+            $manifest.PrimaryReason = $finalReason
+        }
         $manifest.TerminalOutcome = $finalOutcome
         $manifest.TerminalReason = $finalReason
         $manifest.CompletedUtc = [DateTime]::UtcNow.ToString('O')

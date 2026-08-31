@@ -1,6 +1,6 @@
 # Battle Test Automation Milestone 2B.2B Live Feasibility Attempts and Runner Findings
 
-Status: **Dedicated loaded identity, discrete command emission, bounded discovery, and exact cleanup confirmed; native console readiness, UDP visibility, and client connection not reached; another runner correction is required**
+Status: **Dedicated loaded identity, discrete command emission, bounded discovery, and exact cleanup confirmed; Milestone 2B.2C runner correction is source/contract/compile-only verified; clean live proof of native readiness, UDP visibility, and client connection remains pending**
 
 Execution and correction date: **2026-08-31**
 
@@ -108,6 +108,9 @@ The compile-only client PE hash was `305F63FD8E2B3D1E578921E9A3B56517F6AD74887E7
 | Final full contract inventory | `%LOCALAPPDATA%\Temp\CoopSpectator\Automation\m2b2-fix-final-contracts-20260831-01` |
 | Compile-only verification | `%LOCALAPPDATA%\Temp\CoopSpectator\Automation\m2b2-fix-compile-only-20260831-01` |
 | ILSpy comparison | `%LOCALAPPDATA%\Temp\CoopSpectator\Automation\m2b2-fix-il-compare-20260831-01` |
+| Milestone 2B.2C focused runner contracts | `%LOCALAPPDATA%\Temp\CoopSpectator\Automation\m2b2c-runner-focused-20260831-07` |
+| Milestone 2B.2C final full contract inventory | `%LOCALAPPDATA%\Temp\CoopSpectator\Automation\m2b2c-full-contracts-20260831-03` |
+| Milestone 2B.2C final compile-only verification | `%LOCALAPPDATA%\Temp\CoopSpectator\Automation\m2b2c-compile-only-20260831-02` |
 
 ## 7. Clean correction-revision live rerun
 
@@ -151,14 +154,16 @@ The strongest evidence-supported inference is that the six correctly separated c
 
 The requested `/LogOutputPath` did not place these native logs below the run root; they remained under `C:\ProgramData`. Future authoritative attempts must collect the exact PID-correlated native logs into the run artifact set.
 
-## 9. Required correction before another live run
+## 9. Implemented correction before another live run
 
-The next implementation plan must address all three shared runner defects:
+Milestone 2B.2C implements all three shared runner corrections without changing either game module:
 
-1. add a distinct, run-scoped native console-ready acknowledgement after `ModuleReady`; an elapsed sleep is not sufficient;
-2. require acceptance/readback evidence for every bootstrap command, especially `start_game`, before waiting for UDP visibility;
-3. guarantee that every aggregate runner command emits exactly one structured result object and add timeout/cleanup contracts that reject incidental PowerShell pipeline output.
+1. the exact owned dedicated process stdout/stderr is continuously drained and retained; after `ModuleReady`, the runner requires the native `InitialListedGameServerState.OnActivate` readiness message instead of sleeping;
+2. each option command requires its exact native `--Changed` readback, while usable-map plus `start_game` acceptance requires the native game-start and selected-scene messages before the UDP deadline begins;
+3. both Boolean-returning cleanup waits suppress their output, aggregate dispatch rejects zero/multiple/incomplete results, Windows PowerShell ordered dictionaries are normalized, and primary-versus-terminal outcomes are retained separately.
 
-It must also retain or copy the exact PID-correlated native, error, and watchdog logs below the run root. These requirements apply to all future battle types because command readiness, result classification, log capture, and cleanup are shared orchestration concerns.
+The correction also copies only `rgl_log_<PID>.txt`, `rgl_log_errors_<PID>.txt`, and `watchdog_log_<PID>.txt` for the exact dedicated identity into the run root and writes a SHA-256 inventory. These controls apply to all future battle types because command readiness, result classification, log capture, and cleanup are shared orchestration concerns.
 
-No module restaging is required for the already tested binaries. No further live rerun is authorized by this report; code correction, verification, commit/push, and a fresh live `RunId` each remain separate planned gates.
+Focused run `m2b2c-runner-focused-20260831-07` passed in Windows PowerShell 5.1 and PowerShell 7. Final full run `m2b2c-full-contracts-20260831-03` passed 22/22 with matching primary/terminal `Pass`. Final compile-only run `m2b2c-compile-only-20260831-02` passed both project builds and proved installed inventories unchanged. See [BATTLE_TEST_AUTOMATION_M2B2C_RUNNER_CORRECTION.md](BATTLE_TEST_AUTOMATION_M2B2C_RUNNER_CORRECTION.md).
+
+No module restaging is required because no game-side source changed. The next gates are review, commit/push of the correction, and one separately approved fresh clean-revision connection-only run. Until that run observes the native redirected-output contract, UDP ownership, client loaded identity, handoff, and `Connected`, none of those facts—and no L2/L3 battle claim—are established.
