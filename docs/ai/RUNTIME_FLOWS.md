@@ -74,7 +74,7 @@ fresh RunId
   -> verified runner-lock release
 ```
 
-`Doctor` inspects environment, versions/hashes, Git/EOL policy, selected dependencies, ports, writable roots, Steam, and the named version profile. `Contracts` requires the reviewed manifest to match every discovered test project and runs all 21 while preserving per-project output. `CompileOnly` inventories installed module trees, builds the two projects independently below the run root, then proves the installed inventories are unchanged. The historical Milestone 2A aggregate contained 20 projects; Milestone 2B.1 adds the runtime-safety contract project.
+`Doctor` inspects environment, versions/hashes, Git/EOL policy, selected dependencies, ports, writable roots, Steam, and the named version profile. `Contracts` requires the reviewed manifest to match every discovered test project and runs all 22 while preserving per-project output. `CompileOnly` inventories installed module trees, builds the two projects independently below the run root, then proves the installed inventories are unchanged. The historical Milestone 2A aggregate contained 20 projects; later runtime-safety and runner-control contracts extend the current inventory.
 
 No branch in this flow launches a product executable, enables the module automation profile, stages a DLL, joins a server, opens a campaign/mission, advances `CoopBattlePhaseRuntimeState`, or writes a battle result. Runtime ownership, result isolation, cancellation/recovery, and the first connection-only flow remain Milestone 2B.
 
@@ -95,6 +95,8 @@ fresh RunId + result policy Suppress
   -> token-bound state/dedicated-host.json
   -> client launcher inherits the existing run contract
   -> Bannerlord multiplayer process
+  -> launcher publishes schema-v4 complete verified process identity
+  -> runner validates/registers cleanup identity before live revalidation
   -> client module validates run/token/loaded hash
   -> wait for native lobby
   -> GetCustomGameServerList
@@ -112,7 +114,7 @@ fresh RunId + result policy Suppress
 
 The launcher and client module do not issue `start_game`. Only the external runner may authorize the minimum standard server bootstrap, and only after `Suppress`, dedicated loaded-hash validation, and an authoritative readiness acknowledgement from the exact dedicated role. It publishes a fixed structured request rather than an arbitrary console line. The dedicated main tick invokes the native command path and must publish exact state-backed acknowledgements before the runner begins the UDP deadline. Successful process creation first establishes provisional cleanup ownership; bounded identity enrichment then resolves and validates the exact requested executable even when an immediate `Process.Path` read is null.
 
-Clean run `m2b2c-client-handoff-live-20260831-01` proved the corrected dedicated ownership and cleanup sequence, but redirected stdout/stderr stayed empty even while the exact process loaded the module, authenticated, and continued service heartbeats. The starter-owned native console and PID-correlated log did not expose the `Console.WriteLine` readiness text to the runner. Milestone 2B.2D implements the required default-off run/token/hash/process-bound readiness, request, and acknowledgement channel in source and contracts. Redirected standard input/output and native logs may supplement that channel but cannot define it. The new dedicated binary is staged at `ConfirmedPathHashOnly`, but applied options, usable-map acceptance, start-game progression, UDP visibility, client handoff, and connection remain runtime gaps until a named live run confirms the loaded hash and acknowledgements. The bootstrap opens no campaign fixture, advances no cooperative battle phase, consumes no result, and creates no L2/L3 evidence claim.
+Clean run `m2b2d-live-feasibility-20260901-01` runtime-confirmed the staged dedicated hash, authoritative ready state, all seven bootstrap acknowledgements, native `start_game`, exact UDP ownership, real client process creation, and the selected client loaded hash. It stopped before lobby selection because the aggregate converted an already-deserialized UTC `DateTime` through a culture-dependent string and applied the local offset twice. Revision 12 uses a complete schema-v4 process identity and registers it before fallible revalidation; JSON dates are normalized directly from either strings or `System.DateTime` values. Exact `rgl_log` and `rgl_log_errors` remain required, while a non-produced server-PID watchdog log is explicit optional evidence. Connection remains a runtime gap until the clean published-correction rerun. The bootstrap opens no campaign fixture, advances no cooperative battle phase, consumes no result, and creates no L2/L3 evidence claim.
 
 ## Flow 1: campaign encounter capture
 

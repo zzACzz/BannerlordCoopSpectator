@@ -1,15 +1,16 @@
 # Battle Test Automation Milestone 2B.2D Dedicated Control Channel
 
-Status: **Source/contracts and controlled dedicated-only staging complete; Bannerlord runtime validation pending**
+Status: **Dedicated control runtime-verified; UTC-safe client-handoff correction source/contracts complete; connection rerun pending**
 Date: **2026-09-01**
 Published source revision: **`7628c85aef140e431f29982e016395b8f303a464`** (`7628c85`)
-Specification: [BATTLE_TEST_AUTOMATION_SPEC.md](BATTLE_TEST_AUTOMATION_SPEC.md), Revision 11
+Live-run source revision: **`21042956b7928726dacb50c2de258437d5a65c6e`** (`2104295`)
+Specification: [BATTLE_TEST_AUTOMATION_SPEC.md](BATTLE_TEST_AUTOMATION_SPEC.md), Revision 12
 
 ## 1. Scope
 
 Milestone 2B.2D replaces redirected dedicated-server standard handles as the authoritative bootstrap control path. The exact dedicated module now exposes a default-off, run-scoped, structured readiness/request/acknowledgement contract. The aggregate runner uses that contract before checking UDP visibility or launching the multiplayer client.
 
-The source implementation slice did not launch Bannerlord or the dedicated server, open a campaign or mission, connect a client, execute a cooperative battle, consume or publish a campaign result, or establish L2/L3 evidence. Section 7 records the later separately approved on-disk dedicated-only staging transaction; it launched no product process and does not change that runtime-evidence boundary.
+The source implementation slice did not launch Bannerlord or the dedicated server, open a campaign or mission, connect a client, execute a cooperative battle, consume or publish a campaign result, or establish L2/L3 evidence. Section 7 records the later separately approved on-disk dedicated-only staging transaction. Section 8 records the subsequent bounded live connection-feasibility run, which launched the dedicated server and one multiplayer client but no campaign or cooperative battle.
 
 ## 2. Lowest-level native findings
 
@@ -113,10 +114,34 @@ The first postflight check compared a JSON-deserialized `DateTime` through cultu
 
 Post-stage doctor run `m2b2d-poststage-doctor-20260901-01` was `EnvironmentBlocked` only by `InstalledDedicatedHashDiffersFromRepositoryOutput` and `RuntimeVersionCombinationNotYetVerified`. The first reason refers to the intentionally untouched ignored repository output from the earlier build, not the clean build artifact or installed tree. Runtime execution must pass the explicit installed client and dedicated hashes and must not infer identity from that stale ignored output.
 
-## 8. Evidence boundary and next gate
+## 8. First dedicated-control live proof
 
-The source implementation satisfies the Revision 11 dedicated-control design at the contract and compile-only levels, and controlled staging establishes `ConfirmedPathHashOnly` for the new dedicated binary. It does not prove that the dedicated runtime loads the binary, observes the native lifecycle event, applies the seven phases, binds the requested UDP endpoint, launches the client, completes lobby handoff, or connects.
+Clean published-revision run `m2b2d-live-feasibility-20260901-01` used explicit installed client hash `B576B8EA0FB223126A65E062CB562FD15815DF8BA1ADDB1797506914B48D7928` and dedicated hash `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78`. It established all of the following runtime facts:
 
-The next runtime gate is a separately approved clean published-revision `Feasibility` run with explicit installed client hash `B576B8EA0FB223126A65E062CB562FD15815DF8BA1ADDB1797506914B48D7928` and dedicated hash `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78`. That run must retain the ready status, all seven acknowledgements, exact UDP ownership, both loaded-role identities, client handoff/connection, unchanged protected result, PID-correlated logs, and exact cleanup.
+- the exact staged dedicated module published `ModuleReady` and the authoritative `InitialListedGameServerState.OnActivated`-bound ready status;
+- the fixed bootstrap reached terminal `BootstrapAccepted` with all seven ordered acknowledgements;
+- `start_game` was confirmed by `IsPlaying=true`, `GameType=TeamDeathmatch`, and `Map=mp_tdm_map_001`;
+- the exact dedicated process owned UDP port `7210`;
+- the real multiplayer executable launched with the expected parent, path, PID, and module request;
+- the client later published exact `ModuleReady` for the selected client hash and reached `WaitingForLobby`;
+- `ResultPolicy=Suppress` held, no campaign fixture or cooperative mission opened, and the protected global result remained unchanged.
 
-Until that named runtime run passes, no connection, campaign, mission, battle, L2, or L3 claim is permitted.
+The aggregate runner stopped before waiting for lobby connection. `ConvertFrom-Json` returned `EntryStartUtc` as an already-UTC `System.DateTime`; the runner converted it to a culture-dependent string, parsed that string as local time, and applied the UTC offset a second time. Exact `22:00:48Z` became false `19:00:48Z`, so a valid client PID was rejected as possible reuse. The same incorrect identity caused automatic cleanup to report `NotRunning`; exact run artifacts later proved the remaining PID/path/parent/start/arguments/status identity, and manual postflight requested graceful close without forced termination.
+
+Final outcome reporting was then superseded by a second runner defect: the collector required `watchdog_log_130464.txt`, but this exact dedicated profile produced only `rgl_log_130464.txt` and `rgl_log_errors_130464.txt`. A verified child `Watchdog.exe` existed, but no server-PID watchdog log was produced. The protected result, all installed module hashes, Git revision, and ports remained unchanged. Final manual postflight confirmed zero product processes and zero owners of ports `7210` and `7777`.
+
+## 9. Revision 12 runner correction
+
+The correction keeps the launcher-owned exact evidence in schema-v4 `client-launch.json`. Its nested process identity includes the original launch operation/window, aggregate-runner parent, exact PID/path/start/hash, role, and path-evidence source. The aggregate runner validates and registers that identity before fallible live revalidation. `ConvertTo-CoopUtcDateTime` handles both ISO strings and already-deserialized `System.DateTime` values without culture-dependent string conversion.
+
+Native-log inventory schema v2 keeps exact `rgl_log` and `rgl_log_errors` files required. A matching watchdog log is captured and validated when present; otherwise the inventory records `Required=false`, `State=NotProduced`, and no false terminal supersession. An existing stale or identity-incompatible file still fails closed.
+
+Focused runner contracts passed in Windows PowerShell `5.1.26100.9168` and PowerShell `7.6.4`. The first canonical attempt used an unnecessarily long run ID and one long-named siege contract exceeded the Windows path limit before test execution; no product process launched. Fresh short-root run `m2d-c-01` then passed all 22 contract projects. These corrections change external scripts, tests, and documentation only; installed game modules require no restaging.
+
+## 10. Evidence boundary and next gate
+
+The dedicated loaded hash, authoritative readiness, seven-step bootstrap, native `start_game`, and UDP ownership are now runtime-confirmed. Real client creation and its loaded module identity are also confirmed, but the aggregate did not reach lobby selection, network handoff, or `Connected`.
+
+The next runtime gate is a separately approved clean published-correction `Feasibility` rerun with the same explicit installed hashes. It must retain both loaded-role identities, exact client handoff, lobby selection, network handoff, connection, required/optional native-log inventory, unchanged protected result, and exact automatic cleanup.
+
+Until that rerun passes, no connection, campaign, cooperative mission, battle, L2, or L3 claim is permitted.

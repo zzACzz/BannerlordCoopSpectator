@@ -1,8 +1,8 @@
 # Battle Test Automation Milestone 2B.2B Live Feasibility Attempts and Runner Findings
 
-Status: **Dedicated identity and exact cleanup live-verified after published ownership corrections; redirected native-console control is disproved as a sole channel; client connection remains blocked**
+Status: **Dedicated control, UDP ownership, real client launch, and both loaded hashes live-confirmed; corrected aggregate client handoff rerun pending**
 
-Execution and correction date: **2026-08-31**
+Execution and correction date: **2026-09-01**
 
 Attempt repository revision: `9f4ee733d8e9b83b5fef4f194140daf97a0d89a8`
 
@@ -10,9 +10,11 @@ Clean rerun repository revision: `70a40db6aa71a27e6b1afa0892118ac77871c1a3`
 
 Latest clean validation repository revision: `711f2cac20ca05d3e81233aa6acfa60816dcce99`
 
+Dedicated-control live validation repository revision: `21042956b7928726dacb50c2de258437d5a65c6e`
+
 Installed game-side binary source revision: `12abf36`
 
-This document records both Milestone 2B live feasibility attempts, their exact evidence boundaries, the shared runner defects they exposed, exact recovery/cleanup, and the non-runtime verification between attempts. It does not claim a client connection, campaign startup, cooperative mission, completed battle, L2, or L3 evidence.
+This document records the Milestone 2B live feasibility attempts through the first dedicated-control/client-launch run, their exact evidence boundaries, the shared runner defects they exposed, exact recovery/cleanup, and the non-runtime verification between attempts. It does not claim a client connection, campaign startup, cooperative mission, completed battle, L2, or L3 evidence.
 
 ## 1. Outcome and evidence boundary
 
@@ -200,4 +202,14 @@ The next gate is not another unchanged retry. It is a separately approved, defau
 
 [BATTLE_TEST_AUTOMATION_M2B2D_DEDICATED_CONTROL.md](BATTLE_TEST_AUTOMATION_M2B2D_DEDICATED_CONTROL.md) records the source/contracts implementation of that exact channel. The dedicated role now observes the authoritative listed-server lifecycle event, validates a fixed bootstrap request, applies native commands on the main tick, and publishes seven ordered state-backed acknowledgements. Full contracts passed 22/22 and compile-only proved the installed module inventories unchanged.
 
-No later live run has yet replaced the evidence in this report. Controlled run `m2b2d-stage-20260901-01` staged the new published dedicated output with SHA-256 `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78`, preserved the exact prior tree, and launched no product process. Loaded dedicated identity, UDP visibility, client launch, loaded client identity, handoff, connection, campaign, mission, and battle remain unverified.
+Controlled run `m2b2d-stage-20260901-01` staged the new published dedicated output with SHA-256 `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78`, preserved the exact prior tree, and launched no product process. Section 13 records the later live result.
+
+## 13. Dedicated-control and client-launch live validation
+
+Clean run `m2b2d-live-feasibility-20260901-01` used published revision `21042956b7928726dacb50c2de258437d5a65c6e`, the explicit installed client hash `B576B8EA0FB223126A65E062CB562FD15815DF8BA1ADDB1797506914B48D7928`, and the staged dedicated hash `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78` in both dedicated bins. The exact dedicated role published its loaded hash, authoritative lifecycle readiness, terminal seven-step `BootstrapAccepted`, native `start_game` confirmation for `TeamDeathmatch`/`mp_tdm_map_001`, and exact UDP ownership on port `7210`.
+
+The real multiplayer client launched as the aggregate runner's child, loaded the selected client module, and later published `ModuleReady` plus `WaitingForLobby`. The aggregate stopped earlier in its own control flow because `EntryStartUtc`, already deserialized as a UTC `System.DateTime`, was converted through a culture-dependent string and shifted from `22:00:48Z` to false `19:00:48Z`. That invalid imported identity also prevented automatic cleanup from recognizing the live client. Exact PID/path/parent/start/arguments/run/token/hash evidence proved ownership, and manual postflight closed the client gracefully without force.
+
+Final reporting was independently superseded when native-log capture required `watchdog_log_<dedicated PID>.txt`; this profile produced exact `rgl_log` and `rgl_log_errors` files but no server-PID watchdog file. Revision 12 changes the launcher handoff to schema v4 with a complete verified identity, normalizes dates without stringifying `DateTime`, registers cleanup authority before revalidation, and records an absent optional watchdog log as `NotProduced`. Focused tests passed in Windows PowerShell 5.1 and PowerShell 7, and short-root canonical run `m2d-c-01` passed all 22 projects. The earlier long-root canonical attempt is retained as non-final evidence of the existing Windows path-length limitation; its only failure occurred before one long-named siege test executable could start.
+
+The run changed no installed module, protected result, or repository file. Final postflight found zero product processes and zero owners of ports `7210` and `7777`. Lobby selection, network handoff, connection, campaign, cooperative mission, battle, L2, and L3 remain unverified until a clean published-correction rerun passes.

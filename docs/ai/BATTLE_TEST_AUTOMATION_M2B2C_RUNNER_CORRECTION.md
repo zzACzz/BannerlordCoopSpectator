@@ -1,8 +1,8 @@
 # Battle Test Automation Milestone 2B.2C Runner Correction
 
-Status: **Aggregate-runner and client-launcher post-start ownership corrections published; dedicated ownership/cleanup live-verified; dedicated control channel blocked before client launch**
+Status: **Historical ownership corrections published; later dedicated control and real client launch live-confirmed; Revision 12 aggregate handoff correction source/contracts complete**
 
-Verification date: **2026-08-31**
+Verification and follow-up date: **2026-09-01**
 
 Source baseline: `30f42c3d30126993b01d1673a755a1a34947ecde`
 
@@ -49,7 +49,7 @@ rgl_log_errors_<PID>.txt
 watchdog_log_<PID>.txt
 ```
 
-The source root is `%ProgramData%\Mount and Blade II Bannerlord\logs`. Every file must exist and have a last-write timestamp compatible with the exact recorded process start. Copies are retained below `artifacts\logs\dedicated\native`, and `inventory.json` records the process identity, source/destination paths, lengths, timestamps, and SHA-256 values. Source logs are never modified or deleted.
+The source root is `%ProgramData%\Mount and Blade II Bannerlord\logs`. This original Revision 9 contract required every listed file. Run `m2b2d-live-feasibility-20260901-01` later proved that the exact dedicated profile creates the PID-bound native and error logs but may not create a server-PID watchdog log even though a verified `Watchdog.exe` descendant exists. Revision 12 therefore keeps `rgl_log` and `rgl_log_errors` required, records an absent watchdog log as explicit `NotProduced`, and still validates/copies it when present. Copies are retained below `artifacts\logs\dedicated\native`, and inventory schema v2 records requiredness, state, process identity, source/destination paths, lengths, timestamps, and SHA-256 values. Source logs are never modified or deleted.
 
 ## 4. Verification evidence
 
@@ -82,7 +82,7 @@ Focused contracts exercise null `Process.Path`, validated `Win32_Process` fallba
 
 ## 6. Hardened cross-script client boundary
 
-`Start-CoopBattleTestClient.ps1` now uses the tested runner core. Immediately after `Process.Start()` returns, it creates an exact provisional client identity from the PID, requested executable path, aggregate-runner parent PID, narrow launch window, and unique launch-operation ID. It atomically publishes `client-launch.provisional.json`, performs bounded exact path/start/parent observation with the validated `Win32_Process` fallback, and only then atomically publishes verified schema-v3 `client-launch.json`.
+`Start-CoopBattleTestClient.ps1` now uses the tested runner core. Immediately after `Process.Start()` returns, it creates an exact provisional client identity from the PID, requested executable path, aggregate-runner parent PID, narrow launch window, and unique launch-operation ID. It atomically publishes `client-launch.provisional.json`, performs bounded exact path/start/parent observation with the validated `Win32_Process` fallback, and only then publishes the verified final handoff. Revision 12 upgrades that handoff from schema v3 to schema v4 so the complete verified identity and original launch evidence survive aggregate import.
 
 The final launch artifact is the ownership handoff boundary. Before it exists, every post-start exception triggers exact cleanup through the provisional identity and is propagated as `RunnerInternalError`; best-effort `client-launch.cleanup.json` retains the primary failure and cleanup result. After final publication, no fallible user-output step remains and local wrapper/lock disposal cannot invalidate the handoff. The aggregate runner then adopts and re-enriches the verified client identity as before.
 
@@ -112,4 +112,4 @@ The next implementation gate is a separately approved run-scoped dedicated readi
 
 The named source blocker is resolved at the contract and compile-only levels by [BATTLE_TEST_AUTOMATION_M2B2D_DEDICATED_CONTROL.md](BATTLE_TEST_AUTOMATION_M2B2D_DEDICATED_CONTROL.md). The dedicated module now observes the exact public `InitialListedGameServerState.OnActivated` event, accepts only one fixed run/token/hash/process-bound bootstrap profile, invokes the native `GameNetwork.HandleConsoleCommand` path from the main tick, and publishes atomic native-state acknowledgements. The aggregate runner no longer writes bootstrap commands to standard input or treats redirected text as readiness authority.
 
-This does not retroactively change the evidence from `m2b2c-client-handoff-live-20260831-01`. Run `m2b2d-stage-20260901-01` later staged the published dedicated binary with SHA-256 `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78` and retained the exact prior tree, but launched no product process. The next gate is a clean published-revision `Feasibility` run; client launch, connection, campaign, mission, battle, L2, and L3 remain unverified.
+This does not retroactively change the evidence from `m2b2c-client-handoff-live-20260831-01`. Run `m2b2d-stage-20260901-01` later staged the published dedicated binary with SHA-256 `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78` and retained the exact prior tree. Run `m2b2d-live-feasibility-20260901-01` then live-confirmed that binary, the full dedicated-control sequence, UDP ownership, real client launch, and the client loaded hash. Revision 12 corrects the subsequently exposed aggregate UTC handoff and optional-watchdog evidence defects. Connection, campaign, mission, battle, L2, and L3 remain unverified pending a clean published-correction rerun.
