@@ -33,6 +33,12 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+$runnerCorePath = Join-Path $PSScriptRoot 'CoopAutomationRunner.Core.ps1'
+if (-not [System.IO.File]::Exists($runnerCorePath)) {
+    throw "Runner core helper is missing: $runnerCorePath"
+}
+. $runnerCorePath
+
 $protocolMajorVersion = 1
 $protocolMinorVersion = 0
 $manifestSchemaVersion = 1
@@ -417,18 +423,21 @@ function Get-CoopProcessIdentity {
     param(
         [Parameter(Mandatory = $true)][int]$ProcessId,
         [Parameter(Mandatory = $true)][string]$RoleType,
-        [Parameter(Mandatory = $true)][string]$RoleInstanceId
+        [Parameter(Mandatory = $true)][string]$RoleInstanceId,
+        [int]$ObservedParentProcessId = -1
     )
 
     $process = Get-Process -Id $ProcessId -ErrorAction Stop
     $path = $process.Path
     $startUtc = $process.StartTime.ToUniversalTime()
-    $parentProcessId = 0
-    try {
-        $record = Get-CimInstance -ClassName Win32_Process -Filter ("ProcessId=" + $ProcessId) -ErrorAction Stop
-        if ($null -ne $record) { $parentProcessId = [int]$record.ParentProcessId }
+    $parentProcessId = if ($ObservedParentProcessId -ge 0) { $ObservedParentProcessId } else { 0 }
+    if ($ObservedParentProcessId -lt 0) {
+        try {
+            $record = Get-CimInstance -ClassName Win32_Process -Filter ("ProcessId=" + $ProcessId) -OperationTimeoutSec 10 -ErrorAction Stop
+            if ($null -ne $record) { $parentProcessId = [int]$record.ParentProcessId }
+        }
+        catch { }
     }
-    catch { }
     return [ordered]@{
         RoleType = $RoleType
         RoleInstanceId = $RoleInstanceId
@@ -476,22 +485,96 @@ function Add-CoopOwnedRuntimeProcess {
 }
 
 function Add-CoopOwnedDescendants {
-    param([Parameter(Mandatory = $true)][int[]]$RootProcessIds)
+    param(
+        [Parameter(Mandatory = $true)][int[]]$RootProcessIds,
+        [ValidateRange(1, 120)][int]$DeadlineSeconds = 30
+    )
 
-    $records = @(Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue)
-    foreach ($record in $records) {
-        $candidateId = [int]$record.ProcessId
-        if ($candidateId -le 0 -or $RootProcessIds -contains $candidateId) { continue }
-        foreach ($rootProcessId in $RootProcessIds) {
-            if (-not (Test-CoopProcessDescendsFrom -ProcessId $candidateId -AncestorProcessId $rootProcessId)) { continue }
-            try {
-                $identity = Get-CoopProcessIdentity -ProcessId $candidateId -RoleType 'RuntimeSupport' -RoleInstanceId ('runtime-support-' + $candidateId)
-                Add-CoopOwnedRuntimeProcess -Identity $identity
+    $snapshotPath = Join-Path $runRoot 'artifacts\processes\runtime-process-tree-snapshot.json'
+    $startedUtc = [DateTime]::UtcNow
+    $deadlineUtc = $startedUtc.AddSeconds($DeadlineSeconds)
+    $snapshot = @()
+    $descendants = @()
+    $registered = New-Object System.Collections.Generic.List[object]
+    $failures = New-Object System.Collections.Generic.List[object]
+    try {
+        $snapshot = @(Get-CimInstance -ClassName Win32_Process -OperationTimeoutSec 10 -ErrorAction Stop)
+        $descendants = @(Get-CoopDescendantProcessRecordsFromSnapshot `
+            -Snapshot $snapshot `
+            -RootProcessIds $RootProcessIds `
+            -MaximumDescendants 256)
+
+        foreach ($record in $descendants) {
+            $candidateId = [int]$record.ProcessId
+            if ([DateTime]::UtcNow -ge $deadlineUtc) {
+                $failures.Add([ordered]@{
+                    ProcessId = $candidateId
+                    ParentProcessId = [int]$record.ParentProcessId
+                    Reason = "Owned descendant registration exceeded its $DeadlineSeconds-second deadline."
+                }) | Out-Null
+                break
             }
-            catch { }
-            break
+            try {
+                $identity = Get-CoopProcessIdentity `
+                    -ProcessId $candidateId `
+                    -RoleType 'RuntimeSupport' `
+                    -RoleInstanceId ('runtime-support-' + $candidateId) `
+                    -ObservedParentProcessId ([int]$record.ParentProcessId)
+                if ($null -ne $record.CreationDate) {
+                    $observedStartUtc = ([DateTime]$record.CreationDate).ToUniversalTime()
+                    $identityStartUtc = [DateTime]::ParseExact(
+                        [string]$identity.ProcessStartUtc,
+                        'O',
+                        [Globalization.CultureInfo]::InvariantCulture,
+                        [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+                    if ([Math]::Abs(($identityStartUtc - $observedStartUtc).TotalSeconds) -ge 1.0) {
+                        throw "Process $candidateId changed identity after the process-tree snapshot."
+                    }
+                }
+                Add-CoopOwnedRuntimeProcess -Identity $identity
+                $registered.Add($identity) | Out-Null
+            }
+            catch {
+                $stillRunning = $null -ne (Get-Process -Id $candidateId -ErrorAction SilentlyContinue)
+                if ($stillRunning) {
+                    $failures.Add([ordered]@{
+                        ProcessId = $candidateId
+                        ParentProcessId = [int]$record.ParentProcessId
+                        Reason = $_.Exception.Message
+                    }) | Out-Null
+                }
+            }
         }
     }
+    catch {
+        $failures.Add([ordered]@{
+            ProcessId = 0
+            ParentProcessId = 0
+            Reason = $_.Exception.Message
+        }) | Out-Null
+    }
+
+    $completedUtc = [DateTime]::UtcNow
+    $snapshotReport = [ordered]@{
+        Schema = 'coop-runtime-process-tree-snapshot-v1'
+        RunId = $RunId
+        RootProcessIds = $RootProcessIds
+        StartedUtc = $startedUtc.ToString('O')
+        CompletedUtc = $completedUtc.ToString('O')
+        DurationMilliseconds = [long]($completedUtc - $startedUtc).TotalMilliseconds
+        DeadlineSeconds = $DeadlineSeconds
+        SnapshotProcessCount = $snapshot.Count
+        DescendantCandidateCount = $descendants.Count
+        RegisteredDescendantCount = $registered.Count
+        RegisteredDescendants = $registered.ToArray()
+        Failures = $failures.ToArray()
+        Outcome = if ($failures.Count -eq 0) { 'Pass' } else { 'Failed' }
+    }
+    Write-CoopJsonAtomic -Path $snapshotPath -Value $snapshotReport
+    if ($failures.Count -gt 0) {
+        throw ('Owned descendant discovery failed: ' + (($failures | ForEach-Object { $_.Reason }) -join '; '))
+    }
+    return $snapshotReport
 }
 
 function Test-CoopProcessDescendsFrom {
@@ -1507,13 +1590,13 @@ function Invoke-CoopFeasibility {
             -ExpectedModuleSha256 $expectedDedicatedHash `
             -DeadlineUtc $roleDeadline
 
-        foreach ($serverCommand in @(
-            'ServerName ' + $effectiveServerName,
-            'MaxNumberOfPlayers 16',
-            'GameType TeamDeathmatch',
-            'Map mp_tdm_map_001',
-            'add_map_to_usable_maps mp_tdm_map_001 TeamDeathmatch',
-            'start_game')) {
+        $serverCommands = @(New-CoopDedicatedBootstrapCommands `
+            -ServerName $effectiveServerName `
+            -MaxNumberOfPlayers 16 `
+            -GameType 'TeamDeathmatch' `
+            -Map 'mp_tdm_map_001')
+        if ($serverCommands.Count -ne 6) { throw 'The dedicated bootstrap command list must contain exactly six commands.' }
+        foreach ($serverCommand in $serverCommands) {
             $dedicatedProcess.StandardInput.WriteLine($serverCommand)
             $dedicatedProcess.StandardInput.Flush()
             Add-CoopEvent -EventType 'DedicatedConsoleCommandSent' -Message $serverCommand
@@ -1626,9 +1709,13 @@ function Invoke-CoopFeasibility {
             $rootProcessIds = @($ownedRuntimeProcesses | Where-Object {
                 [string]$_.RoleType -eq 'DedicatedServer' -or [string]$_.RoleType -eq 'MultiplayerClient'
             } | ForEach-Object { [int]$_.ProcessId } | Select-Object -Unique)
-            if ($rootProcessIds.Count -gt 0) { Add-CoopOwnedDescendants -RootProcessIds $rootProcessIds }
+            if ($rootProcessIds.Count -gt 0) { $null = Add-CoopOwnedDescendants -RootProcessIds $rootProcessIds }
         }
-        catch { }
+        catch {
+            $runtimeOutcome = 'RunnerInternalError'
+            $runtimeReason = 'Owned descendant discovery failed before cleanup: ' + $_.Exception.Message
+            try { Add-CoopEvent -EventType 'OwnedDescendantDiscoveryFailed' -Message $runtimeReason } catch { }
+        }
         try { Stop-CoopOwnedRuntimeProcesses }
         catch {
             $runtimeOutcome = 'RunnerInternalError'

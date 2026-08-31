@@ -1168,7 +1168,7 @@ Exit criteria:
 
 Priority: **P0**
 
-Implementation status: **Milestone 2B.1 source, contract, and compile-only foundation and Milestone 2B.2A clean-current-source controlled staging complete on 2026-08-31; Bannerlord runtime execution remains unverified.** See [BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md](BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md) and [BATTLE_TEST_AUTOMATION_M2B2_STAGING.md](BATTLE_TEST_AUTOMATION_M2B2_STAGING.md).
+Implementation status: **Milestone 2B.1 source, contract, and compile-only foundation and Milestone 2B.2A clean-current-source controlled staging completed on 2026-08-31. The first live feasibility attempt confirmed the exact dedicated loaded hash and `Suppress` policy, but runner orchestration defects prevented UDP visibility and client launch. The corrected runner is source-, contract-, and compile-only verified; a clean committed live rerun is pending.** See [BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md](BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md), [BATTLE_TEST_AUTOMATION_M2B2_STAGING.md](BATTLE_TEST_AUTOMATION_M2B2_STAGING.md), and [BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md](BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md).
 
 Deliverables:
 

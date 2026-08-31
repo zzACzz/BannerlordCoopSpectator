@@ -1,6 +1,6 @@
 # Battle Test Automation Milestone 2B.1 Runtime-Safety Foundation
 
-Status: **Source-, contract-, and compile-only complete; Bannerlord runtime verification pending**
+Status: **Source-, contract-, and compile-only complete; dedicated loaded identity confirmed by the first live attempt; connection rerun pending**
 
 Implementation date: **2026-08-31**
 
@@ -12,7 +12,7 @@ Specification: [BATTLE_TEST_AUTOMATION_SPEC.md](BATTLE_TEST_AUTOMATION_SPEC.md),
 
 Milestone 2B.1 now has a fail-closed runtime source foundation for one bounded local dedicated/client connection probe. The implementation can bind each loaded module role to an exact expected SHA-256, require a run-scoped owned-host identity, suppress campaign-consumable battle-result publication, enforce bounded process ownership and exact cleanup, and inspect or recover an existing run without launching a new product process.
 
-No Bannerlord client, dedicated server, campaign, mission, or battle was launched while implementing or contract-testing this slice. Source completion is not runtime evidence. At implementation completion, the installed `0.3.2` modules still contained the older binaries compiled from revision `f91eeff`; the later [Milestone 2B.2A staging operation](BATTLE_TEST_AUTOMATION_M2B2_STAGING.md) replaced them with the clean committed runtime-safety build without launching a product process.
+No Bannerlord client, dedicated server, campaign, mission, or battle was launched while implementing or contract-testing this slice. Source completion is not runtime evidence. At implementation completion, the installed `0.3.2` modules still contained the older binaries compiled from revision `f91eeff`; the later [Milestone 2B.2A staging operation](BATTLE_TEST_AUTOMATION_M2B2_STAGING.md) replaced them with the clean committed runtime-safety build without launching a product process. A subsequent [first live feasibility attempt](BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md) launched the dedicated role and confirmed its exact loaded hash, but did not reach server visibility, client launch, a campaign, or a battle.
 
 ## 2. Native bootstrap correction
 
@@ -63,14 +63,15 @@ This is a vanilla connectivity bootstrap. It uses no campaign save, cooperative 
 | Full reviewed inventory, final run `m2b1-final-contracts-20260831-03` | Passed 21/21 projects; no product process launched |
 | Client/dedicated compile-only, final run `m2b1-final-compile-only-20260831-02` | Passed; client SHA-256 `D7C2B71E995065B9CA0D688B5DDF30730DE57F1B9EEF3F63778D9C8C9E98C189`; dedicated SHA-256 `1A9723A3249582FABCF08D3778C10CF448944B928549E6D9582FA7F3C0770626`; installed inventories unchanged |
 | Clean committed revision verification, runs `m2b2-contracts-20260831-01` and `m2b2-prestage-compile-20260831-01` | Passed 21/21 projects; client SHA-256 `B576B8EA0FB223126A65E062CB562FD15815DF8BA1ADDB1797506914B48D7928`; dedicated SHA-256 `1A9723A3249582FABCF08D3778C10CF448944B928549E6D9582FA7F3C0770626`; installed inventories unchanged during compile-only |
+| Live-runner correction verification, runs `m2b2-fix-final-contracts-20260831-01` and `m2b2-fix-compile-only-20260831-01` | Passed 22/22 projects and client/dedicated compile-only; installed inventories unchanged; no product process launched by correction verification |
 | `Inspect`, recovery preview, and zero-process `Recover -ApplyRecovery` | Passed against a completed run; valid manifest/lease reported; no process action performed; malformed or cross-run recovery metadata is fail-closed by source contract |
 | PowerShell parser validation | Passed in PowerShell 7 and Windows PowerShell 5.1 for the aggregate runner and client launcher |
 | Repository EOL/hygiene policy | Passed with `-AllowDirty`; all modified and new text files are LF; the only normal hygiene failure is the intentionally uncommitted working tree |
 
-A deliberately invalid-hash `Feasibility` request stopped at `PreconditionsFailed` before any product process launch. A real `Feasibility` invocation remains outside this implementation step.
+A deliberately invalid-hash `Feasibility` request stopped at `PreconditionsFailed` before any product process launch during the original implementation step. Live run `m2b2-live-feasibility-20260831-01` later confirmed the exact dedicated loaded hash and `Suppress`, then exposed shared runner defects in command emission and descendant discovery. Exact recovery stopped the recorded dedicated identity gracefully; the corrected source and contracts are documented in [BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md](BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md).
 
 ## 5. Evidence boundary and next gate
 
-This milestone does not yet establish `ConfirmedLoadedHash`, a supported client/dedicated version combination, a lobby connection, correct native command acceptance, exact runtime cleanup, crash-reporter behavior, or result suppression inside a real mission. Those facts require a separately approved live run.
+This milestone now establishes `ConfirmedLoadedHash` only for the dedicated role and proves exact recovery for the interrupted attempt. It does not establish the client loaded hash, a supported connected client/dedicated version combination, a lobby connection, correct acceptance of the corrected six-command bootstrap, crash-reporter behavior, or result suppression inside a real mission.
 
-The prerequisite commit and controlled staging operation are now complete for clean revision `12abf36`; see [BATTLE_TEST_AUTOMATION_M2B2_STAGING.md](BATTLE_TEST_AUTOMATION_M2B2_STAGING.md). This closes only the on-disk path/hash gate. The first live run must still be separately approved, invoke only `Feasibility`, preserve all artifacts, make no L2/L3 claim, and stop before campaign automation.
+The game-side binaries remain the exact clean revision `12abf36` outputs documented in [BATTLE_TEST_AUTOMATION_M2B2_STAGING.md](BATTLE_TEST_AUTOMATION_M2B2_STAGING.md); the runner-only correction does not require module restaging. The next gate is one separately approved `Feasibility` rerun from a clean committed correction revision. It must preserve all artifacts, make no L2/L3 claim, and stop before campaign automation.

@@ -1,6 +1,6 @@
 # Battle Test Automation Milestone 2B.2A Current-Source Staging Evidence
 
-Status: **Complete for committed-source on-disk identity; Bannerlord runtime loading remains unverified**
+Status: **Complete for committed-source on-disk identity; later live evidence confirmed the dedicated loaded identity, while client loading remains unverified**
 
 Execution date: **2026-08-31**
 
@@ -14,7 +14,7 @@ Specification: [BATTLE_TEST_AUTOMATION_SPEC.md](BATTLE_TEST_AUTOMATION_SPEC.md),
 
 Milestone 2B.2A rebuilt the Milestone 2B.1 runtime-safety source from the clean pushed revision, proved all 21 contract projects, and installed the exact resulting client and dedicated assemblies through a bounded `DeployWithRestore` transaction. The installed trees, retained pre-images, run-owned staged inventories, and ignored repository output identities were verified by recursive path/length/SHA-256 inventories.
 
-No Bannerlord client, launcher, dedicated server, crash reporter, campaign, mission, or battle was launched. This is `ConfirmedPathHashOnly` evidence. It does not establish `ConfirmedLoadedHash`, connectivity, mission bootstrap behavior, result suppression inside a live process, cleanup behavior after a live run, or any L2/L3 battle claim.
+No Bannerlord client, launcher, dedicated server, crash reporter, campaign, mission, or battle was launched by the staging operation. The staging evidence itself is `ConfirmedPathHashOnly`. A later [live feasibility attempt](BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md) established the exact dedicated `ConfirmedLoadedHash` and `Suppress` policy, but did not establish client loading, connectivity, successful mission bootstrap, result suppression inside a mission, or any L2/L3 battle claim.
 
 ## 2. Authoritative runs
 
@@ -109,4 +109,6 @@ The nonzero doctor exit is expected. On-disk identity cannot prove which assembl
 
 Milestone 2B.2A closes the clean-current-source on-disk staging prerequisite for the first Milestone 2B.1 live probe. It does not complete Milestone 2B as a whole.
 
-The next separately approved step is one `Feasibility` connection-only run using the exact hashes in this document. It may perform only the already specified minimum vanilla `TeamDeathmatch`/`start_game` server bootstrap, exact loaded-role acknowledgement, normal-lobby client connection, unchanged global-result proof, and exact owned-process cleanup. It must not load a campaign, run a cooperative battle fixture, consume a campaign result, or claim L2/L3 evidence.
+The first separately approved `Feasibility` attempt used the exact hashes in this document and confirmed the dedicated loaded identity. It stopped before UDP visibility and client launch because the runner concatenated the six bootstrap commands and then stalled in unbounded descendant discovery. Exact recovery completed without a forced dedicated stop, and the staging hashes remained intact.
+
+The next gate is one fresh `Feasibility` connection-only rerun from a clean committed runner-correction revision. It may perform only the already specified minimum vanilla `TeamDeathmatch`/`start_game` server bootstrap, exact loaded-role acknowledgement, normal-lobby client connection, unchanged global-result proof, and exact owned-process cleanup. It must not load a campaign, run a cooperative battle fixture, consume a campaign result, or claim L2/L3 evidence. See [BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md](BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md).
