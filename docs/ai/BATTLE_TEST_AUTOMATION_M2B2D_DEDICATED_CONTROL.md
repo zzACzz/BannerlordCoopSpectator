@@ -1,15 +1,15 @@
 # Battle Test Automation Milestone 2B.2D Dedicated Control Channel
 
-Status: **Source, contract, and compile-only implementation complete; staging and Bannerlord runtime validation pending**
-Date: **2026-08-31**
-Source baseline: **`dcebfae91e959dec7e072b30b8b617fa2730c272`** (`dcebfae`)
+Status: **Source/contracts and controlled dedicated-only staging complete; Bannerlord runtime validation pending**
+Date: **2026-09-01**
+Published source revision: **`7628c85aef140e431f29982e016395b8f303a464`** (`7628c85`)
 Specification: [BATTLE_TEST_AUTOMATION_SPEC.md](BATTLE_TEST_AUTOMATION_SPEC.md), Revision 11
 
 ## 1. Scope
 
 Milestone 2B.2D replaces redirected dedicated-server standard handles as the authoritative bootstrap control path. The exact dedicated module now exposes a default-off, run-scoped, structured readiness/request/acknowledgement contract. The aggregate runner uses that contract before checking UDP visibility or launching the multiplayer client.
 
-This slice does not stage a module, launch Bannerlord or the dedicated server, open a campaign or mission, connect a client, execute a cooperative battle, consume or publish a campaign result, or establish L2/L3 evidence.
+The source implementation slice did not launch Bannerlord or the dedicated server, open a campaign or mission, connect a client, execute a cooperative battle, consume or publish a campaign result, or establish L2/L3 evidence. Section 7 records the later separately approved on-disk dedicated-only staging transaction; it launched no product process and does not change that runtime-evidence boundary.
 
 ## 2. Lowest-level native findings
 
@@ -73,18 +73,50 @@ This control channel is shared pre-scenario infrastructure. It creates only the 
 | Evidence | Result |
 |---|---|
 | Focused runtime/runner contracts, `m2b2d-focused-dev-20260831-03` | Passed in Windows PowerShell 5.1 and PowerShell 7.6.4 |
-| Full canonical contracts, `m2b2d-control-contracts-final-20260831-01` | Passed `22/22`; primary and terminal outcome `Pass`; includes the final server-name command-surface hardening; no product process launched |
-| Compile-only, `m2b2d-control-compile-final-20260831-01` | Client and dedicated builds exited `0`; installed client, legacy-client, and dedicated inventories unchanged; no product process launched |
-| Compile-only client output | Version `0.3.2`; SHA-256 `683E049B1F1178602A483DA6982993108F74D33E372145B317428A8685807E03` |
+| Clean published-revision contracts, `m2b2d-prestage-contracts-20260901-01` | Passed `22/22`; primary and terminal outcome `Pass`; no product process launched |
+| Clean published-revision compile-only, `m2b2d-prestage-compile-20260901-01` | Client and dedicated builds exited `0`; installed client, legacy-client, and dedicated inventories unchanged; no product process launched |
+| Compile-only client output | Version `0.3.2`; SHA-256 `7E91F442989DAB426478395052201C2BADBC229EA82FA4B9F8B59FEB4246BEF9` |
 | Compile-only dedicated output | Version `0.3.2`; SHA-256 `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78` |
 | Compiled-output ILSpy inspection | Confirmed lifecycle-event binding, `GameNetwork.HandleConsoleCommand`, fixed profile values, and start-game confirmation path |
 
 Contract coverage includes valid identity, sequence, token, role, process, module hash, creation/expiry/lifetime, supported profile values, exact readiness lifecycle identity, exact seven-step terminal history, and reordered-history rejection. Runner contracts require the structured files and prove the standard-input command path is absent from `Feasibility`.
 
-## 7. Evidence boundary and next gate
+## 7. Controlled dedicated-only staging
 
-The source implementation satisfies the Revision 11 dedicated-control design at the contract and compile-only levels. It does not prove that the staged dedicated runtime can load the new binary, observe the native lifecycle event, apply the seven phases, bind the requested UDP endpoint, launch the client, complete lobby handoff, or connect.
+Run `m2b2d-stage-20260901-01` started only after local and remote revision `7628c85` matched, the working tree was clean, both required UDP ports were free, no Bannerlord/dedicated/launcher/crash-reporter process existed, and the clean dedicated output matched SHA-256 `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78`.
 
-The installed dedicated module still has the previously staged SHA-256 `1A9723A3249582FABCF08D3778C10CF448944B928549E6D9582FA7F3C0770626`; the newly compiled dedicated output SHA-256 `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78` is intentionally not installed by this slice. The next runtime gate therefore requires separate approval for exact dedicated-module staging, followed by a clean published-revision `Feasibility` run with explicit expected hashes. That run must retain the ready status, all seven acknowledgements, exact UDP ownership, both loaded-role identities, client handoff/connection, unchanged protected result, PID-correlated logs, and exact cleanup.
+Preparation copied the complete 218-file installed `CoopSpectatorDedicated` tree, preserving installed-only resources, and changed exactly these two files in the prepared tree:
+
+- `bin/Win64_Shipping_Server/CoopSpectator.dll`;
+- `bin/Win64_Shipping_Client/CoopSpectator.dll`.
+
+The apply transaction acquired the dedicated installation mutex, revalidated source, remote, process, port, exclusive-file, pre-image, and prepared-tree identity, moved the complete installed tree to the run-owned backup, and moved the prepared tree into the exact installation path. Postflight evidence is:
+
+| Fact | Observed result |
+|---|---|
+| Installed dedicated tree | 218 files; fingerprint `AE406714F10354A1B8C437EC4E4D8B2E90DD55B7B8A7CB968822C4E9BC9A465D` |
+| Retained pre-image | 218 files; fingerprint `89B1630961307D90943ACFCA2936D1C4EC4ADC57FB59979111B26A6812B1F404` |
+| Both installed dedicated DLLs | SHA-256 `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78` |
+| Both retained prior DLLs | SHA-256 `1A9723A3249582FABCF08D3778C10CF448944B928549E6D9582FA7F3C0770626` |
+| Installed client tree | 32 files; unchanged fingerprint `19369B25E232718F1291A54853E0FA090B0AE53AC300E731BDD04123AC5BAAEE` |
+| Installed client DLL | Unchanged SHA-256 `B576B8EA0FB223126A65E062CB562FD15815DF8BA1ADDB1797506914B48D7928` |
+| Protected `battle_result.json` | Length, SHA-256 `D5EF79D59FA97EF4C95BB7AB31803AE1F475EB24498F4469B83CD3B7AD955AD3`, and UTC write ticks unchanged |
+| Product/port state | No product process; ports `7210` and `7777` unowned |
+
+The retained exact pre-image is:
+
+```text
+C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2b2d-stage-20260901-01\backup\dedicated\CoopSpectatorDedicated
+```
+
+The first postflight check compared a JSON-deserialized `DateTime` through culture-dependent string conversion and raised a false mismatch. No mutation occurred in that check. `artifacts/failure/postflight-comparison-01.json` retains the mistake; the corrected check compared exact length, SHA-256, and UTC ticks and passed.
+
+Post-stage doctor run `m2b2d-poststage-doctor-20260901-01` was `EnvironmentBlocked` only by `InstalledDedicatedHashDiffersFromRepositoryOutput` and `RuntimeVersionCombinationNotYetVerified`. The first reason refers to the intentionally untouched ignored repository output from the earlier build, not the clean build artifact or installed tree. Runtime execution must pass the explicit installed client and dedicated hashes and must not infer identity from that stale ignored output.
+
+## 8. Evidence boundary and next gate
+
+The source implementation satisfies the Revision 11 dedicated-control design at the contract and compile-only levels, and controlled staging establishes `ConfirmedPathHashOnly` for the new dedicated binary. It does not prove that the dedicated runtime loads the binary, observes the native lifecycle event, applies the seven phases, binds the requested UDP endpoint, launches the client, completes lobby handoff, or connects.
+
+The next runtime gate is a separately approved clean published-revision `Feasibility` run with explicit installed client hash `B576B8EA0FB223126A65E062CB562FD15815DF8BA1ADDB1797506914B48D7928` and dedicated hash `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78`. That run must retain the ready status, all seven acknowledgements, exact UDP ownership, both loaded-role identities, client handoff/connection, unchanged protected result, PID-correlated logs, and exact cleanup.
 
 Until that named runtime run passes, no connection, campaign, mission, battle, L2, or L3 claim is permitted.

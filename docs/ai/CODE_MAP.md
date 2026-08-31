@@ -304,7 +304,7 @@ This path is disabled by default, is independent of battle type, and stops at ne
 - `scripts/Start-CoopBattleTestClient.ps1`: standalone validation plus aggregate-owned live launch through `-UseExistingRunContract`; inherits the runner token/root/hash/result policy, records immediate provisional PID/path/parent/window ownership, performs bounded exact identity observation, publishes the schema-v3 final handoff, and exactly cleans pre-handoff failures.
 - `Tests/contract-tests.manifest.json`: exact reviewed inventory consumed by the aggregate runner.
 
-This layer remains non-authoritative for campaign and battle state. Milestone 2A stays non-runtime. Milestone 2B.1 adds source-prepared process/role ownership, and Milestone 2B.2D adds the source/contract-verified dedicated control boundary for a bounded vanilla `TeamDeathmatch` connectivity bootstrap after fail-closed result isolation. The new dedicated binary is not staged or runtime-verified. This layer does not load a campaign fixture, advance cooperative battle phases, publish campaign-consumable results, or claim L2/L3 evidence.
+This layer remains non-authoritative for campaign and battle state. Milestone 2A stays non-runtime. Milestone 2B.1 adds source-prepared process/role ownership, and Milestone 2B.2D adds the source/contract-verified dedicated control boundary for a bounded vanilla `TeamDeathmatch` connectivity bootstrap after fail-closed result isolation. The exact dedicated binary is staged but not runtime-verified. This layer does not load a campaign fixture, advance cooperative battle phases, publish campaign-consumable results, or claim L2/L3 evidence.
 
 ## Network files
 

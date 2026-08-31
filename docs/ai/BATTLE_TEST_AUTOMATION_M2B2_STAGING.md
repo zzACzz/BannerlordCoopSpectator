@@ -1,10 +1,10 @@
-# Battle Test Automation Milestone 2B.2A Current-Source Staging Evidence
+# Battle Test Automation Milestone 2B Controlled Staging Evidence
 
-Status: **Complete for committed-source on-disk identity; later live evidence confirmed the dedicated loaded identity, while client loading remains unverified**
+Status: **Milestone 2B.2A client/runtime-foundation staging retained; Milestone 2B.2D dedicated-control on-disk staging complete; new dedicated runtime loading unverified**
 
-Execution date: **2026-08-31**
+Execution dates: **2026-08-31 and 2026-09-01**
 
-Compiled source revision: **`12abf363ae978d520558b7c3bbd226137a816a8a`** (`12abf36`)
+Compiled source revisions: **`12abf363ae978d520558b7c3bbd226137a816a8a`** (`12abf36`) and dedicated-only **`7628c85aef140e431f29982e016395b8f303a464`** (`7628c85`)
 
 Branch: **`codex/v0.1.1-refresh`**, exact revision present on `origin`
 
@@ -113,4 +113,29 @@ The first separately approved `Feasibility` attempt used the exact hashes in thi
 
 Clean revision `70a40db` completed that rerun and preserved the staging hashes. It verified the dedicated loaded identity, six separate writes, bounded process discovery, unchanged global result, and exact cleanup, but no UDP listener or client appeared because command emission preceded native console readiness. Milestone 2B.2C subsequently implemented and contract-tested bounded native-output capture, exact readiness/command/start readbacks, singular runner results, and exact PID-correlated native-log retention without changing the staged game-side binaries. Clean validation revision `e62f536` preserved the same installation hashes but failed after successful process creation because immediate executable-path acquisition returned null before provisional ownership/capture. Exact manual recovery left no process or port owner. Revision 10 then corrected process ownership, and clean run `m2b2c-client-handoff-live-20260831-01` live-verified exact dedicated cleanup while disproving redirected output as readiness authority.
 
-Milestone 2B.2D now changes dedicated game-side source to add the structured control channel; see [BATTLE_TEST_AUTOMATION_M2B2D_DEDICATED_CONTROL.md](BATTLE_TEST_AUTOMATION_M2B2D_DEDICATED_CONTROL.md). Its final compile-only dedicated SHA-256 is `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78`, but the installed dedicated module intentionally remains the staged SHA-256 `1A9723A3249582FABCF08D3778C10CF448944B928549E6D9582FA7F3C0770626`. A new separately approved staging transaction is required before runtime validation. Any later rerun must still avoid campaign loading, cooperative battle fixtures, campaign result consumption, and L2/L3 claims.
+Milestone 2B.2D then changed dedicated game-side source to add the structured control channel; see [BATTLE_TEST_AUTOMATION_M2B2D_DEDICATED_CONTROL.md](BATTLE_TEST_AUTOMATION_M2B2D_DEDICATED_CONTROL.md). Section 9 records its separately approved dedicated-only staging transaction. Any later rerun must still avoid campaign loading, cooperative battle fixtures, campaign result consumption, and L2/L3 claims.
+
+## 9. Milestone 2B.2D dedicated-only staging
+
+Clean published revision `7628c85` passed all 22 contract projects in `m2b2d-prestage-contracts-20260901-01`. Compile-only run `m2b2d-prestage-compile-20260901-01` built both projects, launched no product process, and proved installed client, legacy-client, and dedicated inventories unchanged. Its dedicated output SHA-256 was `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78`.
+
+Controlled run `m2b2d-stage-20260901-01` copied the complete installed dedicated tree and overlaid only the client-bin and server-bin `CoopSpectator.dll`. Preparation proved that those were the only two changed relative paths. Apply revalidated local/remote revision, clean worktree, no product process, free ports, exact pre-image and prepared fingerprints, exclusive DLL access, and the dedicated installation mutex before moving the complete old tree to the run-owned backup and the complete prepared tree into the installation path.
+
+| Tree or file | Before | After |
+|---|---|---|
+| Dedicated tree | 218 files; fingerprint `89B1630961307D90943ACFCA2936D1C4EC4ADC57FB59979111B26A6812B1F404` | 218 files; fingerprint `AE406714F10354A1B8C437EC4E4D8B2E90DD55B7B8A7CB968822C4E9BC9A465D` |
+| Dedicated client-bin DLL | `1A9723A3249582FABCF08D3778C10CF448944B928549E6D9582FA7F3C0770626` | `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78` |
+| Dedicated server-bin DLL | `1A9723A3249582FABCF08D3778C10CF448944B928549E6D9582FA7F3C0770626` | `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78` |
+| Client tree | 32 files; fingerprint `19369B25E232718F1291A54853E0FA090B0AE53AC300E731BDD04123AC5BAAEE` | Unchanged |
+| Client DLL | `B576B8EA0FB223126A65E062CB562FD15815DF8BA1ADDB1797506914B48D7928` | Unchanged |
+| Protected result | SHA-256 `D5EF79D59FA97EF4C95BB7AB31803AE1F475EB24498F4469B83CD3B7AD955AD3` | Length, hash, and UTC write ticks unchanged |
+
+The exact retained pre-image is:
+
+```text
+C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2b2d-stage-20260901-01\backup\dedicated\CoopSpectatorDedicated
+```
+
+The first postflight check produced a false protected-result timestamp mismatch because a deserialized `DateTime` was converted through culture-dependent string formatting. It performed no mutation and is retained at `artifacts/failure/postflight-comparison-01.json`. Exact UTC-tick comparison then passed together with all tree, hash, process, and port checks.
+
+Post-stage doctor run `m2b2d-poststage-doctor-20260901-01` reported `EnvironmentBlocked` with `InstalledDedicatedHashDiffersFromRepositoryOutput` and `RuntimeVersionCombinationNotYetVerified`. The former refers only to the intentionally untouched ignored repository output from the prior build; the installed tree exactly matches the clean run-owned compile artifact. No game process was launched. The new dedicated identity remains `ConfirmedPathHashOnly` until a named live run reports the loaded module hash.
