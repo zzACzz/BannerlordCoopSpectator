@@ -1,6 +1,6 @@
 # Battle Test Automation Milestone 2B.2C Runner Correction
 
-Status: **Aggregate-runner and client-launcher post-start ownership corrections implemented and non-runtime verified; review, commit, push, and clean live validation remain**
+Status: **Aggregate-runner and client-launcher post-start ownership corrections published; dedicated ownership/cleanup live-verified; dedicated control channel blocked before client launch**
 
 Verification date: **2026-08-31**
 
@@ -12,7 +12,9 @@ Aggregate ownership correction source baseline: `1bbdd077b1899de4c6d82cde37f179e
 
 Published aggregate ownership correction: `8f68d433b575b466e42818e9cb1eaabc05f5d865`
 
-Client-launcher handoff source baseline: `8f68d433b575b466e42818e9cb1eaabc05f5d865` (working-tree verification; client correction commit not assigned yet)
+Client-launcher handoff source baseline: `8f68d433b575b466e42818e9cb1eaabc05f5d865`
+
+Published client-launcher handoff correction: `711f2cac20ca05d3e81233aa6acfa60816dcce99`
 
 This milestone implements the Revision 8 console-readiness, command-acceptance, singular-result, and native-log evidence gates exposed by `m2b2-live-feasibility-rerun-20260831-01`. It changes only the aggregate runner, its tested core helper, its focused contract project, and living documentation. It does not change either game module, install a binary, launch a product process, establish a client connection, start a campaign, or provide L2/L3 battle evidence.
 
@@ -25,7 +27,7 @@ ILSpy inspection of the installed, hash-pinned dedicated assemblies established 
 - option changes emit exact `--Changed: <option>, to: <value>` readbacks;
 - successful `ServerSideIntermissionManager.StartGame` emits `--Game is starting...` and `--Selected scene: <map>` only after the usable-map and startup gates pass.
 
-`Feasibility` now redirects and continuously drains the exact owned dedicated process stdout/stderr into run artifacts. It still requires the hash-bound `ModuleReady` status first, but then separately requires the native ready message before writing any bootstrap command. It sends the four option commands one at a time and requires their exact readbacks. It then sends `add_map_to_usable_maps` and `start_game` and requires both native start-game markers for `mp_tdm_map_001`. The UDP-visibility deadline begins only after this evidence succeeds. Missing readiness or command evidence produces an exact bounded failure instead of a generic port timeout.
+The Milestone 2B.2C `Feasibility` source redirects and continuously drains the exact owned dedicated process stdout/stderr into run artifacts. Its original contract requires the hash-bound `ModuleReady` status first, then separately requires the native ready message before writing any bootstrap command. It sends the four option commands one at a time and requires their exact readbacks. It then sends `add_map_to_usable_maps` and `start_game` and requires both native start-game markers for `mp_tdm_map_001`. The UDP-visibility deadline begins only after this evidence succeeds. Missing readiness or command evidence produces an exact bounded failure instead of a generic port timeout. Section 8 records the later clean live proof that redirected standard streams do not provide this evidence for the exact starter profile, so this source contract is not the final control-channel design.
 
 The capture is asynchronous, bounded to a finite in-memory tail, continuously drained during all dedicated/client waits, and finalized only after exact process cleanup. A synthetic child-process contract exercises stdout, stderr, delayed lines, end-of-stream races, sequence boundaries, complete evidence, and missing evidence in Windows PowerShell 5.1 and PowerShell 7.
 
@@ -88,6 +90,20 @@ Focused source contracts enforce the operation order and inject a synthetic post
 
 ## 7. Evidence boundary and next gate
 
-This milestone proves source behavior and controlled process-capture primitives, not Bannerlord runtime acceptance. The first clean live attempt did not reach output-capture creation, so whether the dedicated executable sends all native readiness/readback messages through redirected stdout remains a live hypothesis.
+The ownership milestone now has both source evidence and a bounded Bannerlord runtime proof for the dedicated role. It does not have client-launch, connection, campaign, mission, or battle proof.
 
-No game-side binary changed, so module restaging is not required. The aggregate correction is published, and the client-launcher handoff correction has passed focused cross-PowerShell contracts, the full canonical inventory, and compile-only verification. The client correction remains uncommitted and live-unverified. The next gates are final review, commit, and push. Only then may a separately approved clean live rerun proceed. That rerun must stop before campaign automation and must not claim L2 or L3 evidence unless its explicit connection criteria are reached.
+No game-side binary changed in the aggregate/client ownership corrections, so the clean live run continued to use the exact staged `0.3.2` module hashes. The client-launcher correction is published, but its post-start handoff remains live-unverified because the dedicated bootstrap never reached the client-launch boundary.
+
+## 8. Clean live ownership proof and console-channel blocker
+
+Run `m2b2c-client-handoff-live-20260831-01` started from clean local and remote revision `711f2cac20ca05d3e81233aa6acfa60816dcce99`, a fresh run root, one valid Steam process, free ports `7210` and `7777`, no product process, exact installed client hash `B576B8EA0FB223126A65E062CB562FD15815DF8BA1ADDB1797506914B48D7928`, exact installed dedicated hash `1A9723A3249582FABCF08D3778C10CF448944B928549E6D9582FA7F3C0770626`, and protected-result pre-image `D5EF79D59FA97EF4C95BB7AB31803AE1F475EB24498F4469B83CD3B7AD955AD3`.
+
+The runner provisionally owned and then exactly verified dedicated PID `153416`, including requested path, parent PID `107340`, launch window, start time, executable SHA-256, and `ProcessAndWin32Process` path evidence. The exact dedicated module published `ModuleReady`; its native log then showed successful TaleWorlds connection/login and continuing `AliveMessage` responses until the bounded timeout.
+
+The runner timed out waiting for `NativeConsoleReady`. Both redirected `stdout.txt` and `stderr.txt` remained zero bytes. The exact PID-correlated `rgl_log_153416.txt` reached `323574` bytes and began with `Mount and Blade II Bannerlord Console Started...`, while the owned process tree contained a `conhost.exe` descendant. ILSpy reconfirmed that `InitialListedGameServerState.OnActivate` emits the required ready text through `Console.WriteLine`. The ready text was absent from both redirected streams and the PID-correlated native log. This proves that redirected standard output is not a trustworthy sole evidence channel for this exact starter profile; it does not prove that the native lifecycle point failed to occur. Redirected standard input also remains unverified because fail-closed ordering prevented any command write.
+
+No bootstrap command, UDP endpoint, client process, client loaded identity, lobby handoff, connection, campaign, mission, or battle was reached. The report correctly retained `CampaignStarted=false`, `CampaignBattleFixtureOpened=false`, and `L2OrL3PassClaimed=false`.
+
+Cleanup revalidated the exact starter identity, requested graceful close, used no forced stop, registered the exact Watchdog and `conhost` descendants, and left `RemainingOwnedProcesses` empty. The runner lock was released and reacquired, both required ports were free, the installed module hashes and protected result were unchanged, and the repository remained clean. This is successful live proof of the corrected dedicated ownership/cleanup path, not a successful connection feasibility result.
+
+The next implementation gate is a separately approved run-scoped dedicated readiness, command-intent, and acknowledgement channel tied to the exact run, token hash, process identity, and loaded module hash. Standard streams and PID-native logs remain useful retained diagnostics but cannot be the sole control contract. The shared bootstrap occurs before scenario selection, so this blocker applies to every future battle type rather than one map or adapter. Another unchanged retry or a longer timeout is not justified.

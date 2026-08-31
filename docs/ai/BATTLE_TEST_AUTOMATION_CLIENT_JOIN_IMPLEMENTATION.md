@@ -1,6 +1,6 @@
 # Battle Test Automation Client Join Implementation Report
 
-Status: **Source- and contract-implemented with fail-closed post-start ownership; exact `0.3.2` installed; Bannerlord runtime verification pending**
+Status: **Source- and contract-implemented with published fail-closed post-start ownership; exact `0.3.2` installed; live run stopped at the dedicated control-channel gate before client launch**
 
 Implementation date: **2026-08-31**
 
@@ -8,13 +8,15 @@ Original repository base revision: **`3c513084ebbe9c99daa0b65849fab7b39b913ee1`*
 
 Committed implementation revision: **`f91eeff9b710f68fc7bf4b506ec39c2d1c4474bc`** (`f91eeff`)
 
-Current specification: [BATTLE_TEST_AUTOMATION_SPEC.md](BATTLE_TEST_AUTOMATION_SPEC.md), Revision 10. The original client-join slice was implemented before the Revision 7 runtime-safety foundation; the post-start ownership handoff was hardened against the Revision 10 process contract.
+Published post-start ownership revision: **`711f2cac20ca05d3e81233aa6acfa60816dcce99`** (`711f2ca`)
+
+Current specification: [BATTLE_TEST_AUTOMATION_SPEC.md](BATTLE_TEST_AUTOMATION_SPEC.md), Revision 11. The original client-join slice was implemented before the Revision 7 runtime-safety foundation; the post-start ownership handoff was hardened against the Revision 10 process contract. Revision 11 records that the dedicated starter's redirected standard handles are not a sufficient live control/evidence channel.
 
 ## 1. Outcome
 
 The Milestone 1 normal-lobby control blocker now has a narrow source implementation and isolated contract coverage. A dedicated launcher can validate Steam and the exact installed client module, create a fresh run-scoped join request, launch the real multiplayer executable, and let the module discover and request the associated local server through TaleWorlds' normal custom-game lobby APIs.
 
-This report does not promote either blocked Milestone 1 runtime capability. No client, dedicated server, campaign, mission, or battle was launched during implementation validation. A later controlled operation installed exact `0.3.2` binaries from committed revision `f91eeff` and proved their on-disk paths/hashes, but the code has still not demonstrated a real loaded-role acknowledgement, lobby handoff, or connection. See [BATTLE_TEST_AUTOMATION_M2B_STAGING.md](BATTLE_TEST_AUTOMATION_M2B_STAGING.md).
+This report does not promote either blocked Milestone 1 runtime capability. No client, campaign, mission, or battle was launched during implementation validation. A later controlled operation installed exact `0.3.2` binaries from committed revision `f91eeff` and proved their on-disk paths/hashes. Clean run `m2b2c-client-handoff-live-20260831-01` subsequently live-verified dedicated ownership and cleanup from published revision `711f2ca`, but it stopped at the dedicated readiness channel before client launch. The client has therefore still not demonstrated a real loaded-role acknowledgement, lobby handoff, or connection. See [BATTLE_TEST_AUTOMATION_M2B_STAGING.md](BATTLE_TEST_AUTOMATION_M2B_STAGING.md) and [BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md](BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md).
 
 ## 2. Implemented boundary
 
@@ -47,7 +49,7 @@ The status path is `state/client-join.status.json`. States distinguish `ModuleRe
 
 Request expiry prevents a new native join from starting. Once TaleWorlds owns the join task, the module does not claim cancellation or terminal expiry because the operation may still complete. A future runner must impose its own bounded connection timeout and clean up only the exact process it owns.
 
-The launcher and client module do not issue `start_game`, fabricate battle readiness, or use UI automation. Revision 7 permits only the external runner, after loaded-role and result-suppression gates, to issue the minimum native vanilla `TeamDeathmatch` bootstrap required for the server to bind and appear in the normal lobby.
+The launcher and client module do not issue `start_game`, fabricate battle readiness, or use UI automation. Revision 11 keeps the external runner as the sole bootstrap authority after loaded-role and result-suppression gates, but requires a separate run-scoped dedicated command-intent and acknowledgement channel before the minimum vanilla `TeamDeathmatch` bootstrap may be trusted.
 
 Milestone 2A subsequently supplied the general run manifest, nonce fingerprint, role-instance, lease, event, outcome, assertion, file-fault, and compile-only foundation documented in [BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md](BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md). This closes the general non-runtime protocol/build prerequisites but does not change the unverified live-join status of this client slice.
 
@@ -73,6 +75,8 @@ The main game projects were intentionally not built because their current target
 | Current installed-profile validation | `m2b2c-client-handoff-validate-20260831-01` with `-ValidateOnly` | Exact installed client `0.3.2` hash `B576...7928` validated; Steam found; no run root or product process created |
 | Client-handoff full canonical inventory | `m2b2c-client-handoff-contracts-20260831-01` | Passed 22/22; no product process launched |
 | Client-handoff compile-only proof | `m2b2c-client-handoff-compile-20260831-01` | Both builds passed; installed inventories unchanged; no product process launched |
+| Published ownership revision | `711f2cac20ca05d3e81233aa6acfa60816dcce99` | Client-launcher handoff correction committed and pushed before the clean live attempt |
+| Clean live dedicated gate | `m2b2c-client-handoff-live-20260831-01` | Dedicated ownership/cleanup passed; redirected readiness timed out before client launch; installed hashes and protected result unchanged |
 
 Contract coverage includes valid and invalid `RunId` values, run-token mismatch, loaded-module hash mismatch, expired and excessive-lifetime requests, exact and optional server filters, no match, ambiguous match, terminal-state classification, strict atomic status replacement, and compilation of the bridge/driver/controller/console-command/lobby-patch source graph against narrow runtime stubs.
 
@@ -86,16 +90,17 @@ Contract coverage includes valid and invalid `RunId` values, run-token mismatch,
 | PROC-001 client launch slice | `Satisfied at the non-runtime contract layer; live use unverified` | Immediate provisional PID/path/parent/window identity; bounded exact observation; atomic schema-v3 handoff; exact cleanup on post-start failure; validation-only and cross-PowerShell synthetic failure paths passed | Source, contract test | Multiplayer client | Build guide, code map, correction report, and this report updated | No real Bannerlord client launch, loaded identity, descendant, or connection proof |
 | CLI-002 initial machine prerequisite | `Partially Satisfied` | Launcher requires Steam in the current interactive session and records non-secret process IDs; validation passed | Source, environment validation | Multiplayer client | Build guide and M1 report updated | Portability, anti-cheat, modal, and other-machine proof remain open |
 | CLI-006 early feasibility gate | `Partially Satisfied` | A supported source control path now exists; M1 launch evidence and new contract evidence are separated | Source, contract test | Multiplayer client and local dedicated server | Audit and feasibility report updated | No connection, handoff, or exact cross-role runtime correlation yet |
-| CLI-008 run-scoped native-lobby intent | `Partially Satisfied` | (a) default-off complete profile; (b) fresh RunId/token/hash-bound request; (c) exact server filters; (d) run-scoped owned process plus UDP association gate; (e) native list/join APIs; (f) secret excluded from CLI/artifacts; (g) atomic state acknowledgements; (h) launcher/client do not issue `start_game` or use UI automation; source compiled and contracts passed; (i) clean `70a40db` live rerun verified dedicated identity, six writes, and cleanup; (j) Milestone 2B.2C added bounded native-output capture, exact readiness/command/start markers, singular structured results, and exact PID-correlated log retention; (k) clean `e62f536` validation exposed missing aggregate provisional ownership; (l) Revision 10 aggregate and client-launcher post-start ownership paths are now fail-closed and non-runtime verified | Source, contract test, dedicated runtime evidence | Multiplayer client and associated local dedicated server; battle-type independent | Specification Revision 10 and affected living documents updated | The corrected output and client-handoff mechanics are not yet live-proven; UDP visibility, client launch, loaded identity, lobby handoff, and connection remain unverified; the external runner's minimum vanilla bootstrap is not L2/L3 battle evidence |
+| CLI-008 run-scoped native-lobby intent | `Partially Satisfied` | (a) default-off complete profile; (b) fresh RunId/token/hash-bound request; (c) exact server filters; (d) run-scoped owned process plus UDP association gate; (e) native list/join APIs; (f) secret excluded from CLI/artifacts; (g) atomic state acknowledgements; (h) launcher/client do not issue `start_game` or use UI automation; source compiled and contracts passed; (i) clean `70a40db` live rerun verified dedicated identity, six writes, and cleanup; (j) Milestone 2B.2C added bounded capture, singular structured results, and exact PID-log retention; (k) clean `e62f536` validation exposed missing aggregate provisional ownership; (l) Revision 10 aggregate and client-launcher post-start ownership paths became fail-closed; (m) published-revision run `m2b2c-client-handoff-live-20260831-01` live-verified dedicated ownership/cleanup and disproved redirected output as the sole readiness channel before client launch | Source, contract test, dedicated runtime evidence | Multiplayer client and associated local dedicated server; battle-type independent | Specification Revision 11 and affected living documents updated | A run-scoped dedicated readiness/command/acknowledgement channel is not implemented; UDP visibility, client launch, loaded identity, lobby handoff, and connection remain unverified; the minimum vanilla bootstrap is not L2/L3 battle evidence |
 | TST-004 safe default | `Satisfied` for this slice | No complete automation environment means the controller returns without work; feature flag is independent of verbose diagnostics | Source, contract compilation | Production multiplayer client | Architecture and risks updated | Main project was not built or runtime-tested in this step |
 
 ## 5. Remaining gates
 
-The aggregate and client-launcher post-start ownership prerequisites are implemented and non-runtime verified. The remaining gates are:
+The aggregate and client-launcher post-start ownership prerequisites are implemented, published, and live-verified for the dedicated process path only. The remaining gates are:
 
-1. review, commit, and push the client-launcher handoff correction without module restaging;
-2. invoke `Feasibility` from that clean revision with explicit expected hashes and require both roles to report those loaded identities;
-3. require exact native readiness, every option/start-game/scene readback, the run-owned UDP endpoint, exact lobby selection, network handoff, connected session, unchanged global result state, exact PID-log inventory, and exact cleanup evidence;
-4. retain the run root for inspection and make no campaign, L2, or L3 claim.
+1. design and separately approve a default-off run/token/hash/process-bound dedicated readiness, command-intent, and acknowledgement channel that does not depend solely on redirected standard handles;
+2. implement and contract-test that shared dedicated control boundary, then build/stage exact module identities only under a separate approved plan if game-side source changes;
+3. invoke `Feasibility` from a clean published revision with explicit expected hashes and require the dedicated acknowledgement sequence, run-owned UDP endpoint, and then both loaded roles;
+4. require exact lobby selection, network handoff, connected session, unchanged global result state, exact PID-log inventory, and exact cleanup evidence;
+5. retain the run root for inspection and make no campaign, L2, or L3 claim.
 
 Only after that bounded runtime gate passes may the project proceed to campaign encounter capture or full battle execution. The vanilla bootstrap used by `Feasibility` is solely a native connectivity prerequisite and does not satisfy a battle milestone.

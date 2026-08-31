@@ -185,6 +185,19 @@ If source inspection and runtime evidence disagree, do not choose one silently. 
 
 A dated technical specification is not proof that its design was implemented. For example, the 2026-08-21 V3 unused-siege-machine finalization document describes a planned change; the reviewed source does not yet expose the specified finalization operation.
 
+## External source verification
+
+Use official developer documentation and Internet research as bounded supporting evidence, not as a substitute for exact local investigation.
+
+- Consult current official documentation when the task depends on a documented public contract, supported API, launch parameter, platform requirement, tool behavior, or version-compatibility statement.
+- Search the Internet when it can materially help identify a known engine/platform issue, version change, documented workaround, or focused hypothesis for an unresolved local observation.
+- Prefer primary official sources. Record the URL, access date, and applicable game/tool version when an external claim enters a persistent report or implementation decision.
+- Treat community posts, issue discussions, videos, and unsourced summaries as leads to verify, not as authoritative proof.
+- For intended supported behavior, official documentation may define the public contract. For the actual behavior of the installed profile, reproducible evidence from the exact source revision and exact-hash binaries, followed by decompilation or debugger evidence from those binaries, takes precedence.
+- If official documentation, external reports, source, decompilation, and runtime evidence disagree, preserve the disagreement explicitly and resolve it at the lowest practical level. Do not silently select the more convenient source.
+- Do not perform broad or repeated Internet searches when exact local evidence already answers the question. Explain why external research is unnecessary in that case.
+- Never copy an Internet workaround directly into production code without validating its version applicability, invariants, write surfaces, and relevant battle-scenario impact.
+
 ## Architectural guardrails
 
 - The campaign host owns campaign truth and builds the full battle snapshot.

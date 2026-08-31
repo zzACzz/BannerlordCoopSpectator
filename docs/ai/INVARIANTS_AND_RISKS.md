@@ -2,6 +2,7 @@
 
 Last source verification: **2026-08-28**
 Last automation-control source/contract verification: **2026-08-31**
+Last dedicated-control runtime verification: **2026-08-31** (`m2b2c-client-handoff-live-20260831-01`)
 
 ## Non-negotiable runtime invariants
 
@@ -166,6 +167,14 @@ Every automation run root is fresh and exclusively owned by its `RunId`. Persist
 
 An L0/L1 `Pass` proves only the named environment assertion, contract inventory, or compile operation. It must not be reported as loaded-binary, client/server connection, mission-open, battle-lifecycle, natural-completion, result, or writeback evidence.
 
+### 18. Dedicated readiness and commands require an observable run-scoped channel
+
+`ModuleReady`, process liveness, service authentication, a fixed delay, or an unacknowledged write must never be treated as proof that the dedicated command handler is ready or that a bootstrap command was accepted.
+
+For the exact staged profile, `DedicatedCustomServer.Starter.exe` may create or rebind a native console after process creation. Redirected stdout/stderr may remain empty even while native logs and service heartbeats continue, and PID-correlated `rgl_log` output does not necessarily include .NET `Console.WriteLine` text. Redirected standard input/output and native logs are therefore supplementary evidence only.
+
+Before another live connection attempt, the external runner must own an allowlisted command intent, and the exact dedicated role must publish run/token/hash/process-bound atomic acknowledgements for readiness, applied options, usable-map acceptance, and start-game progression. The control path must remain disabled by default, must not expose a generic production command surface, and must not perform per-tick file I/O or logging when automation is disabled.
+
 ## Known current limitations and unverified areas
 
 ### Source-verified limitations
@@ -179,6 +188,7 @@ An L0/L1 `Pass` proves only the named environment assertion, contract inventory,
 - Blockade and blockade sally out are unsupported.
 - Core battle roster and phase/start-request paths are still shared under the normal Documents profile and have no automation `RunId`. Milestone 2B.1 makes only result publication fail-closed: a complete explicit automation profile with exact `Suppress` records a run-scoped decision and cannot write campaign-consumable `battle_result.json`; an invalid enabled profile rejects publication instead of falling back to production. This permits only the minimum vanilla connectivity bootstrap, not a campaign fixture or L2/L3 battle run.
 - A default-off run-scoped command/acknowledgement path now exists in source for the normal lobby join flow, but it has only isolated contract evidence. It is not Bannerlord-runtime-verified and does not remove the M1 connection/control blockers until a named connection rerun proves the exact handoff.
+- No run-scoped dedicated readiness/command acknowledgement path exists yet. The current aggregate runner's redirected standard-handle path timed out before command dispatch in `m2b2c-client-handoff-live-20260831-01`; another unchanged retry is not an acceptable substitute.
 - The Milestone 2A runner, protocol, full 20-project aggregate, and compile-only mode are source/build/test verified. They intentionally provide no staging, loaded-hash, process-cleanup, connection, mission, or battle evidence; those remain Milestone 2B or later.
 
 ### Recorded runtime gaps
@@ -195,6 +205,7 @@ From the July 2026 materialization status:
 - the 2026-08-31 Milestone 1 probe loaded installed client and dedicated modules version `0.3.1`, while repository outputs were version `0.3.2` with different hashes; the successful launches are installed-profile evidence only;
 - the same probe confirmed that Steam must already be running for the direct multiplayer client launch on the named machine profile;
 - the dedicated module authenticated without `start_game`, but port `7210` remained unbound and client connection/control were not tested because result isolation was not yet safe.
+- clean published-revision run `m2b2c-client-handoff-live-20260831-01` verified dedicated provisional/verified ownership, exact graceful cleanup, released ports/lock, unchanged installed hashes, and unchanged protected result; it timed out on the unobservable redirected console-readiness channel before any command or client launch.
 - the 2026-08-31 post-M1 client-control implementation passed isolated source compilation, request/server-selection/atomic-status contracts, PowerShell parsing, and launcher `-ValidateOnly` checks; no game process was started, and no live normal-lobby handoff or connection was observed;
 - the developer reports stable manual battle runs before releasing `0.3.2`; this is separate manual regression evidence and does not alter the M1 fact that its own locally loaded artifacts were `0.3.1`.
 - `m2a-contracts-20260831-07` passed all 20 contract projects and `m2a-compile-only-20260831-03` compiled both `0.3.2` assemblies without changing installed module inventories; neither run launched Bannerlord or verified runtime loading.

@@ -1,12 +1,14 @@
 # Battle Test Automation Milestone 2B.2B Live Feasibility Attempts and Runner Findings
 
-Status: **Dedicated loaded identity, discrete command emission, bounded discovery, and exact cleanup confirmed in earlier attempts; aggregate and client-launcher post-start corrections are non-runtime verified; clean live validation pending**
+Status: **Dedicated identity and exact cleanup live-verified after published ownership corrections; redirected native-console control is disproved as a sole channel; client connection remains blocked**
 
 Execution and correction date: **2026-08-31**
 
 Attempt repository revision: `9f4ee733d8e9b83b5fef4f194140daf97a0d89a8`
 
 Clean rerun repository revision: `70a40db6aa71a27e6b1afa0892118ac77871c1a3`
+
+Latest clean validation repository revision: `711f2cac20ca05d3e81233aa6acfa60816dcce99`
 
 Installed game-side binary source revision: `12abf36`
 
@@ -112,6 +114,7 @@ The compile-only client PE hash was `305F63FD8E2B3D1E578921E9A3B56517F6AD74887E7
 | Milestone 2B.2C final full contract inventory | `%LOCALAPPDATA%\Temp\CoopSpectator\Automation\m2b2c-full-contracts-20260831-03` |
 | Milestone 2B.2C final compile-only verification | `%LOCALAPPDATA%\Temp\CoopSpectator\Automation\m2b2c-compile-only-20260831-02` |
 | Milestone 2B.2C first clean live validation | `%LOCALAPPDATA%\Temp\CoopSpectator\Automation\m2b2c-live-feasibility-20260831-01` |
+| Published ownership-correction clean live validation | `%LOCALAPPDATA%\Temp\CoopSpectator\Automation\m2b2c-client-handoff-live-20260831-01` |
 
 ## 7. Clean correction-revision live rerun
 
@@ -178,3 +181,17 @@ Dedicated `Process.Start()` succeeded with PID `113376`. Immediate identity capt
 This exposed two related shared-runner defects: process creation was not provisionally owned before fallible identity enrichment, and the runner classified its own post-start identity failure as a product assertion failure. The empty automatic cleanup inventory therefore did not include the live starter or Watchdog. Exact manual recovery validated their PID/path/start/parent chain, gracefully stopped the starter, forcibly stopped only its Watchdog child, and left no product process or port owner. Installed module hashes and the protected result file remained unchanged. See [BATTLE_TEST_AUTOMATION_M2B2C_RUNNER_CORRECTION.md](BATTLE_TEST_AUTOMATION_M2B2C_RUNNER_CORRECTION.md) for the required correction contract.
 
 The aggregate-runner correction was subsequently implemented and published as `8f68d43`: immediate provisional dedicated ownership, bounded exact executable-path resolution with a validated `Win32_Process` fallback, exact launch-window/parent validation, in-place promotion, explicit `RunnerInternalError` classification, and exact cleanup of provisional identities. The client launcher is now hardened against the same boundary: it publishes provisional identity immediately after creation, verifies exact PID/path/start/parent evidence, treats atomic schema-v3 `client-launch.json` publication as the handoff, and cleans the exact client on every earlier exception. Focused contracts passed in Windows PowerShell 5.1 and PowerShell 7; `m2b2c-client-handoff-contracts-20260831-01` passed 22/22 and `m2b2c-client-handoff-compile-20260831-01` passed both builds with installed inventories unchanged. This is non-runtime evidence only; client launch, loaded identity, lobby handoff, and connection remain unverified.
+
+## 11. Published-correction clean live validation
+
+Run `m2b2c-client-handoff-live-20260831-01` used clean local/remote revision `711f2cac20ca05d3e81233aa6acfa60816dcce99`, exact installed `0.3.2` client and dedicated hashes, running Steam, free ports `7210` and `7777`, no pre-existing product process, a fresh run root, and the same protected-result pre-image.
+
+The corrected runner established provisional ownership immediately after creating dedicated PID `153416`, promoted it to a verified identity using exact PID/path/start/parent/launch-window evidence, and retained the expected executable hash and path-evidence source. The dedicated role published exact `ModuleReady`; PID-correlated native evidence subsequently recorded successful TaleWorlds connection/login and repeating successful `AliveMessage` traffic. This proves the staged dedicated module was loaded and remained operational during the bounded wait.
+
+The run terminated with the preserved primary and terminal `Timeout`: `Timed out waiting for captured-text evidence 'NativeConsoleReady'.` No bootstrap command was sent. Redirected `stdout.txt` and `stderr.txt` remained empty. The exact `rgl_log_153416.txt` reached `323574` bytes, began with the engine's native-console startup line, and was associated with an owned `conhost.exe` descendant, but it did not contain the `Console.WriteLine` readiness text. ILSpy reconfirmed that `InitialListedGameServerState.OnActivate` owns that text. The available evidence therefore disproves redirected standard output as the sole observable contract for this starter profile; it does not prove that the lifecycle point itself failed. Standard-input command consumption remains unverified because no command was allowed before readiness evidence.
+
+Automatic cleanup gracefully stopped the exact starter without a forced stop, recorded the Watchdog and console-host descendants as no longer running, retained an empty `RemainingOwnedProcesses` set, and proved runner-lock release. Post-run process and port inspection was clean. The three installed module hashes, protected `battle_result.json` hash/length/timestamp, repository revision, and clean worktree state matched their preflight values.
+
+The client launcher was not invoked, so its live process-handoff behavior remains unverified. No UDP endpoint, client loaded identity, lobby selection, network handoff, connection, campaign, mission, or battle was reached, and the report explicitly retained `CampaignStarted=false`, `CampaignBattleFixtureOpened=false`, and `L2OrL3PassClaimed=false`.
+
+The next gate is not another unchanged retry. It is a separately approved, default-off, run/token/hash/process-bound dedicated readiness, command-intent, and acknowledgement channel. This shared bootstrap precedes all scenario routing, so its blocker applies equally to field, village, siege, sally-out, ambush, relief, lords-hall, hideout, sequential, and reconnect work.
