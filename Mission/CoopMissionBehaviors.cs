@@ -26785,10 +26785,19 @@ namespace CoopSpectator.MissionBehaviors
             if (snapshot == null)
                 return;
 
-            if (!CoopBattleResultBridgeFile.WriteResult(snapshot))
+            if (!CoopBattleResultBridgeFile.WriteResult(snapshot, out bool resultPublicationSuppressed))
                 return;
 
             _hasWrittenBattleResultSnapshotForMission = true;
+            if (resultPublicationSuppressed)
+            {
+                ModLogger.Info(
+                    "CoopMissionSpawnLogic: battle result snapshot publication suppressed. " +
+                    "BattleId=" + (snapshot.BattleId ?? "null") +
+                    " Source=" + (source ?? "unknown") + ".");
+                return;
+            }
+
             ModLogger.Info(
                 "CoopMissionSpawnLogic: battle result snapshot written. " +
                 "BattleId=" + (snapshot.BattleId ?? "null") +

@@ -244,3 +244,9 @@ Milestone 2A subsequently implemented and verified the non-runtime foundation de
 - `m2a-doctor-20260831-06` retained `EnvironmentBlocked` for the installed/repository hash mismatch and unverified runtime version matrix.
 
 This resolves the side-effect-free current-source compilation prerequisite, not current-build runtime identity. The M1 blocked connection/control rows still require a staged-and-role-confirmed loaded hash, result isolation, exact runtime ownership/cleanup, and a named connection-only rerun in Milestone 2B.
+
+## 15. Milestone 2B.1 source correction
+
+The approved Milestone 2B.1 implementation subsequently closed the source/contract side of result suppression, loaded-role identity, run-scoped owned-host correlation, exact cleanup, inspection, and recovery. Lowest-level investigation also established that the native dedicated server does not bind/list its UDP server before standard `start_game`. Revision 7 therefore permits only the external runner to issue a minimum vanilla `TeamDeathmatch` bootstrap after `Suppress` and dedicated loaded-hash gates. The client launcher/module still does not issue `start_game`.
+
+Final non-runtime evidence is `m2b1-final-contracts-20260831-03` (21/21) and `m2b1-final-compile-only-20260831-02` (both projects passed; installed inventories unchanged). No real `Feasibility` run, client/server connection, loaded new binary, campaign fixture, L2/L3 battle, or campaign result was produced. See [BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md](BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md).

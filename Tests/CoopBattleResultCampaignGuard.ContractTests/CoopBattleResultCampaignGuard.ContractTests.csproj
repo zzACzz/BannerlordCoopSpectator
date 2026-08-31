@@ -13,6 +13,9 @@
     <Compile Include="..\..\Infrastructure\CoopBattleResultCampaignGuardContract.cs" Link="CoopBattleResultCampaignGuardContract.cs" />
     <Compile Include="..\..\Infrastructure\CoopBattleResultReadCacheContract.cs" Link="CoopBattleResultReadCacheContract.cs" />
     <Compile Include="..\..\Infrastructure\CoopBattleResultBridgeFile.cs" Link="CoopBattleResultBridgeFile.cs" />
+    <Compile Include="..\..\Infrastructure\Automation\CoopAutomationProtocolFileIO.cs" Link="CoopAutomationProtocolFileIO.cs" />
+    <Compile Include="..\..\Infrastructure\Automation\CoopAutomationRuntimeContract.cs" Link="CoopAutomationRuntimeContract.cs" />
+    <Compile Include="..\..\Infrastructure\Automation\CoopAutomationRuntimeBridge.cs" Link="CoopAutomationRuntimeBridge.cs" />
     <Compile Include="..\..\Network\Messages\BattleStartMessage.cs" Link="BattleStartMessage.cs" />
   </ItemGroup>
 </Project>

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using Newtonsoft.Json;
 using CoopSpectator.Network.Messages;
+using CoopSpectator.Infrastructure.Automation;
 
 namespace CoopSpectator.Infrastructure
 {
@@ -138,8 +139,57 @@ namespace CoopSpectator.Infrastructure
 
         public static bool WriteResult(BattleResultSnapshot snapshot)
         {
+            return WriteResult(snapshot, out _);
+        }
+
+        public static bool WriteResult(BattleResultSnapshot snapshot, out bool suppressed)
+        {
+            suppressed = false;
             if (snapshot == null)
                 return false;
+
+            CoopAutomationResultPublicationDecision automationDecision =
+                CoopAutomationRuntimeBridge.ResolveResultPublicationDecision(
+                    out CoopAutomationRuntimeConfiguration automationConfiguration,
+                    out string automationFailureCode,
+                    out string automationFailureMessage);
+            if (automationDecision != CoopAutomationResultPublicationDecision.Publish)
+            {
+                suppressed = automationDecision == CoopAutomationResultPublicationDecision.Suppress;
+                try
+                {
+                    CoopAutomationRuntimeBridge.WriteResultPublicationStatus(
+                        automationConfiguration,
+                        automationDecision,
+                        snapshot.BattleId,
+                        snapshot.Source,
+                        automationFailureCode,
+                        automationFailureMessage);
+                }
+                catch (Exception ex)
+                {
+                    ModLogger.Error(
+                        "CoopBattleResultBridgeFile: failed to write automation result-publication status.",
+                        ex);
+                    return false;
+                }
+
+                if (suppressed)
+                {
+                    ModLogger.Info(
+                        "CoopBattleResultBridgeFile: canonical result publication suppressed by validated automation policy. " +
+                        "RunId=" + automationConfiguration.RunId +
+                        " BattleId=" + (snapshot.BattleId ?? "null") + ".");
+                    return true;
+                }
+
+                ModLogger.Error(
+                    "CoopBattleResultBridgeFile: canonical result publication rejected because automation configuration is invalid. " +
+                    "Failure=" + (automationFailureCode ?? "unknown") + ": " +
+                    (automationFailureMessage ?? "unknown"),
+                    null);
+                return false;
+            }
 
             string path = GetResultFilePath();
             try

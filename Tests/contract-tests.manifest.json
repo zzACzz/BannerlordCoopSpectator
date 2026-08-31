@@ -4,6 +4,7 @@
     { "Name": "CampaignlessConversationMissionSafety.ContractTests", "Path": "Tests/CampaignlessConversationMissionSafety.ContractTests/CampaignlessConversationMissionSafety.ContractTests.csproj" },
     { "Name": "CoopAutomationJoin.ContractTests", "Path": "Tests/CoopAutomationJoin.ContractTests/CoopAutomationJoin.ContractTests.csproj" },
     { "Name": "CoopAutomationProtocol.ContractTests", "Path": "Tests/CoopAutomationProtocol.ContractTests/CoopAutomationProtocol.ContractTests.csproj" },
+    { "Name": "CoopAutomationRuntime.ContractTests", "Path": "Tests/CoopAutomationRuntime.ContractTests/CoopAutomationRuntime.ContractTests.csproj" },
     { "Name": "CoopBattlePower.ContractTests", "Path": "Tests/CoopBattlePower.ContractTests/CoopBattlePower.ContractTests.csproj" },
     { "Name": "CoopBattleResultCampaignGuard.ContractTests", "Path": "Tests/CoopBattleResultCampaignGuard.ContractTests/CoopBattleResultCampaignGuard.ContractTests.csproj" },
     { "Name": "CoopBattleResultReadCache.ContractTests", "Path": "Tests/CoopBattleResultReadCache.ContractTests/CoopBattleResultReadCache.ContractTests.csproj" },

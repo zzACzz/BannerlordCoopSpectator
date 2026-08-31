@@ -187,6 +187,9 @@
     <Compile Include="..\Infrastructure\CoopBattlePeerReconnectState.cs" Link="Infrastructure\CoopBattlePeerReconnectState.cs" />
     <Compile Include="..\Infrastructure\CoopBattleAgentControlRuntimeState.cs" Link="Infrastructure\CoopBattleAgentControlRuntimeState.cs" />
     <Compile Include="..\Infrastructure\AtomicBridgeFileIO.cs" Link="Infrastructure\AtomicBridgeFileIO.cs" />
+    <Compile Include="..\Infrastructure\Automation\CoopAutomationProtocolFileIO.cs" Link="Infrastructure\Automation\CoopAutomationProtocolFileIO.cs" />
+    <Compile Include="..\Infrastructure\Automation\CoopAutomationRuntimeContract.cs" Link="Infrastructure\Automation\CoopAutomationRuntimeContract.cs" />
+    <Compile Include="..\Infrastructure\Automation\CoopAutomationRuntimeBridge.cs" Link="Infrastructure\Automation\CoopAutomationRuntimeBridge.cs" />
     <Compile Include="..\Infrastructure\CoopHeroCreationContract.cs" Link="Infrastructure\CoopHeroCreationContract.cs" />
     <Compile Include="..\Infrastructure\CoopHeroCreationProgressContract.cs" Link="Infrastructure\CoopHeroCreationProgressContract.cs" />
     <Compile Include="..\Infrastructure\Hideout\CoopHideoutBossPhaseContract.cs" Link="Infrastructure\Hideout\CoopHideoutBossPhaseContract.cs" />

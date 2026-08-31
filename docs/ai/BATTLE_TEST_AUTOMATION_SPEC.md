@@ -2,7 +2,7 @@
 
 Status: **Canonical implementation specification — implementation in progress**
 Specification date: **2026-08-31**
-Revision: **6 — Milestone 2A implementation-aligned non-runtime contracts**
+Revision: **7 — Milestone 2B.1 runtime-safety and native-bootstrap alignment**
 Source baseline: **`f5bd90ddb6a361f4341ea3771b4acadc266d684b`** (`f5bd90d`)
 Companion audit: [BATTLE_TEST_AUTOMATION_AUDIT.md](BATTLE_TEST_AUTOMATION_AUDIT.md)
 
@@ -14,8 +14,9 @@ Companion audit: [BATTLE_TEST_AUTOMATION_AUDIT.md](BATTLE_TEST_AUTOMATION_AUDIT.
 | 4 | Mandatory natural-completion coverage for every supported battle adapter, natural L4 claim boundaries, and fast-versus-full suite policy |
 | 5 | Default-off run-scoped client launch/join intent, exact local-server selection, secret handling, acknowledgement states, and native-join deadline semantics |
 | 6 | Implemented compile-only, aggregate-runner, environment-doctor, run/protocol, assertion, fault-injection, and artifact contracts for Milestone 2A |
+| 7 | Fail-closed loaded-role identity, run-scoped host ownership, result suppression, exact cleanup/recovery, and the minimum native Team Deathmatch bootstrap required for connection feasibility |
 
-The companion audit remains the source-fact baseline. Revisions 2–6 refine implementation requirements and ordering without changing the audit's historical source findings. The narrow client launch/join slice and the Milestone 2A non-runtime foundation now exist in source and contract tests. Their evidence boundaries are recorded in [BATTLE_TEST_AUTOMATION_CLIENT_JOIN_IMPLEMENTATION.md](BATTLE_TEST_AUTOMATION_CLIENT_JOIN_IMPLEMENTATION.md) and [BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md](BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md); neither is Bannerlord-runtime evidence.
+The companion audit remains the source-fact baseline. Revisions 2–7 refine implementation requirements and ordering without changing the audit's historical source findings. The narrow client launch/join slice, Milestone 2A non-runtime foundation, and Milestone 2B.1 runtime-safety source foundation now exist in source and contract tests. Their evidence boundaries are recorded in [BATTLE_TEST_AUTOMATION_CLIENT_JOIN_IMPLEMENTATION.md](BATTLE_TEST_AUTOMATION_CLIENT_JOIN_IMPLEMENTATION.md), [BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md](BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md), and [BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md](BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md). None of those source/contract completion statements is Bannerlord-runtime evidence.
 
 ## 1. Purpose
 
@@ -924,11 +925,13 @@ Before process creation, the launcher MUST verify that Steam is running in the c
 
 The client module MUST recompute its loaded assembly hash and reject mismatched run, token, schema, lifetime, or binary identity before issuing a join. Request expiry bounds whether the native join may start; after the native join task has started, the module MUST NOT report a false cancellation or terminal expiry while TaleWorlds may still complete the non-cancellable operation. The external runner retains bounded timeout and exact-process cleanup authority.
 
-Server discovery and joining MUST use the normal `NetworkMain.GameClient` lobby path: `GetCustomGameServerList()` followed by `RequestJoinCustomGame(...)`. Selection MUST require exactly one server matching the requested name and port plus any declared game-type or unique-map filters. The initial local profile MUST additionally prove the existing persisted local-host marker matches and that the requested local UDP port is active before joining. Multiple exact matches MUST fail rather than select the first result.
+Server discovery and joining MUST use the normal `NetworkMain.GameClient` lobby path: `GetCustomGameServerList()` followed by `RequestJoinCustomGame(...)`. Selection MUST require exactly one server matching the requested name and port plus any declared game-type or unique-map filters. The automation profile MUST NOT trust or mutate the production persisted local-host marker. It MUST instead validate a run-scoped owned-host record bound to the exact `RunId`, run-token hash, server name, UDP port, process ID, process start time, and executable path; the recorded process identity MUST still be live and the UDP port MUST be active before joining. Multiple exact matches MUST fail rather than select the first result.
+
+Native investigation established that the dedicated server does not expose the requested local UDP endpoint or normal lobby listing before `start_game`. After result publication is already fail-closed as `Suppress` and the dedicated role has reported the expected loaded module hash, the external runner MAY issue only the minimum standard dedicated commands needed to create an isolated vanilla `TeamDeathmatch` bootstrap mission and expose the owned server. This bootstrap MUST use no campaign fixture, campaign save, cooperative battle snapshot, battle-phase advancement, or campaign result consumer, and MUST NOT be classified as L2 or L3 battle evidence.
 
 A server password MUST NOT be accepted as a command-line argument or persisted in the request, launch artifact, status, or logs. When required, it MAY be inherited through a protected child-process environment value; artifacts MAY record only whether a password was supplied.
 
-The module MUST write run-scoped status atomically and only on state or failure-detail changes. At minimum, it MUST distinguish module readiness, lobby wait, server-list request, server wait, join request, join acceptance, network handoff, connection, explicit pre-join cancellation, and failure. The launcher and module MUST NOT issue `start_game`, open a mission, fabricate readiness, or use UI automation. Source and contract-test completion of this requirement does not promote the Milestone 1 connection/control capability rows until a named runtime rerun proves the exact client/server correlation.
+The module MUST write run-scoped status atomically and only on state or failure-detail changes. At minimum, it MUST distinguish module readiness, lobby wait, server-list request, server wait, join request, join acceptance, network handoff, connection, explicit pre-join cancellation, and failure. The launcher and client module MUST NOT issue `start_game`, fabricate readiness, or use UI automation. Only the external runner may perform the preceding minimum native bootstrap, under the stated result-isolation and ownership gates. Source and contract-test completion of this requirement does not promote the Milestone 1 connection/control capability rows until a named runtime rerun proves the exact client/server correlation.
 
 ## 16. Campaign end-to-end requirements
 
@@ -1165,11 +1168,14 @@ Exit criteria:
 
 Priority: **P0**
 
+Implementation status: **Milestone 2B.1 source, contract, and compile-only foundation complete on 2026-08-31; Bannerlord runtime execution remains unverified.** See [BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md](BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md).
+
 Deliverables:
 
 - exact process/port ownership, runtime locks, and role-instance process inventory;
 - one verified runtime staging mode with end-to-end binary hash chain;
-- state/heartbeat observation without opening a battle mission;
+- loaded-role state observation before native mission bootstrap;
+- a minimum runner-owned vanilla `TeamDeathmatch` bootstrap, used only because the native dedicated server does not bind/list the local UDP server beforehand;
 - cancellation, exact cleanup, abandoned-run inspection, and `Recover` flow;
 - `Suppress` result policy and early-abort safety contracts;
 - structured fatal-failure event and minimum crash/hang evidence.
@@ -1178,6 +1184,7 @@ Exit criteria:
 
 - every essential Milestone 1 capability is `Confirmed`;
 - staging and role-reported `ConfirmedLoadedHash` identities match the intended build;
+- the minimum native bootstrap and normal-lobby connection are correlated to the exact run-scoped server process and client role without a campaign fixture or battle-evidence claim;
 - cancellation and simulated runner failure preserve exact recovery evidence;
 - cleanup stops only owned processes and releases only verified owned locks;
 - `Recover` passes its read-only, revalidation, preview, action, and reporting contract tests;
@@ -1422,7 +1429,7 @@ Safety prohibitions apply whenever their subject exists. This table defines when
 |---|---|---|
 | Source-drift checks, ENV-001/002, CLI-006, BLD-005 feasibility, PROC-001/002 discovery | Milestone 1 | Capability decision and evidence only; no L2/L3 claim |
 | SAF-001–SAF-005, L0/L1 contracts, OUT-001–OUT-004, RUN-001–RUN-007, RUN-009/010, BLD-001–BLD-004, TST-001/002/004/005, base ART schema | Milestone 2A | Non-runtime contracts and compile-only proof |
-| CLI-008, RUN-008, BLD-005/006 runtime proof, PROC-001–PROC-005, PROC-007–PROC-009, RES-001/002/004 contracts | Milestone 2B | Run-scoped normal-lobby control, process, staging, lock, cleanup, recovery, and result-isolation foundation without a battle pass |
+| CLI-008, RUN-008, BLD-005/006 runtime proof, PROC-001–PROC-005, PROC-007–PROC-009, RES-001/002/004 contracts | Milestone 2B | Run-scoped normal-lobby control, minimum vanilla server bootstrap, process, staging, lock, cleanup, recovery, and result isolation without a campaign fixture or L2/L3 battle pass |
 | PAY-001–PAY-004, PAY-007/008 | Milestone 3 | Current field fixture boundaries only |
 | L2, PROC-006, RT-001, RES-001/002/004 runtime proof, SCN-001 L2 | Milestone 4 | One-client-free field dedicated smoke |
 | L3, RT-002, RES-003/005/007/008, CLI-001–CLI-005, TST-006 initial commands, SCN-001 L3 and L3 natural, PROC-010 developer-loop baseline | Milestone 5 | One real client, separate `ControlledLifecycleEnd` and field `NaturalBattleEnd` runs |

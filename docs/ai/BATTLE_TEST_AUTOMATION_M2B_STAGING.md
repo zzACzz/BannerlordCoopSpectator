@@ -8,7 +8,7 @@ Compiled source revision: **`f91eeff9b710f68fc7bf4b506ec39c2d1c4474bc`** (`f91ee
 
 Branch: **`codex/v0.1.1-refresh`**, pushed to `origin`
 
-Specification: [BATTLE_TEST_AUTOMATION_SPEC.md](BATTLE_TEST_AUTOMATION_SPEC.md), Revision 6
+Current specification: [BATTLE_TEST_AUTOMATION_SPEC.md](BATTLE_TEST_AUTOMATION_SPEC.md), Revision 7. This staging operation predated the Revision 7 native-bootstrap correction.
 
 ## 1. Outcome
 
@@ -96,11 +96,15 @@ The doctor outcome remains correctly `EnvironmentBlocked` with process exit code
 
 The installed binaries remain bound to compiled source revision `f91eeff`. The documentation-only successor commit does not change runtime source files, but future evidence must not silently relabel these DLLs as having been compiled from that later documentation revision. A runtime run must either declare `f91eeff` as its intended build revision or perform another clean compile-and-stage cycle from its selected revision.
 
-The next approved runtime step should be connection-only:
+The earlier next-step wording below assumed the native dedicated server could bind and advertise its port without starting a server mission. Subsequent lowest-level investigation showed that assumption was false. [BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md](BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md) records the replacement safety design.
+
+The next approved runtime step remains connectivity-only in evidence scope:
 
 1. launch the exactly owned dedicated role and require a role-reported loaded path/hash;
-2. launch the exactly owned multiplayer client with the expected client hash;
-3. require exact server discovery, join request/acknowledgement, network handoff, connection, and cleanup evidence;
-4. do not issue `start_game`, open a mission, or create/consume a battle result.
+2. enable fail-closed `Suppress` result policy before any native mission command;
+3. let only the external runner issue the minimum standard vanilla `TeamDeathmatch` configuration and `start_game` required to expose the owned UDP server;
+4. launch the exactly owned multiplayer client with the expected client hash;
+5. require exact server discovery, join request/acknowledgement, network handoff, connection, unchanged global battle-result state, and cleanup evidence;
+6. do not load a campaign, use a cooperative battle fixture, advance cooperative battle phases, consume a result, or claim L2/L3 evidence.
 
 Only after both roles report the expected loaded hashes can the named version combination move from `ConfirmedPathHashOnly` to `ConfirmedLoadedHash` and the remaining doctor blocker be reconsidered.

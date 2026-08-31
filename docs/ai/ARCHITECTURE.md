@@ -232,7 +232,7 @@ The initial battle-test client-control bridge is deliberately separate from prod
 
 Milestone 2A adds an isolated non-runtime control plane below `%TEMP%\CoopSpectator\Automation\<RunId>`. It does not replace any campaign, dedicated, mission-network, battle-phase, spawn, result, or writeback authority.
 
-`scripts/Invoke-CoopTest.ps1` is the only current general runner entry point. For `Doctor`, `Contracts`, and `CompileOnly` it owns:
+`scripts/Invoke-CoopTest.ps1` is the only current general runner entry point. For non-runtime `Doctor`, `Contracts`, and `CompileOnly`, and source-prepared runtime `Feasibility`, `Inspect`, and `Recover`, it owns:
 
 - a fresh exact run root and exclusive runner lock;
 - manifest schema 1 and protocol 1.0;
@@ -240,7 +240,11 @@ Milestone 2A adds an isolated non-runtime control plane below `%TEMP%\CoopSpecta
 - the `Runner/runner-01` role instance, process identity, capabilities, lease/heartbeat, atomic status, and ordered events;
 - categorized artifacts, assertion records, stable terminal outcomes, and non-pass reproduction metadata.
 
-`CoopAutomationRunContract` defines the cross-role identity and compatibility model, while `CoopAutomationProtocolFileIO` defines the verified local same-volume file semantics. The existing client-join request uses schema 2 / protocol 1.0 with exact `Runner/runner-01 -> MultiplayerClient/multiplayer-client-01` identity. That request is a future consumer of the control plane, but it is not runtime-connected by Milestone 2A.
+`CoopAutomationRunContract` defines the cross-role identity and compatibility model, while `CoopAutomationProtocolFileIO` defines the verified local same-volume file semantics. The client-join request uses schema 2 / protocol 1.0 with exact `Runner/runner-01 -> MultiplayerClient/multiplayer-client-01` identity.
+
+Milestone 2B.1 adds `CoopAutomationRuntimeContract` and `CoopAutomationRuntimeBridge`. An explicitly enabled role must validate the exact run root, token, expected loaded assembly SHA-256, and `Suppress` result policy before publishing `ModuleReady`. The aggregate runner records a local server only after verifying that the requested UDP endpoint belongs to the exact dedicated process or its descendant. The client then revalidates a token-bound run-scoped owner record, live PID/path/start time, and UDP endpoint instead of trusting or mutating the production host marker.
+
+The dedicated server does not bind/list the local endpoint before native `start_game`. Therefore the external `Feasibility` runner may issue a minimum vanilla `TeamDeathmatch` bootstrap only after the dedicated loaded-hash and result-suppression gates. This bootstrap has no campaign fixture, cooperative battle authority, campaign result publication, or L2/L3 evidence status. Runtime execution of this path is still unverified.
 
 The compile-only build plane is separate from both installed modules and repository module output folders. `Directory.Build.props` redirects all build/package state below the run root only when `CoopCompileOnly=true`; both main project files independently suppress their deployment targets in that mode. Normal developer builds retain their historical deployment behavior because the property defaults to false.
 

@@ -8,6 +8,7 @@ using CoopSpectator.DedicatedServer;
 using CoopSpectator.DedicatedServer.MissionOverrides;
 using CoopSpectator.GameMode;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.Infrastructure.Automation;
 using CoopSpectator.MissionBehaviors;
 using CoopSpectator.MissionModels;
 using CoopSpectator.Patches;
@@ -414,6 +415,16 @@ namespace CoopSpectator
                 try { AssemblyDiagnostics.LogRuntimeLoadPaths(); AssemblyDiagnostics.WarnIfAssemblyPathUnexpected(); } catch (Exception ex) { ModLogger.Info("[DedicatedDiag] AssemblyDiagnostics failed: " + ex.Message); }
 
                 base.OnSubModuleLoad();
+                if (!CoopAutomationRuntimeBridge.TryInitializeRole(
+                        "DedicatedServer",
+                        "dedicated-server-01",
+                        out string automationFailureCode,
+                        out string automationFailureMessage))
+                {
+                    throw new InvalidOperationException(
+                        "Dedicated automation runtime configuration rejected: " +
+                        automationFailureCode + ": " + automationFailureMessage);
+                }
                 SandBoxSceneScriptTypeRegistrar.RegisterOrThrow();
                 CoopBattlePeerReconnectState.EnsureHooksInstalled();
                 LogDedicatedStartupInfo();

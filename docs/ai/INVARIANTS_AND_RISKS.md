@@ -152,7 +152,7 @@ Missing/mismatched topology, non-siege scenarios, different mission shells, and 
 
 ### 16. Battle-test lobby control remains run-scoped and non-authoritative
 
-`CoopLobbyAutomationController` is disabled unless the complete explicit automation profile is present. It may request the normal TaleWorlds lobby join only after the request matches the `RunId`, run-token hash, loaded client-module hash, command lifetime, exact server identity, persisted local-host marker, and active local UDP port.
+`CoopLobbyAutomationController` is disabled unless the complete explicit automation profile is present. It may request the normal TaleWorlds lobby join only after the request matches the `RunId`, run-token hash, loaded client-module hash, command lifetime, exact server identity, run-scoped owned-host record, still-live dedicated PID/path/start time, and active local UDP port. Automation must neither trust nor mutate the production persisted local-host marker.
 
 The controller must not create an alternate connection path, rewrite any address except through the existing validated local-host loopback patch, issue `start_game`, open a mission, fabricate readiness, or publish battle results. The server password must remain environment-only and absent from commands, artifacts, status, and logs. Status publication must remain strictly atomic and state-change-driven; per-tick logging is prohibited.
 
@@ -177,7 +177,7 @@ An L0/L1 `Pass` proves only the named environment assertion, contract inventory,
 - Invasive late-join hooks for native late-client handling and agent/missile sends are disabled.
 - Siege single-player formation-marker UI and siege lobby equipment component are disabled.
 - Blockade and blockade sally out are unsupported.
-- Core battle roster, phase/start-request, and result bridge paths are still shared under the normal Documents profile and have no automation `RunId`; no mission-open automation is safe until those boundaries are isolated or result publication is explicitly suppressed.
+- Core battle roster and phase/start-request paths are still shared under the normal Documents profile and have no automation `RunId`. Milestone 2B.1 makes only result publication fail-closed: a complete explicit automation profile with exact `Suppress` records a run-scoped decision and cannot write campaign-consumable `battle_result.json`; an invalid enabled profile rejects publication instead of falling back to production. This permits only the minimum vanilla connectivity bootstrap, not a campaign fixture or L2/L3 battle run.
 - A default-off run-scoped command/acknowledgement path now exists in source for the normal lobby join flow, but it has only isolated contract evidence. It is not Bannerlord-runtime-verified and does not remove the M1 connection/control blockers until a named connection rerun proves the exact handoff.
 - The Milestone 2A runner, protocol, full 20-project aggregate, and compile-only mode are source/build/test verified. They intentionally provide no staging, loaded-hash, process-cleanup, connection, mission, or battle evidence; those remain Milestone 2B or later.
 

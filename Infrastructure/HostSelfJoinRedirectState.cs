@@ -3,6 +3,7 @@ using System.IO;
 using System.Net;
 using System.Net.NetworkInformation;
 using CoopSpectator.DedicatedHelper;
+using CoopSpectator.Infrastructure.Automation;
 
 namespace CoopSpectator.Infrastructure
 {
@@ -33,6 +34,9 @@ namespace CoopSpectator.Infrastructure
             _activeJoinedHostServerName = null;
             _activeJoinedHostPort = 0;
 
+            if (CoopAutomationRuntimeBridge.IsAutomationEnabled)
+                return;
+
             try
             {
                 if (File.Exists(MarkerFilePath))
@@ -51,6 +55,9 @@ namespace CoopSpectator.Infrastructure
             _activeJoinedHostServerName = null;
             _activeJoinedHostPort = 0;
 
+            if (CoopAutomationRuntimeBridge.IsAutomationEnabled)
+                return;
+
             try
             {
                 if (File.Exists(HostedPeerMarkerFilePath))
@@ -67,6 +74,13 @@ namespace CoopSpectator.Infrastructure
             string normalizedServerName = Normalize(settings?.ServerName);
             if (string.IsNullOrWhiteSpace(normalizedServerName) || port <= 0)
                 return;
+
+            if (CoopAutomationRuntimeBridge.IsAutomationEnabled)
+            {
+                ModLogger.Info(
+                    "HostSelfJoinRedirectState: skipped global host marker publication for run-scoped automation.");
+                return;
+            }
 
             try
             {
@@ -159,6 +173,15 @@ namespace CoopSpectator.Infrastructure
                 return false;
             }
 
+            if (CoopAutomationRuntimeBridge.IsAutomationEnabled)
+            {
+                _activeJoinedHostServerName = null;
+                _activeJoinedHostPort = 0;
+                ModLogger.Info(
+                    "HostSelfJoinRedirectState: skipped global hosted-peer marker publication for run-scoped automation.");
+                return true;
+            }
+
             if (string.Equals(_lastPersistedHostedPeerUserName, normalizedUserName, StringComparison.OrdinalIgnoreCase) &&
                 File.Exists(HostedPeerMarkerFilePath))
             {
@@ -203,6 +226,9 @@ namespace CoopSpectator.Infrastructure
         {
             userName = string.Empty;
 
+            if (CoopAutomationRuntimeBridge.IsAutomationEnabled)
+                return false;
+
             if (!string.IsNullOrWhiteSpace(_lastPersistedHostedPeerUserName) &&
                 _lastPersistedHostedPeerCreatedUtcTicks > 0 &&
                 !IsExpired(_lastPersistedHostedPeerCreatedUtcTicks))
@@ -233,6 +259,25 @@ namespace CoopSpectator.Infrastructure
         {
             if (string.IsNullOrWhiteSpace(serverName) || port <= 0)
                 return false;
+
+            if (CoopAutomationRuntimeBridge.IsAutomationEnabled)
+            {
+                bool confirmed = CoopAutomationRuntimeBridge.TryConfirmOwnedHostSession(
+                    serverName,
+                    port,
+                    out string failureCode,
+                    out string failureMessage);
+                if (!confirmed)
+                {
+                    ModLogger.Info(
+                        "HostSelfJoinRedirectState: run-scoped owned-host validation failed. " +
+                        "Failure=" + (failureCode ?? "unknown") + ": " +
+                        (failureMessage ?? "unknown") + ".");
+                    return false;
+                }
+
+                return IsLocalDedicatedPortActive(port);
+            }
 
             if (!TryReadMarker(out string markerServerName, out int markerPort, out long markerTicks))
                 return false;

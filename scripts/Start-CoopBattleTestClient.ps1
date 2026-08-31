@@ -21,6 +21,8 @@ param(
     [ValidateRange(30, 1800)]
     [int]$RequestLifetimeSeconds = 600,
 
+    [switch]$UseExistingRunContract,
+
     [switch]$ValidateOnly
 )
 
@@ -31,6 +33,8 @@ $automationFlagName = 'COOPSPECTATOR_TEST_AUTOMATION'
 $runIdVariableName = 'COOPSPECTATOR_AUTOMATION_RUN_ID'
 $runRootVariableName = 'COOPSPECTATOR_AUTOMATION_RUN_ROOT'
 $runTokenVariableName = 'COOPSPECTATOR_AUTOMATION_RUN_TOKEN'
+$expectedModuleSha256VariableName = 'COOPSPECTATOR_AUTOMATION_EXPECTED_MODULE_SHA256'
+$resultPolicyVariableName = 'COOPSPECTATOR_AUTOMATION_RESULT_POLICY'
 $serverPasswordVariableName = 'COOPSPECTATOR_AUTOMATION_SERVER_PASSWORD'
 $modulesArgument = '_MODULES_*Native*SandBoxCore*Sandbox*Multiplayer*CoopSpectator*_MODULES_'
 
@@ -51,18 +55,6 @@ function Get-StringSha256 {
     }
     finally {
         $sha.Dispose()
-    }
-}
-
-function New-RunToken {
-    $bytes = New-Object byte[] 32
-    $generator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-    try {
-        $generator.GetBytes($bytes)
-        return [Convert]::ToBase64String($bytes)
-    }
-    finally {
-        $generator.Dispose()
     }
 }
 
@@ -92,6 +84,25 @@ function Write-JsonAtomic {
             [System.IO.File]::Delete($temporaryPath)
         }
     }
+}
+
+function Read-JsonShared {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not [System.IO.File]::Exists($Path)) {
+        throw "Required run-contract artifact is missing: $Path"
+    }
+    $stream = New-Object System.IO.FileStream(
+        $Path,
+        [System.IO.FileMode]::Open,
+        [System.IO.FileAccess]::Read,
+        ([System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete))
+    try {
+        $reader = New-Object System.IO.StreamReader($stream)
+        try { return ($reader.ReadToEnd() | ConvertFrom-Json) }
+        finally { $reader.Dispose() }
+    }
+    finally { $stream.Dispose() }
 }
 
 if ($RunId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$') {
@@ -170,6 +181,9 @@ if ($ValidateOnly) {
     [PSCustomObject]$validation
     return
 }
+if (-not $UseExistingRunContract) {
+    throw 'Live client automation requires -UseExistingRunContract from scripts/Invoke-CoopTest.ps1 -Command Feasibility. Standalone mode is validation-only because it cannot prove exact dedicated-process ownership.'
+}
 
 $runRoot = [System.IO.Path]::GetFullPath(
     (Join-Path ([System.IO.Path]::GetTempPath()) (Join-Path 'CoopSpectator\Automation' $RunId)))
@@ -177,6 +191,72 @@ $requestPath = Join-Path $runRoot 'commands\client-join.request.json'
 $statusPath = Join-Path $runRoot 'state\client-join.status.json'
 $launchArtifactPath = Join-Path $runRoot 'artifacts\processes\client-launch.json'
 $lockPath = Join-Path $runRoot 'work\client-launch.lock'
+$runnerLockPath = Join-Path $runRoot 'work\runner.lock'
+$manifestPath = Join-Path $runRoot 'manifest.json'
+
+$runToken = [Environment]::GetEnvironmentVariable($runTokenVariableName, 'Process')
+$existingRunId = [Environment]::GetEnvironmentVariable($runIdVariableName, 'Process')
+$existingRunRoot = [Environment]::GetEnvironmentVariable($runRootVariableName, 'Process')
+$existingExpectedModuleHash = [Environment]::GetEnvironmentVariable($expectedModuleSha256VariableName, 'Process')
+$existingResultPolicy = [Environment]::GetEnvironmentVariable($resultPolicyVariableName, 'Process')
+if (-not [string]::Equals([Environment]::GetEnvironmentVariable($automationFlagName, 'Process'), '1', [StringComparison]::Ordinal)) {
+    throw 'UseExistingRunContract requires the inherited automation flag.'
+}
+if ([string]::IsNullOrEmpty($runToken) -or $runToken.Length -lt 32) {
+    throw 'UseExistingRunContract requires an inherited automation run token of at least 32 characters.'
+}
+if (-not [string]::Equals($existingRunId, $RunId, [StringComparison]::Ordinal)) {
+    throw 'UseExistingRunContract inherited RunId does not match the requested RunId.'
+}
+if ([string]::IsNullOrWhiteSpace($existingRunRoot) -or
+    -not [string]::Equals(
+        [System.IO.Path]::GetFullPath($existingRunRoot).TrimEnd('\', '/'),
+        $runRoot.TrimEnd('\', '/'),
+        [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'UseExistingRunContract inherited run root does not match the required RunId-scoped root.'
+}
+if (-not [string]::Equals($existingExpectedModuleHash, $actualModuleHash, [StringComparison]::Ordinal)) {
+    throw 'UseExistingRunContract inherited expected module hash does not match the validated installed client module.'
+}
+if (-not [string]::Equals($existingResultPolicy, 'Suppress', [StringComparison]::Ordinal)) {
+    throw 'UseExistingRunContract requires ResultPolicy=Suppress.'
+}
+
+$runTokenHash = Get-StringSha256 -Value $runToken
+$existingManifest = Read-JsonShared -Path $manifestPath
+$manifestRunId = $existingManifest.PSObject.Properties['RunId']
+$manifestNonce = $existingManifest.PSObject.Properties['NonceSha256']
+$manifestCommand = $existingManifest.PSObject.Properties['RequestedCommand']
+$manifestResultPolicy = $existingManifest.PSObject.Properties['ResultPolicy']
+if ($null -eq $manifestRunId -or $null -eq $manifestNonce -or $null -eq $manifestCommand -or $null -eq $manifestResultPolicy -or
+    -not [string]::Equals([string]$manifestRunId.Value, $RunId, [StringComparison]::Ordinal) -or
+    -not [string]::Equals([string]$manifestNonce.Value, $runTokenHash, [StringComparison]::Ordinal) -or
+    -not [string]::Equals([string]$manifestCommand.Value, 'Feasibility', [StringComparison]::Ordinal) -or
+    -not [string]::Equals([string]$manifestResultPolicy.Value, 'Suppress', [StringComparison]::Ordinal)) {
+    throw 'UseExistingRunContract manifest identity, command, token fingerprint, or result policy is invalid.'
+}
+
+$runnerLockHeld = $false
+$runnerLockProbe = $null
+if (-not [System.IO.File]::Exists($runnerLockPath)) {
+    throw 'UseExistingRunContract requires the aggregate runner lock file.'
+}
+try {
+    $runnerLockProbe = New-Object System.IO.FileStream(
+        $runnerLockPath,
+        [System.IO.FileMode]::Open,
+        [System.IO.FileAccess]::ReadWrite,
+        [System.IO.FileShare]::None)
+}
+catch [System.IO.IOException] {
+    $runnerLockHeld = $true
+}
+finally {
+    if ($null -ne $runnerLockProbe) { $runnerLockProbe.Dispose() }
+}
+if (-not $runnerLockHeld) {
+    throw 'UseExistingRunContract requires an active aggregate runner lock.'
+}
 
 [System.IO.Directory]::CreateDirectory((Split-Path -Parent $lockPath)) | Out-Null
 $lockStream = $null
@@ -191,8 +271,6 @@ try {
         throw "RunId already contains a join request or status. Use a new RunId: $RunId"
     }
 
-    $runToken = New-RunToken
-    $runTokenHash = Get-StringSha256 -Value $runToken
     $serverPassword = [Environment]::GetEnvironmentVariable($serverPasswordVariableName, 'Process')
     $createdUtc = [DateTime]::UtcNow
     $expiresUtc = $createdUtc.AddSeconds($RequestLifetimeSeconds)
@@ -232,6 +310,8 @@ try {
     $startInfo.EnvironmentVariables[$runIdVariableName] = $RunId
     $startInfo.EnvironmentVariables[$runRootVariableName] = $runRoot
     $startInfo.EnvironmentVariables[$runTokenVariableName] = $runToken
+    $startInfo.EnvironmentVariables[$expectedModuleSha256VariableName] = $actualModuleHash
+    $startInfo.EnvironmentVariables[$resultPolicyVariableName] = 'Suppress'
     if (-not [string]::IsNullOrEmpty($serverPassword)) {
         $startInfo.EnvironmentVariables[$serverPasswordVariableName] = $serverPassword
     }
@@ -265,6 +345,8 @@ try {
         StatusPath = $statusPath
         PasswordProvided = -not [string]::IsNullOrEmpty($serverPassword)
         PasswordPersisted = $false
+        ResultPolicy = 'Suppress'
+        ExistingRunContractUsed = [bool]$UseExistingRunContract
         ShaderCacheHelperUsed = $false
         UiAutomationUsed = $false
         StartGameIssued = $false

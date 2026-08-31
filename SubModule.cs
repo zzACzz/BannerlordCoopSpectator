@@ -4,6 +4,7 @@ using CoopSpectator.Campaign; // ÐŸÑ–Ð´ÐºÐ»ÑŽÑ‡Ð°Ñ”Ð¼Ð¾
 using CoopSpectator.GameMode; // Ð ÐµÑ”ÑÑ‚Ñ€Ð°Ñ†Ñ–Ñ TdmClone Ð½Ð° ÐºÐ»Ñ–Ñ”Ð½Ñ‚Ñ– Ð´Ð»Ñ Join Ð´Ð¾ ÑÐµÑ€Ð²ÐµÑ€Ð° Ð· GameType TdmClone (Ð•Ñ‚Ð°Ð¿ 3.3)
 #endif
 using CoopSpectator.Infrastructure; // ÐŸÑ–Ð´ÐºÐ»ÑŽÑ‡Ð°Ñ”Ð¼Ð¾ Ñ–Ð½Ñ„Ñ€Ð°ÑÑ‚Ñ€ÑƒÐºÑ‚ÑƒÑ€Ñƒ (Ð»Ð¾Ð³ÐµÑ€, dispatcher)
+using CoopSpectator.Infrastructure.Automation;
 using CoopSpectator.Multiplayer.Automation;
 using CoopSpectator.MissionModels; // Low-level mission model wrappers for CoopBattle
 using CoopSpectator.Patches; // LobbyCustomGameLocalJoinPatch
@@ -64,6 +65,16 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
 
             // Runtime diagnostics: assembly paths/versions (to detect build mismatch vs dedicated).
             try { AssemblyDiagnostics.LogRuntimeLoadPaths(); AssemblyDiagnostics.WarnIfAssemblyPathUnexpected(); } catch (Exception ex) { ModLogger.Info("AssemblyDiagnostics failed: " + ex.Message); }
+            if (!CoopAutomationRuntimeBridge.TryInitializeRole(
+                    "MultiplayerClient",
+                    "multiplayer-client-01",
+                    out string automationFailureCode,
+                    out string automationFailureMessage))
+            {
+                throw new InvalidOperationException(
+                    "Client automation runtime configuration rejected: " +
+                    automationFailureCode + ": " + automationFailureMessage);
+            }
             try { ExactBattleRuntimeBundleBridgeFile.ResetBundle("SubModule.OnSubModuleLoad"); } catch (Exception ex) { ModLogger.Info("ExactBattleRuntimeBundleBridgeFile reset failed: " + ex.Message); }
             CoopBattlePeerReconnectState.EnsureHooksInstalled();
 
@@ -819,4 +830,3 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
         } // Ð—Ð°Ð²ÐµÑ€ÑˆÑƒÑ”Ð¼Ð¾ Ð±Ð»Ð¾Ðº Ð¼ÐµÑ‚Ð¾Ð´Ñƒ
     } // Ð—Ð°Ð²ÐµÑ€ÑˆÑƒÑ”Ð¼Ð¾ Ð±Ð»Ð¾Ðº ÐºÐ»Ð°ÑÑƒ
 } // Ð—Ð°Ð²ÐµÑ€ÑˆÑƒÑ”Ð¼Ð¾ Ð±Ð»Ð¾Ðº Ð¿Ñ€Ð¾ÑÑ‚Ð¾Ñ€Ñƒ Ñ–Ð¼ÐµÐ½
-

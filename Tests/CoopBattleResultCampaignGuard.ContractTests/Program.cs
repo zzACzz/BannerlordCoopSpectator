@@ -2,10 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using CoopSpectator.Campaign;
 using CoopSpectator.Infrastructure;
+using CoopSpectator.Infrastructure.Automation;
 using CoopSpectator.Network.Messages;
 using Newtonsoft.Json;
 
@@ -120,6 +122,7 @@ internal static class Program
             ValidateConcurrentBeginAllowsOneMutation();
             ValidateCrashRecoveryBeforeAndAfterSave();
             ValidateSnapshotAndResultJsonRoundTrips();
+            ValidateAutomationSuppressesCampaignConsumableResultsAcrossBattleTypes();
             ValidateOldJsonUsesControlledLegacyBranch();
             ValidateJournalBoundIsDeterministic();
             ValidateSourceOrderingAndResultFileRetention();
@@ -429,6 +432,138 @@ internal static class Program
                resultRoundTrip.CampaignId == campaignId &&
                resultRoundTrip.ResultId == resultId,
             "Result JSON round trip must preserve CampaignId and ResultId.");
+    }
+
+    private static void ValidateAutomationSuppressesCampaignConsumableResultsAcrossBattleTypes()
+    {
+        string[] variableNames =
+        {
+            CoopAutomationRuntimeBridge.TestAutomationVariable,
+            CoopAutomationRuntimeBridge.RunIdVariable,
+            CoopAutomationRuntimeBridge.RunRootVariable,
+            CoopAutomationRuntimeBridge.RunTokenVariable,
+            CoopAutomationRuntimeBridge.ExpectedModuleSha256Variable,
+            CoopAutomationRuntimeBridge.ResultPolicyVariable
+        };
+        var previousValues = variableNames.ToDictionary(
+            name => name,
+            name => Environment.GetEnvironmentVariable(name),
+            StringComparer.Ordinal);
+        string runId = "result-suppress-" + Guid.NewGuid().ToString("N");
+        string runRoot = Path.GetFullPath(Path.Combine(
+            Path.GetTempPath(),
+            "CoopSpectator",
+            "Automation",
+            runId));
+        string token = "contract-result-token-" + Guid.NewGuid().ToString("N");
+        string moduleHash = CoopAutomationRuntimeContract.ComputeFileSha256(
+            Assembly.GetExecutingAssembly().Location);
+        string globalResultPath = CoopBattleResultBridgeFile.GetResultFilePath();
+        FileIdentity globalBefore = ReadFileIdentity(globalResultPath);
+
+        try
+        {
+            Environment.SetEnvironmentVariable(CoopAutomationRuntimeBridge.TestAutomationVariable, "1");
+            Environment.SetEnvironmentVariable(CoopAutomationRuntimeBridge.RunIdVariable, runId);
+            Environment.SetEnvironmentVariable(CoopAutomationRuntimeBridge.RunRootVariable, runRoot);
+            Environment.SetEnvironmentVariable(CoopAutomationRuntimeBridge.RunTokenVariable, token);
+            Environment.SetEnvironmentVariable(CoopAutomationRuntimeBridge.ExpectedModuleSha256Variable, moduleHash);
+            Environment.SetEnvironmentVariable(
+                CoopAutomationRuntimeBridge.ResultPolicyVariable,
+                CoopAutomationRuntimeContract.SuppressResultPolicy);
+
+            foreach (string battleType in new[]
+                     {
+                         "Battle",
+                         "Village",
+                         "SiegeAssault",
+                         "SallyOut",
+                         "SiegeAmbush",
+                         "Hideout",
+                         "LordsHall"
+                     })
+            {
+                var result = new CoopBattleResultBridgeFile.BattleResultSnapshot
+                {
+                    BattleId = "suppressed-" + battleType,
+                    BattleType = battleType,
+                    Source = "ContractTest"
+                };
+                Assert(
+                    CoopBattleResultBridgeFile.WriteResult(result, out bool suppressed) && suppressed,
+                    "A valid automation Suppress policy must absorb the " + battleType +
+                    " result without publishing the campaign-consumable file.");
+            }
+
+            string publicationStatusPath = CoopAutomationRuntimeContract.CombineRunPath(
+                runRoot,
+                CoopAutomationRuntimeContract.ResultPublicationRelativePath);
+            Assert(
+                CoopAutomationProtocolFileIO.TryReadJson(
+                    publicationStatusPath,
+                    1024 * 1024,
+                    out CoopAutomationResultPublicationStatus publicationStatus,
+                    out string statusFailureCode,
+                    out string statusFailureMessage),
+                "The run-scoped result-publication status must be readable: " +
+                statusFailureCode + ": " + statusFailureMessage);
+            Assert(
+                publicationStatus.RunId == runId &&
+                publicationStatus.Decision == CoopAutomationResultPublicationDecision.Suppress.ToString() &&
+                publicationStatus.BattleId == "suppressed-LordsHall",
+                "The final run-scoped status must identify the exact run, suppression decision, and battle.");
+            Assert(
+                FileIdentity.Equals(globalBefore, ReadFileIdentity(globalResultPath)),
+                "Suppressed results for every supported battle type must leave global battle_result.json unchanged.");
+
+            Environment.SetEnvironmentVariable(CoopAutomationRuntimeBridge.ResultPolicyVariable, "Unsupported");
+            var invalidResult = new CoopBattleResultBridgeFile.BattleResultSnapshot
+            {
+                BattleId = "invalid-policy",
+                BattleType = "Battle",
+                Source = "ContractTest"
+            };
+            Assert(
+                !CoopBattleResultBridgeFile.WriteResult(invalidResult, out bool invalidSuppressed) &&
+                !invalidSuppressed,
+                "An enabled invalid automation profile must reject publication instead of claiming suppression or falling back to production.");
+            Assert(
+                FileIdentity.Equals(globalBefore, ReadFileIdentity(globalResultPath)),
+                "An invalid enabled automation profile must leave global battle_result.json unchanged.");
+        }
+        finally
+        {
+            foreach (KeyValuePair<string, string> pair in previousValues)
+                Environment.SetEnvironmentVariable(pair.Key, pair.Value);
+            if (Directory.Exists(runRoot))
+                Directory.Delete(runRoot, recursive: true);
+        }
+    }
+
+    private sealed class FileIdentity
+    {
+        public bool Exists { get; set; }
+        public long Length { get; set; }
+        public string Sha256 { get; set; }
+
+        public static bool Equals(FileIdentity left, FileIdentity right)
+        {
+            return left.Exists == right.Exists &&
+                   left.Length == right.Length &&
+                   string.Equals(left.Sha256, right.Sha256, StringComparison.Ordinal);
+        }
+    }
+
+    private static FileIdentity ReadFileIdentity(string path)
+    {
+        if (!File.Exists(path))
+            return new FileIdentity { Exists = false, Length = 0, Sha256 = string.Empty };
+        return new FileIdentity
+        {
+            Exists = true,
+            Length = new FileInfo(path).Length,
+            Sha256 = CoopAutomationRuntimeContract.ComputeFileSha256(path)
+        };
     }
 
     private static void ValidateOldJsonUsesControlledLegacyBranch()

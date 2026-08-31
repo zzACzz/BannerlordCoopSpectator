@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="..\..\Infrastructure\Automation\CoopAutomationProtocolFileIO.cs" Link="CoopAutomationProtocolFileIO.cs" />
+    <Compile Include="..\..\Infrastructure\Automation\CoopAutomationRuntimeContract.cs" Link="CoopAutomationRuntimeContract.cs" />
+    <Compile Include="..\..\Infrastructure\Automation\CoopAutomationRuntimeBridge.cs" Link="CoopAutomationRuntimeBridge.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
+  </ItemGroup>
+</Project>

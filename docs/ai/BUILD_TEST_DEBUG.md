@@ -52,8 +52,12 @@ The repository does not currently define a documented, verified property that di
 | `scripts/CreateReleasePackage.ps1 -SkipBuild -NexusAssetsOnly` | No | recreates validated Nexus client/HostLite archives under `dist/releases/<version>/Nexus/` | No | No |
 | `scripts/CreateReleasePackage.ps1 -SkipBuild -ReleaseAssetsOnly` | No | recreates both GitHub and Nexus archive sets under `dist/releases/<version>/` | No | No |
 | `scripts/Test-RepositoryHygiene.ps1` | No | no content/output writes; Git may refresh index metadata | No | No |
+| `scripts/Invoke-CoopTest.ps1 -Command Doctor|Contracts|CompileOnly` | `Contracts`/`CompileOnly` only | Writes only the selected temporary automation run root; compile-only outputs remain below it | No | No |
+| `scripts/Invoke-CoopTest.ps1 -Command Feasibility` | No | Writes only the selected temporary automation run root; product runtimes may write normal external logs/configuration | No module writes | No module writes |
+| `scripts/Invoke-CoopTest.ps1 -Command Inspect|Recover` without `-ApplyRecovery` | No | Read-only for the existing run | No | No |
 | `scripts/Start-CoopBattleTestClient.ps1 -ValidateOnly` | No | No expected repository or run-root writes | No | No |
-| `run_battle_test_client.bat` / live `Start-CoopBattleTestClient.ps1` | No | Writes only the selected temporary automation run root; Bannerlord writes its normal external logs/configuration | No | No |
+| `run_battle_test_client.bat` / standalone live `Start-CoopBattleTestClient.ps1` | No | Current source fails before run-root creation; standalone mode cannot prove dedicated ownership | No | No |
+| `Start-CoopBattleTestClient.ps1 -UseExistingRunContract` | No | Writes only the aggregate runner's selected temporary automation run root; Bannerlord writes its normal external logs/configuration | No | No |
 
 This table records current project/script behavior, not a guarantee that an arbitrary command is safe. Every approved plan containing one of these operations must still state the exact command and resolved destinations.
 
@@ -292,13 +296,15 @@ The script's default log markers focus on native agent visuals, spawn ownership,
 
 ### `run_battle_test_client.bat` and `scripts/Start-CoopBattleTestClient.ps1`
 
-These files implement the initial default-off, run-scoped multiplayer-client launch and normal-lobby join intent. They do not build, deploy, run the shader-cache helper, issue `start_game`, open a mission, or automate UI.
+These files implement the initial default-off, run-scoped multiplayer-client validation and normal-lobby join intent. They do not build, deploy, run the shader-cache helper, issue `start_game`, or automate UI. Standalone `-ValidateOnly` remains supported. A live launch requires `-UseExistingRunContract` and inherits the aggregate runner's existing token, root, expected hash, `Suppress` result policy, and exact owned-server evidence.
 
-The short entry point is:
+The historical short entry point is:
 
 ```text
 run_battle_test_client.bat <RunId> "<ExactServerName>" <ExpectedInstalledClientSha256> [Port]
 ```
+
+Current source intentionally rejects its live launch after validation because the wrapper has no exact dedicated-process contract. Use `scripts/Invoke-CoopTest.ps1 -Command Feasibility` for a separately approved live connectivity probe.
 
 The live launcher requires all of the following before process creation:
 
@@ -307,7 +313,7 @@ The live launcher requires all of the following before process creation:
 - the installed client module's SHA-256 exactly equals the command's expected hash;
 - the `RunId` is fresh and has no existing request or status under `%TEMP%\CoopSpectator\Automation\<RunId>`.
 
-After launch and before the native join request, the module additionally requires the persisted local dedicated marker to match the server name/port and requires that UDP port to be active. This is an initial local-server association gate, not exact dedicated-process ownership proof; the future runner still must correlate and own the dedicated PID/path/start time.
+After launch and before the native join request, the automation profile requires `state/dedicated-host.json` to match the `RunId`, token hash, server name/port, and exact still-live dedicated PID/path/start time, and requires that UDP port to be active. Automation neither trusts nor mutates the production persisted local-host marker.
 
 The optional server password is deliberately not a command-line parameter. Set it only in the current shell before launch:
 
@@ -345,6 +351,14 @@ The module status distinguishes readiness, lobby/server wait, native join reques
 Current on-disk boundary: controlled run `m2b-install-20260831-01` installed the exact `0.3.2` client and dedicated binaries compiled from revision `f91eeff`. The client hash is `3D3C6F1DD8BEAA3CB427108CB30A2B1C69D4CC5F769B3E764EBDCC13126AE532`; both dedicated bins use `1D2BCAE905A8634D96593BB35D3E8D2AA0636701B40A935D555D472543BFF66C`. Full `0.3.1` pre-images remain under that run root. Post-install doctor run `m2b-postinstall-doctor-20260831-01` removed both installed/repository mismatch blockers and retained only `RuntimeVersionCombinationNotYetVerified`.
 
 This is `ConfirmedPathHashOnly`, not `ConfirmedLoadedHash`. `-ValidateOnly` may now validate the exact installed client hash, but no process has yet reported that it loaded the staged assembly. Do not use the launcher as L3 evidence until the named connection-only rerun proves loaded client/dedicated hashes, correlated handoff, connection, and cleanup. See [BATTLE_TEST_AUTOMATION_M2B_STAGING.md](BATTLE_TEST_AUTOMATION_M2B_STAGING.md).
+
+### `scripts/Invoke-CoopTest.ps1` Milestone 2B.1 controls
+
+`Feasibility` is source-prepared but not runtime-verified. It requires a fresh `RunId`, exact installed client/dedicated hashes, Steam, no pre-existing Bannerlord/dedicated/crash-reporter process, and an unowned requested UDP port. It enables fail-closed `Suppress`, launches the exact dedicated role, requires its loaded hash, issues the minimum vanilla `TeamDeathmatch`/`start_game` bootstrap required for native server visibility, verifies the exact UDP owner, launches the client through `-UseExistingRunContract`, requires `Connected`, stops only recorded exact process identities, and proves the global `battle_result.json` did not change. This command is connectivity evidence only, never L2/L3 battle evidence.
+
+`Inspect` renders an existing run without mutation. `Recover` also remains read-only unless `-ApplyRecovery` is supplied; the apply form acquires the abandoned run lock and revalidates each recorded PID, executable path, and start time immediately before stopping it. It does not delete the run root.
+
+The currently installed `0.3.2` binaries predate this source foundation. Compile-only verification does not install it. Do not invoke live `Feasibility` until a separate approved commit and controlled staging operation establish exact expected hashes for both roles.
 
 ### `scripts/CreateReleasePackage.ps1`
 

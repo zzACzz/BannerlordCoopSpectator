@@ -289,15 +289,18 @@ These types overlap deliberately: intent, authoritative request, spawn result, l
 
 This path is disabled by default, is independent of battle type, and stops at network connection evidence. It does not open a mission or own battle readiness/result state.
 
-### Battle-test non-runtime foundation
+### Battle-test automation foundation
 
 - `Directory.Build.props`: shared default-false compile-only output/intermediate/package routing.
 - `Infrastructure/Automation/CoopAutomationRunContract.cs`: manifest, role instance, port/fixture identity, lease, envelope, event, stable outcome/reason, recovery, and known-issue contracts.
 - `Infrastructure/Automation/CoopAutomationProtocolFileIO.cs`: strict atomic JSON, bounded shared reads, append-safe JSONL, and same-volume inbox processing.
-- `scripts/Invoke-CoopTest.ps1`: `Doctor`, full `Contracts`, and client/dedicated `CompileOnly`; owns the fresh run root, runner lock, nonce fingerprint, lease, status, events, assertions, logs, and reports.
+- `Infrastructure/Automation/CoopAutomationRuntimeContract.cs`: strict runtime profile, loaded-role identity, `Suppress` result policy, and run-scoped owned-host validation.
+- `Infrastructure/Automation/CoopAutomationRuntimeBridge.cs`: loaded assembly hashing, role status publication, result-policy resolution, and exact live owned-host confirmation.
+- `scripts/Invoke-CoopTest.ps1`: `Doctor`, full `Contracts`, client/dedicated `CompileOnly`, runtime `Feasibility`, existing-run `Inspect`, and opt-in exact `Recover`; owns the run root, runner lock, nonce fingerprint, lease, status, events, assertions, process identities, cleanup, logs, and reports.
+- `scripts/Start-CoopBattleTestClient.ps1`: standalone validation/launch plus `-UseExistingRunContract` for inheriting the aggregate runner's token, run root, expected hash, and result policy.
 - `Tests/contract-tests.manifest.json`: exact reviewed inventory consumed by the aggregate runner.
 
-This layer is non-authoritative and battle-type independent. It may inspect source/environment state and compile into a run root, but Milestone 2A does not stage modules, start product processes, connect roles, open missions, or publish battle results.
+This layer remains non-authoritative for campaign and battle state. Milestone 2A stays non-runtime. Milestone 2B.1 adds source-prepared process/role ownership and a bounded connectivity probe that may create only a vanilla `TeamDeathmatch` bootstrap after fail-closed result isolation; it does not stage modules, load a campaign fixture, advance cooperative battle phases, publish campaign-consumable results, or claim L2/L3 evidence.
 
 ## Network files
 
@@ -474,6 +477,7 @@ Each project is a small `net8.0` executable. Most link a narrow production contr
 | `CoopSiegeSceneScriptRegistration.ContractTests` | SandBox managed scene-script registration |
 | `CoopAutomationJoin.ContractTests` | Run/token/hash request validation, exact server selection, atomic status, and automation source-graph compilation |
 | `CoopAutomationProtocol.ContractTests` | Protocol compatibility, role/run/nonce ordering, lease/recovery, stable outcomes/reasons, known issues, atomic/append file faults, locks, and repeat reads |
+| `CoopAutomationRuntime.ContractTests` | Strict runtime profile, loaded-role hash status, fail-closed result suppression, and exact live owned-host validation |
 | `CoopCompileOnly.ContractTests` | Shared compile-only property, output routing, and deployment-target guards in both main project files |
 | `NativeAftermath.ContractTests` | Casualty math, staged siege totals, hideout/final siege aftermath |
 
@@ -487,7 +491,7 @@ These tests prove contract logic only. They do not prove native mission loading,
 - `scripts/Test-RepositoryHygiene.ps1`: read-only validation of repository-local Git EOL configuration, tracked text EOL state, mixed endings, and optional final working-tree cleanliness.
 - `scripts/Invoke-CoopTest.ps1`: canonical fresh-root L0/L1 runner for environment facts, all reviewed contract projects, and side-effect-free main-project compilation.
 - `scripts/Start-CoopBattleTestClient.ps1`: validates Steam, exact installed client hash, and run identity; `-ValidateOnly` performs no launch/run-root write; a live call writes only the selected temporary run root and launches the exact multiplayer executable.
-- `run_battle_test_client.bat`: short wrapper for the PowerShell battle-test client launcher. The password is intentionally environment-only and not a positional argument.
+- `run_battle_test_client.bat`: historical standalone wrapper for the PowerShell client launcher. Current source is validation-only for this route; live automation must inherit exact server ownership from aggregate `Feasibility`. The password remains environment-only and is not a positional argument.
 
 ## High-risk hotspots
 
