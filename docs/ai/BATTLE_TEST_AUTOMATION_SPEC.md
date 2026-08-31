@@ -1168,7 +1168,7 @@ Exit criteria:
 
 Priority: **P0**
 
-Implementation status: **Milestone 2B.1 source, contract, and compile-only foundation complete on 2026-08-31; Bannerlord runtime execution remains unverified.** See [BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md](BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md).
+Implementation status: **Milestone 2B.1 source, contract, and compile-only foundation and Milestone 2B.2A clean-current-source controlled staging complete on 2026-08-31; Bannerlord runtime execution remains unverified.** See [BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md](BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md) and [BATTLE_TEST_AUTOMATION_M2B2_STAGING.md](BATTLE_TEST_AUTOMATION_M2B2_STAGING.md).
 
 Deliverables:
 

@@ -2,6 +2,8 @@
 
 Status: **Complete for on-disk installation identity; runtime loading remains unverified**
 
+Historical note: this record describes the first `0.3.2` installation from revision `f91eeff`. The current installed runtime-safety build and its immediately preceding restore trees are documented in [BATTLE_TEST_AUTOMATION_M2B2_STAGING.md](BATTLE_TEST_AUTOMATION_M2B2_STAGING.md). This file remains authoritative for its historical run IDs and retained `0.3.1` pre-images.
+
 Execution date: **2026-08-31**
 
 Compiled source revision: **`f91eeff9b710f68fc7bf4b506ec39c2d1c4474bc`** (`f91eeff`)

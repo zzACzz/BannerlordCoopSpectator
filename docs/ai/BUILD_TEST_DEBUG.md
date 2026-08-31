@@ -348,9 +348,9 @@ pwsh -NoProfile -File .\scripts\Start-CoopBattleTestClient.ps1 `
 
 The module status distinguishes readiness, lobby/server wait, native join request/acceptance, network handoff, connection, failure, and safe pre-join cancellation. `coop.automation_join status` reads the in-process summary; `coop.automation_join cancel` refuses to label an already started native join as cancelled.
 
-Current on-disk boundary: controlled run `m2b-install-20260831-01` installed the exact `0.3.2` client and dedicated binaries compiled from revision `f91eeff`. The client hash is `3D3C6F1DD8BEAA3CB427108CB30A2B1C69D4CC5F769B3E764EBDCC13126AE532`; both dedicated bins use `1D2BCAE905A8634D96593BB35D3E8D2AA0636701B40A935D555D472543BFF66C`. Full `0.3.1` pre-images remain under that run root. Post-install doctor run `m2b-postinstall-doctor-20260831-01` removed both installed/repository mismatch blockers and retained only `RuntimeVersionCombinationNotYetVerified`.
+Current on-disk boundary: controlled run `m2b2-stage-20260831-02` installed the exact `0.3.2` client and dedicated binaries compiled from clean pushed revision `12abf36`. The client hash is `B576B8EA0FB223126A65E062CB562FD15815DF8BA1ADDB1797506914B48D7928`; both dedicated bins use `1A9723A3249582FABCF08D3778C10CF448944B928549E6D9582FA7F3C0770626`. Complete immediately preceding `0.3.2` installation trees remain under that run root, and the historical `m2b-install-20260831-01` root still retains the earlier `0.3.1` pre-images. Post-stage doctor run `m2b2-poststage-doctor-20260831-01` reports only `RuntimeVersionCombinationNotYetVerified`.
 
-This is `ConfirmedPathHashOnly`, not `ConfirmedLoadedHash`. `-ValidateOnly` may now validate the exact installed client hash, but no process has yet reported that it loaded the staged assembly. Do not use the launcher as L3 evidence until the named connection-only rerun proves loaded client/dedicated hashes, correlated handoff, connection, and cleanup. See [BATTLE_TEST_AUTOMATION_M2B_STAGING.md](BATTLE_TEST_AUTOMATION_M2B_STAGING.md).
+This is `ConfirmedPathHashOnly`, not `ConfirmedLoadedHash`. `-ValidateOnly` may now validate the exact installed client hash, but no process has yet reported that it loaded the staged assembly. Do not use the launcher as L3 evidence until the named connection-only rerun proves loaded client/dedicated hashes, correlated handoff, connection, and cleanup. See [BATTLE_TEST_AUTOMATION_M2B2_STAGING.md](BATTLE_TEST_AUTOMATION_M2B2_STAGING.md).
 
 ### `scripts/Invoke-CoopTest.ps1` Milestone 2B.1 controls
 
@@ -358,7 +358,7 @@ This is `ConfirmedPathHashOnly`, not `ConfirmedLoadedHash`. `-ValidateOnly` may 
 
 `Inspect` renders an existing run without mutation. `Recover` also remains read-only unless `-ApplyRecovery` is supplied; the apply form acquires the abandoned run lock and revalidates each recorded PID, executable path, and start time immediately before stopping it. It does not delete the run root.
 
-The currently installed `0.3.2` binaries predate this source foundation. Compile-only verification does not install it. Do not invoke live `Feasibility` until a separate approved commit and controlled staging operation establish exact expected hashes for both roles.
+The current `0.3.2` binaries include this source foundation and are bound to clean pushed revision `12abf36` by the Milestone 2B.2A staging record. Live `Feasibility` remains a separate, explicitly approved step because on-disk equality is not loaded-role or connectivity evidence.
 
 ### `scripts/CreateReleasePackage.ps1`
 
@@ -409,7 +409,7 @@ Verified launch facts for that named profile:
 - the client shader-cache helper and UI automation were not used;
 - both roles closed gracefully by exact PID/path/start-time ownership and required no forced termination.
 
-For that M1 run, the loaded modules were installed version `0.3.1`, while the repository outputs were `0.3.2` with different hashes. Those commands are therefore diagnostic evidence for that historical installed profile only. The developer separately reports that `0.3.2` was released after stable manual battle runs; the M1 mismatch limits only what that specific automated probe proves and does not classify `0.3.2` as unstable. The later `m2b-install-20260831-01` operation closes the current-build on-disk staging gate, but the normal-lobby control path is still not Bannerlord-runtime-verified. L2/L3 still require role-confirmed loaded hashes, result isolation, and a successful connection-only rerun.
+For that M1 run, the loaded modules were installed version `0.3.1`, while the repository outputs were `0.3.2` with different hashes. Those commands are therefore diagnostic evidence for that historical installed profile only. The developer separately reports that `0.3.2` was released after stable manual battle runs; the M1 mismatch limits only what that specific automated probe proves and does not classify `0.3.2` as unstable. The later `m2b-install-20260831-01` operation first closed the `0.3.2` on-disk staging gate, and `m2b2-stage-20260831-02` subsequently replaced it with the clean committed Milestone 2B.1 runtime-safety build. The normal-lobby control path is still not Bannerlord-runtime-verified. L2/L3 still require role-confirmed loaded hashes, result isolation, and a successful connection-only rerun.
 
 ### Battle bridge/diagnostic folder
 
