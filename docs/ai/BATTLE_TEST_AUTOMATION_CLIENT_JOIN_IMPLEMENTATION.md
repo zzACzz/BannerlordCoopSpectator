@@ -1,6 +1,6 @@
 # Battle Test Automation Client Join Implementation Report
 
-Status: **Source- and contract-implemented; exact `0.3.2` installed; Bannerlord runtime verification blocked**
+Status: **Source- and contract-implemented with fail-closed post-start ownership; exact `0.3.2` installed; Bannerlord runtime verification pending**
 
 Implementation date: **2026-08-31**
 
@@ -8,7 +8,7 @@ Original repository base revision: **`3c513084ebbe9c99daa0b65849fab7b39b913ee1`*
 
 Committed implementation revision: **`f91eeff9b710f68fc7bf4b506ec39c2d1c4474bc`** (`f91eeff`)
 
-Current specification: [BATTLE_TEST_AUTOMATION_SPEC.md](BATTLE_TEST_AUTOMATION_SPEC.md), Revision 7. The original client-join slice was implemented before the Revision 7 runtime-safety foundation.
+Current specification: [BATTLE_TEST_AUTOMATION_SPEC.md](BATTLE_TEST_AUTOMATION_SPEC.md), Revision 10. The original client-join slice was implemented before the Revision 7 runtime-safety foundation; the post-start ownership handoff was hardened against the Revision 10 process contract.
 
 ## 1. Outcome
 
@@ -25,7 +25,9 @@ This report does not promote either blocked Milestone 1 runtime capability. No c
 - `-ValidateOnly` performs those checks without creating a run directory or starting Bannerlord.
 - A live call without `-UseExistingRunContract` fails before creating the run root because a standalone client cannot prove exact dedicated-process ownership.
 - A server password is accepted only from `COOPSPECTATOR_AUTOMATION_SERVER_PASSWORD` in the launcher environment. It is never accepted as a command-line argument or written to the request, status, launch artifact, or logs.
-- A real launch creates a fresh request, launch artifact, and exclusive launcher lock below `%TEMP%\CoopSpectator\Automation\<RunId>`. Existing request or status files cause rejection.
+- A real launch creates a fresh request, provisional launch artifact, verified final launch artifact, and exclusive launcher lock below `%TEMP%\CoopSpectator\Automation\<RunId>`. Existing request or status files cause rejection.
+- Immediately after process creation, the launcher binds a provisional identity to the exact PID, requested executable path, aggregate-runner parent PID, launch window, and launch-operation ID. It uses bounded `Process`/`Win32_Process` observation before publishing verified schema-v3 `client-launch.json`.
+- Any exception after process creation but before final artifact publication triggers PID-reuse-resistant exact cleanup and propagates `RunnerInternalError`. The final atomic artifact is the handoff boundary after which the aggregate runner owns cleanup.
 - The child receives the test flag, `RunId`, exact run root, un-hashed run token, and optional password through its environment. The persisted request contains only the token hash.
 
 ### Module control path
@@ -67,6 +69,10 @@ The main game projects were intentionally not built because their current target
 | Clean committed-revision compile and controlled install | `m2b-prestage-compile-20260831-01`, `m2b-install-20260831-01` | Exact `0.3.2` client/dedicated hashes installed; full `0.3.1` pre-images retained; no product process launched |
 | Post-install environment doctor | `m2b-postinstall-doctor-20260831-01` | Installed/repository hashes match; only `RuntimeVersionCombinationNotYetVerified` remains |
 | Milestone 2B.1 final contracts and compile-only | `m2b1-final-contracts-20260831-03`, `m2b1-final-compile-only-20260831-02` | Passed 21/21 and both main projects; installed inventories unchanged; no product process launched |
+| Post-start handoff focused contracts | `Tests/CoopAutomationRunner.ContractTests` under Windows PowerShell 5.1 and PowerShell 7 | Passed source-order, exact parent/path/start, PID-reuse rejection, synthetic post-start failure, and provisional cleanup coverage |
+| Current installed-profile validation | `m2b2c-client-handoff-validate-20260831-01` with `-ValidateOnly` | Exact installed client `0.3.2` hash `B576...7928` validated; Steam found; no run root or product process created |
+| Client-handoff full canonical inventory | `m2b2c-client-handoff-contracts-20260831-01` | Passed 22/22; no product process launched |
+| Client-handoff compile-only proof | `m2b2c-client-handoff-compile-20260831-01` | Both builds passed; installed inventories unchanged; no product process launched |
 
 Contract coverage includes valid and invalid `RunId` values, run-token mismatch, loaded-module hash mismatch, expired and excessive-lifetime requests, exact and optional server filters, no match, ambiguous match, terminal-state classification, strict atomic status replacement, and compilation of the bridge/driver/controller/console-command/lobby-patch source graph against narrow runtime stubs.
 
@@ -77,20 +83,19 @@ Contract coverage includes valid and invalid `RunId` values, run-token mismatch,
 | SAF-004 default-off profile | `Partially Satisfied` | `ExperimentalFeatures.EnableTestAutomation`; bridge requires the complete run profile; isolated contract compilation passed | Source, contract test | Multiplayer client; battle-type independent | Architecture, build guide, risks, runtime flow updated | Full L2–L5 profile and runtime proof do not exist |
 | RUN-001/003/004/005 narrow client protocol | `Satisfied at the non-runtime contract layer; runtime use unverified` | Fixed `RunId` root; protocol 1.0 source/target role identity; sequence/command/token/hash identity; strict atomic status; launcher refuses reused request/status; general manifest/lease/recovery/file-fault contracts pass | Source, contract test | Multiplayer client; battle-type independent | Specification, code map, build guide, M2A report updated | Live role registration, acknowledgement, connection, timeout, and cleanup remain future runtime work |
 | BLD-003/006 client identity slice | `Partially Satisfied` | Launcher checks installed hash; module hashes its loaded assembly and rejects mismatch; exact committed `0.3.2` client/dedicated paths match the compile output; the first live feasibility attempt confirmed the dedicated loaded hash | Source, contract test, on-disk staging evidence, dedicated runtime evidence | Multiplayer client | M1 report, build guide, staging report, and feasibility report updated | No real role-reported loaded client `0.3.2` identity proof |
-| PROC-001 client launch slice | `Partially Satisfied` | Launch artifact records entry PID/path/start time; validation-only path tested | Source, contract test | Multiplayer client | Build guide and code map updated | No live launch in this step, descendant ownership, exact cleanup, or crash recovery proof |
+| PROC-001 client launch slice | `Satisfied at the non-runtime contract layer; live use unverified` | Immediate provisional PID/path/parent/window identity; bounded exact observation; atomic schema-v3 handoff; exact cleanup on post-start failure; validation-only and cross-PowerShell synthetic failure paths passed | Source, contract test | Multiplayer client | Build guide, code map, correction report, and this report updated | No real Bannerlord client launch, loaded identity, descendant, or connection proof |
 | CLI-002 initial machine prerequisite | `Partially Satisfied` | Launcher requires Steam in the current interactive session and records non-secret process IDs; validation passed | Source, environment validation | Multiplayer client | Build guide and M1 report updated | Portability, anti-cheat, modal, and other-machine proof remain open |
 | CLI-006 early feasibility gate | `Partially Satisfied` | A supported source control path now exists; M1 launch evidence and new contract evidence are separated | Source, contract test | Multiplayer client and local dedicated server | Audit and feasibility report updated | No connection, handoff, or exact cross-role runtime correlation yet |
-| CLI-008 run-scoped native-lobby intent | `Partially Satisfied` | (a) default-off complete profile; (b) fresh RunId/token/hash-bound request; (c) exact server filters; (d) run-scoped owned process plus UDP association gate; (e) native list/join APIs; (f) secret excluded from CLI/artifacts; (g) atomic state acknowledgements; (h) launcher/client do not issue `start_game` or use UI automation; source compiled and contracts passed; (i) clean `70a40db` live rerun verified dedicated identity, six writes, and cleanup; (j) Milestone 2B.2C added bounded native-output capture, exact readiness/command/start markers, singular structured results, and exact PID-correlated log retention; (k) clean `e62f536` validation exposed missing provisional ownership when immediate process-path acquisition returned null | Source, contract test, dedicated runtime evidence | Multiplayer client and associated local dedicated server; battle-type independent | Specification Revision 10 and affected living documents updated | The Milestone 2B.2C output mechanics are not yet live-proven; post-start identity/cleanup must be corrected before another run; UDP visibility, client launch, handoff, and connection remain unverified; the external runner's minimum vanilla bootstrap is not L2/L3 battle evidence |
+| CLI-008 run-scoped native-lobby intent | `Partially Satisfied` | (a) default-off complete profile; (b) fresh RunId/token/hash-bound request; (c) exact server filters; (d) run-scoped owned process plus UDP association gate; (e) native list/join APIs; (f) secret excluded from CLI/artifacts; (g) atomic state acknowledgements; (h) launcher/client do not issue `start_game` or use UI automation; source compiled and contracts passed; (i) clean `70a40db` live rerun verified dedicated identity, six writes, and cleanup; (j) Milestone 2B.2C added bounded native-output capture, exact readiness/command/start markers, singular structured results, and exact PID-correlated log retention; (k) clean `e62f536` validation exposed missing aggregate provisional ownership; (l) Revision 10 aggregate and client-launcher post-start ownership paths are now fail-closed and non-runtime verified | Source, contract test, dedicated runtime evidence | Multiplayer client and associated local dedicated server; battle-type independent | Specification Revision 10 and affected living documents updated | The corrected output and client-handoff mechanics are not yet live-proven; UDP visibility, client launch, loaded identity, lobby handoff, and connection remain unverified; the external runner's minimum vanilla bootstrap is not L2/L3 battle evidence |
 | TST-004 safe default | `Satisfied` for this slice | No complete automation environment means the controller returns without work; feature flag is independent of verbose diagnostics | Source, contract compilation | Production multiplayer client | Architecture and risks updated | Main project was not built or runtime-tested in this step |
 
 ## 5. Remaining gates
 
-The first clean Milestone 2B.2C connectivity-only validation exposed another shared runner prerequisite. The remaining gates are:
+The aggregate and client-launcher post-start ownership prerequisites are implemented and non-runtime verified. The remaining gates are:
 
-1. implement and contract-test provisional ownership immediately after successful process creation, bounded exact-path acquisition, correct `RunnerInternalError` classification, and cleanup when enrichment fails;
-2. pass focused cross-PowerShell contracts, the full canonical inventory, compile-only verification, review, commit, and push without module restaging;
-3. invoke `Feasibility` from that clean revision with explicit expected hashes and require both roles to report those loaded identities;
-4. require exact native readiness, every option/start-game/scene readback, the run-owned UDP endpoint, exact lobby selection, network handoff, connected session, unchanged global result state, exact PID-log inventory, and exact cleanup evidence;
-5. retain the run root for inspection and make no campaign, L2, or L3 claim.
+1. review, commit, and push the client-launcher handoff correction without module restaging;
+2. invoke `Feasibility` from that clean revision with explicit expected hashes and require both roles to report those loaded identities;
+3. require exact native readiness, every option/start-game/scene readback, the run-owned UDP endpoint, exact lobby selection, network handoff, connected session, unchanged global result state, exact PID-log inventory, and exact cleanup evidence;
+4. retain the run root for inspection and make no campaign, L2, or L3 claim.
 
 Only after that bounded runtime gate passes may the project proceed to campaign encounter capture or full battle execution. The vanilla bootstrap used by `Feasibility` is solely a native connectivity prerequisite and does not satisfy a battle milestone.

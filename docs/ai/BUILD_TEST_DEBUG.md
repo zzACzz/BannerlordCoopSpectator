@@ -343,7 +343,9 @@ pwsh -NoProfile -File .\scripts\Start-CoopBattleTestClient.ps1 `
 
 - `commands/client-join.request.json` — token-hash-, RunId-, command-, lifetime-, module-hash-, and server-bound intent;
 - `state/client-join.status.json` — strictly atomic module acknowledgement;
-- `artifacts/processes/client-launch.json` — entry PID/path/start time and non-secret launch identity;
+- `artifacts/processes/client-launch.provisional.json` — immediate PID/path/parent/launch-window ownership before fallible enrichment;
+- `artifacts/processes/client-launch.json` — verified schema-v3 PID/path/parent/start identity and atomic ownership handoff to the aggregate runner;
+- `artifacts/processes/client-launch.cleanup.json` — best-effort primary-error and exact-cleanup evidence when handoff fails before final publication;
 - `work/client-launch.lock` — exclusive launcher ownership for the selected `RunId`.
 
 The module status distinguishes readiness, lobby/server wait, native join request/acceptance, network handoff, connection, failure, and safe pre-join cancellation. `coop.automation_join status` reads the in-process summary; `coop.automation_join cancel` refuses to label an already started native join as cancelled.
@@ -374,7 +376,7 @@ The post-live aggregate correction now records a provisional launch identity bef
 
 `Inspect` renders an existing run without mutation. `Recover` also remains read-only unless `-ApplyRecovery` is supplied; the apply form acquires the abandoned run lock and revalidates each recorded PID, executable path, and start time immediately before stopping it. It does not delete the run root.
 
-The current `0.3.2` binaries include the game-side runtime foundation and remain bound to clean pushed revision `12abf36` by the Milestone 2B.2A staging record. Milestone 2B.2C changes no game-side source, so restaging is not required. The aggregate post-start correction is implemented and non-runtime verified, but `Start-CoopBattleTestClient.ps1` still has a separate gap between client process creation and launch-artifact publication. Harden and failure-test that cross-script handoff, then review, commit, and push before another live run. Do not proceed to campaign automation first.
+The current `0.3.2` binaries include the game-side runtime foundation and remain bound to clean pushed revision `12abf36` by the Milestone 2B.2A staging record. Milestone 2B.2C changes no game-side source, so restaging is not required. Aggregate correction `8f68d43` is published. The client launcher now records provisional ownership immediately after `Process.Start`, performs bounded exact path/start/parent enrichment, publishes the final artifact as the ownership handoff, and cleans the exact client on every earlier exception. Focused cross-PowerShell tests, `m2b2c-client-handoff-contracts-20260831-01` (22/22), and `m2b2c-client-handoff-compile-20260831-01` passed without product launch or installed-inventory change. Review, commit, and push this client correction before another live run. Do not proceed to campaign automation first.
 
 ### `scripts/CreateReleasePackage.ps1`
 

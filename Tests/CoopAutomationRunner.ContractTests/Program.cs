@@ -10,9 +10,11 @@ internal static class Program
         string repositoryRoot = ResolveRepositoryRoot();
         string corePath = Path.Combine(repositoryRoot, "scripts", "CoopAutomationRunner.Core.ps1");
         string runnerPath = Path.Combine(repositoryRoot, "scripts", "Invoke-CoopTest.ps1");
+        string clientLauncherPath = Path.Combine(repositoryRoot, "scripts", "Start-CoopBattleTestClient.ps1");
         Assert(File.Exists(corePath), "Runner core helper must exist: " + corePath);
         Assert(File.Exists(runnerPath), "Aggregate runner must exist: " + runnerPath);
-        ValidateRunnerIntegration(runnerPath, corePath);
+        Assert(File.Exists(clientLauncherPath), "Client launcher must exist: " + clientLauncherPath);
+        ValidateRunnerIntegration(runnerPath, corePath, clientLauncherPath);
 
         string temporaryRoot = Path.Combine(
             Path.GetTempPath(),
@@ -37,10 +39,11 @@ internal static class Program
         }
     }
 
-    private static void ValidateRunnerIntegration(string runnerPath, string corePath)
+    private static void ValidateRunnerIntegration(string runnerPath, string corePath, string clientLauncherPath)
     {
         string source = File.ReadAllText(runnerPath);
         string coreSource = File.ReadAllText(corePath);
+        string clientLauncherSource = File.ReadAllText(clientLauncherPath);
         Assert(
             source.Contains(". $runnerCorePath", StringComparison.Ordinal),
             "Aggregate runner must dot-source the tested core helper.");
@@ -92,6 +95,34 @@ internal static class Program
             !source.Contains("foreach ($serverCommand in @(\n", StringComparison.Ordinal) &&
             !source.Contains("foreach ($serverCommand in @(\r\n", StringComparison.Ordinal),
             "Aggregate runner must not reconstruct the comma-precedence bootstrap bug.");
+
+        int clientProcessStart = clientLauncherSource.IndexOf("$process = [System.Diagnostics.Process]::Start($startInfo)", StringComparison.Ordinal);
+        int clientProvisionalIdentity = clientLauncherSource.IndexOf("$provisionalIdentity = New-CoopProvisionalProcessIdentity", clientProcessStart, StringComparison.Ordinal);
+        int clientProvisionalArtifact = clientLauncherSource.IndexOf("Write-JsonAtomic -Path $provisionalLaunchArtifactPath", clientProvisionalIdentity, StringComparison.Ordinal);
+        int clientExactObservation = clientLauncherSource.IndexOf("$processObservation = Resolve-CoopProcessObservation", clientProvisionalArtifact, StringComparison.Ordinal);
+        int clientFinalArtifact = clientLauncherSource.IndexOf("Write-JsonAtomic -Path $launchArtifactPath", clientExactObservation, StringComparison.Ordinal);
+        int clientHandoffPublished = clientLauncherSource.IndexOf("$finalLaunchArtifactPublished = $true", clientFinalArtifact, StringComparison.Ordinal);
+        Assert(
+            clientProcessStart >= 0 &&
+            clientProvisionalIdentity > clientProcessStart &&
+            clientProvisionalArtifact > clientProvisionalIdentity &&
+            clientExactObservation > clientProvisionalArtifact &&
+            clientFinalArtifact > clientExactObservation &&
+            clientHandoffPublished > clientFinalArtifact,
+            "Client launch must publish provisional ownership and exact identity before the final handoff artifact.");
+        Assert(
+            clientLauncherSource.Contains(". $runnerCorePath", StringComparison.Ordinal) &&
+            clientLauncherSource.Contains("-ExpectedParentProcessId $PID", StringComparison.Ordinal) &&
+            clientLauncherSource.Contains("Schema = 'coop-automation-client-launch-v3'", StringComparison.Ordinal),
+            "Client launch identity must use the tested core, exact runner parent PID, and versioned verified artifact.");
+        Assert(
+            clientLauncherSource.Contains("if (-not $finalLaunchArtifactPublished)", StringComparison.Ordinal) &&
+            clientLauncherSource.Contains("Stop-CoopExactProcessIdentityCore", StringComparison.Ordinal) &&
+            clientLauncherSource.Contains("$wrapped.Data['CoopRuntimeOutcome'] = 'RunnerInternalError'", StringComparison.Ordinal),
+            "A post-start client handoff failure must remain internal and clean the exact provisional process.");
+        Assert(
+            clientLauncherSource.IndexOf("Write-Host", clientFinalArtifact, StringComparison.Ordinal) < 0,
+            "No fallible user-output operation may follow the atomic final client handoff artifact.");
     }
 
     private static string ResolveRepositoryRoot()
@@ -354,9 +385,18 @@ try {
         -LaunchObservedUtc $cleanupLaunchObservedUtc
     Assert-True (Test-CoopLiveProcessIdentityCore -Identity $cleanupIdentity -DeadlineMilliseconds 5000) `
         'A live process must match its provisional launch evidence before cleanup.'
-    $cleanupEvidence = Stop-CoopExactProcessIdentityCore -Identity $cleanupIdentity -GraceSeconds 1
+    $syntheticPostStartFailureObserved = $false
+    try {
+        throw 'Synthetic client artifact publication failed after Process.Start.'
+    }
+    catch {
+        $syntheticPostStartFailureObserved = $_.Exception.Message -match 'artifact publication failed'
+        $cleanupEvidence = Stop-CoopExactProcessIdentityCore -Identity $cleanupIdentity -GraceSeconds 1
+    }
+    Assert-True $syntheticPostStartFailureObserved `
+        'The focused harness must inject a failure after process creation and provisional identity capture.'
     Assert-True ($cleanupEvidence.IdentityMatched -and $cleanupEvidence.Outcome -eq 'Stopped') `
-        'Exact cleanup must stop a process that is known only by provisional launch ownership.'
+        'Exact cleanup must stop a provisionally owned process after post-start artifact failure.'
     Assert-True $cleanupProcess.HasExited 'The provisionally owned synthetic process must not remain running after cleanup.'
 }
 finally {

@@ -29,6 +29,12 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+$runnerCorePath = Join-Path $PSScriptRoot 'CoopAutomationRunner.Core.ps1'
+if (-not [System.IO.File]::Exists($runnerCorePath)) {
+    throw "Runner core helper is missing: $runnerCorePath"
+}
+. $runnerCorePath
+
 $automationFlagName = 'COOPSPECTATOR_TEST_AUTOMATION'
 $runIdVariableName = 'COOPSPECTATOR_AUTOMATION_RUN_ID'
 $runRootVariableName = 'COOPSPECTATOR_AUTOMATION_RUN_ROOT'
@@ -190,6 +196,8 @@ $runRoot = [System.IO.Path]::GetFullPath(
 $requestPath = Join-Path $runRoot 'commands\client-join.request.json'
 $statusPath = Join-Path $runRoot 'state\client-join.status.json'
 $launchArtifactPath = Join-Path $runRoot 'artifacts\processes\client-launch.json'
+$provisionalLaunchArtifactPath = Join-Path $runRoot 'artifacts\processes\client-launch.provisional.json'
+$launchCleanupArtifactPath = Join-Path $runRoot 'artifacts\processes\client-launch.cleanup.json'
 $lockPath = Join-Path $runRoot 'work\client-launch.lock'
 $runnerLockPath = Join-Path $runRoot 'work\runner.lock'
 $manifestPath = Join-Path $runRoot 'manifest.json'
@@ -260,6 +268,11 @@ if (-not $runnerLockHeld) {
 
 [System.IO.Directory]::CreateDirectory((Split-Path -Parent $lockPath)) | Out-Null
 $lockStream = $null
+$process = $null
+$provisionalIdentity = $null
+$finalLaunchArtifactPublished = $false
+$clientLaunchStartedUtc = $null
+$clientLaunchObservedUtc = $null
 try {
     $lockStream = New-Object System.IO.FileStream(
         $lockPath,
@@ -319,20 +332,50 @@ try {
         $startInfo.EnvironmentVariables.Remove($serverPasswordVariableName)
     }
 
+    $clientLaunchStartedUtc = [DateTime]::UtcNow
     $process = [System.Diagnostics.Process]::Start($startInfo)
     if ($null -eq $process) {
         throw 'Bannerlord process creation returned null.'
     }
+    $clientLaunchObservedUtc = [DateTime]::UtcNow
 
-    $processStartUtc = $process.StartTime.ToUniversalTime()
-    $launchArtifact = [ordered]@{
-        Schema = 'coop-automation-client-launch-v2'
+    $provisionalIdentity = New-CoopProvisionalProcessIdentity `
+        -ProcessId $process.Id `
+        -RoleType 'MultiplayerClient' `
+        -RoleInstanceId 'multiplayer-client-01' `
+        -ExpectedExecutablePath $gameExecutable `
+        -ExpectedParentProcessId $PID `
+        -LaunchStartedUtc $clientLaunchStartedUtc `
+        -LaunchObservedUtc $clientLaunchObservedUtc
+    Write-JsonAtomic -Path $provisionalLaunchArtifactPath -Value ([ordered]@{
+        Schema = 'coop-automation-client-launch-provisional-v1'
         RunId = $RunId
         CommandId = $commandId
+        Identity = $provisionalIdentity
+        PublishedUtc = [DateTime]::UtcNow.ToString('O')
+    })
+
+    $processObservation = Resolve-CoopProcessObservation `
+        -ProcessId $process.Id `
+        -ExpectedExecutablePath $gameExecutable `
+        -ExpectedParentProcessId $PID `
+        -LaunchStartedUtc $clientLaunchStartedUtc `
+        -LaunchObservedUtc $clientLaunchObservedUtc `
+        -DeadlineMilliseconds 5000
+
+    $launchArtifact = [ordered]@{
+        Schema = 'coop-automation-client-launch-v3'
+        RunId = $RunId
+        CommandId = $commandId
+        LaunchOperationId = [string]$provisionalIdentity.LaunchOperationId
+        IdentityState = 'Verified'
         LaunchUtc = [DateTime]::UtcNow.ToString('O')
         EntryPid = $process.Id
         EntryPath = $gameExecutable
-        EntryStartUtc = $processStartUtc.ToString('O')
+        EntryParentPid = [int]$processObservation.ParentProcessId
+        EntryStartUtc = [string]$processObservation.ProcessStartUtc
+        PathEvidenceSource = [string]$processObservation.PathEvidenceSource
+        ProvisionalArtifactPath = $provisionalLaunchArtifactPath
         WorkingDirectory = $startInfo.WorkingDirectory
         Arguments = $startInfo.Arguments
         SteamProcessIds = @($steamProcesses | ForEach-Object { $_.Id })
@@ -353,15 +396,76 @@ try {
         MissionOpenIssued = $false
     }
     Write-JsonAtomic -Path $launchArtifactPath -Value $launchArtifact
+    $finalLaunchArtifactPublished = $true
+}
+catch {
+    $primaryException = $_.Exception
+    if ($null -eq $process) { throw }
 
-    Write-Host "[OK] Bannerlord multiplayer client started. PID=$($process.Id)"
-    Write-Host "[OK] RunId=$RunId"
-    Write-Host "[OK] Request=$requestPath"
-    Write-Host "[OK] Status=$statusPath"
-    Write-Host '[INFO] The launcher does not issue start_game or open a mission.'
+    $cleanupEvidence = $null
+    $cleanupFailure = ''
+    if (-not $finalLaunchArtifactPublished) {
+        if ($null -eq $provisionalIdentity) {
+            try {
+                if ($null -eq $clientLaunchStartedUtc) { $clientLaunchStartedUtc = [DateTime]::UtcNow }
+                if ($null -eq $clientLaunchObservedUtc) { $clientLaunchObservedUtc = [DateTime]::UtcNow }
+                $provisionalIdentity = New-CoopProvisionalProcessIdentity `
+                    -ProcessId $process.Id `
+                    -RoleType 'MultiplayerClient' `
+                    -RoleInstanceId 'multiplayer-client-01' `
+                    -ExpectedExecutablePath $gameExecutable `
+                    -ExpectedParentProcessId $PID `
+                    -LaunchStartedUtc $clientLaunchStartedUtc `
+                    -LaunchObservedUtc $clientLaunchObservedUtc
+            }
+            catch {
+                $cleanupFailure = 'Fallback provisional identity construction failed: ' + $_.Exception.Message
+            }
+        }
+        if ($null -ne $provisionalIdentity) {
+            try {
+                $cleanupEvidence = Stop-CoopExactProcessIdentityCore `
+                    -Identity $provisionalIdentity `
+                    -GraceSeconds 5
+                if ([string]$cleanupEvidence.Outcome -ne 'Stopped' -and
+                    [string]$cleanupEvidence.Outcome -ne 'NotRunning') {
+                    $cleanupFailure = 'Exact client cleanup outcome was ' + [string]$cleanupEvidence.Outcome + '.'
+                }
+            }
+            catch {
+                $cleanupFailure = 'Exact client cleanup failed: ' + $_.Exception.Message
+            }
+        }
+
+        try {
+            Write-JsonAtomic -Path $launchCleanupArtifactPath -Value ([ordered]@{
+                Schema = 'coop-automation-client-launch-cleanup-v1'
+                RunId = $RunId
+                CommandId = $commandId
+                LaunchArtifactPublished = $finalLaunchArtifactPublished
+                PrimaryError = $primaryException.Message
+                CleanupError = $cleanupFailure
+                ProvisionalIdentity = $provisionalIdentity
+                CleanupEvidence = $cleanupEvidence
+                CompletedUtc = [DateTime]::UtcNow.ToString('O')
+            })
+        }
+        catch { }
+    }
+
+    $message = 'Post-start client launch handoff failed: ' + $primaryException.Message
+    if (-not [string]::IsNullOrWhiteSpace($cleanupFailure)) {
+        $message += ' ' + $cleanupFailure
+    }
+    $wrapped = [System.InvalidOperationException]::new($message, $primaryException)
+    $wrapped.Data['CoopRuntimeOutcome'] = 'RunnerInternalError'
+    throw $wrapped
 }
 finally {
+    if ($null -ne $process) {
+        try { $process.Dispose() } catch { }
+    }
     if ($null -ne $lockStream) {
-        $lockStream.Dispose()
+        try { $lockStream.Dispose() } catch { }
     }
 }
