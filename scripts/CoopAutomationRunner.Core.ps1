@@ -1,24 +1,195 @@
-function New-CoopDedicatedBootstrapCommands {
+function New-CoopDedicatedBootstrapRequest {
     [CmdletBinding()]
     param(
+        [Parameter(Mandatory = $true)][string]$RunId,
+        [Parameter(Mandatory = $true)][string]$RunTokenSha256,
+        [Parameter(Mandatory = $true)][string]$ExpectedDedicatedModuleSha256,
+        [Parameter(Mandatory = $true)][int]$ExpectedProcessId,
+        [Parameter(Mandatory = $true)][DateTime]$ExpectedProcessStartUtc,
+        [Parameter(Mandatory = $true)][string]$ExpectedExecutablePath,
+        [Parameter(Mandatory = $true)][Guid]$CommandId,
+        [Parameter(Mandatory = $true)][DateTime]$CreatedUtc,
+        [Parameter(Mandatory = $true)][DateTime]$ExpiresUtc,
         [Parameter(Mandatory = $true)][string]$ServerName,
-        [ValidateRange(1, 1024)][int]$MaxNumberOfPlayers = 16,
-        [Parameter(Mandatory = $true)][string]$GameType,
-        [Parameter(Mandatory = $true)][string]$Map
+        [ValidateRange(16, 16)][int]$MaxNumberOfPlayers = 16,
+        [ValidateSet('TeamDeathmatch')][string]$GameType = 'TeamDeathmatch',
+        [ValidateSet('mp_tdm_map_001')][string]$Map = 'mp_tdm_map_001'
     )
 
-    if ([string]::IsNullOrWhiteSpace($ServerName)) { throw 'ServerName is required.' }
-    if ([string]::IsNullOrWhiteSpace($GameType)) { throw 'GameType is required.' }
-    if ([string]::IsNullOrWhiteSpace($Map)) { throw 'Map is required.' }
+    if ($RunId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$') { throw 'RunId is invalid.' }
+    if ($RunTokenSha256 -notmatch '^[A-Fa-f0-9]{64}$') { throw 'RunTokenSha256 is invalid.' }
+    if ($ExpectedDedicatedModuleSha256 -notmatch '^[A-Fa-f0-9]{64}$') { throw 'ExpectedDedicatedModuleSha256 is invalid.' }
+    if ($ExpectedProcessId -le 0) { throw 'ExpectedProcessId must be positive.' }
+    if ($ExpectedProcessStartUtc -eq [DateTime]::MinValue) { throw 'ExpectedProcessStartUtc is required.' }
+    if ([string]::IsNullOrWhiteSpace($ExpectedExecutablePath)) { throw 'ExpectedExecutablePath is required.' }
+    if ($CommandId -eq [Guid]::Empty) { throw 'CommandId must be non-empty.' }
+    if ($CreatedUtc -eq [DateTime]::MinValue -or $ExpiresUtc -le $CreatedUtc) { throw 'The request lifetime is invalid.' }
+    if ($ExpiresUtc.ToUniversalTime() - $CreatedUtc.ToUniversalTime() -gt [TimeSpan]::FromMinutes(10)) {
+        throw 'The request lifetime exceeds ten minutes.'
+    }
+    if ($ServerName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') {
+        throw 'ServerName must contain only ASCII letters, digits, dot, underscore, or hyphen.'
+    }
 
-    $commands = New-Object 'System.Collections.Generic.List[string]'
-    $commands.Add('ServerName ' + $ServerName) | Out-Null
-    $commands.Add('MaxNumberOfPlayers ' + $MaxNumberOfPlayers.ToString([Globalization.CultureInfo]::InvariantCulture)) | Out-Null
-    $commands.Add('GameType ' + $GameType) | Out-Null
-    $commands.Add('Map ' + $Map) | Out-Null
-    $commands.Add('add_map_to_usable_maps ' + $Map + ' ' + $GameType) | Out-Null
-    $commands.Add('start_game') | Out-Null
-    return $commands.ToArray()
+    return [ordered]@{
+        SchemaVersion = 1
+        ProtocolMajorVersion = 1
+        ProtocolMinorVersion = 0
+        RunId = $RunId
+        Sequence = 1
+        CommandId = $CommandId.ToString('D')
+        SourceRoleType = 'Runner'
+        SourceRoleInstanceId = 'runner-01'
+        TargetRoleType = 'DedicatedServer'
+        TargetRoleInstanceId = 'dedicated-server-01'
+        CreatedUtc = $CreatedUtc.ToUniversalTime().ToString('O')
+        ExpiresUtc = $ExpiresUtc.ToUniversalTime().ToString('O')
+        RunTokenSha256 = $RunTokenSha256.ToUpperInvariant()
+        ExpectedDedicatedModuleSha256 = $ExpectedDedicatedModuleSha256.ToUpperInvariant()
+        ExpectedProcessId = $ExpectedProcessId
+        ExpectedProcessStartUtc = $ExpectedProcessStartUtc.ToUniversalTime().ToString('O')
+        ExpectedExecutablePath = [System.IO.Path]::GetFullPath($ExpectedExecutablePath)
+        BootstrapProfile = 'ConnectionFeasibilityV1'
+        ServerName = $ServerName
+        MaxNumberOfPlayers = $MaxNumberOfPlayers
+        GameType = $GameType
+        Map = $Map
+    }
+}
+
+function Assert-CoopDedicatedControlReadyStatus {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Status,
+        [Parameter(Mandatory = $true)][string]$ExpectedRunId,
+        [Parameter(Mandatory = $true)][string]$ExpectedRunTokenSha256,
+        [Parameter(Mandatory = $true)][string]$ExpectedDedicatedModuleSha256,
+        [Parameter(Mandatory = $true)][int]$ExpectedProcessId,
+        [Parameter(Mandatory = $true)][DateTime]$ExpectedProcessStartUtc,
+        [Parameter(Mandatory = $true)][string]$ExpectedExecutablePath
+    )
+
+    if ($null -eq $Status) { throw 'Dedicated control readiness status is missing.' }
+    if ([int](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'SchemaVersion') -ne 1 -or
+        [int](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'ProtocolMajorVersion') -ne 1 -or
+        [int](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'ProtocolMinorVersion') -ne 0) {
+        throw 'Dedicated control readiness protocol is unsupported.'
+    }
+    if (-not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'RunId'), $ExpectedRunId, [StringComparison]::Ordinal) -or
+        -not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'RunTokenSha256'), $ExpectedRunTokenSha256, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Dedicated control readiness run identity mismatch.'
+    }
+    if (-not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'RoleType'), 'DedicatedServer', [StringComparison]::Ordinal) -or
+        -not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'RoleInstanceId'), 'dedicated-server-01', [StringComparison]::Ordinal)) {
+        throw 'Dedicated control readiness role identity mismatch.'
+    }
+    $state = [string](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'State')
+    if ([string]::Equals($state, 'Failed', [StringComparison]::Ordinal)) {
+        throw ('Dedicated control readiness failed: ' + [string](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'FailureCode') + ': ' + [string](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'FailureMessage'))
+    }
+    if (-not [string]::Equals($state, 'Ready', [StringComparison]::Ordinal)) {
+        throw 'Dedicated control readiness state is not Ready.'
+    }
+    if ([int](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'ProcessId') -ne $ExpectedProcessId) {
+        throw 'Dedicated control readiness process ID mismatch.'
+    }
+    $actualStartUtc = ConvertTo-CoopUtcDateTime -Value (Get-CoopOptionalPropertyValue -InputObject $Status -Name 'ProcessStartUtc')
+    if ($null -eq $actualStartUtc -or [Math]::Abs(($actualStartUtc - $ExpectedProcessStartUtc.ToUniversalTime()).TotalSeconds) -ge 1.0) {
+        throw 'Dedicated control readiness process start mismatch.'
+    }
+    $actualPath = [string](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'ExecutablePath')
+    if ([string]::IsNullOrWhiteSpace($actualPath) -or
+        -not [string]::Equals([System.IO.Path]::GetFullPath($actualPath), [System.IO.Path]::GetFullPath($ExpectedExecutablePath), [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Dedicated control readiness executable path mismatch.'
+    }
+    if (-not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'ModuleSha256'), $ExpectedDedicatedModuleSha256, [StringComparison]::OrdinalIgnoreCase) -or
+        -not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'ExpectedModuleSha256'), $ExpectedDedicatedModuleSha256, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Dedicated control readiness module identity mismatch.'
+    }
+    if (-not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'LifecycleSource'), 'InitialListedGameServerState.OnActivated', [StringComparison]::Ordinal)) {
+        throw 'Dedicated control readiness lifecycle source is not authoritative.'
+    }
+    return $Status
+}
+
+function Confirm-CoopDedicatedBootstrapStatus {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Status,
+        [Parameter(Mandatory = $true)]$Request,
+        [Parameter(Mandatory = $true)][string]$ExpectedRunId,
+        [Parameter(Mandatory = $true)][string]$ExpectedRunTokenSha256,
+        [Parameter(Mandatory = $true)][string]$ExpectedDedicatedModuleSha256,
+        [Parameter(Mandatory = $true)][int]$ExpectedProcessId,
+        [Parameter(Mandatory = $true)][DateTime]$ExpectedProcessStartUtc,
+        [Parameter(Mandatory = $true)][string]$ExpectedExecutablePath
+    )
+
+    if ($null -eq $Status -or $null -eq $Request) { throw 'Dedicated bootstrap status validation context is missing.' }
+    if ([int](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'SchemaVersion') -ne 1 -or
+        [int](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'ProtocolMajorVersion') -ne 1 -or
+        [int](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'ProtocolMinorVersion') -ne 0) {
+        throw 'Dedicated bootstrap status protocol is unsupported.'
+    }
+    if (-not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'RunId'), $ExpectedRunId, [StringComparison]::Ordinal) -or
+        -not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'RunTokenSha256'), $ExpectedRunTokenSha256, [StringComparison]::OrdinalIgnoreCase) -or
+        [long](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'Sequence') -ne [long](Get-CoopOptionalPropertyValue -InputObject $Request -Name 'Sequence') -or
+        -not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'CommandId'), [string](Get-CoopOptionalPropertyValue -InputObject $Request -Name 'CommandId'), [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Dedicated bootstrap status command identity mismatch.'
+    }
+    if (-not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'SourceRoleType'), 'DedicatedServer', [StringComparison]::Ordinal) -or
+        -not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'SourceRoleInstanceId'), 'dedicated-server-01', [StringComparison]::Ordinal) -or
+        -not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'TargetRoleType'), 'Runner', [StringComparison]::Ordinal) -or
+        -not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'TargetRoleInstanceId'), 'runner-01', [StringComparison]::Ordinal)) {
+        throw 'Dedicated bootstrap status role routing mismatch.'
+    }
+    if ([int](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'ProcessId') -ne $ExpectedProcessId) {
+        throw 'Dedicated bootstrap status process ID mismatch.'
+    }
+    $actualStartUtc = ConvertTo-CoopUtcDateTime -Value (Get-CoopOptionalPropertyValue -InputObject $Status -Name 'ProcessStartUtc')
+    if ($null -eq $actualStartUtc -or [Math]::Abs(($actualStartUtc - $ExpectedProcessStartUtc.ToUniversalTime()).TotalSeconds) -ge 1.0) {
+        throw 'Dedicated bootstrap status process start mismatch.'
+    }
+    $actualPath = [string](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'ExecutablePath')
+    if ([string]::IsNullOrWhiteSpace($actualPath) -or
+        -not [string]::Equals([System.IO.Path]::GetFullPath($actualPath), [System.IO.Path]::GetFullPath($ExpectedExecutablePath), [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Dedicated bootstrap status executable path mismatch.'
+    }
+    if (-not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'DedicatedModuleSha256'), $ExpectedDedicatedModuleSha256, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Dedicated bootstrap status module identity mismatch.'
+    }
+
+    $state = [string](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'State')
+    if ([string]::Equals($state, 'Failed', [StringComparison]::Ordinal)) {
+        throw ('Dedicated bootstrap failed: ' + [string](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'FailureCode') + ': ' + [string](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'FailureMessage'))
+    }
+    if (-not [bool](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'IsTerminal')) {
+        return $false
+    }
+    if (-not [string]::Equals($state, 'BootstrapAccepted', [StringComparison]::Ordinal)) {
+        throw 'Dedicated bootstrap terminal state is not BootstrapAccepted.'
+    }
+
+    $acknowledgements = @(Get-CoopOptionalPropertyValue -InputObject $Status -Name 'Acknowledgements')
+    $expectedSteps = @('ServerName', 'MaxNumberOfPlayers', 'GameType', 'Map', 'UsableMap', 'StartGameRequested', 'StartGameConfirmed')
+    if ($acknowledgements.Count -ne $expectedSteps.Count) { throw 'Dedicated bootstrap acknowledgement history is incomplete.' }
+    for ($index = 0; $index -lt $expectedSteps.Count; $index++) {
+        $ack = $acknowledgements[$index]
+        if ([int](Get-CoopOptionalPropertyValue -InputObject $ack -Name 'StepSequence') -ne ($index + 1) -or
+            -not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $ack -Name 'Step'), $expectedSteps[$index], [StringComparison]::Ordinal)) {
+            throw 'Dedicated bootstrap acknowledgement history is reordered.'
+        }
+    }
+    if (-not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $acknowledgements[0] -Name 'ObservedValue'), [string](Get-CoopOptionalPropertyValue -InputObject $Request -Name 'ServerName'), [StringComparison]::Ordinal) -or
+        -not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $acknowledgements[1] -Name 'ObservedValue'), '16', [StringComparison]::Ordinal) -or
+        -not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $acknowledgements[2] -Name 'ObservedValue'), 'TeamDeathmatch', [StringComparison]::Ordinal) -or
+        -not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $acknowledgements[3] -Name 'ObservedValue'), 'mp_tdm_map_001', [StringComparison]::Ordinal) -or
+        -not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $acknowledgements[4] -Name 'ObservedValue'), 'mp_tdm_map_001', [StringComparison]::Ordinal) -or
+        -not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $acknowledgements[5] -Name 'ObservedValue'), 'start_game', [StringComparison]::Ordinal) -or
+        [string](Get-CoopOptionalPropertyValue -InputObject $acknowledgements[6] -Name 'ObservedValue') -notmatch '^IsPlaying=true;GameType=TeamDeathmatch;Map=mp_tdm_map_001$') {
+        throw 'Dedicated bootstrap acknowledgement values do not match the allowlisted request.'
+    }
+    return $true
 }
 
 function Get-CoopDescendantProcessRecordsFromSnapshot {

@@ -48,8 +48,8 @@ internal static class Program
             source.Contains(". $runnerCorePath", StringComparison.Ordinal),
             "Aggregate runner must dot-source the tested core helper.");
         Assert(
-            source.Contains("$serverCommands = @(New-CoopDedicatedBootstrapCommands", StringComparison.Ordinal),
-            "Aggregate runner must use the tested discrete bootstrap-command builder.");
+            source.Contains("$dedicatedBootstrapRequest = New-CoopDedicatedBootstrapRequest", StringComparison.Ordinal),
+            "Aggregate runner must use the tested structured dedicated-bootstrap request builder.");
         Assert(
             source.Contains("Get-CoopDescendantProcessRecordsFromSnapshot", StringComparison.Ordinal),
             "Aggregate runner must use the tested in-memory process-tree traversal.");
@@ -72,13 +72,16 @@ internal static class Program
             "Post-start identity-enrichment defects must be classified as RunnerInternalError.");
         Assert(
             source.Contains("$dedicatedStartInfo.RedirectStandardOutput = $true", StringComparison.Ordinal) &&
-            source.Contains("$dedicatedStartInfo.RedirectStandardError = $true", StringComparison.Ordinal),
-            "Feasibility must capture the exact dedicated process stdout and stderr.");
+            source.Contains("$dedicatedStartInfo.RedirectStandardError = $true", StringComparison.Ordinal) &&
+            source.Contains("$dedicatedStartInfo.RedirectStandardInput = $false", StringComparison.Ordinal),
+            "Feasibility must retain supplementary output capture without relying on redirected standard input.");
         Assert(
-            source.Contains("Wait-CoopCapturedTextMarkers", StringComparison.Ordinal) &&
-            source.Contains("is ready! You can now enter console commands", StringComparison.Ordinal) &&
-            source.Contains("--Game is starting...", StringComparison.Ordinal),
-            "Feasibility must wait for native console readiness and accepted start_game evidence.");
+            source.Contains("Wait-CoopDedicatedControlReady", StringComparison.Ordinal) &&
+            source.Contains("Wait-CoopDedicatedBootstrapAccepted", StringComparison.Ordinal) &&
+            source.Contains("DedicatedControlReadinessEvidence", StringComparison.Ordinal) &&
+            source.Contains("DedicatedBootstrapStatus", StringComparison.Ordinal) &&
+            !source.Contains("$dedicatedProcess.StandardInput.WriteLine", StringComparison.Ordinal),
+            "Feasibility must use run-scoped dedicated readiness/bootstrap acknowledgements and no standard-input command writes.");
         Assert(
             source.Contains("Copy-CoopDedicatedNativeLogs", StringComparison.Ordinal),
             "Feasibility must retain exact PID-correlated native logs.");
@@ -92,9 +95,10 @@ internal static class Program
             source.Contains("Stop-CoopExactProcessIdentityCore -Identity $Identity", StringComparison.Ordinal),
             "Cleanup waits must not leak Boolean values into the command result pipeline.");
         Assert(
-            !source.Contains("foreach ($serverCommand in @(\n", StringComparison.Ordinal) &&
-            !source.Contains("foreach ($serverCommand in @(\r\n", StringComparison.Ordinal),
-            "Aggregate runner must not reconstruct the comma-precedence bootstrap bug.");
+            coreSource.Contains("function New-CoopDedicatedBootstrapRequest", StringComparison.Ordinal) &&
+            coreSource.Contains("function Assert-CoopDedicatedControlReadyStatus", StringComparison.Ordinal) &&
+            coreSource.Contains("function Confirm-CoopDedicatedBootstrapStatus", StringComparison.Ordinal),
+            "The tested runner core must own the structured dedicated control protocol validation.");
 
         int clientProcessStart = clientLauncherSource.IndexOf("$process = [System.Diagnostics.Process]::Start($startInfo)", StringComparison.Ordinal);
         int clientProvisionalIdentity = clientLauncherSource.IndexOf("$provisionalIdentity = New-CoopProvisionalProcessIdentity", clientProcessStart, StringComparison.Ordinal);
@@ -197,32 +201,147 @@ function Assert-True([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
 }
 
-$commands = @(New-CoopDedicatedBootstrapCommands `
-    -ServerName 'AC_COOP_CONTRACT' `
-    -MaxNumberOfPlayers 16 `
-    -GameType 'TeamDeathmatch' `
-    -Map 'mp_tdm_map_001')
-$expectedCommands = @(
-    'ServerName AC_COOP_CONTRACT',
-    'MaxNumberOfPlayers 16',
-    'GameType TeamDeathmatch',
-    'Map mp_tdm_map_001',
-    'add_map_to_usable_maps mp_tdm_map_001 TeamDeathmatch',
-    'start_game')
-Assert-True ($commands.Count -eq 6) 'Bootstrap must contain exactly six commands.'
-for ($index = 0; $index -lt $expectedCommands.Count; $index++) {
-    Assert-True ([string]::Equals($commands[$index], $expectedCommands[$index], [StringComparison]::Ordinal)) `
-        ('Bootstrap command mismatch at index ' + $index + ': ' + $commands[$index])
-}
+$controlNowUtc = [DateTime]::UtcNow
+$controlProcessStartUtc = $controlNowUtc.AddSeconds(-2)
+$controlPath = [System.IO.Path]::GetFullPath($CorePath)
+$controlTokenHash = 'A' * 64
+$controlModuleHash = 'B' * 64
+$controlCommandId = [Guid]::NewGuid()
+$request = New-CoopDedicatedBootstrapRequest `
+    -RunId 'dedicated-control-contract' `
+    -RunTokenSha256 $controlTokenHash `
+    -ExpectedDedicatedModuleSha256 $controlModuleHash `
+    -ExpectedProcessId 61001 `
+    -ExpectedProcessStartUtc $controlProcessStartUtc `
+    -ExpectedExecutablePath $controlPath `
+    -CommandId $controlCommandId `
+    -CreatedUtc $controlNowUtc `
+    -ExpiresUtc $controlNowUtc.AddMinutes(5) `
+    -ServerName 'AC_COOP_CONTRACT'
+Assert-True ($request.SchemaVersion -eq 1) 'Dedicated bootstrap request schema must remain exact.'
+Assert-True ($request.Sequence -eq 1) 'A fresh run root must accept only dedicated bootstrap sequence 1.'
+Assert-True ($request.CommandId -eq $controlCommandId.ToString('D')) 'Dedicated bootstrap command ID must remain exact.'
+Assert-True ($request.BootstrapProfile -eq 'ConnectionFeasibilityV1') 'Dedicated bootstrap profile must remain allowlisted.'
+Assert-True ($request.MaxNumberOfPlayers -eq 16 -and $request.GameType -eq 'TeamDeathmatch' -and $request.Map -eq 'mp_tdm_map_001') `
+    'Dedicated bootstrap values must remain the narrow connection-feasibility profile.'
 
-$alternate = @(New-CoopDedicatedBootstrapCommands `
-    -ServerName 'AC_COOP_ALTERNATE' `
-    -MaxNumberOfPlayers 32 `
-    -GameType 'AlternateMode' `
-    -Map 'alternate_map')
-Assert-True ($alternate.Count -eq 6) 'Alternate bootstrap must remain six discrete commands.'
-Assert-True ($alternate[2] -eq 'GameType AlternateMode') 'Game type must remain a distinct dynamic command.'
-Assert-True ($alternate[4] -eq 'add_map_to_usable_maps alternate_map AlternateMode') 'Usable-map command must retain both dynamic identities.'
+$lifetimeRejected = $false
+try {
+    $null = New-CoopDedicatedBootstrapRequest `
+        -RunId 'dedicated-control-contract' `
+        -RunTokenSha256 $controlTokenHash `
+        -ExpectedDedicatedModuleSha256 $controlModuleHash `
+        -ExpectedProcessId 61001 `
+        -ExpectedProcessStartUtc $controlProcessStartUtc `
+        -ExpectedExecutablePath $controlPath `
+        -CommandId ([Guid]::NewGuid()) `
+        -CreatedUtc $controlNowUtc `
+        -ExpiresUtc $controlNowUtc.AddMinutes(11) `
+        -ServerName 'AC_COOP_CONTRACT'
+}
+catch { $lifetimeRejected = $_.Exception.Message -match 'exceeds ten minutes' }
+Assert-True $lifetimeRejected 'An excessive dedicated bootstrap lifetime must be rejected.'
+
+$unsafeServerNameRejected = $false
+try {
+    $null = New-CoopDedicatedBootstrapRequest `
+        -RunId 'dedicated-control-contract' `
+        -RunTokenSha256 $controlTokenHash `
+        -ExpectedDedicatedModuleSha256 $controlModuleHash `
+        -ExpectedProcessId 61001 `
+        -ExpectedProcessStartUtc $controlProcessStartUtc `
+        -ExpectedExecutablePath $controlPath `
+        -CommandId ([Guid]::NewGuid()) `
+        -CreatedUtc $controlNowUtc `
+        -ExpiresUtc $controlNowUtc.AddMinutes(5) `
+        -ServerName 'AC_COOP_CONTRACT;start_game'
+}
+catch { $unsafeServerNameRejected = $_.Exception.Message -match 'only ASCII letters' }
+Assert-True $unsafeServerNameRejected 'The server-name field must not expose console separators or arbitrary commands.'
+
+$readyStatus = [pscustomobject]@{
+    SchemaVersion = 1
+    ProtocolMajorVersion = 1
+    ProtocolMinorVersion = 0
+    RunId = $request.RunId
+    RunTokenSha256 = $controlTokenHash
+    RoleType = 'DedicatedServer'
+    RoleInstanceId = 'dedicated-server-01'
+    State = 'Ready'
+    ProcessId = 61001
+    ProcessStartUtc = $controlProcessStartUtc.ToString('O')
+    ExecutablePath = $controlPath
+    ModuleSha256 = $controlModuleHash
+    ExpectedModuleSha256 = $controlModuleHash
+    LifecycleSource = 'InitialListedGameServerState.OnActivated'
+    FailureCode = ''
+    FailureMessage = ''
+}
+$validatedReady = Assert-CoopDedicatedControlReadyStatus `
+    -Status $readyStatus `
+    -ExpectedRunId $request.RunId `
+    -ExpectedRunTokenSha256 $controlTokenHash `
+    -ExpectedDedicatedModuleSha256 $controlModuleHash `
+    -ExpectedProcessId 61001 `
+    -ExpectedProcessStartUtc $controlProcessStartUtc `
+    -ExpectedExecutablePath $controlPath
+Assert-True ($validatedReady.State -eq 'Ready') 'The exact lifecycle readiness status must be accepted.'
+
+$acknowledgements = @(
+    [pscustomobject]@{ StepSequence = 1; Step = 'ServerName'; State = 'Applied'; ObservedValue = 'AC_COOP_CONTRACT' },
+    [pscustomobject]@{ StepSequence = 2; Step = 'MaxNumberOfPlayers'; State = 'Applied'; ObservedValue = '16' },
+    [pscustomobject]@{ StepSequence = 3; Step = 'GameType'; State = 'Applied'; ObservedValue = 'TeamDeathmatch' },
+    [pscustomobject]@{ StepSequence = 4; Step = 'Map'; State = 'Applied'; ObservedValue = 'mp_tdm_map_001' },
+    [pscustomobject]@{ StepSequence = 5; Step = 'UsableMap'; State = 'Accepted'; ObservedValue = 'mp_tdm_map_001' },
+    [pscustomobject]@{ StepSequence = 6; Step = 'StartGameRequested'; State = 'Requested'; ObservedValue = 'start_game' },
+    [pscustomobject]@{ StepSequence = 7; Step = 'StartGameConfirmed'; State = 'Confirmed'; ObservedValue = 'IsPlaying=true;GameType=TeamDeathmatch;Map=mp_tdm_map_001' })
+$terminalStatus = [pscustomobject]@{
+    SchemaVersion = 1
+    ProtocolMajorVersion = 1
+    ProtocolMinorVersion = 0
+    RunId = $request.RunId
+    Sequence = $request.Sequence
+    CommandId = $request.CommandId
+    SourceRoleType = 'DedicatedServer'
+    SourceRoleInstanceId = 'dedicated-server-01'
+    TargetRoleType = 'Runner'
+    TargetRoleInstanceId = 'runner-01'
+    RunTokenSha256 = $controlTokenHash
+    DedicatedModuleSha256 = $controlModuleHash
+    ProcessId = 61001
+    ProcessStartUtc = $controlProcessStartUtc.ToString('O')
+    ExecutablePath = $controlPath
+    State = 'BootstrapAccepted'
+    IsTerminal = $true
+    Acknowledgements = $acknowledgements
+    FailureCode = ''
+    FailureMessage = ''
+}
+$accepted = Confirm-CoopDedicatedBootstrapStatus `
+    -Status $terminalStatus `
+    -Request $request `
+    -ExpectedRunId $request.RunId `
+    -ExpectedRunTokenSha256 $controlTokenHash `
+    -ExpectedDedicatedModuleSha256 $controlModuleHash `
+    -ExpectedProcessId 61001 `
+    -ExpectedProcessStartUtc $controlProcessStartUtc `
+    -ExpectedExecutablePath $controlPath
+Assert-True $accepted 'The complete ordered dedicated bootstrap acknowledgement history must be accepted.'
+$terminalStatus.Acknowledgements[5].Step = 'StartGameConfirmed'
+$reorderedRejected = $false
+try {
+    $null = Confirm-CoopDedicatedBootstrapStatus `
+        -Status $terminalStatus `
+        -Request $request `
+        -ExpectedRunId $request.RunId `
+        -ExpectedRunTokenSha256 $controlTokenHash `
+        -ExpectedDedicatedModuleSha256 $controlModuleHash `
+        -ExpectedProcessId 61001 `
+        -ExpectedProcessStartUtc $controlProcessStartUtc `
+        -ExpectedExecutablePath $controlPath
+}
+catch { $reorderedRejected = $_.Exception.Message -match 'reordered' }
+Assert-True $reorderedRejected 'A reordered dedicated bootstrap acknowledgement history must be rejected.'
 
 $snapshot = @(
     [pscustomobject]@{ ProcessId = 10; ParentProcessId = 1; Name = 'root-a' },

@@ -173,7 +173,7 @@ An L0/L1 `Pass` proves only the named environment assertion, contract inventory,
 
 For the exact staged profile, `DedicatedCustomServer.Starter.exe` may create or rebind a native console after process creation. Redirected stdout/stderr may remain empty even while native logs and service heartbeats continue, and PID-correlated `rgl_log` output does not necessarily include .NET `Console.WriteLine` text. Redirected standard input/output and native logs are therefore supplementary evidence only.
 
-Before another live connection attempt, the external runner must own an allowlisted command intent, and the exact dedicated role must publish run/token/hash/process-bound atomic acknowledgements for readiness, applied options, usable-map acceptance, and start-game progression. The control path must remain disabled by default, must not expose a generic production command surface, and must not perform per-tick file I/O or logging when automation is disabled.
+The Milestone 2B.2D source path enforces this invariant: the external runner owns one fixed allowlisted command intent, the variable server-name field accepts only ASCII letters, digits, dot, underscore, or hyphen, and the exact dedicated role publishes run/token/hash/process-bound atomic acknowledgements for readiness, applied options, usable-map acceptance, and start-game progression. The control path remains disabled by default, exposes no generic production command surface, and performs no per-tick file I/O or logging when automation is disabled. Runtime proof remains pending until the new dedicated output is staged and exercised by a named run.
 
 ## Known current limitations and unverified areas
 
@@ -188,7 +188,7 @@ Before another live connection attempt, the external runner must own an allowlis
 - Blockade and blockade sally out are unsupported.
 - Core battle roster and phase/start-request paths are still shared under the normal Documents profile and have no automation `RunId`. Milestone 2B.1 makes only result publication fail-closed: a complete explicit automation profile with exact `Suppress` records a run-scoped decision and cannot write campaign-consumable `battle_result.json`; an invalid enabled profile rejects publication instead of falling back to production. This permits only the minimum vanilla connectivity bootstrap, not a campaign fixture or L2/L3 battle run.
 - A default-off run-scoped command/acknowledgement path now exists in source for the normal lobby join flow, but it has only isolated contract evidence. It is not Bannerlord-runtime-verified and does not remove the M1 connection/control blockers until a named connection rerun proves the exact handoff.
-- No run-scoped dedicated readiness/command acknowledgement path exists yet. The current aggregate runner's redirected standard-handle path timed out before command dispatch in `m2b2c-client-handoff-live-20260831-01`; another unchanged retry is not an acceptable substitute.
+- A run-scoped dedicated readiness/request/acknowledgement path now exists in source and passed focused, full-contract, and compile-only validation. Its newly compiled dedicated binary is not staged or Bannerlord-runtime-verified; no UDP, client, connection, campaign, mission, L2, or L3 proof follows from the source result.
 - The Milestone 2A runner, protocol, full 20-project aggregate, and compile-only mode are source/build/test verified. They intentionally provide no staging, loaded-hash, process-cleanup, connection, mission, or battle evidence; those remain Milestone 2B or later.
 
 ### Recorded runtime gaps

@@ -9,6 +9,7 @@
     <Compile Include="..\..\Infrastructure\Automation\CoopAutomationProtocolFileIO.cs" Link="CoopAutomationProtocolFileIO.cs" />
     <Compile Include="..\..\Infrastructure\Automation\CoopAutomationRuntimeContract.cs" Link="CoopAutomationRuntimeContract.cs" />
     <Compile Include="..\..\Infrastructure\Automation\CoopAutomationRuntimeBridge.cs" Link="CoopAutomationRuntimeBridge.cs" />
+    <Compile Include="..\..\DedicatedServer\Automation\CoopAutomationDedicatedControlContract.cs" Link="CoopAutomationDedicatedControlContract.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />

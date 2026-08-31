@@ -195,3 +195,9 @@ Automatic cleanup gracefully stopped the exact starter without a forced stop, re
 The client launcher was not invoked, so its live process-handoff behavior remains unverified. No UDP endpoint, client loaded identity, lobby selection, network handoff, connection, campaign, mission, or battle was reached, and the report explicitly retained `CampaignStarted=false`, `CampaignBattleFixtureOpened=false`, and `L2OrL3PassClaimed=false`.
 
 The next gate is not another unchanged retry. It is a separately approved, default-off, run/token/hash/process-bound dedicated readiness, command-intent, and acknowledgement channel. This shared bootstrap precedes all scenario routing, so its blocker applies equally to field, village, siege, sally-out, ambush, relief, lords-hall, hideout, sequential, and reconnect work.
+
+## 12. Source follow-up
+
+[BATTLE_TEST_AUTOMATION_M2B2D_DEDICATED_CONTROL.md](BATTLE_TEST_AUTOMATION_M2B2D_DEDICATED_CONTROL.md) records the source/contracts implementation of that exact channel. The dedicated role now observes the authoritative listed-server lifecycle event, validates a fixed bootstrap request, applies native commands on the main tick, and publishes seven ordered state-backed acknowledgements. Full contracts passed 22/22 and compile-only proved the installed module inventories unchanged.
+
+No later live run has yet replaced the evidence in this report. The new dedicated output is not staged, so UDP visibility, client launch, loaded client identity, handoff, connection, campaign, mission, and battle remain unverified.

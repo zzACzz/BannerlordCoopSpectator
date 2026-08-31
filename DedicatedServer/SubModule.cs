@@ -54,6 +54,8 @@ namespace CoopSpectator
         {
             base.OnApplicationTick(dt);
 
+            CoopAutomationDedicatedControlBridge.Tick();
+
             if (ExperimentalFeatures.EnableTdmCloneExperiment)
                 return;
 
@@ -425,6 +427,14 @@ namespace CoopSpectator
                         "Dedicated automation runtime configuration rejected: " +
                         automationFailureCode + ": " + automationFailureMessage);
                 }
+                if (!CoopAutomationDedicatedControlBridge.TryInitialize(
+                        out automationFailureCode,
+                        out automationFailureMessage))
+                {
+                    throw new InvalidOperationException(
+                        "Dedicated automation control initialization rejected: " +
+                        automationFailureCode + ": " + automationFailureMessage);
+                }
                 SandBoxSceneScriptTypeRegistrar.RegisterOrThrow();
                 CoopBattlePeerReconnectState.EnsureHooksInstalled();
                 LogDedicatedStartupInfo();
@@ -550,6 +560,18 @@ namespace CoopSpectator
             TryRegisterCoopCampaignDerivedAgentApplyDamageModel(game, gameStarterObject, "dedicated");
             TryRegisterCoopCampaignDerivedMissionDifficultyModel(game, gameStarterObject, "dedicated");
             TryRegisterCoopCampaignDerivedBattleMoraleModel(game, gameStarterObject, "dedicated");
+        }
+
+        protected override void OnSubModuleUnloaded()
+        {
+            try
+            {
+                CoopAutomationDedicatedControlBridge.Shutdown();
+            }
+            finally
+            {
+                base.OnSubModuleUnloaded();
+            }
         }
 
         private static void TryApplyExactCampaignArmyBootstrapPatch()

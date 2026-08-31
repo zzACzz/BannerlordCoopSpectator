@@ -86,7 +86,11 @@ This default-off orchestration flow is independent of the battle-phase and exact
 fresh RunId + result policy Suppress
   -> exact dedicated process
   -> dedicated module validates run/token/loaded hash
-  -> runner sends minimum vanilla TeamDeathmatch/start_game bootstrap
+  -> dedicated bridge observes InitialListedGameServerState.OnActivated
+  -> atomic dedicated-control ready acknowledgement
+  -> runner publishes fixed ConnectionFeasibilityV1 bootstrap request
+  -> dedicated main tick applies native TeamDeathmatch/start_game commands
+  -> seven ordered native-state acknowledgements
   -> runner verifies exact UDP owner
   -> token-bound state/dedicated-host.json
   -> client launcher inherits the existing run contract
@@ -106,9 +110,9 @@ fresh RunId + result policy Suppress
 
 `SubModule.OnApplicationTick` pumps `CoopLobbyAutomationController` on the main thread. The controller writes status only when the state or failure details change. A request may expire before native join starts; after the native task starts, only the future external runner may time out and clean up its exactly owned process.
 
-The launcher and client module do not issue `start_game`. Only the external runner may authorize the minimum standard server bootstrap, and only after `Suppress`, dedicated loaded-hash validation, and an authoritative readiness acknowledgement from the exact dedicated role. Successful process creation first establishes provisional cleanup ownership; bounded identity enrichment then resolves and validates the exact requested executable even when an immediate `Process.Path` read is null.
+The launcher and client module do not issue `start_game`. Only the external runner may authorize the minimum standard server bootstrap, and only after `Suppress`, dedicated loaded-hash validation, and an authoritative readiness acknowledgement from the exact dedicated role. It publishes a fixed structured request rather than an arbitrary console line. The dedicated main tick invokes the native command path and must publish exact state-backed acknowledgements before the runner begins the UDP deadline. Successful process creation first establishes provisional cleanup ownership; bounded identity enrichment then resolves and validates the exact requested executable even when an immediate `Process.Path` read is null.
 
-Clean run `m2b2c-client-handoff-live-20260831-01` proved the corrected dedicated ownership and cleanup sequence, but redirected stdout/stderr stayed empty even while the exact process loaded the module, authenticated, and continued service heartbeats. The starter-owned native console and PID-correlated log did not expose the `Console.WriteLine` readiness text to the runner. The next flow therefore requires a default-off run/token/hash/process-bound readiness, command-intent, and acknowledgement channel. Redirected standard input/output and native logs may supplement that channel but cannot define it. Until that channel proves readiness, applied options, usable-map acceptance, and start-game progression, command acceptance, UDP visibility, client handoff, and connection remain blocked. The bootstrap opens no campaign fixture, advances no cooperative battle phase, consumes no result, and creates no L2/L3 evidence claim.
+Clean run `m2b2c-client-handoff-live-20260831-01` proved the corrected dedicated ownership and cleanup sequence, but redirected stdout/stderr stayed empty even while the exact process loaded the module, authenticated, and continued service heartbeats. The starter-owned native console and PID-correlated log did not expose the `Console.WriteLine` readiness text to the runner. Milestone 2B.2D now implements the required default-off run/token/hash/process-bound readiness, request, and acknowledgement channel in source and contracts. Redirected standard input/output and native logs may supplement that channel but cannot define it. Because the new dedicated binary is not staged or runtime-verified, applied options, usable-map acceptance, start-game progression, UDP visibility, client handoff, and connection remain runtime gaps. The bootstrap opens no campaign fixture, advances no cooperative battle phase, consumes no result, and creates no L2/L3 evidence claim.
 
 ## Flow 1: campaign encounter capture
 

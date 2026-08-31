@@ -796,6 +796,86 @@ function Wait-CoopRuntimeRoleReady {
     throw "Timed out waiting for runtime role status: $StatusPath"
 }
 
+function Wait-CoopDedicatedControlReady {
+    param(
+        [Parameter(Mandatory = $true)][string]$StatusPath,
+        [Parameter(Mandatory = $true)][string]$ExpectedModuleSha256,
+        [Parameter(Mandatory = $true)]$DedicatedIdentity,
+        [Parameter(Mandatory = $true)][System.Diagnostics.Process]$DedicatedProcess,
+        [Parameter(Mandatory = $true)][DateTime]$DeadlineUtc,
+        $ProcessTextCapture
+    )
+
+    $expectedStartUtc = [DateTime]::Parse(
+        [string]$DedicatedIdentity.ProcessStartUtc,
+        [Globalization.CultureInfo]::InvariantCulture,
+        [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+    while ([DateTime]::UtcNow -lt $DeadlineUtc) {
+        if ($null -ne $ProcessTextCapture) {
+            Update-CoopProcessTextCapture -Capture $ProcessTextCapture
+        }
+        if ($DedicatedProcess.HasExited) {
+            throw 'Dedicated server exited before publishing the authoritative control readiness acknowledgement.'
+        }
+        $status = Read-CoopJsonShared -Path $StatusPath
+        if ($null -ne $status) {
+            $validated = Assert-CoopDedicatedControlReadyStatus `
+                -Status $status `
+                -ExpectedRunId $RunId `
+                -ExpectedRunTokenSha256 $nonceSha256 `
+                -ExpectedDedicatedModuleSha256 $ExpectedModuleSha256 `
+                -ExpectedProcessId ([int]$DedicatedIdentity.ProcessId) `
+                -ExpectedProcessStartUtc $expectedStartUtc `
+                -ExpectedExecutablePath ([string]$DedicatedIdentity.ExecutablePath)
+            return $validated
+        }
+        Update-CoopLease
+        Start-Sleep -Milliseconds 250
+    }
+    throw "Timed out waiting for the run-scoped dedicated control readiness acknowledgement: $StatusPath"
+}
+
+function Wait-CoopDedicatedBootstrapAccepted {
+    param(
+        [Parameter(Mandatory = $true)][string]$StatusPath,
+        [Parameter(Mandatory = $true)]$Request,
+        [Parameter(Mandatory = $true)][string]$ExpectedModuleSha256,
+        [Parameter(Mandatory = $true)]$DedicatedIdentity,
+        [Parameter(Mandatory = $true)][System.Diagnostics.Process]$DedicatedProcess,
+        [Parameter(Mandatory = $true)][DateTime]$DeadlineUtc,
+        $ProcessTextCapture
+    )
+
+    $expectedStartUtc = [DateTime]::Parse(
+        [string]$DedicatedIdentity.ProcessStartUtc,
+        [Globalization.CultureInfo]::InvariantCulture,
+        [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+    while ([DateTime]::UtcNow -lt $DeadlineUtc) {
+        if ($null -ne $ProcessTextCapture) {
+            Update-CoopProcessTextCapture -Capture $ProcessTextCapture
+        }
+        if ($DedicatedProcess.HasExited) {
+            throw 'Dedicated server exited before terminal bootstrap acknowledgement.'
+        }
+        $status = Read-CoopJsonShared -Path $StatusPath
+        if ($null -ne $status) {
+            $accepted = Confirm-CoopDedicatedBootstrapStatus `
+                -Status $status `
+                -Request $Request `
+                -ExpectedRunId $RunId `
+                -ExpectedRunTokenSha256 $nonceSha256 `
+                -ExpectedDedicatedModuleSha256 $ExpectedModuleSha256 `
+                -ExpectedProcessId ([int]$DedicatedIdentity.ProcessId) `
+                -ExpectedProcessStartUtc $expectedStartUtc `
+                -ExpectedExecutablePath ([string]$DedicatedIdentity.ExecutablePath)
+            if ($accepted) { return $status }
+        }
+        Update-CoopLease
+        Start-Sleep -Milliseconds 250
+    }
+    throw "Timed out waiting for the run-scoped dedicated bootstrap acknowledgement: $StatusPath"
+}
+
 function Wait-CoopClientConnection {
     param(
         [Parameter(Mandatory = $true)][string]$StatusPath,
@@ -1595,8 +1675,8 @@ function Invoke-CoopFeasibility {
         if ($candidate.Length -gt 120) { $candidate.Substring(0, 120) } else { $candidate }
     }
     else { $ServerName.Trim() }
-    if ([string]::IsNullOrWhiteSpace($effectiveServerName) -or $effectiveServerName.Length -gt 128 -or $effectiveServerName -match '[\x00-\x1F\x7F]') {
-        return [ordered]@{ Outcome = 'PreconditionsFailed'; Reason = 'The runtime server name is invalid.'; ArtifactPath = '' }
+    if ($effectiveServerName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') {
+        return [ordered]@{ Outcome = 'PreconditionsFailed'; Reason = 'The runtime server name must contain only ASCII letters, digits, dot, underscore, or hyphen.'; ArtifactPath = '' }
     }
 
     if (-not [string]::IsNullOrWhiteSpace($ExpectedClientModuleSha256) -and
@@ -1671,7 +1751,8 @@ function Invoke-CoopFeasibility {
     $dedicatedProcess = $null
     $dedicatedIdentity = $null
     $dedicatedTextCapture = $null
-    $nativeConsoleReadinessEvidence = $null
+    $dedicatedControlReadinessEvidence = $null
+    $dedicatedBootstrapStatus = $null
     $bootstrapCommandEvidence = New-Object 'System.Collections.Generic.List[object]'
     $nativeLogInventory = $null
 
@@ -1684,7 +1765,7 @@ function Invoke-CoopFeasibility {
         $dedicatedStartInfo.WorkingDirectory = Split-Path -Parent $dedicatedExecutable
         $dedicatedStartInfo.UseShellExecute = $false
         $dedicatedStartInfo.CreateNoWindow = $false
-        $dedicatedStartInfo.RedirectStandardInput = $true
+        $dedicatedStartInfo.RedirectStandardInput = $false
         $dedicatedStartInfo.RedirectStandardOutput = $true
         $dedicatedStartInfo.RedirectStandardError = $true
         $dedicatedStartInfo.Arguments = '--multihome 0.0.0.0 --port ' + $Port +
@@ -1745,81 +1826,52 @@ function Invoke-CoopFeasibility {
             -DeadlineUtc $roleDeadline `
             -ProcessTextCapture $dedicatedTextCapture
 
-        $consoleReadyDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Min(180, $RuntimeTimeoutSeconds))
-        $nativeConsoleReadinessEvidence = Wait-CoopCapturedTextMarkers `
-            -Capture $dedicatedTextCapture `
-            -RequiredSubstrings @('is ready! You can now enter console commands') `
-            -AfterSequence 0 `
-            -DeadlineUtc $consoleReadyDeadline `
-            -EvidenceName 'NativeConsoleReady' `
-            -Heartbeat { Update-CoopLease }
-        Add-CoopEvent -EventType 'DedicatedNativeConsoleReady' -Message `
-            'The exact owned process emitted the native InitialListedGameServerState readiness acknowledgement.'
+        $controlReadyDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Min(180, $RuntimeTimeoutSeconds))
+        $dedicatedControlReadinessEvidence = Wait-CoopDedicatedControlReady `
+            -StatusPath (Join-Path $runRoot 'state\dedicated-control.ready.json') `
+            -ExpectedModuleSha256 $expectedDedicatedHash `
+            -DedicatedIdentity $dedicatedIdentity `
+            -DedicatedProcess $dedicatedProcess `
+            -DeadlineUtc $controlReadyDeadline `
+            -ProcessTextCapture $dedicatedTextCapture
+        Add-CoopEvent -EventType 'DedicatedControlReady' -Message `
+            'The exact dedicated role published the InitialListedGameServerState.OnActivated acknowledgement.'
 
-        $serverCommands = @(New-CoopDedicatedBootstrapCommands `
-            -ServerName $effectiveServerName `
-            -MaxNumberOfPlayers 16 `
-            -GameType 'TeamDeathmatch' `
-            -Map 'mp_tdm_map_001')
-        if ($serverCommands.Count -ne 6) { throw 'The dedicated bootstrap command list must contain exactly six commands.' }
-        $optionEvidenceMarkers = @(
-            ('--Changed: ServerName, to: ' + $effectiveServerName),
-            '--Changed: MaxNumberOfPlayers, to: 16',
-            '--Changed: GameType, to: TeamDeathmatch',
-            '--Changed: Map, to: mp_tdm_map_001')
-        $bootstrapDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Min(180, $RuntimeTimeoutSeconds))
-        for ($commandIndex = 0; $commandIndex -lt 4; $commandIndex++) {
-            Update-CoopProcessTextCapture -Capture $dedicatedTextCapture
-            $afterSequence = [long]$dedicatedTextCapture.Sequence
-            $serverCommand = $serverCommands[$commandIndex]
-            $dedicatedProcess.StandardInput.WriteLine($serverCommand)
-            $dedicatedProcess.StandardInput.Flush()
-            Add-CoopEvent -EventType 'DedicatedConsoleCommandSent' -Message $serverCommand
-            $commandEvidence = Wait-CoopCapturedTextMarkers `
-                -Capture $dedicatedTextCapture `
-                -RequiredSubstrings @($optionEvidenceMarkers[$commandIndex]) `
-                -AfterSequence $afterSequence `
-                -DeadlineUtc $bootstrapDeadline `
-                -EvidenceName ('DedicatedCommandAccepted-' + ($commandIndex + 1)) `
-                -Heartbeat { Update-CoopLease }
-            $bootstrapCommandEvidence.Add([ordered]@{
-                Sequence = $commandIndex + 1
-                Command = $serverCommand
-                Acceptance = 'NativeOptionReadback'
-                Evidence = $commandEvidence
-            }) | Out-Null
-            Add-CoopEvent -EventType 'DedicatedConsoleCommandAccepted' -Message $serverCommand
-        }
+        $bootstrapCreatedUtc = [DateTime]::UtcNow
+        $bootstrapDeadline = $bootstrapCreatedUtc.AddSeconds([Math]::Min(180, $RuntimeTimeoutSeconds))
+        $dedicatedStartUtc = [DateTime]::Parse(
+            [string]$dedicatedIdentity.ProcessStartUtc,
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+        $dedicatedBootstrapRequest = New-CoopDedicatedBootstrapRequest `
+            -RunId $RunId `
+            -RunTokenSha256 $nonceSha256 `
+            -ExpectedDedicatedModuleSha256 $expectedDedicatedHash `
+            -ExpectedProcessId ([int]$dedicatedIdentity.ProcessId) `
+            -ExpectedProcessStartUtc $dedicatedStartUtc `
+            -ExpectedExecutablePath ([string]$dedicatedIdentity.ExecutablePath) `
+            -CommandId ([Guid]::NewGuid()) `
+            -CreatedUtc $bootstrapCreatedUtc `
+            -ExpiresUtc $bootstrapDeadline `
+            -ServerName $effectiveServerName
+        $dedicatedBootstrapRequestPath = Join-Path $runRoot 'commands\dedicated-bootstrap.request.json'
+        Write-CoopJsonAtomic -Path $dedicatedBootstrapRequestPath -Value $dedicatedBootstrapRequest
+        Add-CoopEvent -EventType 'DedicatedBootstrapRequested' -Message `
+            ('CommandId=' + [string]$dedicatedBootstrapRequest.CommandId + '; Profile=ConnectionFeasibilityV1.')
 
-        Update-CoopProcessTextCapture -Capture $dedicatedTextCapture
-        $startEvidenceAfterSequence = [long]$dedicatedTextCapture.Sequence
-        foreach ($commandIndex in @(4, 5)) {
-            $serverCommand = $serverCommands[$commandIndex]
-            $dedicatedProcess.StandardInput.WriteLine($serverCommand)
-            $dedicatedProcess.StandardInput.Flush()
-            Add-CoopEvent -EventType 'DedicatedConsoleCommandSent' -Message $serverCommand
-        }
-        $startGameEvidence = Wait-CoopCapturedTextMarkers `
-            -Capture $dedicatedTextCapture `
-            -RequiredSubstrings @('--Game is starting...', '--Selected scene: mp_tdm_map_001') `
-            -AfterSequence $startEvidenceAfterSequence `
+        $dedicatedBootstrapStatus = Wait-CoopDedicatedBootstrapAccepted `
+            -StatusPath (Join-Path $runRoot 'state\dedicated-bootstrap.status.json') `
+            -Request $dedicatedBootstrapRequest `
+            -ExpectedModuleSha256 $expectedDedicatedHash `
+            -DedicatedIdentity $dedicatedIdentity `
+            -DedicatedProcess $dedicatedProcess `
             -DeadlineUtc $bootstrapDeadline `
-            -EvidenceName 'DedicatedMapAndStartGameAccepted' `
-            -Heartbeat { Update-CoopLease }
-        $bootstrapCommandEvidence.Add([ordered]@{
-            Sequence = 5
-            Command = $serverCommands[4]
-            Acceptance = 'RequiredByNativeStartGameSuccess'
-            Evidence = $startGameEvidence
-        }) | Out-Null
-        $bootstrapCommandEvidence.Add([ordered]@{
-            Sequence = 6
-            Command = $serverCommands[5]
-            Acceptance = 'NativeStartGameAndSelectedSceneReadback'
-            Evidence = $startGameEvidence
-        }) | Out-Null
-        Add-CoopEvent -EventType 'DedicatedConsoleCommandAccepted' -Message $serverCommands[4]
-        Add-CoopEvent -EventType 'DedicatedConsoleCommandAccepted' -Message $serverCommands[5]
+            -ProcessTextCapture $dedicatedTextCapture
+        foreach ($acknowledgement in @($dedicatedBootstrapStatus.Acknowledgements)) {
+            $bootstrapCommandEvidence.Add($acknowledgement) | Out-Null
+            Add-CoopEvent -EventType 'DedicatedBootstrapStepAcknowledged' -Message `
+                ('Step=' + [string]$acknowledgement.Step + '; State=' + [string]$acknowledgement.State + '.')
+        }
 
         $portDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Min(180, $RuntimeTimeoutSeconds))
         $udpEndpoint = $null
@@ -2016,7 +2068,7 @@ function Invoke-CoopFeasibility {
     }
 
     $report = [ordered]@{
-        Schema = 'coop-runtime-feasibility-v1'
+        Schema = 'coop-runtime-feasibility-v2'
         RunId = $RunId
         PrimaryOutcome = $primaryRuntimeOutcome
         PrimaryReason = $primaryRuntimeReason
@@ -2027,7 +2079,7 @@ function Invoke-CoopFeasibility {
         ServerPort = $Port
         ServerBootstrapGameType = 'TeamDeathmatch'
         ServerBootstrapMap = 'mp_tdm_map_001'
-        StartGameIssuedBy = 'RunnerDedicatedStandardInput'
+        StartGameIssuedBy = 'DedicatedModuleNativeCommandHandler'
         CampaignStarted = $false
         CampaignBattleFixtureOpened = $false
         L2OrL3PassClaimed = $false
@@ -2035,8 +2087,9 @@ function Invoke-CoopFeasibility {
         ExpectedClientModuleSha256 = $expectedClientHash
         ExpectedDedicatedModuleSha256 = $expectedDedicatedHash
         DedicatedRoleStatus = $dedicatedRoleStatus
-        NativeConsoleReadinessEvidence = $nativeConsoleReadinessEvidence
-        BootstrapCommandEvidence = $bootstrapCommandEvidence.ToArray()
+        DedicatedControlReadinessEvidence = $dedicatedControlReadinessEvidence
+        DedicatedBootstrapStatus = $dedicatedBootstrapStatus
+        BootstrapAcknowledgementEvidence = $bootstrapCommandEvidence.ToArray()
         ClientRoleStatus = $clientRoleStatus
         ClientJoinStatus = $clientJoinStatus
         OwnedHostStatus = $ownedHostStatus
@@ -2150,7 +2203,7 @@ try {
         InputFixtures = @()
         ArtifactCategories = [ordered]@{
             Manifest = 'Run identity, profile, binary identity, and terminal outcome; retained with the run.'
-            Commands = if ($Command -eq 'Feasibility') { 'Run-scoped client join request and dedicated console-command evidence.' } else { 'Atomic inbox and processed control records; none are issued by Milestone 2A commands.' }
+            Commands = if ($Command -eq 'Feasibility') { 'Run-scoped dedicated bootstrap and client-join requests with atomic acknowledgements.' } else { 'Atomic inbox and processed control records; none are issued by Milestone 2A commands.' }
             Status = 'Atomic role-instance state snapshots; retained with the run.'
             Events = 'Append-only ordered role event journal; retained with the run.'
             Payloads = 'Exact future fixture payloads; empty in Milestone 2A.'
