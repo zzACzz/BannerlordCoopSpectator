@@ -16,8 +16,8 @@ namespace CoopSpectator.Multiplayer.Automation
 
     internal static class CoopLobbyAutomationDriver
     {
-        private const string MultiplayerAssemblyName = "TaleWorlds.MountAndBlade.Multiplayer";
-        private const string NetworkMainTypeName = "TaleWorlds.MountAndBlade.NetworkMain";
+        internal const string NetworkMainAssemblyName = "TaleWorlds.MountAndBlade";
+        internal const string NetworkMainTypeName = "TaleWorlds.MountAndBlade.NetworkMain";
 
         public static bool TryGetLobbyClient(
             out object lobbyClient,
@@ -30,19 +30,24 @@ namespace CoopSpectator.Multiplayer.Automation
 
             try
             {
-                Assembly assembly = AppDomain.CurrentDomain.GetAssemblies()
-                    .FirstOrDefault(candidate =>
-                        string.Equals(candidate.GetName().Name, MultiplayerAssemblyName, StringComparison.Ordinal));
-                if (assembly == null)
+                if (!TryResolveNetworkMainType(
+                        AppDomain.CurrentDomain.GetAssemblies(),
+                        out Type networkMainType,
+                        out failureMessage))
                 {
-                    failureMessage = "The multiplayer assembly is not loaded.";
                     return false;
                 }
 
-                Type networkMainType = assembly.GetType(NetworkMainTypeName);
-                PropertyInfo gameClientProperty = networkMainType?.GetProperty(
+                PropertyInfo gameClientProperty = networkMainType.GetProperty(
                     "GameClient",
                     BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                if (gameClientProperty == null)
+                {
+                    failureMessage = "The NetworkMain.GameClient property was not found in " +
+                                     NetworkMainAssemblyName + ".";
+                    return false;
+                }
+
                 lobbyClient = gameClientProperty?.GetValue(null);
                 if (lobbyClient == null)
                 {
@@ -58,6 +63,33 @@ namespace CoopSpectator.Multiplayer.Automation
                 failureMessage = "Lobby client discovery failed: " + ex.Message;
                 return false;
             }
+        }
+
+        internal static bool TryResolveNetworkMainType(
+            IEnumerable<Assembly> assemblies,
+            out Type networkMainType,
+            out string failureMessage)
+        {
+            networkMainType = null;
+            failureMessage = string.Empty;
+
+            Assembly assembly = assemblies?.FirstOrDefault(candidate =>
+                string.Equals(candidate.GetName().Name, NetworkMainAssemblyName, StringComparison.Ordinal));
+            if (assembly == null)
+            {
+                failureMessage = "The " + NetworkMainAssemblyName + " assembly is not loaded.";
+                return false;
+            }
+
+            networkMainType = assembly.GetType(NetworkMainTypeName);
+            if (networkMainType == null)
+            {
+                failureMessage = "The " + NetworkMainTypeName + " type was not found in " +
+                                 NetworkMainAssemblyName + ".";
+                return false;
+            }
+
+            return true;
         }
 
         public static bool IsReadyForServerList(object lobbyClient, string lobbyState)

@@ -2,8 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
+using System.Reflection.Emit;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.Infrastructure.Automation;
+using CoopSpectator.Multiplayer.Automation;
 
 internal static class Program
 {
@@ -26,6 +29,7 @@ internal static class Program
             ValidateAmbiguousServerMatch();
             ValidateTerminalStates();
             ValidateStrictAtomicStatusWrite();
+            ValidateNetworkMainAssemblyResolution();
             Console.WriteLine("Coop automation join contract tests passed.");
             return 0;
         }
@@ -209,6 +213,43 @@ internal static class Program
             if (Directory.Exists(directory))
                 Directory.Delete(directory, recursive: true);
         }
+    }
+
+    private static void ValidateNetworkMainAssemblyResolution()
+    {
+        AssemblyBuilder wrongAssembly = DefineNetworkMainAssembly("TaleWorlds.MountAndBlade.Multiplayer.ContractTest");
+        Assert(
+            !CoopLobbyAutomationDriver.TryResolveNetworkMainType(
+                new Assembly[] { wrongAssembly },
+                out _,
+                out string wrongAssemblyFailure) &&
+            wrongAssemblyFailure.Contains(CoopLobbyAutomationDriver.NetworkMainAssemblyName),
+            "NetworkMain resolution must reject the historical multiplayer-assembly mismatch.");
+
+        AssemblyBuilder coreAssembly = DefineNetworkMainAssembly(CoopLobbyAutomationDriver.NetworkMainAssemblyName);
+        Assert(
+            CoopLobbyAutomationDriver.TryResolveNetworkMainType(
+                new Assembly[] { wrongAssembly, coreAssembly },
+                out Type resolvedType,
+                out string resolutionFailure) &&
+            string.Equals(
+                resolvedType?.FullName,
+                CoopLobbyAutomationDriver.NetworkMainTypeName,
+                StringComparison.Ordinal),
+            "NetworkMain must resolve from TaleWorlds.MountAndBlade, but failed with: " + resolutionFailure);
+    }
+
+    private static AssemblyBuilder DefineNetworkMainAssembly(string assemblyName)
+    {
+        AssemblyBuilder assembly = AssemblyBuilder.DefineDynamicAssembly(
+            new AssemblyName(assemblyName),
+            AssemblyBuilderAccess.Run);
+        ModuleBuilder module = assembly.DefineDynamicModule(assemblyName + ".dll");
+        module.DefineType(
+                CoopLobbyAutomationDriver.NetworkMainTypeName,
+                TypeAttributes.Public | TypeAttributes.Abstract | TypeAttributes.Sealed)
+            .CreateType();
+        return assembly;
     }
 
     private static CoopAutomationJoinRequest ValidRequest(DateTime now)
