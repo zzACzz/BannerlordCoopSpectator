@@ -4,8 +4,9 @@ Last source verification: **2026-08-29**
 Last bounded runtime-feasibility verification: **2026-08-31** (`M1-20260831T013501Z-4114d2df`, no mission opened)
 Last automation-control source/contract verification: **2026-08-31** (no game process launched)
 Last automation-foundation verification: **2026-08-31** (`m2a-contracts-20260831-07` and `m2a-compile-only-20260831-03`, no product process launched)
+Last controlled on-disk staging verification: **2026-08-31** (`m2b-install-20260831-01` and `m2b-postinstall-doctor-20260831-01`, no product process launched)
 Repository: `BannerlordCoopSpectator3`
-Verification scope: static review of source, project files, module descriptors, tests, scripts, existing documentation, and selected local server assemblies, plus the separately documented Milestone 1 installed-runtime launch/cleanup probe, post-M1 isolated client-control validation, and Milestone 2A full contracts/compile-only proof. Milestone 2A built both main projects only into its temporary run root; it performed no deployment, staging, product launch, battle mission, campaign writeback, or mutating Git operation.
+Verification scope: static review of source, project files, module descriptors, tests, scripts, existing documentation, and selected local server assemblies, plus the separately documented Milestone 1 installed-runtime launch/cleanup probe, post-M1 isolated client-control validation, Milestone 2A full contracts/compile-only proof, and the controlled on-disk `0.3.2` installation. The latest installation retained full `0.3.1` pre-images and launched no product process; runtime loading of the installed `0.3.2` binaries is still unverified.
 
 ## Purpose
 
@@ -27,6 +28,7 @@ The project converts a single-player Bannerlord campaign encounter into a synchr
 | [BATTLE_TEST_AUTOMATION_M1_FEASIBILITY.md](BATTLE_TEST_AUTOMATION_M1_FEASIBILITY.md) | Named-machine runtime-feasibility evidence, capability decisions, blockers, and the revised pre-runtime gate plan |
 | [BATTLE_TEST_AUTOMATION_CLIENT_JOIN_IMPLEMENTATION.md](BATTLE_TEST_AUTOMATION_CLIENT_JOIN_IMPLEMENTATION.md) | Post-M1 run-scoped launcher/lobby-control implementation, validation evidence, requirement audit, and remaining runtime gates |
 | [BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md](BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md) | Completed non-runtime runner/protocol/compile-only implementation, authoritative L0/L1 evidence, requirement audit, and Milestone 2B boundary |
+| [BATTLE_TEST_AUTOMATION_M2B_STAGING.md](BATTLE_TEST_AUTOMATION_M2B_STAGING.md) | Controlled `0.3.2` on-disk installation identity, retained `0.3.1` pre-images, post-install doctor evidence, and the remaining loaded-hash gate |
 | [INVARIANTS_AND_RISKS.md](INVARIANTS_AND_RISKS.md) | Protected contracts, known limitations, high-risk files, regression matrix, and change checklists |
 
 The repository-root [AGENTS.md](../../AGENTS.md) is the concise instruction and routing entry point.
@@ -126,7 +128,7 @@ Do not interpret the presence of an adapter as unconditional support. `BattleDet
 - A default-off, run-scoped multiplayer-client launcher and normal-lobby join controller now exist in source.
 - The request is bound to a `RunId`, token hash, expected loaded client hash, exact server name/port, and initial local-host ownership proof.
 - The path passed isolated contract/source compilation and non-launching environment validation on 2026-08-31.
-- It is not Bannerlord-runtime-verified: no live server discovery, join handoff, or connection has been observed, and installed `0.3.1` does not contain the new working-tree implementation.
+- The exact `0.3.2` client and dedicated binaries compiled from revision `f91eeff` are installed and hash-confirmed on disk. No live server discovery, loaded-role acknowledgement, join handoff, or connection has been observed.
 - The path does not issue `start_game`, open a mission, or automate battle phases/results.
 
 ### Battle-test non-runtime foundation
@@ -135,7 +137,7 @@ Do not interpret the presence of an adapter as unconditional support. `BattleDet
 - `Tests/contract-tests.manifest.json` is the canonical 20-project inventory; `m2a-contracts-20260831-07` passed all 20.
 - `CoopCompileOnly=true` redirects all build/package state below the run root and disables installation deployment; `m2a-compile-only-20260831-03` compiled both version `0.3.2` assemblies and proved installed module inventories unchanged.
 - Protocol 1.0 covers run/nonce/role identity, leases, ordered events, stable outcomes/reasons, known-issue annotations, atomic/append file behavior, recovery classification, and fault injection.
-- The named doctor remains `EnvironmentBlocked` for installed/repository hash mismatch and the unverified version matrix. No L2–L5 runtime claim exists.
+- The post-install doctor no longer reports an installed/repository hash mismatch. It remains `EnvironmentBlocked` only for `RuntimeVersionCombinationNotYetVerified`; no L2–L5 runtime claim exists.
 
 ### Runtime evidence retained from dated reports
 
@@ -189,7 +191,7 @@ If runtime validation was not performed, use precise language such as “impleme
 | UI or player commands | `CODE_MAP.md` | `UI/`, `Commands/`, matching GUI prefab |
 | Build/runtime mismatch | `BUILD_TEST_DEBUG.md` | both project files, module descriptors, actual DLL stamps and logs |
 | Release packaging or archive layout | `RELEASE_PACKAGING.md`, `BUILD_TEST_DEBUG.md` | `scripts/CreateReleasePackage.ps1`, release documents, module descriptors, generated archives |
-| Battle-test automation | `BATTLE_TEST_AUTOMATION_AUDIT.md`, `BATTLE_TEST_AUTOMATION_SPEC.md`, `BATTLE_TEST_AUTOMATION_M1_FEASIBILITY.md`, `BATTLE_TEST_AUTOMATION_CLIENT_JOIN_IMPLEMENTATION.md`, `BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md` | compile-only targets, aggregate runner/protocol, run-scoped launcher/control files, bridge files, mission readiness, result publication/writeback, scenario adapters, installed-runtime capability evidence |
+| Battle-test automation | `BATTLE_TEST_AUTOMATION_AUDIT.md`, `BATTLE_TEST_AUTOMATION_SPEC.md`, `BATTLE_TEST_AUTOMATION_M1_FEASIBILITY.md`, `BATTLE_TEST_AUTOMATION_CLIENT_JOIN_IMPLEMENTATION.md`, `BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md`, `BATTLE_TEST_AUTOMATION_M2B_STAGING.md` | compile-only targets, aggregate runner/protocol, controlled staging evidence, run-scoped launcher/control files, bridge files, mission readiness, result publication/writeback, scenario adapters, installed-runtime capability evidence |
 | New diagnostics | `INVARIANTS_AND_RISKS.md`, `BUILD_TEST_DEBUG.md` | `ExperimentalFeatures.cs`, `CoopDebugConfig.cs`, target hot path |
 
 ## Maintenance workflow

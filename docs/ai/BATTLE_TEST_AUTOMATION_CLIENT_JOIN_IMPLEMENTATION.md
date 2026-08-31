@@ -1,10 +1,12 @@
 # Battle Test Automation Client Join Implementation Report
 
-Status: **Source- and contract-implemented; Bannerlord runtime verification blocked**
+Status: **Source- and contract-implemented; exact `0.3.2` installed; Bannerlord runtime verification blocked**
 
 Implementation date: **2026-08-31**
 
-Repository base revision: **`3c513084ebbe9c99daa0b65849fab7b39b913ee1`** (`3c51308`), with the implementation present as uncommitted working-tree changes
+Original repository base revision: **`3c513084ebbe9c99daa0b65849fab7b39b913ee1`** (`3c51308`)
+
+Committed implementation revision: **`f91eeff9b710f68fc7bf4b506ec39c2d1c4474bc`** (`f91eeff`)
 
 Specification: [BATTLE_TEST_AUTOMATION_SPEC.md](BATTLE_TEST_AUTOMATION_SPEC.md), Revision 6
 
@@ -12,7 +14,7 @@ Specification: [BATTLE_TEST_AUTOMATION_SPEC.md](BATTLE_TEST_AUTOMATION_SPEC.md),
 
 The Milestone 1 normal-lobby control blocker now has a narrow source implementation and isolated contract coverage. A dedicated launcher can validate Steam and the exact installed client module, create a fresh run-scoped join request, launch the real multiplayer executable, and let the module discover and request the associated local server through TaleWorlds' normal custom-game lobby APIs.
 
-This report does not promote either blocked Milestone 1 runtime capability. No client, dedicated server, campaign, mission, or battle was launched during implementation validation. The code has not yet demonstrated a real lobby handoff or connection, and the locally installed module remains `0.3.1` while repository outputs are `0.3.2`.
+This report does not promote either blocked Milestone 1 runtime capability. No client, dedicated server, campaign, mission, or battle was launched during implementation validation. A later controlled operation installed exact `0.3.2` binaries from committed revision `f91eeff` and proved their on-disk paths/hashes, but the code has still not demonstrated a real loaded-role acknowledgement, lobby handoff, or connection. See [BATTLE_TEST_AUTOMATION_M2B_STAGING.md](BATTLE_TEST_AUTOMATION_M2B_STAGING.md).
 
 ## 2. Implemented boundary
 
@@ -56,11 +58,13 @@ The main game projects were intentionally not built because their current target
 | PowerShell 7 syntax | `pwsh.exe` parsed `scripts/Start-CoopBattleTestClient.ps1` through `ScriptBlock.Create` | Passed |
 | Windows PowerShell 5.1 syntax | `powershell.exe` parsed the same script through `ScriptBlock.Create` | Passed |
 | Wrong installed hash rejection | `Start-CoopBattleTestClient.ps1 ... -ExpectedClientModuleSha256 A...A -ValidateOnly` | Rejected with exit code `1`; no run root was created |
-| Installed-profile validation | `Start-CoopBattleTestClient.ps1 -RunId M2B-installed-validate-only -ServerName AC_COOP -ExpectedClientModuleSha256 9B271E4E0CFA3AD0FF2DB4B3ACC5A69AE6405E833D52ECB4E1A4C0FDCA8C1B31 -ValidateOnly` | Passed; Steam found; installed product version `0.3.1`; no game launch |
+| Historical installed-profile validation before current staging | `Start-CoopBattleTestClient.ps1 -RunId M2B-installed-validate-only -ServerName AC_COOP -ExpectedClientModuleSha256 9B271E4E0CFA3AD0FF2DB4B3ACC5A69AE6405E833D52ECB4E1A4C0FDCA8C1B31 -ValidateOnly` | Passed against the then-installed `0.3.1`; Steam found; no game launch |
 | BAT argument guard | `cmd.exe /d /c run_battle_test_client.bat` | Usage shown; exit code `2`; no game launch |
 | Patch whitespace/error check | `git diff --check` | Passed |
 | Full canonical contract inventory after protocol 1.0 integration | `Invoke-CoopTest.ps1 -Command Contracts -RunId m2a-contracts-20260831-07 -All` | Passed 20/20; no product process launched |
 | Main client/dedicated compile-only proof | `Invoke-CoopTest.ps1 -Command CompileOnly -RunId m2a-compile-only-20260831-03` | Passed; installed module inventories unchanged; no product process launched |
+| Clean committed-revision compile and controlled install | `m2b-prestage-compile-20260831-01`, `m2b-install-20260831-01` | Exact `0.3.2` client/dedicated hashes installed; full `0.3.1` pre-images retained; no product process launched |
+| Post-install environment doctor | `m2b-postinstall-doctor-20260831-01` | Installed/repository hashes match; only `RuntimeVersionCombinationNotYetVerified` remains |
 
 Contract coverage includes valid and invalid `RunId` values, run-token mismatch, loaded-module hash mismatch, expired and excessive-lifetime requests, exact and optional server filters, no match, ambiguous match, terminal-state classification, strict atomic status replacement, and compilation of the bridge/driver/controller/console-command/lobby-patch source graph against narrow runtime stubs.
 
@@ -70,7 +74,7 @@ Contract coverage includes valid and invalid `RunId` values, run-token mismatch,
 |---|---|---|---|---|---|---|
 | SAF-004 default-off profile | `Partially Satisfied` | `ExperimentalFeatures.EnableTestAutomation`; bridge requires the complete run profile; isolated contract compilation passed | Source, contract test | Multiplayer client; battle-type independent | Architecture, build guide, risks, runtime flow updated | Full L2–L5 profile and runtime proof do not exist |
 | RUN-001/003/004/005 narrow client protocol | `Satisfied at the non-runtime contract layer; runtime use unverified` | Fixed `RunId` root; protocol 1.0 source/target role identity; sequence/command/token/hash identity; strict atomic status; launcher refuses reused request/status; general manifest/lease/recovery/file-fault contracts pass | Source, contract test | Multiplayer client; battle-type independent | Specification, code map, build guide, M2A report updated | Live role registration, acknowledgement, connection, timeout, and cleanup remain future runtime work |
-| BLD-003/006 client identity slice | `Partially Satisfied` | Launcher checks installed hash; module hashes its loaded assembly and rejects mismatch; wrong-hash and installed-profile validation passed | Source, contract test, environment validation | Multiplayer client | M1 report and build guide updated | No current-build staging or real role-reported `0.3.2` runtime identity proof |
+| BLD-003/006 client identity slice | `Partially Satisfied` | Launcher checks installed hash; module hashes its loaded assembly and rejects mismatch; exact committed `0.3.2` client/dedicated paths now match the compile output | Source, contract test, on-disk staging evidence | Multiplayer client | M1 report, build guide, and staging report updated | No real role-reported loaded `0.3.2` identity proof |
 | PROC-001 client launch slice | `Partially Satisfied` | Launch artifact records entry PID/path/start time; validation-only path tested | Source, contract test | Multiplayer client | Build guide and code map updated | No live launch in this step, descendant ownership, exact cleanup, or crash recovery proof |
 | CLI-002 initial machine prerequisite | `Partially Satisfied` | Launcher requires Steam in the current interactive session and records non-secret process IDs; validation passed | Source, environment validation | Multiplayer client | Build guide and M1 report updated | Portability, anti-cheat, modal, and other-machine proof remain open |
 | CLI-006 early feasibility gate | `Partially Satisfied` | A supported source control path now exists; M1 launch evidence and new contract evidence are separated | Source, contract test | Multiplayer client and local dedicated server | Audit and feasibility report updated | No connection, handoff, or exact cross-role runtime correlation yet |
@@ -81,7 +85,7 @@ Contract coverage includes valid and invalid `RunId` values, run-token mismatch,
 
 Before a real connection-only rerun:
 
-1. provide a side-effect-free current-build path and prove selected/loaded `0.3.2` client and dedicated hashes;
+1. bind the runtime run to the intended build revision and require both roles to report the already selected `0.3.2` loaded paths/hashes;
 2. isolate or suppress result publication before any mission can be opened or aborted;
 3. add runner-owned process timeout, exact cleanup, abandoned-run recovery, and lock evidence;
 4. start the exact owned dedicated game so its local host marker exists and its requested UDP port is active;

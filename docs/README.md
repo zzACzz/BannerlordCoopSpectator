@@ -18,6 +18,7 @@ For new engineering work, start with `docs/ai/README.md`. The `docs/ai/` set is 
 9. `docs/ai/BATTLE_TEST_AUTOMATION_M1_FEASIBILITY.md` — installed-runtime feasibility evidence and blockers.
 10. `docs/ai/BATTLE_TEST_AUTOMATION_CLIENT_JOIN_IMPLEMENTATION.md` — run-scoped client launcher/lobby-control implementation evidence and remaining runtime gates.
 11. `docs/ai/BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md` — completed non-runtime runner/protocol/compile-only foundation, authoritative L0/L1 evidence, and the Milestone 2B boundary.
+12. `docs/ai/BATTLE_TEST_AUTOMATION_M2B_STAGING.md` — controlled `0.3.2` on-disk installation identity, retained `0.3.1` pre-images, post-install doctor evidence, and the remaining loaded-hash gate.
 
 Current source and runtime evidence outrank dated plans. Preserve the remaining documents below as focused investigation history, implementation evidence, and technical specifications; do not assume that a newer dated specification is already implemented.
 
