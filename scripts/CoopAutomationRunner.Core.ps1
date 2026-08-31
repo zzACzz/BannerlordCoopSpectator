@@ -85,6 +85,318 @@ function Get-CoopDescendantProcessRecordsFromSnapshot {
     return $descendants.ToArray()
 }
 
+function Get-CoopOptionalPropertyValue {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]$InputObject,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    if ($null -eq $InputObject) { return $null }
+    if ($InputObject -is [System.Collections.IDictionary]) {
+        if ($InputObject.Contains($Name)) { return $InputObject[$Name] }
+        return $null
+    }
+    $property = $InputObject.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $null }
+    return $property.Value
+}
+
+function ConvertTo-CoopUtcDateTime {
+    [CmdletBinding()]
+    param([AllowNull()]$Value)
+
+    if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) { return $null }
+    try {
+        if ($Value -is [DateTime]) { return ([DateTime]$Value).ToUniversalTime() }
+        return [DateTime]::Parse(
+            [string]$Value,
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+    }
+    catch {
+        return $null
+    }
+}
+
+function New-CoopProvisionalProcessIdentity {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][ValidateRange(1, [int]::MaxValue)][int]$ProcessId,
+        [Parameter(Mandatory = $true)][string]$RoleType,
+        [Parameter(Mandatory = $true)][string]$RoleInstanceId,
+        [Parameter(Mandatory = $true)][string]$ExpectedExecutablePath,
+        [ValidateRange(-1, [int]::MaxValue)][int]$ExpectedParentProcessId = -1,
+        [Parameter(Mandatory = $true)][DateTime]$LaunchStartedUtc,
+        [Parameter(Mandatory = $true)][DateTime]$LaunchObservedUtc,
+        [string]$LaunchOperationId
+    )
+
+    if ([string]::IsNullOrWhiteSpace($RoleType)) { throw 'RoleType is required.' }
+    if ([string]::IsNullOrWhiteSpace($RoleInstanceId)) { throw 'RoleInstanceId is required.' }
+    if ([string]::IsNullOrWhiteSpace($ExpectedExecutablePath)) { throw 'ExpectedExecutablePath is required.' }
+    $launchStart = $LaunchStartedUtc.ToUniversalTime()
+    $launchObserved = $LaunchObservedUtc.ToUniversalTime()
+    if ($launchObserved -lt $launchStart) { throw 'LaunchObservedUtc must not precede LaunchStartedUtc.' }
+    if ([string]::IsNullOrWhiteSpace($LaunchOperationId)) {
+        $LaunchOperationId = [Guid]::NewGuid().ToString('D')
+    }
+
+    return [ordered]@{
+        IdentityState = 'Provisional'
+        LaunchOperationId = $LaunchOperationId
+        RoleType = $RoleType
+        RoleInstanceId = $RoleInstanceId
+        ProcessId = $ProcessId
+        ParentProcessId = $ExpectedParentProcessId
+        ExpectedParentProcessId = $ExpectedParentProcessId
+        ProcessStartUtc = $null
+        ExecutablePath = [System.IO.Path]::GetFullPath($ExpectedExecutablePath)
+        ExecutableSha256 = $null
+        PathEvidenceSource = 'RequestedLaunchPath'
+        LaunchStartedUtc = $launchStart.ToString('O')
+        LaunchObservedUtc = $launchObserved.ToString('O')
+        RegisteredUtc = [DateTime]::UtcNow.ToString('O')
+    }
+}
+
+function Resolve-CoopProcessObservation {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][ValidateRange(1, [int]::MaxValue)][int]$ProcessId,
+        [string]$ExpectedExecutablePath,
+        [ValidateRange(-1, [int]::MaxValue)][int]$ExpectedParentProcessId = -1,
+        [Nullable[DateTime]]$LaunchStartedUtc,
+        [Nullable[DateTime]]$LaunchObservedUtc,
+        [ValidateRange(50, 30000)][int]$DeadlineMilliseconds = 5000,
+        [scriptblock]$ProcessRecordProvider,
+        [scriptblock]$CimRecordProvider
+    )
+
+    if ($null -eq $ProcessRecordProvider) {
+        $ProcessRecordProvider = {
+            param([int]$CandidateProcessId)
+            Get-Process -Id $CandidateProcessId -ErrorAction Stop
+        }
+    }
+    if ($null -eq $CimRecordProvider) {
+        $CimRecordProvider = {
+            param([int]$CandidateProcessId)
+            Get-CimInstance -ClassName Win32_Process `
+                -Filter ('ProcessId=' + $CandidateProcessId) `
+                -OperationTimeoutSec 2 `
+                -ErrorAction Stop
+        }
+    }
+
+    $expectedPath = if ([string]::IsNullOrWhiteSpace($ExpectedExecutablePath)) {
+        ''
+    }
+    else {
+        [System.IO.Path]::GetFullPath($ExpectedExecutablePath)
+    }
+    $deadlineUtc = [DateTime]::UtcNow.AddMilliseconds($DeadlineMilliseconds)
+    $lastFailure = ''
+    do {
+        $processRecord = $null
+        $cimRecord = $null
+        try {
+            $records = @(& $ProcessRecordProvider $ProcessId)
+            if ($records.Count -gt 1) { throw "Process provider returned multiple records for PID $ProcessId." }
+            if ($records.Count -eq 1) { $processRecord = $records[0] }
+        }
+        catch { $lastFailure = $_.Exception.Message }
+        try {
+            $records = @(& $CimRecordProvider $ProcessId)
+            if ($records.Count -gt 1) { throw "Win32_Process provider returned multiple records for PID $ProcessId." }
+            if ($records.Count -eq 1) { $cimRecord = $records[0] }
+        }
+        catch { $lastFailure = $_.Exception.Message }
+
+        $processPathValue = Get-CoopOptionalPropertyValue -InputObject $processRecord -Name 'Path'
+        $cimPathValue = Get-CoopOptionalPropertyValue -InputObject $cimRecord -Name 'ExecutablePath'
+        $processPath = if ([string]::IsNullOrWhiteSpace([string]$processPathValue)) { '' } else { [System.IO.Path]::GetFullPath([string]$processPathValue) }
+        $cimPath = if ([string]::IsNullOrWhiteSpace([string]$cimPathValue)) { '' } else { [System.IO.Path]::GetFullPath([string]$cimPathValue) }
+
+        foreach ($observedPath in @($processPath, $cimPath)) {
+            if ([string]::IsNullOrWhiteSpace($observedPath) -or [string]::IsNullOrWhiteSpace($expectedPath)) { continue }
+            if (-not [string]::Equals($observedPath, $expectedPath, [StringComparison]::OrdinalIgnoreCase)) {
+                throw "Process $ProcessId executable path '$observedPath' does not match the exact requested path '$expectedPath'."
+            }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($processPath) -and
+            -not [string]::IsNullOrWhiteSpace($cimPath) -and
+            -not [string]::Equals($processPath, $cimPath, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Process $ProcessId has conflicting executable paths in Process and Win32_Process observations."
+        }
+
+        $resolvedPath = if (-not [string]::IsNullOrWhiteSpace($processPath)) { $processPath } else { $cimPath }
+        if ([string]::IsNullOrWhiteSpace($expectedPath) -and -not [string]::IsNullOrWhiteSpace($resolvedPath)) {
+            $expectedPath = $resolvedPath
+        }
+        $processStartUtc = ConvertTo-CoopUtcDateTime -Value (Get-CoopOptionalPropertyValue -InputObject $processRecord -Name 'StartTime')
+        $cimStartUtc = ConvertTo-CoopUtcDateTime -Value (Get-CoopOptionalPropertyValue -InputObject $cimRecord -Name 'CreationDate')
+        if ($null -ne $processStartUtc -and $null -ne $cimStartUtc -and
+            [Math]::Abs(($processStartUtc - $cimStartUtc).TotalSeconds) -ge 1.0) {
+            throw "Process $ProcessId has conflicting creation times in Process and Win32_Process observations."
+        }
+        $resolvedStartUtc = if ($null -ne $processStartUtc) { $processStartUtc } else { $cimStartUtc }
+        $parentValue = Get-CoopOptionalPropertyValue -InputObject $cimRecord -Name 'ParentProcessId'
+        $resolvedParentProcessId = if ($null -eq $parentValue) { -1 } else { [int]$parentValue }
+
+        if (-not [string]::IsNullOrWhiteSpace($resolvedPath) -and $null -ne $resolvedStartUtc) {
+            if ($ExpectedParentProcessId -ge 0) {
+                if ($resolvedParentProcessId -lt 0) {
+                    $lastFailure = "Win32_Process parent identity for PID $ProcessId is not available yet."
+                }
+                elseif ($resolvedParentProcessId -ne $ExpectedParentProcessId) {
+                    throw "Process $ProcessId parent PID $resolvedParentProcessId does not match expected parent PID $ExpectedParentProcessId."
+                }
+            }
+            if ($null -ne $LaunchStartedUtc -and
+                $resolvedStartUtc -lt $LaunchStartedUtc.ToUniversalTime().AddSeconds(-2)) {
+                throw "Process $ProcessId predates its exact launch operation."
+            }
+            if ($null -ne $LaunchObservedUtc -and
+                $resolvedStartUtc -gt $LaunchObservedUtc.ToUniversalTime().AddSeconds(2)) {
+                throw "Process $ProcessId was created after its exact launch observation and may be a reused PID."
+            }
+            if ($ExpectedParentProcessId -lt 0 -or $resolvedParentProcessId -ge 0) {
+                return [pscustomobject]@{
+                    ProcessId = $ProcessId
+                    ParentProcessId = $resolvedParentProcessId
+                    ProcessStartUtc = $resolvedStartUtc.ToString('O')
+                    ExecutablePath = $resolvedPath
+                    PathEvidenceSource = if (-not [string]::IsNullOrWhiteSpace($processPath) -and -not [string]::IsNullOrWhiteSpace($cimPath)) {
+                        'ProcessAndWin32Process'
+                    }
+                    elseif (-not [string]::IsNullOrWhiteSpace($processPath)) { 'ProcessPath' }
+                    else { 'Win32ProcessFallback' }
+                    ObservedUtc = [DateTime]::UtcNow.ToString('O')
+                }
+            }
+        }
+
+        if ([DateTime]::UtcNow -lt $deadlineUtc) { Start-Sleep -Milliseconds 100 }
+    } while ([DateTime]::UtcNow -lt $deadlineUtc)
+
+    $detail = if ([string]::IsNullOrWhiteSpace($lastFailure)) { '' } else { ' Last observation error: ' + $lastFailure }
+    throw "Timed out after $DeadlineMilliseconds ms while resolving exact process identity for PID $ProcessId.$detail"
+}
+
+function Test-CoopProcessObservationMatchesIdentity {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Identity,
+        [Parameter(Mandatory = $true)]$Observation
+    )
+
+    $identityProcessId = [int](Get-CoopOptionalPropertyValue -InputObject $Identity -Name 'ProcessId')
+    $observationProcessId = [int](Get-CoopOptionalPropertyValue -InputObject $Observation -Name 'ProcessId')
+    if ($identityProcessId -le 0 -or $identityProcessId -ne $observationProcessId) { return $false }
+    $expectedPathValue = Get-CoopOptionalPropertyValue -InputObject $Identity -Name 'ExecutablePath'
+    $actualPathValue = Get-CoopOptionalPropertyValue -InputObject $Observation -Name 'ExecutablePath'
+    if ([string]::IsNullOrWhiteSpace([string]$expectedPathValue) -or [string]::IsNullOrWhiteSpace([string]$actualPathValue)) { return $false }
+    $expectedPath = [System.IO.Path]::GetFullPath([string]$expectedPathValue)
+    $actualPath = [System.IO.Path]::GetFullPath([string]$actualPathValue)
+    if (-not [string]::Equals($actualPath, $expectedPath, [StringComparison]::OrdinalIgnoreCase)) { return $false }
+
+    $actualStartUtc = ConvertTo-CoopUtcDateTime -Value (Get-CoopOptionalPropertyValue -InputObject $Observation -Name 'ProcessStartUtc')
+    if ($null -eq $actualStartUtc) { return $false }
+    $expectedStartUtc = ConvertTo-CoopUtcDateTime -Value (Get-CoopOptionalPropertyValue -InputObject $Identity -Name 'ProcessStartUtc')
+    if ($null -ne $expectedStartUtc) {
+        return [Math]::Abs(($actualStartUtc - $expectedStartUtc).TotalSeconds) -lt 1.0
+    }
+
+    $launchStartedUtc = ConvertTo-CoopUtcDateTime -Value (Get-CoopOptionalPropertyValue -InputObject $Identity -Name 'LaunchStartedUtc')
+    $launchObservedUtc = ConvertTo-CoopUtcDateTime -Value (Get-CoopOptionalPropertyValue -InputObject $Identity -Name 'LaunchObservedUtc')
+    if ($null -eq $launchStartedUtc -or $null -eq $launchObservedUtc -or
+        $actualStartUtc -lt $launchStartedUtc.AddSeconds(-2) -or
+        $actualStartUtc -gt $launchObservedUtc.AddSeconds(2)) {
+        return $false
+    }
+    $expectedParentValue = Get-CoopOptionalPropertyValue -InputObject $Identity -Name 'ExpectedParentProcessId'
+    if ($null -ne $expectedParentValue -and [int]$expectedParentValue -ge 0) {
+        $actualParentValue = Get-CoopOptionalPropertyValue -InputObject $Observation -Name 'ParentProcessId'
+        if ($null -eq $actualParentValue -or [int]$actualParentValue -ne [int]$expectedParentValue) { return $false }
+    }
+    return $true
+}
+
+function Test-CoopLiveProcessIdentityCore {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Identity,
+        [ValidateRange(50, 30000)][int]$DeadlineMilliseconds = 2500
+    )
+
+    $processId = [int](Get-CoopOptionalPropertyValue -InputObject $Identity -Name 'ProcessId')
+    if ($processId -le 0) { return $false }
+    try {
+        $identityState = [string](Get-CoopOptionalPropertyValue -InputObject $Identity -Name 'IdentityState')
+        $isProvisional = [string]::Equals($identityState, 'Provisional', [StringComparison]::Ordinal)
+        $expectedParent = -1
+        $launchStartedUtc = $null
+        $launchObservedUtc = $null
+        if ($isProvisional) {
+            $parentValue = Get-CoopOptionalPropertyValue -InputObject $Identity -Name 'ExpectedParentProcessId'
+            if ($null -ne $parentValue) { $expectedParent = [int]$parentValue }
+            $launchStartedUtc = ConvertTo-CoopUtcDateTime -Value (Get-CoopOptionalPropertyValue -InputObject $Identity -Name 'LaunchStartedUtc')
+            $launchObservedUtc = ConvertTo-CoopUtcDateTime -Value (Get-CoopOptionalPropertyValue -InputObject $Identity -Name 'LaunchObservedUtc')
+        }
+        $observation = Resolve-CoopProcessObservation `
+            -ProcessId $processId `
+            -ExpectedExecutablePath ([string](Get-CoopOptionalPropertyValue -InputObject $Identity -Name 'ExecutablePath')) `
+            -ExpectedParentProcessId $expectedParent `
+            -LaunchStartedUtc $launchStartedUtc `
+            -LaunchObservedUtc $launchObservedUtc `
+            -DeadlineMilliseconds $DeadlineMilliseconds
+        return Test-CoopProcessObservationMatchesIdentity -Identity $Identity -Observation $observation
+    }
+    catch {
+        return $false
+    }
+}
+
+function Stop-CoopExactProcessIdentityCore {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Identity,
+        [ValidateRange(1, 60)][int]$GraceSeconds = 15
+    )
+
+    $processId = [int](Get-CoopOptionalPropertyValue -InputObject $Identity -Name 'ProcessId')
+    $evidence = [ordered]@{
+        RoleType = [string](Get-CoopOptionalPropertyValue -InputObject $Identity -Name 'RoleType')
+        RoleInstanceId = [string](Get-CoopOptionalPropertyValue -InputObject $Identity -Name 'RoleInstanceId')
+        IdentityState = [string](Get-CoopOptionalPropertyValue -InputObject $Identity -Name 'IdentityState')
+        LaunchOperationId = [string](Get-CoopOptionalPropertyValue -InputObject $Identity -Name 'LaunchOperationId')
+        ProcessId = $processId
+        IdentityMatched = $false
+        GracefulCloseRequested = $false
+        ForcedStopUsed = $false
+        Outcome = 'NotRunning'
+        CheckedUtc = [DateTime]::UtcNow.ToString('O')
+    }
+    if (-not (Test-CoopLiveProcessIdentityCore -Identity $Identity)) { return $evidence }
+
+    $evidence.IdentityMatched = $true
+    $process = Get-Process -Id $processId -ErrorAction Stop
+    try { $evidence.GracefulCloseRequested = [bool]$process.CloseMainWindow() } catch { }
+    try { Wait-CoopProcessExitNoOutput -Process $process -TimeoutMilliseconds ($GraceSeconds * 1000) } catch { }
+    if (-not $process.HasExited) {
+        if (-not (Test-CoopLiveProcessIdentityCore -Identity $Identity)) {
+            $evidence.Outcome = 'IdentityChangedBeforeForcedStop'
+            return $evidence
+        }
+        $evidence.ForcedStopUsed = $true
+        $process.Kill()
+        Wait-CoopProcessExitNoOutput -Process $process -TimeoutMilliseconds 10000
+    }
+    $evidence.Outcome = if ($process.HasExited) { 'Stopped' } else { 'StopFailed' }
+    return $evidence
+}
+
 function Wait-CoopProcessExitNoOutput {
     [CmdletBinding()]
     param(

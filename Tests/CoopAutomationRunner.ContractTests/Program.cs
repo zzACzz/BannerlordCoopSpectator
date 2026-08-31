@@ -12,7 +12,7 @@ internal static class Program
         string runnerPath = Path.Combine(repositoryRoot, "scripts", "Invoke-CoopTest.ps1");
         Assert(File.Exists(corePath), "Runner core helper must exist: " + corePath);
         Assert(File.Exists(runnerPath), "Aggregate runner must exist: " + runnerPath);
-        ValidateRunnerIntegration(runnerPath);
+        ValidateRunnerIntegration(runnerPath, corePath);
 
         string temporaryRoot = Path.Combine(
             Path.GetTempPath(),
@@ -37,9 +37,10 @@ internal static class Program
         }
     }
 
-    private static void ValidateRunnerIntegration(string runnerPath)
+    private static void ValidateRunnerIntegration(string runnerPath, string corePath)
     {
         string source = File.ReadAllText(runnerPath);
+        string coreSource = File.ReadAllText(corePath);
         Assert(
             source.Contains(". $runnerCorePath", StringComparison.Ordinal),
             "Aggregate runner must dot-source the tested core helper.");
@@ -52,6 +53,20 @@ internal static class Program
         Assert(
             source.Contains("Get-CimInstance -ClassName Win32_Process -OperationTimeoutSec 10", StringComparison.Ordinal),
             "Aggregate runner process snapshots must use a bounded CIM operation timeout.");
+        int provisionalRegistration = source.IndexOf("$dedicatedIdentity = New-CoopProvisionalProcessIdentity", StringComparison.Ordinal);
+        int provisionalInventoryWrite = source.IndexOf("Add-CoopOwnedRuntimeProcess -Identity $dedicatedIdentity", provisionalRegistration, StringComparison.Ordinal);
+        int verifiedIdentityResolution = source.IndexOf("$dedicatedIdentity = Get-CoopProcessIdentity", provisionalInventoryWrite, StringComparison.Ordinal);
+        Assert(
+            provisionalRegistration >= 0 && provisionalInventoryWrite > provisionalRegistration && verifiedIdentityResolution > provisionalInventoryWrite,
+            "Feasibility must record provisional dedicated ownership before fallible identity enrichment.");
+        Assert(
+            source.Contains("-ExpectedExecutablePath $dedicatedExecutable", StringComparison.Ordinal) &&
+            source.Contains("-ObservedParentProcessId $PID", StringComparison.Ordinal),
+            "Dedicated identity promotion must validate the exact requested executable and runner parent PID.");
+        Assert(
+            source.Contains("$_.Exception.Data['CoopRuntimeOutcome']", StringComparison.Ordinal) &&
+            source.Contains("$wrapped.Data['CoopRuntimeOutcome'] = 'RunnerInternalError'", StringComparison.Ordinal),
+            "Post-start identity-enrichment defects must be classified as RunnerInternalError.");
         Assert(
             source.Contains("$dedicatedStartInfo.RedirectStandardOutput = $true", StringComparison.Ordinal) &&
             source.Contains("$dedicatedStartInfo.RedirectStandardError = $true", StringComparison.Ordinal),
@@ -68,9 +83,10 @@ internal static class Program
             source.Contains("Get-CoopSingularCommandResult", StringComparison.Ordinal),
             "Aggregate command dispatch must validate a singular structured result.");
         Assert(
-            source.Contains("Wait-CoopProcessExitNoOutput -Process $process", StringComparison.Ordinal) &&
-            !source.Contains("$process.WaitForExit($GraceSeconds * 1000)", StringComparison.Ordinal) &&
-            !source.Contains("$process.WaitForExit(10000)", StringComparison.Ordinal),
+            coreSource.Contains("Wait-CoopProcessExitNoOutput -Process $process", StringComparison.Ordinal) &&
+            !coreSource.Contains("$process.WaitForExit($GraceSeconds * 1000)", StringComparison.Ordinal) &&
+            !coreSource.Contains("$process.WaitForExit(10000)", StringComparison.Ordinal) &&
+            source.Contains("Stop-CoopExactProcessIdentityCore -Identity $Identity", StringComparison.Ordinal),
             "Cleanup waits must not leak Boolean values into the command result pipeline.");
         Assert(
             !source.Contains("foreach ($serverCommand in @(\n", StringComparison.Ordinal) &&
@@ -216,6 +232,140 @@ Assert-True $limitRejected 'The explicit descendant limit must reject an oversiz
 
 $empty = @(Get-CoopDescendantProcessRecordsFromSnapshot -Snapshot @() -RootProcessIds @(99))
 Assert-True ($empty.Count -eq 0) 'An empty snapshot must produce no descendants.'
+
+$script:syntheticProcessStartUtc = [DateTime]::UtcNow
+$script:syntheticRequestedPath = [System.IO.Path]::GetFullPath($CorePath)
+$fallbackObservation = Resolve-CoopProcessObservation `
+    -ProcessId 61001 `
+    -ExpectedExecutablePath $script:syntheticRequestedPath `
+    -ExpectedParentProcessId 61000 `
+    -LaunchStartedUtc $script:syntheticProcessStartUtc.AddSeconds(-1) `
+    -LaunchObservedUtc $script:syntheticProcessStartUtc.AddSeconds(1) `
+    -DeadlineMilliseconds 1000 `
+    -ProcessRecordProvider {
+        param([int]$CandidateProcessId)
+        [pscustomobject]@{ Path = $null; StartTime = $script:syntheticProcessStartUtc }
+    } `
+    -CimRecordProvider {
+        param([int]$CandidateProcessId)
+        [pscustomobject]@{
+            ExecutablePath = $script:syntheticRequestedPath
+            CreationDate = $script:syntheticProcessStartUtc
+            ParentProcessId = 61000
+        }
+    }
+Assert-True ($fallbackObservation.PathEvidenceSource -eq 'Win32ProcessFallback') `
+    'A transient null Process.Path must use the validated Win32_Process executable-path fallback.'
+Assert-True ([string]::Equals($fallbackObservation.ExecutablePath, $script:syntheticRequestedPath, [StringComparison]::OrdinalIgnoreCase)) `
+    'Win32_Process fallback must retain the exact requested executable path.'
+
+$mismatchedPathRejected = $false
+try {
+    $null = Resolve-CoopProcessObservation `
+        -ProcessId 61002 `
+        -ExpectedExecutablePath $script:syntheticRequestedPath `
+        -DeadlineMilliseconds 500 `
+        -ProcessRecordProvider {
+            param([int]$CandidateProcessId)
+            [pscustomobject]@{
+                Path = $script:syntheticRequestedPath + '.unexpected'
+                StartTime = $script:syntheticProcessStartUtc
+            }
+        } `
+        -CimRecordProvider { param([int]$CandidateProcessId) $null }
+}
+catch { $mismatchedPathRejected = $_.Exception.Message -match 'does not match the exact requested path' }
+Assert-True $mismatchedPathRejected 'An observed path mismatch must be rejected before hashing or ownership promotion.'
+
+$boundedNullPathRejected = $false
+$nullPathStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+try {
+    $null = Resolve-CoopProcessObservation `
+        -ProcessId 61003 `
+        -ExpectedExecutablePath $script:syntheticRequestedPath `
+        -DeadlineMilliseconds 250 `
+        -ProcessRecordProvider {
+            param([int]$CandidateProcessId)
+            [pscustomobject]@{ Path = $null; StartTime = $script:syntheticProcessStartUtc }
+        } `
+        -CimRecordProvider { param([int]$CandidateProcessId) $null }
+}
+catch { $boundedNullPathRejected = $_.Exception.Message -match 'Timed out after 250 ms' }
+$nullPathStopwatch.Stop()
+Assert-True $boundedNullPathRejected 'A persistently unavailable executable path must fail through a bounded timeout.'
+Assert-True ($nullPathStopwatch.Elapsed.TotalSeconds -lt 3) 'Bounded path acquisition must not hang the runner.'
+
+$provisionalIdentity = New-CoopProvisionalProcessIdentity `
+    -ProcessId 61001 `
+    -RoleType 'DedicatedServer' `
+    -RoleInstanceId 'dedicated-server-contract' `
+    -ExpectedExecutablePath $script:syntheticRequestedPath `
+    -ExpectedParentProcessId 61000 `
+    -LaunchStartedUtc $script:syntheticProcessStartUtc.AddSeconds(-1) `
+    -LaunchObservedUtc $script:syntheticProcessStartUtc.AddSeconds(1) `
+    -LaunchOperationId 'runner-core-contract-launch'
+Assert-True (Test-CoopProcessObservationMatchesIdentity -Identity $provisionalIdentity -Observation $fallbackObservation) `
+    'Provisional ownership must match the exact launch window, path, PID, and parent PID.'
+$reusedPidObservation = [pscustomobject]@{
+    ProcessId = 61001
+    ParentProcessId = 61000
+    ProcessStartUtc = $script:syntheticProcessStartUtc.AddMinutes(1).ToString('O')
+    ExecutablePath = $script:syntheticRequestedPath
+}
+Assert-True (-not (Test-CoopProcessObservationMatchesIdentity -Identity $provisionalIdentity -Observation $reusedPidObservation)) `
+    'A reused PID outside the exact launch window must never match provisional ownership.'
+$wrongParentObservation = [pscustomobject]@{
+    ProcessId = 61001
+    ParentProcessId = 61999
+    ProcessStartUtc = $script:syntheticProcessStartUtc.ToString('O')
+    ExecutablePath = $script:syntheticRequestedPath
+}
+Assert-True (-not (Test-CoopProcessObservationMatchesIdentity -Identity $provisionalIdentity -Observation $wrongParentObservation)) `
+    'A different parent PID must never match provisional root-process ownership.'
+$verifiedIdentity = [ordered]@{
+    IdentityState = 'Verified'
+    ProcessId = 61001
+    ProcessStartUtc = $script:syntheticProcessStartUtc.ToString('O')
+    ExecutablePath = $script:syntheticRequestedPath
+}
+Assert-True (Test-CoopProcessObservationMatchesIdentity -Identity $verifiedIdentity -Observation $fallbackObservation) `
+    'Verified ownership must match the exact executable path, PID, and process start time.'
+Assert-True (-not (Test-CoopProcessObservationMatchesIdentity -Identity $verifiedIdentity -Observation $reusedPidObservation)) `
+    'Verified ownership must reject PID reuse even when the executable path is unchanged.'
+
+$cleanupProcess = $null
+try {
+    $cleanupStartInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $cleanupStartInfo.FileName = (Get-Process -Id $PID).Path
+    $cleanupStartInfo.UseShellExecute = $false
+    $cleanupStartInfo.CreateNoWindow = $true
+    $cleanupStartInfo.Arguments = '-NoProfile -Command "Start-Sleep -Seconds 30"'
+    $cleanupLaunchStartedUtc = [DateTime]::UtcNow
+    $cleanupProcess = [System.Diagnostics.Process]::Start($cleanupStartInfo)
+    Assert-True ($null -ne $cleanupProcess) 'Synthetic cleanup process must start.'
+    $cleanupLaunchObservedUtc = [DateTime]::UtcNow
+    $cleanupIdentity = New-CoopProvisionalProcessIdentity `
+        -ProcessId $cleanupProcess.Id `
+        -RoleType 'DedicatedServer' `
+        -RoleInstanceId 'synthetic-provisional-cleanup' `
+        -ExpectedExecutablePath $cleanupStartInfo.FileName `
+        -ExpectedParentProcessId $PID `
+        -LaunchStartedUtc $cleanupLaunchStartedUtc `
+        -LaunchObservedUtc $cleanupLaunchObservedUtc
+    Assert-True (Test-CoopLiveProcessIdentityCore -Identity $cleanupIdentity -DeadlineMilliseconds 5000) `
+        'A live process must match its provisional launch evidence before cleanup.'
+    $cleanupEvidence = Stop-CoopExactProcessIdentityCore -Identity $cleanupIdentity -GraceSeconds 1
+    Assert-True ($cleanupEvidence.IdentityMatched -and $cleanupEvidence.Outcome -eq 'Stopped') `
+        'Exact cleanup must stop a process that is known only by provisional launch ownership.'
+    Assert-True $cleanupProcess.HasExited 'The provisionally owned synthetic process must not remain running after cleanup.'
+}
+finally {
+    if ($null -ne $cleanupProcess -and -not $cleanupProcess.HasExited) {
+        $cleanupProcess.Kill()
+        $cleanupProcess.WaitForExit()
+    }
+    if ($null -ne $cleanupProcess) { $cleanupProcess.Dispose() }
+}
 
 $validResult = [ordered]@{ Outcome = 'Timeout'; Reason = 'synthetic'; ArtifactPath = 'synthetic.json' }
 $singular = Get-CoopSingularCommandResult -Results @($validResult) -CommandName 'Synthetic'

@@ -424,64 +424,126 @@ function Get-CoopProcessIdentity {
         [Parameter(Mandatory = $true)][int]$ProcessId,
         [Parameter(Mandatory = $true)][string]$RoleType,
         [Parameter(Mandatory = $true)][string]$RoleInstanceId,
-        [int]$ObservedParentProcessId = -1
+        [string]$ExpectedExecutablePath,
+        [int]$ObservedParentProcessId = -1,
+        $ProvisionalIdentity,
+        [ValidateRange(50, 30000)][int]$DeadlineMilliseconds = 5000
     )
 
-    $process = Get-Process -Id $ProcessId -ErrorAction Stop
-    $path = $process.Path
-    $startUtc = $process.StartTime.ToUniversalTime()
-    $parentProcessId = if ($ObservedParentProcessId -ge 0) { $ObservedParentProcessId } else { 0 }
-    if ($ObservedParentProcessId -lt 0) {
-        try {
-            $record = Get-CimInstance -ClassName Win32_Process -Filter ("ProcessId=" + $ProcessId) -OperationTimeoutSec 10 -ErrorAction Stop
-            if ($null -ne $record) { $parentProcessId = [int]$record.ParentProcessId }
+    try {
+        $expectedParentProcessId = $ObservedParentProcessId
+        if ($expectedParentProcessId -lt 0 -and $null -ne $ProvisionalIdentity) {
+            $provisionalParent = Get-CoopOptionalPropertyValue -InputObject $ProvisionalIdentity -Name 'ExpectedParentProcessId'
+            if ($null -ne $provisionalParent) { $expectedParentProcessId = [int]$provisionalParent }
         }
-        catch { }
+        if ([string]::IsNullOrWhiteSpace($ExpectedExecutablePath) -and $null -ne $ProvisionalIdentity) {
+            $ExpectedExecutablePath = [string](Get-CoopOptionalPropertyValue -InputObject $ProvisionalIdentity -Name 'ExecutablePath')
+        }
+        $launchStartedUtc = if ($null -eq $ProvisionalIdentity) {
+            $null
+        }
+        else {
+            ConvertTo-CoopUtcDateTime -Value (Get-CoopOptionalPropertyValue -InputObject $ProvisionalIdentity -Name 'LaunchStartedUtc')
+        }
+        $launchObservedUtc = if ($null -eq $ProvisionalIdentity) {
+            $null
+        }
+        else {
+            ConvertTo-CoopUtcDateTime -Value (Get-CoopOptionalPropertyValue -InputObject $ProvisionalIdentity -Name 'LaunchObservedUtc')
+        }
+        $observation = Resolve-CoopProcessObservation `
+            -ProcessId $ProcessId `
+            -ExpectedExecutablePath $ExpectedExecutablePath `
+            -ExpectedParentProcessId $expectedParentProcessId `
+            -LaunchStartedUtc $launchStartedUtc `
+            -LaunchObservedUtc $launchObservedUtc `
+            -DeadlineMilliseconds $DeadlineMilliseconds
+        $launchOperationId = if ($null -eq $ProvisionalIdentity) {
+            ''
+        }
+        else {
+            [string](Get-CoopOptionalPropertyValue -InputObject $ProvisionalIdentity -Name 'LaunchOperationId')
+        }
+        $registeredUtc = if ($null -eq $ProvisionalIdentity) {
+            [DateTime]::UtcNow.ToString('O')
+        }
+        else {
+            [string](Get-CoopOptionalPropertyValue -InputObject $ProvisionalIdentity -Name 'RegisteredUtc')
+        }
+        return [ordered]@{
+            IdentityState = 'Verified'
+            LaunchOperationId = $launchOperationId
+            RoleType = $RoleType
+            RoleInstanceId = $RoleInstanceId
+            ProcessId = $ProcessId
+            ParentProcessId = if ([int]$observation.ParentProcessId -ge 0) { [int]$observation.ParentProcessId } else { 0 }
+            ExpectedParentProcessId = $expectedParentProcessId
+            ProcessStartUtc = [string]$observation.ProcessStartUtc
+            ExecutablePath = [string]$observation.ExecutablePath
+            ExecutableSha256 = (Get-FileHash -LiteralPath ([string]$observation.ExecutablePath) -Algorithm SHA256).Hash.ToUpperInvariant()
+            PathEvidenceSource = [string]$observation.PathEvidenceSource
+            LaunchStartedUtc = if ($null -eq $launchStartedUtc) { $null } else { $launchStartedUtc.ToString('O') }
+            LaunchObservedUtc = if ($null -eq $launchObservedUtc) { $null } else { $launchObservedUtc.ToString('O') }
+            RegisteredUtc = $registeredUtc
+            VerifiedUtc = [DateTime]::UtcNow.ToString('O')
+        }
     }
-    return [ordered]@{
-        RoleType = $RoleType
-        RoleInstanceId = $RoleInstanceId
-        ProcessId = $ProcessId
-        ParentProcessId = $parentProcessId
-        ProcessStartUtc = $startUtc.ToString('O')
-        ExecutablePath = $path
-        ExecutableSha256 = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToUpperInvariant()
-        RegisteredUtc = [DateTime]::UtcNow.ToString('O')
+    catch {
+        $message = "Post-start process identity enrichment failed for $RoleType/$RoleInstanceId PID ${ProcessId}: " + $_.Exception.Message
+        $wrapped = [System.InvalidOperationException]::new($message, $_.Exception)
+        $wrapped.Data['CoopRuntimeOutcome'] = 'RunnerInternalError'
+        throw $wrapped
     }
 }
 
 function Test-CoopLiveProcessIdentity {
     param([Parameter(Mandatory = $true)]$Identity)
 
-    if ($null -eq $Identity -or [int]$Identity.ProcessId -le 0) { return $false }
-    try {
-        $process = Get-Process -Id ([int]$Identity.ProcessId) -ErrorAction Stop
-        $actualPath = [System.IO.Path]::GetFullPath($process.Path)
-        $expectedPath = [System.IO.Path]::GetFullPath([string]$Identity.ExecutablePath)
-        $actualStartUtc = $process.StartTime.ToUniversalTime()
-        $expectedStartUtc = [DateTime]::Parse([string]$Identity.ProcessStartUtc).ToUniversalTime()
-        return [string]::Equals($actualPath, $expectedPath, [StringComparison]::OrdinalIgnoreCase) -and
-            [Math]::Abs(($actualStartUtc - $expectedStartUtc).TotalSeconds) -lt 1.0
-    }
-    catch {
-        return $false
-    }
+    if ($null -eq $Identity) { return $false }
+    return Test-CoopLiveProcessIdentityCore -Identity $Identity
 }
 
 function Add-CoopOwnedRuntimeProcess {
     param([Parameter(Mandatory = $true)]$Identity)
 
-    $duplicate = @($ownedRuntimeProcesses | Where-Object {
-        [int]$_.ProcessId -eq [int]$Identity.ProcessId -and
-            [string]::Equals([string]$_.ProcessStartUtc, [string]$Identity.ProcessStartUtc, [StringComparison]::Ordinal)
-    }).Count -gt 0
-    if (-not $duplicate) { $ownedRuntimeProcesses.Add($Identity) }
-    Write-CoopJsonAtomic -Path (Join-Path $runRoot 'artifacts\processes\runtime-owned-processes.json') -Value ([ordered]@{
-        Schema = 'coop-runtime-process-inventory-v1'
-        RunId = $RunId
-        UpdatedUtc = [DateTime]::UtcNow.ToString('O')
-        Processes = $ownedRuntimeProcesses.ToArray()
-    })
+    try {
+        $incomingProcessId = [int](Get-CoopOptionalPropertyValue -InputObject $Identity -Name 'ProcessId')
+        $incomingStartUtc = [string](Get-CoopOptionalPropertyValue -InputObject $Identity -Name 'ProcessStartUtc')
+        $incomingLaunchOperationId = [string](Get-CoopOptionalPropertyValue -InputObject $Identity -Name 'LaunchOperationId')
+        $replacementIndex = -1
+        $duplicate = $false
+        for ($index = 0; $index -lt $ownedRuntimeProcesses.Count; $index++) {
+            $existing = $ownedRuntimeProcesses[$index]
+            $existingLaunchOperationId = [string](Get-CoopOptionalPropertyValue -InputObject $existing -Name 'LaunchOperationId')
+            if (-not [string]::IsNullOrWhiteSpace($incomingLaunchOperationId) -and
+                [string]::Equals($existingLaunchOperationId, $incomingLaunchOperationId, [StringComparison]::Ordinal)) {
+                $replacementIndex = $index
+                break
+            }
+            $existingStartUtc = [string](Get-CoopOptionalPropertyValue -InputObject $existing -Name 'ProcessStartUtc')
+            if ([int](Get-CoopOptionalPropertyValue -InputObject $existing -Name 'ProcessId') -eq $incomingProcessId -and
+                -not [string]::IsNullOrWhiteSpace($incomingStartUtc) -and
+                [string]::Equals($existingStartUtc, $incomingStartUtc, [StringComparison]::Ordinal)) {
+                $duplicate = $true
+                break
+            }
+        }
+        if ($replacementIndex -ge 0) { $ownedRuntimeProcesses[$replacementIndex] = $Identity }
+        elseif (-not $duplicate) { $ownedRuntimeProcesses.Add($Identity) }
+        Write-CoopJsonAtomic -Path (Join-Path $runRoot 'artifacts\processes\runtime-owned-processes.json') -Value ([ordered]@{
+            Schema = 'coop-runtime-process-inventory-v1'
+            RunId = $RunId
+            UpdatedUtc = [DateTime]::UtcNow.ToString('O')
+            Processes = $ownedRuntimeProcesses.ToArray()
+        })
+    }
+    catch {
+        $wrapped = [System.InvalidOperationException]::new(
+            'Runtime ownership registration failed: ' + $_.Exception.Message,
+            $_.Exception)
+        $wrapped.Data['CoopRuntimeOutcome'] = 'RunnerInternalError'
+        throw $wrapped
+    }
 }
 
 function Add-CoopOwnedDescendants {
@@ -604,36 +666,7 @@ function Stop-CoopExactProcessIdentity {
         [ValidateRange(1, 60)][int]$GraceSeconds = 15
     )
 
-    $evidence = [ordered]@{
-        RoleType = [string]$Identity.RoleType
-        RoleInstanceId = [string]$Identity.RoleInstanceId
-        ProcessId = [int]$Identity.ProcessId
-        IdentityMatched = $false
-        GracefulCloseRequested = $false
-        ForcedStopUsed = $false
-        Outcome = 'NotRunning'
-        CheckedUtc = [DateTime]::UtcNow.ToString('O')
-    }
-    if (-not (Test-CoopLiveProcessIdentity -Identity $Identity)) {
-        $runtimeCleanupEvidence.Add($evidence)
-        return
-    }
-
-    $evidence.IdentityMatched = $true
-    $process = Get-Process -Id ([int]$Identity.ProcessId) -ErrorAction Stop
-    try { $evidence.GracefulCloseRequested = [bool]$process.CloseMainWindow() } catch { }
-    try { Wait-CoopProcessExitNoOutput -Process $process -TimeoutMilliseconds ($GraceSeconds * 1000) } catch { }
-    if (-not $process.HasExited) {
-        if (-not (Test-CoopLiveProcessIdentity -Identity $Identity)) {
-            $evidence.Outcome = 'IdentityChangedBeforeForcedStop'
-            $runtimeCleanupEvidence.Add($evidence)
-            return
-        }
-        $evidence.ForcedStopUsed = $true
-        $process.Kill()
-        Wait-CoopProcessExitNoOutput -Process $process -TimeoutMilliseconds 10000
-    }
-    $evidence.Outcome = if ($process.HasExited) { 'Stopped' } else { 'StopFailed' }
+    $evidence = Stop-CoopExactProcessIdentityCore -Identity $Identity -GraceSeconds $GraceSeconds
     $runtimeCleanupEvidence.Add($evidence)
 }
 
@@ -1667,8 +1700,36 @@ function Invoke-CoopFeasibility {
 
         $dedicatedProcess = New-Object System.Diagnostics.Process
         $dedicatedProcess.StartInfo = $dedicatedStartInfo
+        $dedicatedLaunchStartedUtc = [DateTime]::UtcNow
         if (-not $dedicatedProcess.Start()) { throw 'Dedicated server process creation returned false.' }
-        $dedicatedIdentity = Get-CoopProcessIdentity -ProcessId $dedicatedProcess.Id -RoleType 'DedicatedServer' -RoleInstanceId 'dedicated-server-01'
+        $dedicatedLaunchObservedUtc = [DateTime]::UtcNow
+        $dedicatedIdentity = New-CoopProvisionalProcessIdentity `
+            -ProcessId $dedicatedProcess.Id `
+            -RoleType 'DedicatedServer' `
+            -RoleInstanceId 'dedicated-server-01' `
+            -ExpectedExecutablePath $dedicatedExecutable `
+            -ExpectedParentProcessId $PID `
+            -LaunchStartedUtc $dedicatedLaunchStartedUtc `
+            -LaunchObservedUtc $dedicatedLaunchObservedUtc
+        Add-CoopOwnedRuntimeProcess -Identity $dedicatedIdentity
+        try {
+            Add-CoopEvent -EventType 'DedicatedProcessProvisionallyOwned' -Message `
+                ("PID=" + $dedicatedProcess.Id + '; exact requested path and launch window recorded before identity enrichment.')
+        }
+        catch {
+            $wrapped = [System.InvalidOperationException]::new(
+                'Provisional process-ownership event publication failed: ' + $_.Exception.Message,
+                $_.Exception)
+            $wrapped.Data['CoopRuntimeOutcome'] = 'RunnerInternalError'
+            throw $wrapped
+        }
+        $dedicatedIdentity = Get-CoopProcessIdentity `
+            -ProcessId $dedicatedProcess.Id `
+            -RoleType 'DedicatedServer' `
+            -RoleInstanceId 'dedicated-server-01' `
+            -ExpectedExecutablePath $dedicatedExecutable `
+            -ObservedParentProcessId $PID `
+            -ProvisionalIdentity $dedicatedIdentity
         Add-CoopOwnedRuntimeProcess -Identity $dedicatedIdentity
         $dedicatedTextCapture = New-CoopProcessTextCapture `
             -Process $dedicatedProcess `
@@ -1835,13 +1896,25 @@ function Invoke-CoopFeasibility {
 
         $clientLaunch = Read-CoopJsonShared -Path (Join-Path $runRoot 'artifacts\processes\client-launch.json')
         if ($null -eq $clientLaunch) { throw 'Client launch identity artifact is missing.' }
-        $clientIdentity = Get-CoopProcessIdentity -ProcessId ([int]$clientLaunch.EntryPid) -RoleType 'MultiplayerClient' -RoleInstanceId 'multiplayer-client-01'
-        if (-not [string]::Equals(
-                [string]$clientIdentity.ExecutablePath,
-                [string]$clientLaunch.EntryPath,
-                [StringComparison]::OrdinalIgnoreCase)) {
-            throw 'Live client process path does not match the launcher identity.'
-        }
+        $clientLaunchStartUtc = [DateTime]::Parse(
+            [string]$clientLaunch.EntryStartUtc,
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+        $clientIdentity = New-CoopProvisionalProcessIdentity `
+            -ProcessId ([int]$clientLaunch.EntryPid) `
+            -RoleType 'MultiplayerClient' `
+            -RoleInstanceId 'multiplayer-client-01' `
+            -ExpectedExecutablePath ([string]$clientLaunch.EntryPath) `
+            -LaunchStartedUtc $clientLaunchStartUtc `
+            -LaunchObservedUtc $clientLaunchStartUtc
+        $clientIdentity.ProcessStartUtc = $clientLaunchStartUtc.ToString('O')
+        Add-CoopOwnedRuntimeProcess -Identity $clientIdentity
+        $clientIdentity = Get-CoopProcessIdentity `
+            -ProcessId ([int]$clientLaunch.EntryPid) `
+            -RoleType 'MultiplayerClient' `
+            -RoleInstanceId 'multiplayer-client-01' `
+            -ExpectedExecutablePath ([string]$clientLaunch.EntryPath) `
+            -ProvisionalIdentity $clientIdentity
         Add-CoopOwnedRuntimeProcess -Identity $clientIdentity
 
         $clientDeadline = [DateTime]::UtcNow.AddSeconds($RuntimeTimeoutSeconds)
@@ -1861,7 +1934,9 @@ function Invoke-CoopFeasibility {
     }
     catch {
         $runtimeReason = $_.Exception.Message
-        $runtimeOutcome = if ($runtimeReason -match 'Timed out') { 'Timeout' }
+        $outcomeHint = [string]$_.Exception.Data['CoopRuntimeOutcome']
+        $runtimeOutcome = if ($outcomeExitCodes.ContainsKey($outcomeHint)) { $outcomeHint }
+        elseif ($runtimeReason -match 'Timed out') { 'Timeout' }
         elseif ($runtimeReason -match 'exited|crash') { 'Crash' }
         else { 'AssertionFailed' }
     }
@@ -1894,7 +1969,8 @@ function Invoke-CoopFeasibility {
                 $runtimeSupersession = 'DedicatedTextCaptureFailed'
             }
         }
-        if ($null -ne $dedicatedIdentity) {
+        if ($null -ne $dedicatedIdentity -and
+            -not [string]::IsNullOrWhiteSpace([string](Get-CoopOptionalPropertyValue -InputObject $dedicatedIdentity -Name 'ProcessStartUtc'))) {
             try {
                 $nativeLogInventory = Copy-CoopDedicatedNativeLogs `
                     -DedicatedIdentity $dedicatedIdentity `

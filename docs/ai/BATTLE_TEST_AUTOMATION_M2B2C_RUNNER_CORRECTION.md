@@ -1,12 +1,14 @@
 # Battle Test Automation Milestone 2B.2C Runner Correction
 
-Status: **Source, focused contracts, full canonical contracts, and compile-only verification complete; first clean committed live attempt exposed a post-start process-identity gap; correction pending**
+Status: **Aggregate-runner post-start ownership correction implemented and non-runtime verified; client-launcher handoff hardening, review, commit, push, and clean live validation remain**
 
 Verification date: **2026-08-31**
 
 Source baseline: `30f42c3d30126993b01d1673a755a1a34947ecde`
 
 Published implementation revision: `e62f536e2d75ac32a60b623260909cc5245bfc5b`
+
+Post-live correction source baseline: `1bbdd077b1899de4c6d82cde37f179e4d39516ea` (working-tree verification; correction commit not assigned yet)
 
 This milestone implements the Revision 8 console-readiness, command-acceptance, singular-result, and native-log evidence gates exposed by `m2b2-live-feasibility-rerun-20260831-01`. It changes only the aggregate runner, its tested core helper, its focused contract project, and living documentation. It does not change either game module, install a binary, launch a product process, establish a client connection, start a campaign, or provide L2/L3 battle evidence.
 
@@ -51,6 +53,8 @@ The source root is `%ProgramData%\Mount and Blade II Bannerlord\logs`. Every fil
 | `m2b2c-full-contracts-20260831-01` | All 22 projects passed, then the new validator correctly exposed the Windows PowerShell ordered-dictionary adapter gap; retained as non-final diagnostic evidence |
 | `m2b2c-full-contracts-20260831-03` | Final canonical inventory passed 22/22; manifest `PrimaryOutcome=Pass` and `TerminalOutcome=Pass` |
 | `m2b2c-compile-only-20260831-02` | Client and dedicated builds exited `0`; installed inventories remained unchanged; no product process launched |
+| `m2b2c-r10-contracts-20260831-02` | Final post-live Revision 10 source passed the complete 22/22 inventory; manifest primary and terminal outcomes were `Pass`; no product process launched |
+| `m2b2c-r10-compile-20260831-02` | Final post-live Revision 10 client and dedicated builds exited `0`; installed inventories remained unchanged; no product process launched |
 
 The final compile-only client SHA-256 was `38712B7FE759576D23CA9CED49E9CDF01A46C69318498580AC1876C4A1795160`; it is a dirty-source verification output under the run root, not a staged runtime identity. The dedicated compile-only SHA-256 remained `1A9723A3249582FABCF08D3778C10CF448944B928549E6D9582FA7F3C0770626`. The authoritative installed runtime identities remain the unchanged Milestone 2B.2A hashes.
 
@@ -62,10 +66,20 @@ The dedicated role continued independently and published `ModuleReady` for PID `
 
 The installed client/dedicated hashes and protected `battle_result.json` hash remained unchanged. All three exact PID `113376` native logs existed under `C:\ProgramData\Mount and Blade II Bannerlord\logs`, but the runner could not collect them because the exact identity object had never been created. The outcome is a shared runner defect affecting every future battle type, not a game-module, map, or battle-adapter failure.
 
-The required correction is now explicit: successful process creation MUST establish a provisional cleanup identity before any enrichment step that can fail; executable-path acquisition MUST be bounded and may use a validated Windows process-record fallback when `Process.Path` is transiently unavailable; the path MUST match the exact requested executable before hashing; and an identity-acquisition failure after process creation MUST be `RunnerInternalError` while still executing exact cleanup.
+The required aggregate-runner correction is now implemented. Immediately after the dedicated `Process.Start()` returns, the runner records a provisional identity containing a unique launch-operation ID, PID, exact requested executable path, runner parent PID, and narrow launch window, and publishes it to the recovery inventory before identity enrichment. Promotion is bounded, accepts either the normal `Process.Path` value or a `Win32_Process.ExecutablePath` fallback, requires exact requested-path equality, cross-checks process creation time and parent PID, and hashes only the validated path. Promotion replaces the provisional inventory entry instead of creating a second owner.
 
-## 6. Evidence boundary and next gate
+Exact cleanup now consumes both provisional and verified identities through the tested core primitive. A provisional identity must match PID, requested path, launch window, and expected parent; a verified identity must match PID, path, and exact start time. PID reuse, path substitution, and parent substitution are rejected before a forced stop. Identity-enrichment exceptions carry an explicit `RunnerInternalError` outcome hint, so the feasibility catch no longer misclassifies this runner defect as `AssertionFailed`, and `finally` still discovers descendants and runs cleanup.
+
+Focused contracts exercise null `Process.Path`, validated `Win32_Process` fallback, bounded path failure, exact-path rejection, launch-window and parent checks, verified and provisional PID-reuse rejection, and real cleanup of a synthetic provisionally owned process in Windows PowerShell 5.1 and PowerShell 7. The aggregate runner also provisionally adopts the client immediately after reading the launch artifact and before re-enrichment.
+
+## 6. Remaining cross-script client boundary
+
+`Start-CoopBattleTestClient.ps1` still creates the multiplayer process and then reads `StartTime` and publishes `client-launch.json`. The aggregate runner can adopt and clean the client once that artifact exists, but it cannot recover the PID if the launcher fails after process creation and before artifact publication. This is the same class of post-start handoff risk across a separate script boundary, although it was not the cause of `m2b2c-live-feasibility-20260831-01` and the client was not reached in that run.
+
+The client launcher was outside the approved correction file set and was therefore not changed silently. A separate reviewed plan must add a fail-closed launch handoff or equivalent exact recovery evidence, with focused failure-injection coverage, before a live feasibility rerun is allowed to reach client creation.
+
+## 7. Evidence boundary and next gate
 
 This milestone proves source behavior and controlled process-capture primitives, not Bannerlord runtime acceptance. The first clean live attempt did not reach output-capture creation, so whether the dedicated executable sends all native readiness/readback messages through redirected stdout remains a live hypothesis.
 
-No game-side binary changed, so module restaging is not required. The next gate is a separately reviewed source/contracts correction for post-start provisional ownership, bounded path acquisition, failure classification, and cleanup coverage. Another live run is prohibited until that correction passes focused cross-PowerShell contracts, the full canonical inventory, compile-only verification, review, commit, and push. A later rerun must stop before campaign automation and must not claim L2 or L3 evidence unless its explicit connection criteria are reached.
+No game-side binary changed, so module restaging is not required. The aggregate correction has passed focused cross-PowerShell contracts, the full canonical inventory, and compile-only verification, but it remains uncommitted and live-unverified. The next gates are review, the separate client-launcher handoff correction, final non-runtime verification, commit, and push. Only then may a clean live rerun be approved. That rerun must stop before campaign automation and must not claim L2 or L3 evidence unless its explicit connection criteria are reached.
