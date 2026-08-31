@@ -1,10 +1,12 @@
 # Battle Test Automation Milestone 2B.2C Runner Correction
 
-Status: **Source, focused contracts, full canonical contracts, and compile-only verification complete; clean committed live rerun pending**
+Status: **Source, focused contracts, full canonical contracts, and compile-only verification complete; first clean committed live attempt exposed a post-start process-identity gap; correction pending**
 
 Verification date: **2026-08-31**
 
 Source baseline: `30f42c3d30126993b01d1673a755a1a34947ecde`
+
+Published implementation revision: `e62f536e2d75ac32a60b623260909cc5245bfc5b`
 
 This milestone implements the Revision 8 console-readiness, command-acceptance, singular-result, and native-log evidence gates exposed by `m2b2-live-feasibility-rerun-20260831-01`. It changes only the aggregate runner, its tested core helper, its focused contract project, and living documentation. It does not change either game module, install a binary, launch a product process, establish a client connection, start a campaign, or provide L2/L3 battle evidence.
 
@@ -52,8 +54,18 @@ The source root is `%ProgramData%\Mount and Blade II Bannerlord\logs`. Every fil
 
 The final compile-only client SHA-256 was `38712B7FE759576D23CA9CED49E9CDF01A46C69318498580AC1876C4A1795160`; it is a dirty-source verification output under the run root, not a staged runtime identity. The dedicated compile-only SHA-256 remained `1A9723A3249582FABCF08D3778C10CF448944B928549E6D9582FA7F3C0770626`. The authoritative installed runtime identities remain the unchanged Milestone 2B.2A hashes.
 
-## 5. Evidence boundary and next gate
+## 5. Clean live validation outcome
 
-This milestone proves source behavior and controlled process-capture primitives, not Bannerlord runtime acceptance. Whether the dedicated executable sends all native readiness/readback messages through redirected stdout remains a live hypothesis until the next bounded run.
+Run `m2b2c-live-feasibility-20260831-01` started from clean local/remote revision `e62f536`, a fresh run root, one valid Steam process, free ports `7210` and `7777`, and the exact installed Milestone 2B.2A hashes. `Process.Start()` successfully created dedicated PID `113376`, but the immediate `Get-Process` projection returned a null `.Path`. `Get-CoopProcessIdentity` passed that null value to `Get-FileHash -LiteralPath`, so the runner terminated with `AssertionFailed` before writing its process-start event, provisional ownership record, or redirected-output capture.
 
-No game-side binary changed, so module restaging is not required. The next gate is review, a documentation/source commit and push, followed by one separately approved clean-revision connection-only `Feasibility` rerun with a fresh `RunId`. That run must stop before campaign automation and must not claim L2 or L3 evidence unless its explicit connection criteria are reached.
+The dedicated role continued independently and published `ModuleReady` for PID `113376` with the exact expected loaded hash. No bootstrap command, UDP listener, client launch, campaign, mission, or battle followed. Because ownership registration had not completed, the generated runtime-cleanup inventory was empty even though the starter and its Watchdog descendant remained live. Exact manual recovery revalidated PID, executable path, start time, and parentage: the starter was a direct child of runner PID `120428`, and Watchdog PID `124728` was its direct child. The starter accepted graceful close; only the Watchdog required a forced stop. No related process or port owner remained afterward.
+
+The installed client/dedicated hashes and protected `battle_result.json` hash remained unchanged. All three exact PID `113376` native logs existed under `C:\ProgramData\Mount and Blade II Bannerlord\logs`, but the runner could not collect them because the exact identity object had never been created. The outcome is a shared runner defect affecting every future battle type, not a game-module, map, or battle-adapter failure.
+
+The required correction is now explicit: successful process creation MUST establish a provisional cleanup identity before any enrichment step that can fail; executable-path acquisition MUST be bounded and may use a validated Windows process-record fallback when `Process.Path` is transiently unavailable; the path MUST match the exact requested executable before hashing; and an identity-acquisition failure after process creation MUST be `RunnerInternalError` while still executing exact cleanup.
+
+## 6. Evidence boundary and next gate
+
+This milestone proves source behavior and controlled process-capture primitives, not Bannerlord runtime acceptance. The first clean live attempt did not reach output-capture creation, so whether the dedicated executable sends all native readiness/readback messages through redirected stdout remains a live hypothesis.
+
+No game-side binary changed, so module restaging is not required. The next gate is a separately reviewed source/contracts correction for post-start provisional ownership, bounded path acquisition, failure classification, and cleanup coverage. Another live run is prohibited until that correction passes focused cross-PowerShell contracts, the full canonical inventory, compile-only verification, review, commit, and push. A later rerun must stop before campaign automation and must not claim L2 or L3 evidence unless its explicit connection criteria are reached.

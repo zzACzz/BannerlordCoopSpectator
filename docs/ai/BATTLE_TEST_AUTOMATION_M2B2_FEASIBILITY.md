@@ -1,6 +1,6 @@
 # Battle Test Automation Milestone 2B.2B Live Feasibility Attempts and Runner Findings
 
-Status: **Dedicated loaded identity, discrete command emission, bounded discovery, and exact cleanup confirmed; Milestone 2B.2C runner correction is source/contract/compile-only verified; clean live proof of native readiness, UDP visibility, and client connection remains pending**
+Status: **Dedicated loaded identity, discrete command emission, bounded discovery, and exact cleanup confirmed in earlier attempts; the first Milestone 2B.2C clean live attempt exposed a post-start ownership/identity gap before native-output capture; correction pending**
 
 Execution and correction date: **2026-08-31**
 
@@ -111,6 +111,7 @@ The compile-only client PE hash was `305F63FD8E2B3D1E578921E9A3B56517F6AD74887E7
 | Milestone 2B.2C focused runner contracts | `%LOCALAPPDATA%\Temp\CoopSpectator\Automation\m2b2c-runner-focused-20260831-07` |
 | Milestone 2B.2C final full contract inventory | `%LOCALAPPDATA%\Temp\CoopSpectator\Automation\m2b2c-full-contracts-20260831-03` |
 | Milestone 2B.2C final compile-only verification | `%LOCALAPPDATA%\Temp\CoopSpectator\Automation\m2b2c-compile-only-20260831-02` |
+| Milestone 2B.2C first clean live validation | `%LOCALAPPDATA%\Temp\CoopSpectator\Automation\m2b2c-live-feasibility-20260831-01` |
 
 ## 7. Clean correction-revision live rerun
 
@@ -166,4 +167,12 @@ The correction also copies only `rgl_log_<PID>.txt`, `rgl_log_errors_<PID>.txt`,
 
 Focused run `m2b2c-runner-focused-20260831-07` passed in Windows PowerShell 5.1 and PowerShell 7. Final full run `m2b2c-full-contracts-20260831-03` passed 22/22 with matching primary/terminal `Pass`. Final compile-only run `m2b2c-compile-only-20260831-02` passed both project builds and proved installed inventories unchanged. See [BATTLE_TEST_AUTOMATION_M2B2C_RUNNER_CORRECTION.md](BATTLE_TEST_AUTOMATION_M2B2C_RUNNER_CORRECTION.md).
 
-No module restaging is required because no game-side source changed. The next gates are review, commit/push of the correction, and one separately approved fresh clean-revision connection-only run. Until that run observes the native redirected-output contract, UDP ownership, client loaded identity, handoff, and `Connected`, none of those facts—and no L2/L3 battle claim—are established.
+No module restaging was required because no game-side source changed. Revision `e62f536` committed and pushed this correction before the next approved live attempt. Until a later run observes the native redirected-output contract, UDP ownership, client loaded identity, handoff, and `Connected`, none of those facts—and no L2/L3 battle claim—are established.
+
+## 10. Milestone 2B.2C clean live validation
+
+Run `m2b2c-live-feasibility-20260831-01` used clean local/remote revision `e62f536e2d75ac32a60b623260909cc5245bfc5b`, the exact installed hashes, one valid Steam process, free ports, no pre-existing product process, and a fresh run root. The protected result pre-image was SHA-256 `D5EF79D59FA97EF4C95BB7AB31803AE1F475EB24498F4469B83CD3B7AD955AD3`.
+
+Dedicated `Process.Start()` succeeded with PID `113376`. Immediate identity capture then failed because `Get-Process.Path` was null and `Get-CoopProcessIdentity` passed it to `Get-FileHash -LiteralPath`. The runner reported `AssertionFailed` before recording the dedicated identity or creating stdout/stderr capture. The dedicated process later published exact `ModuleReady` for the expected `1A9723...` assembly, proving the launch itself and the game-side runtime profile were valid, but no command, UDP endpoint, client, campaign, or mission followed.
+
+This exposed two related shared-runner defects: process creation was not provisionally owned before fallible identity enrichment, and the runner classified its own post-start identity failure as a product assertion failure. The empty automatic cleanup inventory therefore did not include the live starter or Watchdog. Exact manual recovery validated their PID/path/start/parent chain, gracefully stopped the starter, forcibly stopped only its Watchdog child, and left no product process or port owner. Installed module hashes and the protected result file remained unchanged. See [BATTLE_TEST_AUTOMATION_M2B2C_RUNNER_CORRECTION.md](BATTLE_TEST_AUTOMATION_M2B2C_RUNNER_CORRECTION.md) for the required correction contract.

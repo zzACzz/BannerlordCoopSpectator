@@ -2,8 +2,8 @@
 
 Status: **Canonical implementation specification — implementation in progress**
 Specification date: **2026-08-31**
-Revision: **9 — Milestone 2B native-output readiness/readback and primary-outcome implementation contract**
-Source baseline: **`f5bd90ddb6a361f4341ea3771b4acadc266d684b`** (`f5bd90d`)
+Revision: **10 — post-start provisional ownership and bounded process-identity acquisition contract**
+Source baseline: **`e62f536e2d75ac32a60b623260909cc5245bfc5b`** (`e62f536`)
 Companion audit: [BATTLE_TEST_AUTOMATION_AUDIT.md](BATTLE_TEST_AUTOMATION_AUDIT.md)
 
 | Revision | Summary |
@@ -17,8 +17,9 @@ Companion audit: [BATTLE_TEST_AUTOMATION_AUDIT.md](BATTLE_TEST_AUTOMATION_AUDIT.
 | 7 | Fail-closed loaded-role identity, run-scoped host ownership, result suppression, exact cleanup/recovery, and the minimum native Team Deathmatch bootstrap required for connection feasibility |
 | 8 | Separate native console-readiness and command-acceptance evidence, singular runner result objects, and PID-correlated native log capture required by clean live-rerun findings |
 | 9 | Exact owned-process native-output readiness/readback, primary-versus-terminal outcomes, and PID-log collection implemented and contract-verified before another live run |
+| 10 | Immediate provisional ownership after process creation, bounded executable-path acquisition, exact-path validation, correct internal-failure classification, and cleanup despite identity-enrichment failure |
 
-The companion audit remains the source-fact baseline. Revisions 2–9 refine implementation requirements and ordering without changing the audit's historical source findings. The narrow client launch/join slice, Milestone 2A non-runtime foundation, and Milestone 2B runner-safety foundation now exist in source and contract tests. Their evidence boundaries are recorded in [BATTLE_TEST_AUTOMATION_CLIENT_JOIN_IMPLEMENTATION.md](BATTLE_TEST_AUTOMATION_CLIENT_JOIN_IMPLEMENTATION.md), [BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md](BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md), [BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md](BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md), [BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md](BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md), and [BATTLE_TEST_AUTOMATION_M2B2C_RUNNER_CORRECTION.md](BATTLE_TEST_AUTOMATION_M2B2C_RUNNER_CORRECTION.md). The live reports establish only the explicitly observed dedicated identity, emission, timeout, and cleanup facts; they do not establish client connectivity or battle evidence.
+The companion audit remains the source-fact baseline. Revisions 2–10 refine implementation requirements and ordering without changing the audit's historical source findings. The narrow client launch/join slice, Milestone 2A non-runtime foundation, and Milestone 2B runner-safety foundation now exist in source and contract tests. Their evidence boundaries are recorded in [BATTLE_TEST_AUTOMATION_CLIENT_JOIN_IMPLEMENTATION.md](BATTLE_TEST_AUTOMATION_CLIENT_JOIN_IMPLEMENTATION.md), [BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md](BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md), [BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md](BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md), [BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md](BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md), and [BATTLE_TEST_AUTOMATION_M2B2C_RUNNER_CORRECTION.md](BATTLE_TEST_AUTOMATION_M2B2C_RUNNER_CORRECTION.md). The live reports establish only the explicitly observed dedicated identity, emission, timeout, and cleanup facts; they do not establish client connectivity or battle evidence.
 
 ## 1. Purpose
 
@@ -473,6 +474,8 @@ The manifest MUST correlate the repository revision, compile output hash, staged
 ### PROC-001 — Exact process ownership
 
 The runner MUST record every process it creates and every verified descendant by process ID, executable path, and start time; it SHOULD also record parent relationship and a process-tree snapshot when observable. Cleanup MUST target only verified owned processes.
+
+Immediately after `Process.Start()` returns a PID, the runner MUST establish a provisional cleanup identity bound to the exact requested executable path and launch operation before any fallible identity-enrichment step. Executable-path acquisition MUST be bounded and MUST NOT rely exclusively on a single immediate `Process.Path` read. On Windows, a null/transient path MAY fall back to a verified `Win32_Process.ExecutablePath` record or bounded retry, but the resolved full path MUST equal the exact requested executable before hashing or promotion to verified ownership. Failure to enrich identity after successful creation MUST be `RunnerInternalError`, MUST retain enough provisional PID/path/start/parent evidence for exact cleanup, and MUST still execute cleanup. It MUST NOT escape as `AssertionFailed` or leave a created process absent from recovery evidence.
 
 Broad termination by executable name, service name, or wildcard is prohibited.
 
@@ -1182,7 +1185,7 @@ Exit criteria:
 
 Priority: **P0**
 
-Implementation status: **Milestone 2B.1 source/contracts, Milestone 2B.2A staging, exact dedicated loaded identity, six-command emission, bounded descendant discovery, result suppression, and exact cleanup are evidenced on 2026-08-31. Milestone 2B.2C now implements and contract-verifies native-output console readiness, per-command readback, singular results across Windows PowerShell 5.1/PowerShell 7, primary-versus-terminal outcomes, and exact PID-log capture. Final runs `m2b2c-full-contracts-20260831-03` and `m2b2c-compile-only-20260831-02` passed; the next clean live rerun remains pending.** See [BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md](BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md), [BATTLE_TEST_AUTOMATION_M2B2_STAGING.md](BATTLE_TEST_AUTOMATION_M2B2_STAGING.md), [BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md](BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md), and [BATTLE_TEST_AUTOMATION_M2B2C_RUNNER_CORRECTION.md](BATTLE_TEST_AUTOMATION_M2B2C_RUNNER_CORRECTION.md).
+Implementation status: **Milestone 2B.1 source/contracts, Milestone 2B.2A staging, exact dedicated loaded identity, six-command emission, bounded descendant discovery, result suppression, and exact cleanup are evidenced on 2026-08-31. Milestone 2B.2C implements and contract-verifies native-output console readiness, per-command readback, singular results across Windows PowerShell 5.1/PowerShell 7, primary-versus-terminal outcomes, and exact PID-log capture. Final runs `m2b2c-full-contracts-20260831-03` and `m2b2c-compile-only-20260831-02` passed. Clean live run `m2b2c-live-feasibility-20260831-01` then exposed a null immediate `Process.Path`, missing provisional ownership, incorrect `AssertionFailed` classification, and an empty automatic cleanup inventory after successful process creation. Exact manual recovery completed without installed/result mutation. Another live run is blocked until the Revision 10 process-identity/cleanup contract is implemented and verified.** See [BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md](BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md), [BATTLE_TEST_AUTOMATION_M2B2_STAGING.md](BATTLE_TEST_AUTOMATION_M2B2_STAGING.md), [BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md](BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md), and [BATTLE_TEST_AUTOMATION_M2B2C_RUNNER_CORRECTION.md](BATTLE_TEST_AUTOMATION_M2B2C_RUNNER_CORRECTION.md).
 
 Deliverables:
 

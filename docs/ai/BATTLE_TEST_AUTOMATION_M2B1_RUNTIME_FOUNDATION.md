@@ -1,6 +1,6 @@
 # Battle Test Automation Milestone 2B.1 Runtime-Safety Foundation
 
-Status: **Source-, contract-, and compile-only complete through Milestone 2B.2C; dedicated loaded identity confirmed; corrected connection rerun pending**
+Status: **Source-, contract-, and compile-only complete through Milestone 2B.2C; dedicated loaded identity confirmed; clean validation exposed a post-start process-identity/ownership gap before connection**
 
 Implementation date: **2026-08-31**
 
@@ -74,4 +74,4 @@ A deliberately invalid-hash `Feasibility` request stopped at `PreconditionsFaile
 
 This milestone now establishes `ConfirmedLoadedHash` only for the dedicated role and proves exact recovery for the interrupted attempt. It does not establish the client loaded hash, a supported connected client/dedicated version combination, a lobby connection, correct acceptance of the corrected six-command bootstrap, crash-reporter behavior, or result suppression inside a real mission.
 
-The game-side binaries remain the exact clean revision `12abf36` outputs documented in [BATTLE_TEST_AUTOMATION_M2B2_STAGING.md](BATTLE_TEST_AUTOMATION_M2B2_STAGING.md). Clean runner revision `70a40db` proved that `ModuleReady` preceded native console readiness and no UDP listener appeared. Milestone 2B.2C implements and contract-tests authoritative native-output readiness, exact command/start readbacks, singular runner results, and PID-correlated native-log capture without changing game-side source. After review, commit, and push, the next separately approved gate is one clean pre-campaign live rerun. It must preserve the no-L2/L3 boundary. See [BATTLE_TEST_AUTOMATION_M2B2C_RUNNER_CORRECTION.md](BATTLE_TEST_AUTOMATION_M2B2C_RUNNER_CORRECTION.md).
+The game-side binaries remain the exact clean revision `12abf36` outputs documented in [BATTLE_TEST_AUTOMATION_M2B2_STAGING.md](BATTLE_TEST_AUTOMATION_M2B2_STAGING.md). Clean runner revision `70a40db` proved that `ModuleReady` preceded native console readiness and no UDP listener appeared. Milestone 2B.2C implements and contract-tests authoritative native-output readiness, exact command/start readbacks, singular runner results, and PID-correlated native-log capture without changing game-side source. Clean live revision `e62f536` then exposed a null immediate `Process.Path` after successful creation, before ownership/capture; exact manual recovery left installed modules and the protected result unchanged. The next gate is a source/contracts fix for provisional post-start ownership and bounded exact identity acquisition, not another live run. It must preserve the no-L2/L3 boundary. See [BATTLE_TEST_AUTOMATION_M2B2C_RUNNER_CORRECTION.md](BATTLE_TEST_AUTOMATION_M2B2C_RUNNER_CORRECTION.md).
