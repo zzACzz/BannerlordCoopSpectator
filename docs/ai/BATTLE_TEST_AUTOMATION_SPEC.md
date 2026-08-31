@@ -2,7 +2,7 @@
 
 Status: **Canonical implementation specification — implementation in progress**
 Specification date: **2026-08-31**
-Revision: **7 — Milestone 2B.1 runtime-safety and native-bootstrap alignment**
+Revision: **8 — Milestone 2B live console-readiness, singular-result, and native-log evidence gates**
 Source baseline: **`f5bd90ddb6a361f4341ea3771b4acadc266d684b`** (`f5bd90d`)
 Companion audit: [BATTLE_TEST_AUTOMATION_AUDIT.md](BATTLE_TEST_AUTOMATION_AUDIT.md)
 
@@ -15,8 +15,9 @@ Companion audit: [BATTLE_TEST_AUTOMATION_AUDIT.md](BATTLE_TEST_AUTOMATION_AUDIT.
 | 5 | Default-off run-scoped client launch/join intent, exact local-server selection, secret handling, acknowledgement states, and native-join deadline semantics |
 | 6 | Implemented compile-only, aggregate-runner, environment-doctor, run/protocol, assertion, fault-injection, and artifact contracts for Milestone 2A |
 | 7 | Fail-closed loaded-role identity, run-scoped host ownership, result suppression, exact cleanup/recovery, and the minimum native Team Deathmatch bootstrap required for connection feasibility |
+| 8 | Separate native console-readiness and command-acceptance evidence, singular runner result objects, and PID-correlated native log capture required by clean live-rerun findings |
 
-The companion audit remains the source-fact baseline. Revisions 2–7 refine implementation requirements and ordering without changing the audit's historical source findings. The narrow client launch/join slice, Milestone 2A non-runtime foundation, and Milestone 2B.1 runtime-safety source foundation now exist in source and contract tests. Their evidence boundaries are recorded in [BATTLE_TEST_AUTOMATION_CLIENT_JOIN_IMPLEMENTATION.md](BATTLE_TEST_AUTOMATION_CLIENT_JOIN_IMPLEMENTATION.md), [BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md](BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md), and [BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md](BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md). None of those source/contract completion statements is Bannerlord-runtime evidence.
+The companion audit remains the source-fact baseline. Revisions 2–8 refine implementation requirements and ordering without changing the audit's historical source findings. The narrow client launch/join slice, Milestone 2A non-runtime foundation, and Milestone 2B.1 runtime-safety source foundation now exist in source and contract tests. Their evidence boundaries are recorded in [BATTLE_TEST_AUTOMATION_CLIENT_JOIN_IMPLEMENTATION.md](BATTLE_TEST_AUTOMATION_CLIENT_JOIN_IMPLEMENTATION.md), [BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md](BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md), [BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md](BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md), and [BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md](BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md). The live reports establish only the explicitly observed dedicated identity, emission, timeout, and cleanup facts; they do not establish client connectivity or battle evidence.
 
 ## 1. Purpose
 
@@ -296,6 +297,12 @@ Automatic retry is disabled by default. An explicitly requested retry MUST creat
 ### OUT-004 — Known native issues
 
 A known TaleWorlds or operating-system issue MAY annotate an observed non-pass result, but MUST NOT convert it to `Pass`. The annotation MUST include exact affected versions/hashes, an evidence reference, quarantine reason, review/expiry condition, and original outcome. An unexpected pass of a quarantined case MUST trigger review rather than silently removing the record.
+
+### OUT-005 — Singular structured runner result
+
+Each aggregate runner command MUST emit exactly one structured result object containing its primary `Outcome`, reason, and artifact path. Side-effect helpers, cleanup operations, process waits, collection mutations, native-tool calls, and diagnostic probes MUST NOT leak incidental values into that result pipeline. The final manifest, runner status, process exit code, reproduction descriptor, and command-specific report MUST preserve the same primary outcome unless a later cleanup or manifest-publication failure legitimately supersedes it as `RunnerInternalError`; any supersession MUST retain the original product outcome as a separate field rather than erase it.
+
+Contract tests MUST exercise at least pass, assertion failure, timeout followed by graceful cleanup, timeout followed by forced cleanup, already-exited descendants, and cleanup failure. They MUST fail if the command returns zero or multiple result objects or if the final manifest disagrees with the command-specific report without an explicit supersession record.
 
 ## 8. Run isolation protocol
 
@@ -927,7 +934,9 @@ The client module MUST recompute its loaded assembly hash and reject mismatched 
 
 Server discovery and joining MUST use the normal `NetworkMain.GameClient` lobby path: `GetCustomGameServerList()` followed by `RequestJoinCustomGame(...)`. Selection MUST require exactly one server matching the requested name and port plus any declared game-type or unique-map filters. The automation profile MUST NOT trust or mutate the production persisted local-host marker. It MUST instead validate a run-scoped owned-host record bound to the exact `RunId`, run-token hash, server name, UDP port, process ID, process start time, and executable path; the recorded process identity MUST still be live and the UDP port MUST be active before joining. Multiple exact matches MUST fail rather than select the first result.
 
-Native investigation established that the dedicated server does not expose the requested local UDP endpoint or normal lobby listing before `start_game`. After result publication is already fail-closed as `Suppress` and the dedicated role has reported the expected loaded module hash, the external runner MAY issue only the minimum standard dedicated commands needed to create an isolated vanilla `TeamDeathmatch` bootstrap mission and expose the owned server. This bootstrap MUST use no campaign fixture, campaign save, cooperative battle snapshot, battle-phase advancement, or campaign result consumer, and MUST NOT be classified as L2 or L3 battle evidence.
+Native investigation established that the dedicated server does not expose the requested local UDP endpoint or normal lobby listing before `start_game`. After result publication is already fail-closed as `Suppress` and the dedicated role has reported the expected loaded module hash, the external runner MAY issue only the minimum standard dedicated commands needed to create an isolated vanilla `TeamDeathmatch` bootstrap mission and expose the owned server. `ModuleReady` MUST NOT be treated as native console readiness: before the first command, the runner MUST require a distinct run-scoped acknowledgement tied to an authoritative native lifecycle point where `IGameNetworkHandler.OnHandleConsoleCommand` can receive input. A fixed delay or the existence of the process alone is insufficient.
+
+Each bootstrap command MUST have acceptance or authoritative readback evidence correlated to the exact run and process. The runner MUST establish accepted `start_game` before beginning the UDP-visibility deadline. If console readiness or command acceptance cannot be observed, the run MUST fail with an exact readiness/acceptance reason rather than a generic port timeout. The exact PID-correlated native, error, and watchdog logs MUST be retained below the run root even when TaleWorlds ignores the requested log-output directory. This bootstrap MUST use no campaign fixture, campaign save, cooperative battle snapshot, battle-phase advancement, or campaign result consumer, and MUST NOT be classified as L2 or L3 battle evidence.
 
 A server password MUST NOT be accepted as a command-line argument or persisted in the request, launch artifact, status, or logs. When required, it MAY be inherited through a protected child-process environment value; artifacts MAY record only whether a password was supplied.
 
@@ -1168,14 +1177,15 @@ Exit criteria:
 
 Priority: **P0**
 
-Implementation status: **Milestone 2B.1 source, contract, and compile-only foundation and Milestone 2B.2A clean-current-source controlled staging completed on 2026-08-31. The first live feasibility attempt confirmed the exact dedicated loaded hash and `Suppress` policy, but runner orchestration defects prevented UDP visibility and client launch. The corrected runner is source-, contract-, and compile-only verified; a clean committed live rerun is pending.** See [BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md](BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md), [BATTLE_TEST_AUTOMATION_M2B2_STAGING.md](BATTLE_TEST_AUTOMATION_M2B2_STAGING.md), and [BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md](BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md).
+Implementation status: **Milestone 2B.1 source/contracts, Milestone 2B.2A staging, exact dedicated loaded identity, six-command emission, bounded descendant discovery, result suppression, and exact cleanup are evidenced on 2026-08-31. Clean revision `70a40db` timed out before UDP visibility because command emission preceded native console readiness; the client did not launch. The correct product `Timeout` was then overwritten in terminal metadata by incidental cleanup pipeline output. Revision 8 console-readiness, acceptance, singular-result, and native-log gates remain unimplemented.** See [BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md](BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md), [BATTLE_TEST_AUTOMATION_M2B2_STAGING.md](BATTLE_TEST_AUTOMATION_M2B2_STAGING.md), and [BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md](BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md).
 
 Deliverables:
 
 - exact process/port ownership, runtime locks, and role-instance process inventory;
 - one verified runtime staging mode with end-to-end binary hash chain;
-- loaded-role state observation before native mission bootstrap;
+- loaded-role state plus separate native console-readiness observation before native mission bootstrap;
 - a minimum runner-owned vanilla `TeamDeathmatch` bootstrap, used only because the native dedicated server does not bind/list the local UDP server beforehand;
+- per-command acceptance/readback, singular runner-result, and PID-correlated native-log evidence;
 - cancellation, exact cleanup, abandoned-run inspection, and `Recover` flow;
 - `Suppress` result policy and early-abort safety contracts;
 - structured fatal-failure event and minimum crash/hang evidence.

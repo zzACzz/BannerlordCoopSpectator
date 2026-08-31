@@ -1,14 +1,16 @@
-# Battle Test Automation Milestone 2B.2B Live Feasibility Attempt and Runner Correction
+# Battle Test Automation Milestone 2B.2B Live Feasibility Attempts and Runner Findings
 
-Status: **Dedicated loaded identity confirmed; server visibility and client connection not reached; runner correction source/contract complete; clean live rerun pending**
+Status: **Dedicated loaded identity, discrete command emission, bounded discovery, and exact cleanup confirmed; native console readiness, UDP visibility, and client connection not reached; another runner correction is required**
 
 Execution and correction date: **2026-08-31**
 
 Attempt repository revision: `9f4ee733d8e9b83b5fef4f194140daf97a0d89a8`
 
+Clean rerun repository revision: `70a40db6aa71a27e6b1afa0892118ac77871c1a3`
+
 Installed game-side binary source revision: `12abf36`
 
-This document records the first Milestone 2B live feasibility attempt, its exact evidence boundary, the shared runner defects it exposed, exact recovery, and the non-runtime verification of the correction. It does not claim a client connection, campaign startup, cooperative mission, completed battle, L2, or L3 evidence.
+This document records both Milestone 2B live feasibility attempts, their exact evidence boundaries, the shared runner defects they exposed, exact recovery/cleanup, and the non-runtime verification between attempts. It does not claim a client connection, campaign startup, cooperative mission, completed battle, L2, or L3 evidence.
 
 ## 1. Outcome and evidence boundary
 
@@ -101,13 +103,62 @@ The compile-only client PE hash was `305F63FD8E2B3D1E578921E9A3B56517F6AD74887E7
 | Purpose | Root |
 |---|---|
 | First live attempt and exact recovery | `%LOCALAPPDATA%\Temp\CoopSpectator\Automation\m2b2-live-feasibility-20260831-01` |
+| Clean correction-revision live rerun | `%LOCALAPPDATA%\Temp\CoopSpectator\Automation\m2b2-live-feasibility-rerun-20260831-01` |
 | Focused corrected-runner contracts | `%LOCALAPPDATA%\Temp\CoopSpectator\Automation\m2b2-fix-runner-focused-20260831-02` |
 | Final full contract inventory | `%LOCALAPPDATA%\Temp\CoopSpectator\Automation\m2b2-fix-final-contracts-20260831-01` |
 | Compile-only verification | `%LOCALAPPDATA%\Temp\CoopSpectator\Automation\m2b2-fix-compile-only-20260831-01` |
 | ILSpy comparison | `%LOCALAPPDATA%\Temp\CoopSpectator\Automation\m2b2-fix-il-compare-20260831-01` |
 
-## 7. Next gate
+## 7. Clean correction-revision live rerun
 
-The correction verification runs were intentionally recorded from a dirty working tree before review and commit. A new live run must not be presented as authoritative evidence until the correction and this documentation are committed and pushed as one reviewed revision.
+Run `m2b2-live-feasibility-rerun-20260831-01` used clean committed and pushed revision `70a40db6aa71a27e6b1afa0892118ac77871c1a3`, exact installed client hash `B576B8EA0FB223126A65E062CB562FD15815DF8BA1ADDB1797506914B48D7928`, and exact installed dedicated hash `1A9723A3249582FABCF08D3778C10CF448944B928549E6D9582FA7F3C0770626`. Steam was running, the repository was clean, ports `7210` and `7777` were free, no product process existed, and the run root was fresh.
 
-No module restaging is required because the correction does not change game-side binaries. After the clean correction revision exists, the next separately approved action is one fresh `Feasibility` connection-only rerun with a new `RunId`. That rerun must stop before campaign automation and must not claim L2 or L3 evidence unless its explicit acceptance criteria are actually reached.
+The run proved that the first correction works in a real dedicated process:
+
+- dedicated PID `123600` reported `ModuleReady`, the exact expected loaded hash, and `ResultPolicy=Suppress`;
+- events 3–8 recorded exactly six separate commands in the intended order;
+- the bounded process-tree snapshot completed in 808 ms from one 316-process snapshot and found exactly the watchdog and console-host descendants;
+- exact cleanup gracefully stopped the dedicated process without forced termination and observed both descendants already stopped;
+- `Inspect` validated the manifest, lease, and three recorded identities and reported `LiveExactProcessCount=0`;
+- no client, campaign, cooperative mission, or battle started;
+- ports `7210` and `7777` were free afterward;
+- installed module hashes and the protected result hash `D5EF79D59FA97EF4C95BB7AB31803AE1F475EB24498F4469B83CD3B7AD955AD3` remained unchanged;
+- no crash artifact or crash-reporter process appeared.
+
+The authoritative feasibility report correctly recorded `Outcome=Timeout` and reason `Timed out waiting for owned UDP port 7210.` The client was not launched because the owned port gate never passed.
+
+The terminal manifest separately recorded `RunnerInternalError` with `The property 'Outcome' cannot be found on this object.` This disagreement is a runner defect, not evidence that the product timeout did not occur. `Stop-CoopExactProcessIdentity` calls the Boolean-returning `Process.WaitForExit(int)` without suppressing its output. That incidental Boolean joins the intended structured function result in the PowerShell pipeline, so the aggregate caller does not receive exactly one object with an `Outcome` property. The same shared cleanup path can affect any scenario or terminal outcome.
+
+## 8. Native readiness evidence
+
+The native dedicated log is:
+
+```text
+C:\ProgramData\Mount and Blade II Bannerlord\logs\rgl_log_123600.txt
+```
+
+Its SHA-256 is `A3A6101A4FF58CEF48FCC2C12916FFF6E559345EC15D71AF02CA107CDFEC0EAF`. The native error-log SHA-256 is `0BD87E4E81DDA2DE0F484CB3C7F398788CBE256C4849492EDFB7C24A652B36CC`, and the watchdog-log SHA-256 is `2BF35E61AD7DC7D23BE3CBC43C4CBD755869D3F5372402FAE7C649EB6B4785CF`.
+
+The runner emitted its first command at local time `10:04:23.414`. The native log proves that startup initialization was still active through at least `10:04:25.079`, login began at `10:04:25.094`, login succeeded at `10:04:25.525`, and the first successful alive response arrived at `10:04:27.377`. The exact server name, map, usable-map command, and `start_game` text do not appear in the native log.
+
+Lowest-level source and ILSpy inspection explains the ordering gap:
+
+- the mod writes `ModuleReady` from `DedicatedServer.SubModule.OnSubModuleLoad` immediately after hashing its assembly;
+- the native `DedicatedServerConsoleCommandManager.HandleConsoleCommand` is reached later through `IGameNetworkHandler.OnHandleConsoleCommand`;
+- therefore `ModuleReady` proves loaded binary identity and result policy but does not prove that the native console-command handler can yet receive standard input.
+
+The strongest evidence-supported inference is that the six correctly separated commands were written before the native console path became ready and were not accepted. This rerun does not prove that the selected map or game type is invalid because command acceptance was never established.
+
+The requested `/LogOutputPath` did not place these native logs below the run root; they remained under `C:\ProgramData`. Future authoritative attempts must collect the exact PID-correlated native logs into the run artifact set.
+
+## 9. Required correction before another live run
+
+The next implementation plan must address all three shared runner defects:
+
+1. add a distinct, run-scoped native console-ready acknowledgement after `ModuleReady`; an elapsed sleep is not sufficient;
+2. require acceptance/readback evidence for every bootstrap command, especially `start_game`, before waiting for UDP visibility;
+3. guarantee that every aggregate runner command emits exactly one structured result object and add timeout/cleanup contracts that reject incidental PowerShell pipeline output.
+
+It must also retain or copy the exact PID-correlated native, error, and watchdog logs below the run root. These requirements apply to all future battle types because command readiness, result classification, log capture, and cleanup are shared orchestration concerns.
+
+No module restaging is required for the already tested binaries. No further live rerun is authorized by this report; code correction, verification, commit/push, and a fresh live `RunId` each remain separate planned gates.

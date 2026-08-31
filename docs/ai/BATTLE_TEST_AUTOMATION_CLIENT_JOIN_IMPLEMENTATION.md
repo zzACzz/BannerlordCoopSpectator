@@ -80,17 +80,19 @@ Contract coverage includes valid and invalid `RunId` values, run-token mismatch,
 | PROC-001 client launch slice | `Partially Satisfied` | Launch artifact records entry PID/path/start time; validation-only path tested | Source, contract test | Multiplayer client | Build guide and code map updated | No live launch in this step, descendant ownership, exact cleanup, or crash recovery proof |
 | CLI-002 initial machine prerequisite | `Partially Satisfied` | Launcher requires Steam in the current interactive session and records non-secret process IDs; validation passed | Source, environment validation | Multiplayer client | Build guide and M1 report updated | Portability, anti-cheat, modal, and other-machine proof remain open |
 | CLI-006 early feasibility gate | `Partially Satisfied` | A supported source control path now exists; M1 launch evidence and new contract evidence are separated | Source, contract test | Multiplayer client and local dedicated server | Audit and feasibility report updated | No connection, handoff, or exact cross-role runtime correlation yet |
-| CLI-008 run-scoped native-lobby intent | `Partially Satisfied` | (a) default-off complete profile; (b) fresh RunId/token/hash-bound request; (c) exact server filters; (d) run-scoped owned process plus UDP association gate; (e) native list/join APIs; (f) secret excluded from CLI/artifacts; (g) atomic state acknowledgements; (h) launcher/client do not issue `start_game` or use UI automation; source compiled and contracts passed | Source, contract test, dedicated runtime evidence | Multiplayer client and associated local dedicated server; battle-type independent | Specification Revision 7 and all affected living documents updated | Dedicated loading is verified, but UDP visibility, client launch, handoff, and connection remain unverified; the external runner's minimum vanilla bootstrap is not L2/L3 battle evidence |
+| CLI-008 run-scoped native-lobby intent | `Partially Satisfied` | (a) default-off complete profile; (b) fresh RunId/token/hash-bound request; (c) exact server filters; (d) run-scoped owned process plus UDP association gate; (e) native list/join APIs; (f) secret excluded from CLI/artifacts; (g) atomic state acknowledgements; (h) launcher/client do not issue `start_game` or use UI automation; source compiled and contracts passed; (i) clean live rerun verified dedicated identity, six writes, and cleanup | Source, contract test, dedicated runtime evidence | Multiplayer client and associated local dedicated server; battle-type independent | Specification Revision 8 and affected living documents updated | `ModuleReady` precedes native console readiness; command acceptance, UDP visibility, client launch, handoff, and connection remain unverified; the external runner's minimum vanilla bootstrap is not L2/L3 battle evidence |
 | TST-004 safe default | `Satisfied` for this slice | No complete automation environment means the controller returns without work; feature flag is independent of verbose diagnostics | Source, contract compilation | Production multiplayer client | Architecture and risks updated | Main project was not built or runtime-tested in this step |
 
 ## 5. Remaining gates
 
-Before the corrected connectivity-only rerun:
+Before another connectivity-only rerun:
 
-1. commit and push the source- and contract-verified runner correction; the already staged game-side binaries do not require restaging;
-2. invoke `Feasibility` with explicit expected hashes and require both roles to report those loaded identities;
-3. require `Suppress` before the external runner issues the minimum native vanilla `TeamDeathmatch` bootstrap;
-4. require run-scoped owned-host identity, exact lobby selection, network handoff, connected session, unchanged global result state, and exact cleanup evidence;
-5. retain the run root for inspection and make no campaign, L2, or L3 claim.
+1. add and contract-test a distinct native console-ready acknowledgement after dedicated `ModuleReady`;
+2. require per-command acceptance/readback and retain the PID-correlated native logs below the run root;
+3. make every aggregate runner command return exactly one structured result through timeout and cleanup;
+4. commit and push the verified correction; the already staged game-side binaries require restaging only if the readiness acknowledgement changes module code;
+5. invoke `Feasibility` with explicit expected hashes and require both roles to report those loaded identities;
+6. require run-scoped owned-host identity, exact lobby selection, network handoff, connected session, unchanged global result state, and exact cleanup evidence;
+7. retain the run root for inspection and make no campaign, L2, or L3 claim.
 
 Only after that bounded runtime gate passes may the project proceed to campaign encounter capture or full battle execution. The vanilla bootstrap used by `Feasibility` is solely a native connectivity prerequisite and does not satisfy a battle milestone.

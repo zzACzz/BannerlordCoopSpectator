@@ -106,7 +106,7 @@ fresh RunId + result policy Suppress
 
 `SubModule.OnApplicationTick` pumps `CoopLobbyAutomationController` on the main thread. The controller writes status only when the state or failure details change. A request may expire before native join starts; after the native task starts, only the future external runner may time out and clean up its exactly owned process.
 
-The launcher and client module do not issue `start_game`. Only the external runner may issue the minimum standard server bootstrap, and only after `Suppress` and dedicated loaded-hash validation. The bootstrap opens no campaign fixture, advances no cooperative battle phase, consumes no result, and creates no L2/L3 evidence claim. The 2026-08-31 evidence is source/contract validation only; the bootstrap commands, real lobby handoff, connection, suppression, and cleanup have not yet been runtime-verified.
+The launcher and client module do not issue `start_game`. Only the external runner may issue the minimum standard server bootstrap, and only after `Suppress`, dedicated loaded-hash validation, and a distinct native console-ready acknowledgement. The clean `70a40db` rerun verified six discrete writes, dedicated suppression, bounded discovery, and exact cleanup, but it also proved that `ModuleReady` occurs before login/console readiness; no command acceptance, UDP listener, client handoff, or connection was observed. The bootstrap opens no campaign fixture, advances no cooperative battle phase, consumes no result, and creates no L2/L3 evidence claim.
 
 ## Flow 1: campaign encounter capture
 
