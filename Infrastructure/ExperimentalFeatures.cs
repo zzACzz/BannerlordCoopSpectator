@@ -17,6 +17,13 @@ namespace CoopSpectator.Infrastructure
             IsEnvironmentFlagEnabledCore(VerboseDiagnosticsEnvironmentVariable);
 
         /// <summary>
+        /// Explicit opt-in for the run-scoped battle-test automation protocol.
+        /// It remains independent from verbose diagnostics and disabled by default.
+        /// </summary>
+        public static readonly bool EnableTestAutomation =
+            IsEnvironmentFlagEnabledCore("COOPSPECTATOR_TEST_AUTOMATION");
+
+        /// <summary>
         /// Explicit opt-in for the isolated multiplayer Main_map rendering prototype.
         /// It is independent from verbose diagnostics and remains disabled by default.
         /// </summary>

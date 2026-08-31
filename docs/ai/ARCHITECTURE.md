@@ -1,6 +1,7 @@
 # Architecture
 
 Last source verification: **2026-08-28**
+Last automation-control source verification: **2026-08-31**
 
 ## System objective
 
@@ -25,6 +26,7 @@ The implementation deliberately combines native Bannerlord systems with narrow c
 SubModule.cs (client/campaign startup)
   |-- CoopRuntime / NetworkManager -------------------- TCP host-state/start channel
   |-- BattleDetector --------------------------------- capture + launch + writeback
+  |-- CoopLobbyAutomationController ------------------ default-off run-scoped lobby intent
   |-- Harmony patches -------------------------------- native compatibility boundaries
   |-- campaign behaviors ----------------------------- dispatcher/journal/hero/map prototype
   `-- optional game-mode registration
@@ -222,7 +224,25 @@ Key files:
 
 `HostSelfJoinRedirectState` uses temporary marker files instead of the Documents bridge folder.
 
+The initial battle-test client-control bridge is deliberately separate from production battle bridges. It uses `%TEMP%\CoopSpectator\Automation\<RunId>\commands\client-join.request.json` and `state\client-join.status.json`, binds the intent to a token hash and loaded module hash, and writes status with strict atomic replacement. It is orchestration state only: it requests a normal lobby join but does not own network truth, battle readiness, mission phases, or results.
+
 `AtomicBridgeFileIO` is the common safe-write/read helper. Preserve stable-read and atomic-write semantics for JSON/status bridges; partial reads can corrupt startup or writeback decisions.
+
+### Battle-test automation control plane
+
+Milestone 2A adds an isolated non-runtime control plane below `%TEMP%\CoopSpectator\Automation\<RunId>`. It does not replace any campaign, dedicated, mission-network, battle-phase, spawn, result, or writeback authority.
+
+`scripts/Invoke-CoopTest.ps1` is the only current general runner entry point. For `Doctor`, `Contracts`, and `CompileOnly` it owns:
+
+- a fresh exact run root and exclusive runner lock;
+- manifest schema 1 and protocol 1.0;
+- a random nonce whose SHA-256 fingerprint, never plaintext, is persisted;
+- the `Runner/runner-01` role instance, process identity, capabilities, lease/heartbeat, atomic status, and ordered events;
+- categorized artifacts, assertion records, stable terminal outcomes, and non-pass reproduction metadata.
+
+`CoopAutomationRunContract` defines the cross-role identity and compatibility model, while `CoopAutomationProtocolFileIO` defines the verified local same-volume file semantics. The existing client-join request uses schema 2 / protocol 1.0 with exact `Runner/runner-01 -> MultiplayerClient/multiplayer-client-01` identity. That request is a future consumer of the control plane, but it is not runtime-connected by Milestone 2A.
+
+The compile-only build plane is separate from both installed modules and repository module output folders. `Directory.Build.props` redirects all build/package state below the run root only when `CoopCompileOnly=true`; both main project files independently suppress their deployment targets in that mode. Normal developer builds retain their historical deployment behavior because the property defaults to false.
 
 ## Exact agent transfer architecture
 
@@ -256,6 +276,8 @@ The active architecture deliberately keeps `EnableExactCampaignRuntimeObjectRegi
 | Controlled agent mapping | `CoopBattleAgentControlRuntimeState` |
 | Exact per-entry transfer | `ExactTransferContractRuntimeCache`, `ExactTransferRuntimeState` |
 | Result de-duplication | `BattleResultWritebackJournalBehavior`, campaign guard contracts |
+| Automation run identity/lease/outcomes | `CoopAutomationRunContract`, `scripts/Invoke-CoopTest.ps1` |
+| Automation file publication | `CoopAutomationProtocolFileIO`, runner atomic JSON/JSONL helpers |
 
 Many owners are static and process-wide. Mission transition cleanup is therefore architectural, not cosmetic.
 
@@ -292,6 +314,7 @@ Current source defaults in `Infrastructure/ExperimentalFeatures.cs`:
 ### Explicit opt-in paths
 
 - campaign map prototype: `COOPSPECTATOR_CAMPAIGN_MAP_PROTOTYPE=1`;
+- battle-test client lobby control: `COOPSPECTATOR_TEST_AUTOMATION=1` plus matching `COOPSPECTATOR_AUTOMATION_RUN_ID`, `COOPSPECTATOR_AUTOMATION_RUN_ROOT`, and `COOPSPECTATOR_AUTOMATION_RUN_TOKEN`; the server password is an optional child-environment secret and is never persisted;
 - verbose diagnostics master gate: `COOPSPECTATOR_VERBOSE_DIAGNOSTICS=1`;
 - most targeted high-volume diagnostics additionally require their own environment variable. See [BUILD_TEST_DEBUG.md](BUILD_TEST_DEBUG.md).
 

@@ -15,7 +15,8 @@
     <DebugType>none</DebugType>
     <PlatformTarget>x64</PlatformTarget>
     <Platform Condition="'$(Platform)'==''">x64</Platform>
-    <OutputPath>..\Module\CoopSpectatorDedicated\bin\Win64_Shipping_Server\</OutputPath>
+    <OutputPath Condition="'$(CoopCompileOnly)'!='true'">..\Module\CoopSpectatorDedicated\bin\Win64_Shipping_Server\</OutputPath>
+    <OutputPath Condition="'$(CoopCompileOnly)'=='true' and '$(CoopCompileOutputRoot)'!=''">$(BaseOutputPath)</OutputPath>
     <AppendConfigurationToOutputPath>false</AppendConfigurationToOutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <BannerlordRootDir Condition="'$(BannerlordRootDir)'==''">C:\Program Files (x86)\Steam\steamapps\common\Mount &amp; Blade II Bannerlord</BannerlordRootDir>
@@ -390,7 +391,12 @@
     <Message Text="[CoopSpectatorDedicated] Build OutputPath=$(OutputPath) (local build output)" Importance="normal" />
   </Target>
 
-  <Target Name="DeployServerToDedicated" AfterTargets="Build">
+  <Target Name="ValidateCoopCompileOnlyConfiguration" BeforeTargets="PrepareForBuild" Condition="'$(CoopCompileOnly)'=='true'">
+    <Error Text="[CoopSpectatorDedicated] CoopCompileOnly requires an absolute CoopCompileOutputRoot." Condition="'$(CoopCompileOutputRoot)'=='' or !$([System.IO.Path]::IsPathRooted('$(CoopCompileOutputRoot)'))" />
+    <Message Text="[CoopSpectatorDedicated] CoopCompileOnly=true; dedicated installation deployment is disabled. OutputRoot=$(CoopCompileOutputRoot)" Importance="high" />
+  </Target>
+
+  <Target Name="DeployServerToDedicated" AfterTargets="Build" Condition="'$(CoopCompileOnly)'!='true'">
     <PropertyGroup>
       <_DedicatedModuleDir Condition="Exists('$(DedicatedServerRootDir)')">$(DedicatedServerRootDir)\Modules\CoopSpectatorDedicated</_DedicatedModuleDir>
       <_DedicatedBinServer Condition="Exists('$(DedicatedServerRootDir)')">$(_DedicatedModuleDir)\bin\Win64_Shipping_Server</_DedicatedBinServer>

@@ -20,7 +20,8 @@
     <!-- Встановлюємо платформу за замовчуванням в x64, якщо користувач не передав /p:Platform=... -->
     <Platform Condition="'$(Platform)'==''">x64</Platform>
     <!-- Публікуємо DLL одразу у папку моду, щоб не копіювати вручну після білду -->
-    <OutputPath>Module\CoopSpectator\bin\Win64_Shipping_Client\</OutputPath>
+    <OutputPath Condition="'$(CoopCompileOnly)'!='true'">Module\CoopSpectator\bin\Win64_Shipping_Client\</OutputPath>
+    <OutputPath Condition="'$(CoopCompileOnly)'=='true' and '$(CoopCompileOutputRoot)'!=''">$(BaseOutputPath)</OutputPath>
     <!-- Не додаємо /Debug або /Release у шлях, щоб вихід завжди був в одній папці моду -->
     <AppendConfigurationToOutputPath>false</AppendConfigurationToOutputPath>
     <!-- Не додаємо net472 у шлях, бо Bannerlord очікує DLL у Win64_Shipping_Client напряму -->
@@ -31,6 +32,7 @@
     <!-- Шлях до Win64_Shipping_Client, де лежать DLL гри для компіляції -->
     <BannerlordBinDir>$(BannerlordRootDir)\bin\Win64_Shipping_Client</BannerlordBinDir>
     <DedicatedServerRootDir Condition="'$(DedicatedServerRootDir)'==''">C:\Program Files (x86)\Steam\steamapps\common\Mount &amp; Blade II Dedicated Server</DedicatedServerRootDir>
+    <BuildDedicatedServerModule Condition="'$(BuildDedicatedServerModule)'=='' and '$(CoopCompileOnly)'=='true'">false</BuildDedicatedServerModule>
     <BuildDedicatedServerModule Condition="'$(BuildDedicatedServerModule)'==''">true</BuildDedicatedServerModule>
     <!-- Прапорець: чи існує DLL з папки гри (як маркер, що шлях правильний) -->
     <UseGameDlls Condition="Exists('$(BannerlordBinDir)\TaleWorlds.MountAndBlade.dll')">true</UseGameDlls>
@@ -290,7 +292,12 @@
     <GameModulesBinDir>$(GameModulesDir)\bin\Win64_Shipping_Client</GameModulesBinDir>
     <GameModulesMPDir>$(BannerlordRootDir)\Modules\CoopSpectatorMP</GameModulesMPDir>
   </PropertyGroup>
-  <Target Name="DeployModToGame" AfterTargets="Build">
+  <Target Name="ValidateCoopCompileOnlyConfiguration" BeforeTargets="PrepareForBuild" Condition="'$(CoopCompileOnly)'=='true'">
+    <Error Text="[CoopSpectator] CoopCompileOnly requires an absolute CoopCompileOutputRoot." Condition="'$(CoopCompileOutputRoot)'=='' or !$([System.IO.Path]::IsPathRooted('$(CoopCompileOutputRoot)'))" />
+    <Message Text="[CoopSpectator] CoopCompileOnly=true; deployment and implicit dedicated build are disabled. OutputRoot=$(CoopCompileOutputRoot)" Importance="high" />
+  </Target>
+
+  <Target Name="DeployModToGame" AfterTargets="Build" Condition="'$(CoopCompileOnly)'!='true'">
     <RemoveDir Directories="$(GameModulesMPDir)" Condition="Exists('$(GameModulesMPDir)')" />
     <MakeDir Directories="$(GameModulesDir);$(GameModulesBinDir)" />
     <Copy SourceFiles="$(MultiplayerDependencySource)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" Condition="Exists('$(MultiplayerDependencySource)')" />
@@ -311,7 +318,7 @@
     <Warning Text="[CoopSpectator] Deploy done: CoopSpectator (incl. ModuleData). Removed stale CoopSpectatorMP if present. Restart launcher if open." />
   </Target>
 
-  <Target Name="BuildAndDeployDedicatedModule" AfterTargets="DeployModToGame" Condition="'$(BuildDedicatedServerModule)'=='true' and Exists('$(ProjectDir)DedicatedServer\CoopSpectatorDedicated.csproj')">
+  <Target Name="BuildAndDeployDedicatedModule" AfterTargets="DeployModToGame" Condition="'$(CoopCompileOnly)'!='true' and '$(BuildDedicatedServerModule)'=='true' and Exists('$(ProjectDir)DedicatedServer\CoopSpectatorDedicated.csproj')">
     <MSBuild
       Projects="$(ProjectDir)DedicatedServer\CoopSpectatorDedicated.csproj"
       Targets="Build"
@@ -319,4 +326,3 @@
     <Warning Text="[CoopSpectator] Dedicated deploy done → $(DedicatedServerRootDir)\Modules\CoopSpectatorDedicated. Restart dedicated if running." Condition="Exists('$(DedicatedServerRootDir)')" />
   </Target>
 </Project>
-

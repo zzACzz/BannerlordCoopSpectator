@@ -1,6 +1,7 @@
 # Build, Test, and Debug Guide
 
 Last source verification: **2026-08-28**
+Last automation-control verification: **2026-08-31**
 
 ## Safety first: builds deploy
 
@@ -47,7 +48,12 @@ The repository does not currently define a documented, verified property that di
 | Contract-test `dotnet run` | Yes | test `bin/`, `obj/`; possible test-specific temporary output | No expected module deployment | No expected module deployment |
 | `scripts/CoopDevLoop.ps1` with no action switches | Yes | build outputs | Yes | Yes |
 | `scripts/CreateReleasePackage.ps1` without `-SkipBuild` | Yes | build outputs and recreated `dist/` packages | Yes through project targets | Yes through project targets |
+| `scripts/CreateReleasePackage.ps1 -SkipBuild -GitHubAssetsOnly` | No | recreates GitHub client/host archives and temporary staging under `dist/releases/` | No | No |
+| `scripts/CreateReleasePackage.ps1 -SkipBuild -NexusAssetsOnly` | No | recreates validated Nexus client/HostLite archives under `dist/releases/<version>/Nexus/` | No | No |
+| `scripts/CreateReleasePackage.ps1 -SkipBuild -ReleaseAssetsOnly` | No | recreates both GitHub and Nexus archive sets under `dist/releases/<version>/` | No | No |
 | `scripts/Test-RepositoryHygiene.ps1` | No | no content/output writes; Git may refresh index metadata | No | No |
+| `scripts/Start-CoopBattleTestClient.ps1 -ValidateOnly` | No | No expected repository or run-root writes | No | No |
+| `run_battle_test_client.bat` / live `Start-CoopBattleTestClient.ps1` | No | Writes only the selected temporary automation run root; Bannerlord writes its normal external logs/configuration | No | No |
 
 This table records current project/script behavior, not a guarantee that an arbitrary command is safe. Every approved plan containing one of these operations must still state the exact command and resolved destinations.
 
@@ -124,6 +130,22 @@ dotnet build .\DedicatedServer\CoopSpectatorDedicated.csproj -c Debug `
 
 `BUILD_RUNBOOK.md` contains shorter historical commands, but its dedicated root example omits the current default Steam segment. Prefer explicit paths verified on the current machine.
 
+### Side-effect-free compile-only mode
+
+`Directory.Build.props` and both main project files support `CoopCompileOnly=true`. The mode defaults to false, so the historical developer deployment workflow above remains unchanged. When true, the caller must provide an absolute `CoopCompileOutputRoot`; output, intermediate files, project extensions, and restored packages are redirected below that root, while `DeployModToGame`, `BuildAndDeployDedicatedModule`, and `DeployServerToDedicated` are disabled.
+
+Prefer the reviewed runner instead of calling the projects manually:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-CoopTest.ps1 `
+  -Command CompileOnly `
+  -RunId m2a-local-compile-01
+```
+
+The runner writes below `%TEMP%\CoopSpectator\Automation\<RunId>`, recursively inventories the installed client, legacy-client, and dedicated module trees before and after, compiles the client and dedicated projects independently, and fails if any installed inventory changes. It does not stage or load the resulting DLLs.
+
+The authoritative 2026-08-31 proof is `m2a-compile-only-20260831-03`; both version `0.3.2` outputs compiled, all four assertions passed, and the before/after installed-inventory JSON files shared SHA-256 `9A467236DE7B7FACF18B8C54B947EE8CACEA2D2D2C3B754C3EA3510BE37010CA`.
+
 ## Contract tests
 
 Contract tests are standalone `net8.0` executables. They are the safest automated validation layer because most link narrow pure production contracts rather than loading Bannerlord.
@@ -134,7 +156,18 @@ Run one project:
 dotnet run --project .\Tests\CoopBattleStartup.ContractTests\CoopBattleStartup.ContractTests.csproj -c Release
 ```
 
-Run all contract-test projects:
+Run all contract-test projects through the canonical inventory:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-CoopTest.ps1 `
+  -Command Contracts `
+  -RunId m2a-local-contracts-01 `
+  -All
+```
+
+The runner requires `Tests/contract-tests.manifest.json` to equal the discovered project inventory, continues after an isolated project failure, and writes structured JSON/Markdown results plus combined, stdout, and stderr logs for every project.
+
+The older ad-hoc equivalent is retained only for diagnosis:
 
 ```powershell
 Get-ChildItem .\Tests -Recurse -Filter *.csproj |
@@ -145,7 +178,7 @@ Get-ChildItem .\Tests -Recurse -Filter *.csproj |
   }
 ```
 
-The 17 current projects cover:
+The 20 current projects cover:
 
 - campaignless conversation safety;
 - battle power/HUD math;
@@ -160,7 +193,10 @@ The 17 current projects cover:
 - shader-cache mode-switch script behavior;
 - siege formation membership safety;
 - SandBox scene-script registration;
-- native aftermath/casualty aggregation.
+- native aftermath/casualty aggregation;
+- run-scoped client join request/server-selection/status behavior;
+- general automation protocol, outcome, lease/recovery, known-issue, and file-fault contracts;
+- compile-only project guards.
 
 Test interpretation:
 
@@ -169,6 +205,8 @@ Test interpretation:
 - A new native/runtime fix should add a pure contract test when its decision can be extracted without native state, then still receive the appropriate real mission run.
 
 No tests were run during the 2026-08-28 documentation pass.
+
+The authoritative Milestone 2A full run `m2a-contracts-20260831-07` passed all 20 projects and emitted 20 passing assertion records without launching a product process. See [BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md](BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md).
 
 Focused validation recorded on 2026-08-29:
 
@@ -208,6 +246,23 @@ Line-ending policy changes must remain isolated from production fixes. If normal
 
 ## Development helper scripts
 
+### `scripts/Invoke-CoopTest.ps1`
+
+Milestone 2A commands are non-runtime only:
+
+```powershell
+# Named L0 environment report. Exit 10 is expected while the runtime matrix/hashes are blocked.
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-CoopTest.ps1 -Command Doctor -RunId doctor-01
+
+# Full canonical L1 inventory.
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-CoopTest.ps1 -Command Contracts -RunId contracts-01 -All
+
+# Independent client/dedicated L1 builds below the run root, with installed-tree proof.
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-CoopTest.ps1 -Command CompileOnly -RunId compile-01
+```
+
+`RunId` roots are fresh-only. Do not delete or reuse a failed root implicitly. The manifest stores only a nonce fingerprint; non-pass runs add a redacted reproduction descriptor with a distinct proposed retry ID. `Doctor` accepts `-MachineProfileName` or `COOPSPECTATOR_MACHINE_PROFILE`; an omitted value becomes `LOCAL-<machine>-UNVERIFIED` and must not be presented as a supported runtime matrix.
+
 ### `scripts/CoopDevLoop.ps1`
 
 Actions:
@@ -235,9 +290,71 @@ This example still builds/deploys and requires approval.
 
 The script's default log markers focus on native agent visuals, spawn ownership, and controlled-agent handoff. Update the marker list when the current investigation needs different evidence; do not infer general health from those five markers alone.
 
+### `run_battle_test_client.bat` and `scripts/Start-CoopBattleTestClient.ps1`
+
+These files implement the initial default-off, run-scoped multiplayer-client launch and normal-lobby join intent. They do not build, deploy, run the shader-cache helper, issue `start_game`, open a mission, or automate UI.
+
+The short entry point is:
+
+```text
+run_battle_test_client.bat <RunId> "<ExactServerName>" <ExpectedInstalledClientSha256> [Port]
+```
+
+The live launcher requires all of the following before process creation:
+
+- Steam is already running in the current interactive user session;
+- the Bannerlord executable, `SubModule.xml`, installed `CoopSpectator.dll`, and bundled `0Harmony.dll` exist;
+- the installed client module's SHA-256 exactly equals the command's expected hash;
+- the `RunId` is fresh and has no existing request or status under `%TEMP%\CoopSpectator\Automation\<RunId>`.
+
+After launch and before the native join request, the module additionally requires the persisted local dedicated marker to match the server name/port and requires that UDP port to be active. This is an initial local-server association gate, not exact dedicated-process ownership proof; the future runner still must correlate and own the dedicated PID/path/start time.
+
+The optional server password is deliberately not a command-line parameter. Set it only in the current shell before launch:
+
+```powershell
+$env:COOPSPECTATOR_AUTOMATION_SERVER_PASSWORD = '<password>'
+```
+
+or in `cmd.exe`:
+
+```text
+set COOPSPECTATOR_AUTOMATION_SERVER_PASSWORD=<password>
+```
+
+The launcher passes the secret only through the child environment. Request, status, launch artifact, and logs record only whether it was supplied. Clear the shell variable after the run.
+
+For a non-launching environment/hash check, call the PowerShell core directly:
+
+```powershell
+pwsh -NoProfile -File .\scripts\Start-CoopBattleTestClient.ps1 `
+  -RunId M2B-validate-only `
+  -ServerName AC_COOP `
+  -ExpectedClientModuleSha256 <64-hex-sha256> `
+  -ValidateOnly
+```
+
+`-ValidateOnly` does not create the run root or start Bannerlord. A live run writes:
+
+- `commands/client-join.request.json` — token-hash-, RunId-, command-, lifetime-, module-hash-, and server-bound intent;
+- `state/client-join.status.json` — strictly atomic module acknowledgement;
+- `artifacts/processes/client-launch.json` — entry PID/path/start time and non-secret launch identity;
+- `work/client-launch.lock` — exclusive launcher ownership for the selected `RunId`.
+
+The module status distinguishes readiness, lobby/server wait, native join request/acceptance, network handoff, connection, failure, and safe pre-join cancellation. `coop.automation_join status` reads the in-process summary; `coop.automation_join cancel` refuses to label an already started native join as cancelled.
+
+Important current boundary: the locally installed `0.3.1` module predates this source implementation. Its hash can pass `-ValidateOnly`, but a live run cannot exercise the new module controller until an approved staging path loads a build containing these changes and proves the same loaded hash. Do not use the launcher as L3 evidence until the named connection rerun succeeds.
+
 ### `scripts/CreateReleasePackage.ps1`
 
-Unless `-SkipBuild` is specified, it performs client and dedicated Release builds. It then deletes/recreates selected `dist/` directories and ZIP files. Modes include `-LightOnly` and `-GitHubAssetsOnly`.
+Unless `-SkipBuild` is specified, it performs client and dedicated Release builds. It then deletes/recreates only the `dist/` directories and ZIP files selected by the active mode.
+
+Asset-only modes:
+
+- `-GitHubAssetsOnly`: creates the full GitHub client and host archives.
+- `-NexusAssetsOnly`: requires the matching GitHub archives to exist, then derives client and HostLite Nexus archives, embeds both localized README/CHANGELOG pairs, removes BAT/PS1/PDB files, and validates retained entries by path, length, and SHA-256.
+- `-ReleaseAssetsOnly`: creates the GitHub archives first and then the derived Nexus archives in one run.
+
+`-LightOnly` remains the legacy light-package mode. The canonical artifact names, root layouts, exclusions, validation rules, and publication boundaries are documented in [RELEASE_PACKAGING.md](RELEASE_PACKAGING.md).
 
 This script is destructive inside `dist/` and writes release packages. Verify exact targets before execution and never use it as a compile smoke test.
 
@@ -261,6 +378,22 @@ Common current locations from the development script:
 - dedicated: `%LOCALAPPDATA%\Temp\CoopSpectatorDedicated_logs\logs\rgl_log_*.txt`.
 
 Actual locations can change with launcher/runtime configuration. Prefer the latest non-error `rgl_log_*.txt` belonging to the process under investigation, and correlate process ID/time with the runtime bundle.
+
+### Milestone 1 verified launch profile
+
+The bounded `M1-20260831T013501Z-4114d2df` feasibility run on 2026-08-31 established an installed-runtime profile without building, deploying, opening a mission, or connecting a client. The canonical report is [BATTLE_TEST_AUTOMATION_M1_FEASIBILITY.md](BATTLE_TEST_AUTOMATION_M1_FEASIBILITY.md).
+
+Verified launch facts for that named profile:
+
+- the dedicated module loaded in `DedicatedCustomServer.Starter.exe` when launched directly with the explicit module list, port, and run-owned log directory;
+- the Starter process remained the role process; `Watchdog.exe` and `conhost.exe` were owned descendants rather than a replacement dedicated child;
+- the dedicated stock token-file authentication flow worked without passing token content on the command line;
+- omitting the startup configuration and `start_game` allowed module/authentication feasibility to be tested without opening a mission, but port `7210` did not become a listening game port;
+- direct multiplayer client launch exited before module load when Steam was unavailable and succeeded after Steam was running in the same interactive session;
+- the client shader-cache helper and UI automation were not used;
+- both roles closed gracefully by exact PID/path/start-time ownership and required no forced termination.
+
+The loaded modules were installed version `0.3.1`, while the repository outputs were `0.3.2` with different hashes. These commands are therefore diagnostic evidence for the installed profile only. The developer separately reports that `0.3.2` was released after stable manual battle runs; the M1 mismatch limits only what that specific automated probe proves and does not classify `0.3.2` as unstable. The normal-lobby control path is now source- and contract-implemented, but it is not Bannerlord-runtime-verified. L2/L3 still require safe current-build staging, role-confirmed hashes, result isolation, and a successful connection-only rerun.
 
 ### Battle bridge/diagnostic folder
 

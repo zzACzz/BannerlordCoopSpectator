@@ -692,6 +692,15 @@ internal static class Program
 
     private static string FindRepositoryRoot()
     {
+        string configuredRoot = Environment.GetEnvironmentVariable("COOPSPECTATOR_REPOSITORY_ROOT");
+        if (!string.IsNullOrWhiteSpace(configuredRoot))
+        {
+            string resolvedRoot = Path.GetFullPath(configuredRoot);
+            if (File.Exists(Path.Combine(resolvedRoot, "CoopSpectator.csproj")))
+                return resolvedRoot;
+            throw new InvalidOperationException("COOPSPECTATOR_REPOSITORY_ROOT does not identify this repository.");
+        }
+
         DirectoryInfo directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory != null && !File.Exists(Path.Combine(directory.FullName, "CoopSpectator.csproj")))
             directory = directory.Parent;

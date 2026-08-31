@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="RuntimeCompileStubs.cs" />
+    <Compile Include="..\..\Infrastructure\AtomicBridgeFileIO.cs" Link="AtomicBridgeFileIO.cs" />
+    <Compile Include="..\..\Infrastructure\Automation\CoopAutomationJoinContract.cs" Link="CoopAutomationJoinContract.cs" />
+    <Compile Include="..\..\Infrastructure\Automation\CoopAutomationRunContract.cs" Link="CoopAutomationRunContract.cs" />
+    <Compile Include="..\..\Infrastructure\Automation\CoopAutomationJoinBridge.cs" Link="CoopAutomationJoinBridge.cs" />
+    <Compile Include="..\..\Infrastructure\ExperimentalFeatures.cs" Link="ExperimentalFeatures.cs" />
+    <Compile Include="..\..\Multiplayer\Automation\CoopLobbyAutomationDriver.cs" Link="CoopLobbyAutomationDriver.cs" />
+    <Compile Include="..\..\Multiplayer\Automation\CoopLobbyAutomationController.cs" Link="CoopLobbyAutomationController.cs" />
+    <Compile Include="..\..\Commands\CoopAutomationConsoleCommands.cs" Link="CoopAutomationConsoleCommands.cs" />
+    <Compile Include="..\..\Patches\LobbyCustomGameLocalJoinPatch.cs" Link="LobbyCustomGameLocalJoinPatch.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
+  </ItemGroup>
+</Project>

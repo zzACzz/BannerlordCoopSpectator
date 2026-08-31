@@ -109,6 +109,11 @@ namespace CoopSpectator.Infrastructure
             return true;
         }
 
+        public static bool IsPersistedHostSessionActive(string serverName, int port)
+        {
+            return MatchesPersistedHostSession(Normalize(serverName), port);
+        }
+
         public static bool TryConsumeLoopbackRewrite(ref string serverAddress, int port, string source)
         {
             if (!_pendingLoopbackRewrite)

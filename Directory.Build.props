@@ -1,0 +1,11 @@
+<Project>
+  <PropertyGroup>
+    <CoopCompileOnly Condition="'$(CoopCompileOnly)'==''">false</CoopCompileOnly>
+    <CoopCompileOutputRoot Condition="'$(CoopCompileOnly)'=='true' and '$(CoopCompileOutputRoot)'!=''">$([System.IO.Path]::GetFullPath('$(CoopCompileOutputRoot)'))</CoopCompileOutputRoot>
+    <BaseOutputPath Condition="'$(CoopCompileOnly)'=='true' and '$(CoopCompileOutputRoot)'!=''">$(CoopCompileOutputRoot)\projects\$(MSBuildProjectName)\bin\</BaseOutputPath>
+    <BaseIntermediateOutputPath Condition="'$(CoopCompileOnly)'=='true' and '$(CoopCompileOutputRoot)'!=''">$(CoopCompileOutputRoot)\projects\$(MSBuildProjectName)\obj\</BaseIntermediateOutputPath>
+    <MSBuildProjectExtensionsPath Condition="'$(CoopCompileOnly)'=='true' and '$(CoopCompileOutputRoot)'!=''">$(CoopCompileOutputRoot)\projects\$(MSBuildProjectName)\obj\</MSBuildProjectExtensionsPath>
+    <RestorePackagesPath Condition="'$(CoopCompileOnly)'=='true' and '$(CoopCompileOutputRoot)'!=''">$(CoopCompileOutputRoot)\packages\</RestorePackagesPath>
+    <DefaultItemExcludes Condition="'$(CoopCompileOnly)'=='true'">$(DefaultItemExcludes);$(MSBuildProjectDirectory)\bin\**;$(MSBuildProjectDirectory)\obj\**</DefaultItemExcludes>
+  </PropertyGroup>
+</Project>

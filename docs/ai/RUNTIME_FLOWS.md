@@ -1,6 +1,7 @@
 # Runtime Flows
 
 Last source verification: **2026-08-28**
+Last automation-control source verification: **2026-08-31**
 
 ## Runtime state machines
 
@@ -58,6 +59,47 @@ Any non-cleanup active stage -> Failed
 ```
 
 The mount branch is conditional. External siege assault is foot-only; field, village, sally-out, and siege-ambush contracts may include mounted groups according to scenario policy.
+
+### Milestone 2A non-runtime run
+
+This flow deliberately stays outside all Bannerlord runtime state machines:
+
+```text
+fresh RunId
+  -> exact temporary run root + exclusive runner lock
+  -> nonce fingerprint + manifest + Runner/runner-01 lease/status
+  -> Doctor | full Contracts | CompileOnly
+  -> ordered events + assertion/report artifacts
+  -> terminal outcome + stable exit code
+  -> verified runner-lock release
+```
+
+`Doctor` inspects environment, versions/hashes, Git/EOL policy, selected dependencies, ports, writable roots, Steam, and the named version profile. `Contracts` requires the reviewed manifest to match every discovered test project and runs all 20 while preserving per-project output. `CompileOnly` inventories installed module trees, builds the two projects independently below the run root, then proves the installed inventories are unchanged.
+
+No branch in this flow launches a product executable, enables the module automation profile, stages a DLL, joins a server, opens a campaign/mission, advances `CoopBattlePhaseRuntimeState`, or writes a battle result. Runtime ownership, result isolation, cancellation/recovery, and the first connection-only flow remain Milestone 2B.
+
+### Battle-test client join intent
+
+This default-off orchestration flow is independent of the battle-phase and exact-entry state machines:
+
+```text
+launcher validation
+  -> fresh RunId request + child-only token/optional password
+  -> Bannerlord multiplayer process
+  -> module validates run/token/loaded hash
+  -> wait for native lobby
+  -> GetCustomGameServerList
+  -> select exactly one name/port/filter match
+  -> verify persisted local-host marker + active UDP port
+  -> RequestJoinCustomGame
+  -> existing lobby handoff/loopback patch
+  -> GameNetwork client session active
+  -> atomic Connected acknowledgement
+```
+
+`SubModule.OnApplicationTick` pumps `CoopLobbyAutomationController` on the main thread. The controller writes status only when the state or failure details change. A request may expire before native join starts; after the native task starts, only the future external runner may time out and clean up its exactly owned process.
+
+This flow does not issue `start_game`, open a mission, advance battle phases, fabricate readiness, or write a battle result. The 2026-08-31 evidence is source/contract validation only; a real lobby handoff and connection have not yet been runtime-verified.
 
 ## Flow 1: campaign encounter capture
 

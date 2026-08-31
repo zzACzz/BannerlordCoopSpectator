@@ -1,8 +1,8 @@
 # Battle Test Automation Specification
 
-Status: **Canonical implementation specification — not yet implemented**
-Specification date: **2026-08-29**
-Revision: **3 — implementation-boundary clarification**
+Status: **Canonical implementation specification — implementation in progress**
+Specification date: **2026-08-31**
+Revision: **6 — Milestone 2A implementation-aligned non-runtime contracts**
 Source baseline: **`f5bd90ddb6a361f4341ea3771b4acadc266d684b`** (`f5bd90d`)
 Companion audit: [BATTLE_TEST_AUTOMATION_AUDIT.md](BATTLE_TEST_AUTOMATION_AUDIT.md)
 
@@ -11,8 +11,11 @@ Companion audit: [BATTLE_TEST_AUTOMATION_AUDIT.md](BATTLE_TEST_AUTOMATION_AUDIT.
 | 1 | Initial source-grounded target architecture and evidence ladder |
 | 2 | Practical P0 sequencing, level-specific scenario criteria, staging, lifecycle, failure, fixture, and resource policies |
 | 3 | L3 result consistency, multi-client role instances, milestone applicability, completion-mode boundaries, and exactly-once capability gate |
+| 4 | Mandatory natural-completion coverage for every supported battle adapter, natural L4 claim boundaries, and fast-versus-full suite policy |
+| 5 | Default-off run-scoped client launch/join intent, exact local-server selection, secret handling, acknowledgement states, and native-join deadline semantics |
+| 6 | Implemented compile-only, aggregate-runner, environment-doctor, run/protocol, assertion, fault-injection, and artifact contracts for Milestone 2A |
 
-The companion audit remains the source-fact baseline. Revisions 2 and 3 refine implementation requirements and ordering without changing the audit's source findings.
+The companion audit remains the source-fact baseline. Revisions 2–6 refine implementation requirements and ordering without changing the audit's historical source findings. The narrow client launch/join slice and the Milestone 2A non-runtime foundation now exist in source and contract tests. Their evidence boundaries are recorded in [BATTLE_TEST_AUTOMATION_CLIENT_JOIN_IMPLEMENTATION.md](BATTLE_TEST_AUTOMATION_CLIENT_JOIN_IMPLEMENTATION.md) and [BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md](BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md); neither is Bannerlord-runtime evidence.
 
 ## 1. Purpose
 
@@ -43,6 +46,9 @@ Implementation of this specification requires a separate approved implementation
 - **Fixture**: immutable recorded boundary data plus provenance and integrity metadata.
 - **Test profile**: the complete opt-in configuration that enables automation-only behavior.
 - **Active milestone**: the single approved implementation milestone whose requirements may be claimed in the current completion report.
+- **Controlled lifecycle completion**: an authoritative, automation-requested mission completion after the required L3 readiness and control evidence has been reached; it is not proof of natural combat completion.
+- **Natural battle completion**: a mission outcome reached through the normal Bannerlord combat-end and victory/defeat path without an automation-requested early completion, forced winner, direct result write, or synthetic phase transition.
+- **Full scenario coverage**: the maintained evidence set for a supported adapter includes its required L2 facts, controlled L3 lifecycle, at least one natural L3 completion, and any L4 evidence explicitly claimed for that adapter.
 
 A run MAY contain multiple `MultiplayerClient` role instances. The first P0 field lifecycle requires one client, but the protocol, manifest, status, event, and process models MUST NOT assume that `RoleType` is unique within a run.
 
@@ -67,6 +73,10 @@ Automation MUST NOT deploy during a compile-only check, consume a smoke result i
 ### G-005 — Cover every supported battle adapter incrementally
 
 The final suite MUST cover field, village, siege assault, sally out, siege ambush, relief, lords hall, day hideout, and night hideout. Unsupported blockade variants MUST be rejection tests.
+
+### G-006 — Prove natural battle completion
+
+The final suite MUST include at least one maintained `NaturalBattleEnd` run for every supported battle adapter. Reaching `PreBattleHold`, reaching `BattleActive`, or producing a result through `ControlledLifecycleEnd` MUST NOT by itself be described as full battle coverage. Controlled completion remains the fast lifecycle gate; natural completion is the required proof of native combat-end routing, outcome reconciliation, and post-mission cleanup.
 
 ## 4. Non-goals
 
@@ -195,10 +205,12 @@ A passing run MUST prove:
 - required materialization/map/scenario acknowledgements reached the server;
 - the server reached `BattleActive` through normal gates;
 - the controlled authoritative agent became active where the scenario permits it;
-- a controlled test end or naturally bounded completion produced one isolated authoritative result;
+- the declared `ControlledLifecycleEnd` or `NaturalBattleEnd` boundary produced one isolated authoritative result;
 - both processes shut down or returned to their expected post-mission state cleanly.
 
 This level MAY use an automated visible client. Headless operation is not a requirement unless source/runtime investigation proves it compatible with the actual client path.
+
+The first L3 vertical slice MAY use `ControlledLifecycleEnd` to establish a fast, diagnosable developer loop. That run proves readiness, control, result publication, disposal, and cleanup only. A supported adapter is not fully covered at L3 until a separate maintained `NaturalBattleEnd` run also passes for that adapter.
 
 ### L4 — `CampaignE2E`
 
@@ -216,11 +228,15 @@ A passing run MUST prove:
 
 A server replay from a recorded roster is not `CampaignE2E` because it does not prove campaign extraction or writeback.
 
+Controlled L4 runs MAY be retained for recovery, duplicate-result, and interruption testing. An adapter MUST NOT be described as fully covered at L4 until at least one correlated L4 run for that adapter reaches `NaturalBattleEnd` and proves the applicable natural outcome, result, aftermath, and journal assertions.
+
 ### L5 — `Sequential`, `Soak`, and `RandomizedInvariant`
 
 Purpose: find stale static state, cleanup races, ordering defects, and bounded stability problems.
 
 These modes MUST build on a passing lower-level scenario. They MUST record every iteration separately while retaining a parent run identity.
+
+The maintained L5 inventory MUST include selected `NaturalBattleEnd` iterations after the corresponding natural L3/L4 scenario is stable. Repeating only `PreBattleHold` or `ControlledLifecycleEnd` runs cannot establish full-battle sequential or soak stability.
 
 Randomized tests MUST randomize supported inputs and ordering while asserting invariants. They MUST NOT require identical AI casualty sequences across runs.
 
@@ -332,7 +348,7 @@ The manifest MUST include at least:
 - runner build identity;
 - client and dedicated module version and SHA-256;
 - game and dedicated executable versions;
-- effective feature flags and result policy;
+- effective feature flags, result policy, and declared completion mode where applicable;
 - a role-instance list containing `RoleType`, `RoleInstanceId`, capabilities, executable path, process ID, and start time after launch;
 - observed parent IDs and process-tree snapshots when the operating-system launcher path exposes them reliably;
 - ports and their verified owners;
@@ -531,7 +547,7 @@ Ctrl+C or an explicit cancellation request MUST stop scheduling new work, mark t
 
 ### PROC-010 — Time and observability budgets
 
-Each named machine profile MUST define measured budgets for L1 total time and, as applicable, process start, mission current, snapshot transfer, materialization, `PreBattleHold`, `BattleActive`, controlled completion, and cleanup. Initial feasibility runs establish baselines; later approval may convert calibrated limits into functional failures.
+Each named machine profile MUST define measured budgets for L1 total time and, as applicable, process start, mission current, snapshot transfer, materialization, `PreBattleHold`, `BattleActive`, controlled completion, natural combat completion, and cleanup. Controlled and natural completion MUST have separate measured budgets. Initial feasibility runs establish baselines; later approval may convert calibrated limits into functional failures.
 
 Automation instrumentation MUST also have a measured overhead budget against an equivalent normal run. Hot-path observation SHOULD use aggregation or sampling. Unbounded per-tick, per-agent, or per-message logging is prohibited even in the test profile.
 
@@ -651,6 +667,27 @@ Every L3/L4 result record MUST declare one completion mode:
 
 The completion command for `ControlledLifecycleEnd` MUST still enter through an approved authoritative intent and MUST NOT write or force result state directly.
 
+A `NaturalBattleEnd` run MUST NOT issue that completion command after `BattleActive`, force a winner, directly kill/remove agents to manufacture an outcome, write result state, or advance a phase synthetically. If natural completion exceeds its declared deadline, the run is `Timeout`; it MUST NOT fall back to `ControlledLifecycleEnd` and report a pass.
+
+### RES-008 — Mandatory natural-completion coverage
+
+The maintained suite MUST include at least one passing real-client L3 `NaturalBattleEnd` run for every supported adapter in SCN-001–SCN-009. A controlled run remains valid evidence for its declared boundary, but it cannot satisfy this requirement.
+
+Every natural-completion run MUST prove:
+
+1. the scenario reached `BattleActive` through its normal topology, snapshot, materialization, selection, and readiness gates;
+2. no automation-requested early-completion intent was accepted after `BattleActive`;
+3. the normal authoritative mission path emitted the terminal combat state, outcome, and winner/loser facts applicable to the scenario;
+4. initial, surviving, removed, wounded, killed, routed, captured, hero, mount, formation, stage, settlement, wall, gate, and engine facts reconcile wherever the scenario exposes them;
+5. the normal result builder published exactly one isolated result with matching campaign, battle, stage, and run identity;
+6. mission disposal, role shutdown or post-mission return, exact process cleanup, and run-state cleanup completed without a leaked process, lock, port, command, or bridge record.
+
+Fixtures MAY use small or intentionally asymmetric armies to keep natural completion bounded, but their inputs MUST be fixed before mission start and must still pass through the normal production paths. Assertions MUST follow RT-004: exact identities and accounting remain exact, while AI-driven timing and casualty distribution use justified invariant or bounded assertions.
+
+For a multi-stage scenario, `NaturalBattleEnd` means that every expected stage transition completes through its normal route and that the final scenario result reconciles the full stage sequence. Ending only the first mission or publishing only an intermediate-stage result does not satisfy RES-008.
+
+A controlled L4 run MAY test recovery or failure handling, but an adapter cannot claim full L4 coverage until a same-adapter L4 `NaturalBattleEnd` run proves native completion, result validation, aftermath application, and journal persistence in one correlated run.
+
 ## 13. Runtime assertions
 
 ### RT-001 — Common L2 assertions
@@ -685,6 +722,16 @@ Every supported client lifecycle fixture MUST additionally define:
 - expected behavior when a required acknowledgement is absent;
 - exactly-one isolated result publication at the selected completion boundary.
 
+Every L3 fixture MUST declare its completion mode. A `NaturalBattleEnd` fixture MUST additionally define:
+
+- the authoritative natural-completion signal and terminal-state source;
+- the expected scenario stage sequence;
+- proof that no controlled-completion command was accepted after `BattleActive`;
+- winner/loser and outcome reconciliation rules;
+- applicable entry, casualty, hero, mount, formation, settlement, wall, gate, and engine conservation rules;
+- a bounded natural-combat deadline whose expiration produces `Timeout`;
+- expected mission-disposal and post-mission role states.
+
 ### RT-003 — Common L4 assertions
 
 Every campaign end-to-end fixture MUST additionally define:
@@ -696,6 +743,8 @@ Every campaign end-to-end fixture MUST additionally define:
 - casualties, hero health/capture, settlement, or engine results relevant to that scenario;
 - exactly-once application and journal persistence;
 - duplicate/stale result rejection.
+
+An L4 fixture that contributes to full adapter coverage MUST use `NaturalBattleEnd` and correlate the native terminal outcome with the result consumed by the campaign. Its before/after oracle MUST cover every scenario-relevant casualty, hero health/capture, settlement, wall, gate, engine, stage, and aftermath fact exposed by that adapter. A controlled L4 fixture MUST be labeled as targeted lifecycle/recovery evidence and cannot be the adapter's only L4 completion evidence.
 
 ### RT-004 — Tolerance policy
 
@@ -724,12 +773,15 @@ Repeated suites MUST report first-attempt outcome, pass rate, failure reason dis
 
 Scenario requirements are cumulative by declared evidence level: L3 requires the applicable L2 facts plus its L3 row, and L4 requires the applicable L2/L3 facts plus its L4 row. A scenario is never required to satisfy a higher-level row to complete a lower-level run.
 
+The `L3 natural` rows below are additional L3 acceptance criteria for RES-008, not a new evidence level. A controlled L3 run may pass before the natural fixture exists, but the adapter remains only partially covered. Final maintained coverage for SCN-001–SCN-009 requires both the ordinary L3 row and the corresponding `L3 natural` row. Every scenario report MUST state `Controlled only`, `Natural passing`, or `Natural blocked` rather than collapsing those states into one L3 label.
+
 ### SCN-001 — Field battle
 
 | Level | Mandatory acceptance |
 |---|---|
 | L2 | Scene identity and resolution source, land-adapter identity, party orientation, initial teams/formations/entries, mounted policy, equipment, and captain mapping |
 | L3 | Real-client topology/snapshot/readiness, selected and controlled entry, normal transition to `BattleActive`, and one isolated result |
+| L3 natural | Native combat-end and winner/loser evidence, entry/casualty/hero/mount reconciliation, natural field mission disposal, and one naturally produced isolated result |
 | L4 | Live campaign capture, reconciled casualties/hero outcomes, land-battle aftermath, exactly-once application, and journal evidence |
 
 The maintained fixture set MUST eventually cover both a directly selected field scene and the terrain-resolver fallback. The first vertical slice is one mixed infantry/cavalry fixture with at least one hero or captain; the second scene-resolution branch MUST NOT block that first L3 result.
@@ -740,6 +792,7 @@ The maintained fixture set MUST eventually cover both a directly selected field 
 |---|---|
 | L2 | Exact village scene, village boundary revision/hash, initial orientation/entries/materialization, mounted policy, equipment, and captain mapping |
 | L3 | Village topology and materialization acknowledgements, controlled entry, normal `BattleActive`, and one isolated result |
+| L3 natural | Natural combat end without a village-boundary stall, winner/loser and entry/casualty/hero/mount reconciliation, mission disposal, and one naturally produced isolated result |
 | L4 | Live village capture, relevant casualties/hero outcomes, village aftermath adapter, application, and journal evidence |
 
 Minimum vertical slice: one mixed-party village fixture whose boundary differs measurably from a normal field battle.
@@ -750,6 +803,7 @@ Minimum vertical slice: one mixed-party village fixture whose boundary differs m
 |---|---|
 | L2 | Exact campaign scene, siege deployment shell, orientation, foot-only entry restrictions, initial wall/side deployment facts, exact initial engine identities/health, relevant ladder/topology facts, and initial native materialization |
 | L3 | At least one real remote client, deployment/materialization acknowledgements, remote-only occlusion safety, engine topology, normal `BattleActive`, controlled agent, and correct isolated result stage |
+| L3 natural | Native siege victory/defeat, stage, wall/gate/engine, entry/casualty/hero, and mission-disposal reconciliation with one naturally produced isolated siege result |
 | L4 | Live siege capture, engine/wall/casualty outcomes, siege aftermath, exactly-once application, and journal evidence |
 
 The first L2 vertical slice is one external assault containing engines on both sides. The first L3 slice adds at least one remote client. Siege work follows a passing field L3 and MUST NOT block the first useful field-client milestone.
@@ -760,6 +814,7 @@ The first L2 vertical slice is one external assault containing engines on both s
 |---|---|
 | L2 | Supported sally-out route, mission controller set, map/battle spawn behavior, role orientation, initial materialization, and absence of an unintended `SallyOutMissionController` where the current route excludes it |
 | L3 | Real-client readiness/control, normal `BattleActive`, and one isolated result with correct stage/orientation |
+| L3 natural | Native sally-out completion with reversed orientation preserved through winner/loser, entry/casualty/hero, stage, disposal, and naturally produced result evidence |
 | L4 | Live capture and reversed sally-out aftermath with exactly-once application and journal evidence |
 
 Blockade and blockade-sally-out rejection is governed by SCN-010.
@@ -770,6 +825,7 @@ Blockade and blockade-sally-out rejection is governed by SCN-010.
 |---|---|
 | L2 | Player-defender orientation, native sally-out/ambush controller behavior, mount policy, initial siege facts, and native materialization |
 | L3 | Topology and acknowledgement gates, controlled entry, normal `BattleActive`, and isolated attacker engine-result/stage evidence |
+| L3 natural | Native ambush completion with attacker/defender orientation, stage, engine, entry/casualty/hero/mount, disposal, and naturally produced result reconciliation |
 | L4 | Live attacker engine outcomes and exact siege-ambush aftermath with application/journal evidence |
 
 ### SCN-006 — Relief battle
@@ -778,6 +834,7 @@ Blockade and blockade-sally-out rejection is governed by SCN-010.
 |---|---|
 | L2 | Field-style scene routing with retained siege settlement context, subtype `Relief`, settlement identity, orientation, and initial materialization |
 | L3 | Real-client readiness/control, normal `BattleActive`, and one isolated relief-stage result |
+| L3 natural | Native relief completion preserving settlement/subtype identity through winner/loser, entry/casualty/hero, disposal, and naturally produced result reconciliation |
 | L4 | Live capture and relief aftermath preserving settlement identity, with application/journal evidence |
 
 ### SCN-007 — Lords hall
@@ -786,6 +843,7 @@ Blockade and blockade-sally-out rejection is governed by SCN-010.
 |---|---|
 | L2 | Player-attacker orientation, exact indoor scene/controller, battle stage, ordered participant identity, and initial materialization |
 | L3 | Real-client entry/control, normal scenario progression, and one isolated lords-hall-stage result |
+| L3 natural | Every expected indoor stage completes normally with ordered participant, winner/loser, casualty/hero, disposal, and final naturally produced result reconciliation |
 | L4 | Live capture and lords-hall aftermath with application/journal evidence |
 
 Reordered participants MUST be a contract or precondition mismatch test; it is not a requirement to launch an invalid runtime mission.
@@ -796,6 +854,7 @@ Reordered participants MUST be a contract or precondition mismatch test; it is n
 |---|---|
 | L2 | Native day-hideout controller, reflected participant counts, participant identities, and initial native materialization |
 | L3 | Real player entry/control, required readiness, active scenario progression, and boss-phase behavior where applicable |
+| L3 natural | Native hideout and boss-stage completion where applicable, with participant/casualty/hero, stage, disposal, and naturally produced result reconciliation |
 | L4 | Live hideout capture and aftermath with application/journal evidence |
 
 A game-version incompatibility in reflected private members MUST be reported as a specific environment/compatibility failure.
@@ -806,6 +865,7 @@ A game-version incompatibility in reflected private members MUST be reported as 
 |---|---|
 | L2 | Night/ambush route, private-field compatibility, ordered participants, initial sentry/stealth facts exposed by the existing contract, and native materialization |
 | L3 | Real player entry/control, readiness, active stealth/ambush progression, and one isolated result |
+| L3 natural | Native stealth/ambush and boss-stage completion where applicable, with ordered participant/casualty/hero, stage, disposal, and naturally produced result reconciliation |
 | L4 | Live night-hideout capture and aftermath with application/journal evidence |
 
 Night hideout MUST have a separate fixture from day hideout.
@@ -830,7 +890,7 @@ The client driver MAY automate UI, console, or test-only intent entry, but the m
 
 ### CLI-004 — First client milestone
 
-The first L3 vertical slice MUST be a field battle and is part of P0 because it is the first milestone that removes the developer's manual server/client/join/readiness loop. The second major L3 family SHOULD be siege assault because it exercises deployment, engine topology, foot-only policy, and the widest current acknowledgement surface.
+The first L3 vertical slice MUST be a field battle and is part of P0 because it is the first milestone that removes the developer's manual server/client/join/readiness loop. It MUST contain separate controlled and natural runs as defined by Milestone 5; the controlled run establishes the fast loop and the natural run establishes the first full-battle proof. The second major L3 family SHOULD be siege assault because it exercises deployment, engine topology, foot-only policy, and the widest current acknowledgement surface.
 
 ### CLI-005 — Negative readiness test
 
@@ -855,6 +915,20 @@ The first P0 field L3 requires one client. Before the suite may claim cooperativ
 - one client has acknowledged materialization while the other is still pending.
 
 Server readiness, selection ownership, acknowledgements, controlled agents, disconnect/reconnect state, results, and cleanup evidence MUST be attributable to the exact client role instance. Failure of one client MUST NOT cause the runner to misclassify or terminate the other as unowned.
+
+### CLI-008 — Run-scoped native-lobby join intent
+
+The first local one-client control path MUST be disabled by default and MUST become active only when `COOPSPECTATOR_TEST_AUTOMATION=1`, a valid `RunId`, an absolute run root, and a sufficiently strong run token are supplied together. The run root MUST resolve to `%TEMP%\CoopSpectator\Automation\<RunId>` for this initial profile. Normal production launch without that complete profile MUST remain unchanged.
+
+Before process creation, the launcher MUST verify that Steam is running in the current interactive session, all required client files exist, and the installed client module SHA-256 equals the explicitly requested hash. The launcher MUST create a fresh request bound to the `RunId`, positive sequence, unique command ID, creation/expiry times, run-token hash, and expected module hash; it MUST refuse a reused run containing an existing request or status. The un-hashed run token MUST be passed only through the child-process environment.
+
+The client module MUST recompute its loaded assembly hash and reject mismatched run, token, schema, lifetime, or binary identity before issuing a join. Request expiry bounds whether the native join may start; after the native join task has started, the module MUST NOT report a false cancellation or terminal expiry while TaleWorlds may still complete the non-cancellable operation. The external runner retains bounded timeout and exact-process cleanup authority.
+
+Server discovery and joining MUST use the normal `NetworkMain.GameClient` lobby path: `GetCustomGameServerList()` followed by `RequestJoinCustomGame(...)`. Selection MUST require exactly one server matching the requested name and port plus any declared game-type or unique-map filters. The initial local profile MUST additionally prove the existing persisted local-host marker matches and that the requested local UDP port is active before joining. Multiple exact matches MUST fail rather than select the first result.
+
+A server password MUST NOT be accepted as a command-line argument or persisted in the request, launch artifact, status, or logs. When required, it MAY be inherited through a protected child-process environment value; artifacts MAY record only whether a password was supplied.
+
+The module MUST write run-scoped status atomically and only on state or failure-detail changes. At minimum, it MUST distinguish module readiness, lobby wait, server-list request, server wait, join request, join acceptance, network handoff, connection, explicit pre-join cancellation, and failure. The launcher and module MUST NOT issue `start_game`, open a mission, fabricate readiness, or use UI automation. Source and contract-test completion of this requirement does not promote the Milestone 1 connection/control capability rows until a named runtime rerun proves the exact client/server correlation.
 
 ## 16. Campaign end-to-end requirements
 
@@ -915,13 +989,27 @@ Until TST-003 is implemented, each approved change plan MUST select tests using 
 | Pure contract, DTO, serializer, or validator | Relevant L1 contracts; compatibility fixtures when schemas change |
 | Project/build/deployment target | L0 plus compile-only proof; staging proof before runtime claims |
 | Phase or readiness gate | Relevant L1, L2, L3, and a missing-readiness negative test |
-| Spawn, equipment, entry, hero, mount, or formation | Relevant L1 and L2; L3 when peer/control state is involved |
+| Spawn, equipment, entry, hero, mount, or formation | Relevant L1 and L2; controlled L3 when peer/control state is involved; affected natural L3 when combat accounting or lifetime is affected |
 | Snapshot/chunk/reconnect transport | Relevant L1 and L3, including failure/retry contracts |
-| Result builder/publication | Relevant L1, L2 early-abort isolation, and L3 isolated result |
-| Campaign result application/journal | Relevant L1 and L4 exactly-once/recovery evidence |
-| Scenario detector/adapter | Relevant L1 and the applicable L2/L3/L4 rows for that scenario |
+| Combat AI, agent death/removal, victory routing, mission completion, or casualty accounting | Relevant L1 plus every affected `NaturalBattleEnd` L3 scenario |
+| Result builder/publication | Relevant L1, L2 early-abort isolation, controlled L3 result, and affected natural L3 result reconciliation |
+| Campaign result application/journal | Relevant L1 and L4 exactly-once/recovery evidence; affected natural L4 when combat outcome or aftermath mapping changes |
+| Scenario detector/adapter | Relevant L1 and the applicable L2, controlled L3, natural L3, and claimed L4 rows for that scenario |
 | Cleanup, process, lease, or file bridge | Relevant L1 plus two-run sequential evidence at the lowest affected runtime level |
 | Broad shared infrastructure | Every affected scenario/role identified by explicit adjacent-scenario review |
+
+### TST-006 — Natural-completion suite selection
+
+The command surface MUST provide:
+
+- a fast controlled lifecycle command that does not claim natural completion;
+- an explicit command for one selected adapter's `NaturalBattleEnd` run;
+- an explicit full-natural-suite command covering every maintained SCN-001–SCN-009 natural fixture;
+- a report field that distinguishes a selected subset from the full natural suite.
+
+Until TST-003 is implemented, the approved change plan MUST select natural scenarios manually using TST-005. Changes to combat AI, agent lifetime/death/removal, victory routing, mission completion, result building, casualty reconciliation, scenario-stage progression, or campaign aftermath MUST include every affected maintained natural scenario. A documentation-only, build-only, pure serialization, or UI-only change MAY omit natural runtime tests only when the completion report records why those production paths cannot be affected.
+
+The full natural suite is the authority for repository-wide natural battle coverage. A passing impacted subset is useful change evidence but MUST NOT be reported as a full-natural-suite pass.
 
 ## 18. Artifacts and reporting
 
@@ -937,6 +1025,7 @@ Every run MUST retain:
 - process and port inventory;
 - module/game binary identities;
 - assertion report with evidence links;
+- declared completion mode and, for `NaturalBattleEnd`, terminal-state source, winner/loser, reconciliation, and timeout evidence;
 - cleanup report;
 - result and writeback evidence allowed by the selected level;
 - crash or hang dump/metadata when available;
@@ -983,8 +1072,10 @@ Required logical commands:
 | `Feasibility` | bounded server/client/staging capability investigation; never an L2/L3 pass |
 | `Record` | Typed payload archive with provenance |
 | `DedicatedSpawnSmoke` | L2 run |
-| `ClientLifecycle` | L3 run |
-| `CampaignE2E` | L4 run |
+| `ClientLifecycle` | L3 controlled run by default, or an explicitly selected completion mode; never merges controlled and natural claims |
+| `NaturalBattle` | One selected adapter's L3 `NaturalBattleEnd` run |
+| `NaturalSuite` | Full maintained SCN-001–SCN-009 `NaturalBattleEnd` suite with per-scenario outcomes |
+| `CampaignE2E` | L4 run with an explicit controlled or natural completion mode |
 | `Sequential` | repeated L2, L3, or L4 runs |
 | `Soak` | bounded repeated run with per-iteration evidence |
 | `Inspect` | read-only rendering of an existing run |
@@ -1049,6 +1140,8 @@ No essential capability row may remain `Unknown` when Milestone 1 closes. A `Blo
 ### Milestone 2A — Non-runtime foundation
 
 Priority: **P0**
+
+Implementation status: **Complete at L0/L1 on 2026-08-31.** See [BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md](BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md). The recorded `EnvironmentBlocked` doctor outcome preserves the unresolved runtime version/hash blockers and does not block the completed non-runtime compile/contracts evidence.
 
 Deliverables:
 
@@ -1145,22 +1238,26 @@ Deliverables:
 - field L3 vertical slice using the Milestone 3 fixture;
 - missing-acknowledgement negative test;
 - `ControlledLifecycleEnd` plus one `Isolated` result;
+- a separate small, bounded field `NaturalBattleEnd` run using fixed pre-mission inputs and the same production client/server paths;
+- natural terminal-state, winner/loser, entry/casualty/hero/mount, result, and mission-disposal evidence;
 - mission-disposal/behavior-removal and client/server cleanup evidence;
 - a second field lifecycle attempt proving stale-state reset;
 - crash-reporter, fatal-event, no-heartbeat, and no-progress handling;
-- measured developer-loop time budget and reproduction command.
+- separate measured controlled-loop and natural-loop time budgets and reproduction commands.
 
 Exit criteria:
 
 - the server reaches `BattleActive` only through normal peer gates;
 - controlled-agent identity is proven;
-- one isolated authoritative result is produced and validated;
-- the manifest and report label completion as `ControlledLifecycleEnd` and make no natural combat-end or casualty-correctness claim;
+- the controlled run produces and validates one isolated authoritative result;
+- the controlled manifest and report label completion as `ControlledLifecycleEnd` and make no natural combat-end or casualty-correctness claim;
+- the separate natural run issues no accepted early-completion intent after `BattleActive`, observes the native terminal outcome, reconciles the field entry/casualty/hero/mount facts, and produces one naturally derived isolated result;
+- the natural manifest and report label completion as `NaturalBattleEnd` and retain its terminal-state source and timeout evidence;
 - no campaign application is claimed;
 - withheld readiness prevents `BattleActive` with the exact missing fact;
-- client and server cleanup is exact and repeatable across a second attempt;
+- client and server cleanup is exact for both completion modes and repeatable across a second attempt;
 - a failure preserves first-attempt outcome, last progress, logs, payloads, state journal, and crash/hang metadata;
-- the one-command run removes the manual server/client/connect/select/start loop for this field fixture.
+- separate one-command controlled and natural runs remove the manual server/client/connect/select/start/finish loop for this field fixture.
 
 ### Milestone 6 — Crash-regression inventory
 
@@ -1170,6 +1267,7 @@ Deliverables:
 
 - fixture tags for the RT-005 equipment, hero, lifecycle, and scale dimensions relevant to known project failures;
 - current highest-risk field regression fixtures, beginning with crafted/equipment, mount/rider, hero/commander fallback, reconnect, early-abort, and consecutive-battle cases;
+- natural-completion tags for regressions that can affect combat accounting, agent lifetime, victory routing, result construction, or mission disposal;
 - the CLI-007 two-client field cases after the one-client P0 lifecycle is stable;
 - reviewable risk-based or pairwise selection;
 - known-native-issue annotations without pass conversion;
@@ -1179,6 +1277,7 @@ Exit criteria:
 
 - each promoted regression has an immutable fixture, independent oracle, stable assertion/failure ID, and exact reproduction descriptor;
 - selected regressions pass at their declared evidence level;
+- every regression tagged as natural-completion-sensitive selects the applicable maintained `NaturalBattleEnd` scenario and cannot be closed by a controlled-only pass;
 - retries cannot hide the first outcome;
 - every multi-client selection, acknowledgement, controlled-agent, disconnect/reconnect, result, and cleanup fact is attributed to the exact `RoleInstanceId`;
 - the inventory does not require the full Cartesian product.
@@ -1193,6 +1292,7 @@ Deliverables:
 - SCN-003 L2 scene/deployment/engine/materialization coverage;
 - real remote-client SCN-003 L3 deployment/readiness/occlusion/control coverage;
 - correct isolated siege result-stage evidence;
+- a separate bounded siege `NaturalBattleEnd` run with native victory/defeat, wall/gate/engine, entry/casualty/hero, result, and disposal reconciliation;
 - siege-specific crash regressions and a second sequential lifecycle.
 
 Exit criteria:
@@ -1201,6 +1301,7 @@ Exit criteria:
 - siege cannot reach `BattleActive` without its required acknowledgements;
 - field L3 remains passing or its affected shared-path regressions are explicitly reported;
 - engine and deployment identities reconcile across server/client evidence;
+- the natural siege run issues no accepted early-completion intent after `BattleActive` and satisfies the SCN-003 `L3 natural` row;
 - no stale siege, ladder, chunk, reconnect, or result state survives the second attempt.
 
 ### Milestone 8 — Remaining supported adapters
@@ -1211,6 +1312,7 @@ Deliverables:
 
 - village, sally out, siege ambush, relief, lords hall, day hideout, and night hideout fixtures;
 - applicable SCN-002 and SCN-004–SCN-009 L2 and L3 rows;
+- one maintained bounded `NaturalBattleEnd` run for each of those supported adapters, including complete expected stage progression for multi-stage scenarios;
 - explicit blockade and invalid-live-contract rejection tests;
 - version-sensitive hideout compatibility diagnostics;
 - adjacent-scenario regression evidence for shared changes.
@@ -1219,6 +1321,7 @@ Exit criteria:
 
 - every currently supported adapter has a passing L2 fixture;
 - every adapter intended for automated playable coverage has an applicable passing L3 slice;
+- every supported adapter in this milestone satisfies its `L3 natural` row or is reported `Natural blocked`, in which case full adapter coverage and the milestone remain incomplete;
 - unsupported cases fail before process launch and publish no roster/start/result;
 - each report states which L4 aftermath facts remain unverified.
 
@@ -1231,14 +1334,17 @@ Deliverables:
 - controlled campaign saves/setup procedures and privacy/integrity policy;
 - campaign host driver using native detector/adapter capture;
 - same-run server/client integration;
+- a field L4 `NaturalBattleEnd` vertical slice first and a siege-assault L4 `NaturalBattleEnd` slice second;
 - durable exactly-once result application and journal/recovery assertions;
 - CAM-006 capability-gate evidence;
-- field L4 vertical slice first, siege assault second, then other adapters according to risk.
+- controlled L4 recovery/interruption cases where useful, clearly separated from natural-completion coverage;
+- other adapter L4 slices according to risk, with at least one natural L4 run before any adapter is called fully covered at L4.
 
 Exit criteria:
 
-- live capture, battle, result validation, aftermath, and journal evidence form one correlated run;
+- live capture, natural battle completion, result validation, aftermath, and journal evidence form one correlated field run and one correlated siege-assault run;
 - the field slice satisfies SCN-001 L4 before siege or other adapters can block its completion;
+- the siege slice satisfies SCN-003 L4 and its natural-completion assertions;
 - duplicate result application is rejected;
 - interruption around application/journaling has an unambiguous recovery outcome;
 - at least one CAM-006 capability is proven; otherwise the milestone remains `Not Verifiable`;
@@ -1253,6 +1359,7 @@ Deliverables:
 
 - bounded iteration runner;
 - reset/stale-state assertions;
+- selected natural-completion sequential and soak profiles after their lower-level natural scenarios are stable;
 - calibrated time/resource baselines and diagnostic thresholds;
 - calibrated instrumentation-overhead and retention limits;
 - reproducible randomized input/ordering seed;
@@ -1262,6 +1369,7 @@ Deliverables:
 Exit criteria:
 
 - every iteration has independent artifacts and a parent summary;
+- natural profiles retain completion mode, terminal-state source, outcome, reconciliation, and timeout evidence for every iteration;
 - no owned process, lock, or bridge state leaks between iterations;
 - first-attempt failures remain visible;
 - resource/time trends are evaluated against an approved profile baseline;
@@ -1276,12 +1384,13 @@ This table is an advisory navigation aid for the source baseline named at the to
 | Area | Existing files expected to be reviewed or changed |
 |---|---|
 | Compile-only build | `CoopSpectator.csproj`, `DedicatedServer/CoopSpectatorDedicated.csproj` |
-| Run-root/atomic protocol | `Infrastructure/AtomicBridgeFileIO.cs`; new narrowly scoped automation contracts |
+| Run-root/atomic protocol | `Infrastructure/AtomicBridgeFileIO.cs`; `Infrastructure/Automation/CoopAutomationJoinContract.cs`; `Infrastructure/Automation/CoopAutomationJoinBridge.cs` |
 | Existing bridge isolation | `Campaign/BattleRosterFile.cs`, `Infrastructure/CoopBattlePhaseBridgeFile.cs`, `Infrastructure/CoopBattleEntryStatusBridgeFile.cs`, `Infrastructure/CoopBattleResultBridgeFile.cs` |
 | Runtime observation | `Infrastructure/CoopBattlePhaseRuntimeState.cs`, `Mission/CoopMissionBehaviors.cs`, `Mission/CoopMissionNetworkBridge.cs` |
 | Campaign capture/writeback | `Campaign/BattleDetector.cs`, scenario adapters, `BattleResultWritebackJournalBehavior` |
-| Process orchestration | dedicated helper and command classes plus new scripts; `scripts/CoopDevLoop.ps1` is reference only, not the runner base |
-| Fast tests | existing `Tests/*.ContractTests` projects plus a new aggregate script and focused automation-contract test project if justified |
+| Client lobby control | `Multiplayer/Automation/CoopLobbyAutomationDriver.cs`; `Multiplayer/Automation/CoopLobbyAutomationController.cs`; `Commands/CoopAutomationConsoleCommands.cs`; existing local-host lobby patches |
+| Process orchestration | `run_battle_test_client.bat`; `scripts/Start-CoopBattleTestClient.ps1`; dedicated helper and command classes; `scripts/CoopDevLoop.ps1` is reference only, not the runner base |
+| Fast tests | existing `Tests/*.ContractTests` projects plus `Tests/CoopAutomationJoin.ContractTests` and a future aggregate runner |
 | Documentation | `docs/ai/BUILD_TEST_DEBUG.md`, `CODE_MAP.md`, `RUNTIME_FLOWS.md`, `INVARIANTS_AND_RISKS.md`, and this specification as behavior is implemented |
 
 New file and type names MUST be finalized in each milestone plan after checking compilation boundaries between the client and dedicated projects. Shared contracts must not accidentally pull client-only campaign/UI references into the dedicated build.
@@ -1313,15 +1422,15 @@ Safety prohibitions apply whenever their subject exists. This table defines when
 |---|---|---|
 | Source-drift checks, ENV-001/002, CLI-006, BLD-005 feasibility, PROC-001/002 discovery | Milestone 1 | Capability decision and evidence only; no L2/L3 claim |
 | SAF-001–SAF-005, L0/L1 contracts, OUT-001–OUT-004, RUN-001–RUN-007, RUN-009/010, BLD-001–BLD-004, TST-001/002/004/005, base ART schema | Milestone 2A | Non-runtime contracts and compile-only proof |
-| RUN-008, BLD-005/006 runtime proof, PROC-001–PROC-005, PROC-007–PROC-009, RES-001/002/004 contracts | Milestone 2B | Process, staging, lock, cleanup, recovery, and result-isolation foundation without a battle pass |
+| CLI-008, RUN-008, BLD-005/006 runtime proof, PROC-001–PROC-005, PROC-007–PROC-009, RES-001/002/004 contracts | Milestone 2B | Run-scoped normal-lobby control, process, staging, lock, cleanup, recovery, and result-isolation foundation without a battle pass |
 | PAY-001–PAY-004, PAY-007/008 | Milestone 3 | Current field fixture boundaries only |
 | L2, PROC-006, RT-001, RES-001/002/004 runtime proof, SCN-001 L2 | Milestone 4 | One-client-free field dedicated smoke |
-| L3, RT-002, RES-003/005/007, CLI-001–CLI-005, SCN-001 L3, PROC-010 developer-loop baseline | Milestone 5 | One real client and `ControlledLifecycleEnd` |
+| L3, RT-002, RES-003/005/007/008, CLI-001–CLI-005, TST-006 initial commands, SCN-001 L3 and L3 natural, PROC-010 developer-loop baseline | Milestone 5 | One real client, separate `ControlledLifecycleEnd` and field `NaturalBattleEnd` runs |
 | PAY-005/006 compatibility lifecycle, RT-005/006, OUT-004 quarantine use, CLI-007 | Milestone 6 or first earlier compatibility claim | High-risk regressions and multi-client field coverage |
-| SCN-003 L2/L3 | Milestone 7 | Siege assault |
-| SCN-002 and SCN-004–SCN-010 applicable L2/L3 rows | Milestone 8 | Remaining adapters and rejection cases |
-| L4, RT-003, RES-006, CAM-001–CAM-006, applicable scenario L4 rows | Milestone 9 | Live campaign capture, aftermath, and capability-gated writeback |
-| L5, full PROC-010 overhead limits, calibrated ART-004 retention, resource/stability gates | Milestone 10 | Sequential, soak, and randomized evidence |
+| SCN-003 L2/L3/L3 natural and RES-008 siege coverage | Milestone 7 | Siege assault controlled and natural completion |
+| SCN-002 and SCN-004–SCN-010 applicable L2/L3 rows, SCN-002 and SCN-004–SCN-009 L3 natural rows, remaining RES-008 coverage | Milestone 8 | Remaining adapters, their natural completion, and rejection cases |
+| L4, RT-003, RES-006/008 L4 boundary, CAM-001–CAM-006, applicable scenario L4 rows | Milestone 9 | Live campaign capture, natural field and siege completion, aftermath, and capability-gated writeback |
+| L5, full PROC-010 overhead limits, calibrated ART-004 retention, resource/stability gates, selected natural sequential/soak profiles | Milestone 10 | Sequential, soak, randomized, and full-battle stability evidence |
 | TST-003 automated change-impact mapping | After Milestone 6 inventory is stable | Optimization only; never replaces explicit adjacent-scenario review |
 
 If a milestone intentionally implements a later requirement early, that requirement becomes part of the active approved scope and must appear in the completion matrix. It MUST NOT pull unrelated requirements from the same future milestone into scope automatically.
@@ -1341,6 +1450,9 @@ A scenario is complete at a declared level only when:
 9. at least one repeated run proves stale state is not reused when required by the milestone;
 10. living documentation reflects implemented behavior and remaining limitations;
 11. manual-only validation is listed explicitly rather than silently omitted.
+12. its completion report declares `Controlled only`, `Natural passing`, or `Natural blocked`; full L3 scenario coverage requires a passing `L3 natural` row, and full L4 scenario coverage requires at least one correlated L4 `NaturalBattleEnd` run.
+
+A scenario MAY be complete for an explicitly declared lower boundary while natural coverage is still pending. It MUST then be described as, for example, “L2 passing” or “controlled L3 passing,” not “fully automated” or “fully covered.” A scenario marked `Natural blocked` remains incomplete for full scenario coverage and MUST retain the exact blocker and required follow-up milestone.
 
 ## 24. Final target
 
@@ -1351,9 +1463,10 @@ source change
   -> impacted fast contracts
   -> safe compile-only check
   -> affected dedicated smoke scenarios
-  -> affected client lifecycle scenarios
+  -> affected controlled client lifecycle scenarios
+  -> affected natural-completion scenarios when TST-005/006 selects them
   -> campaign end-to-end only when campaign capture/writeback is in scope
   -> manual UI/camera/visual check only when relevant
 ```
 
-This does not eliminate every real Bannerlord run. It makes each remaining run intentional, evidence-backed, and proportional to the risk of the change.
+The command surface also retains an explicit full-natural-suite run across every maintained SCN-001–SCN-009 fixture. This does not eliminate every real Bannerlord run. It makes each remaining run intentional, evidence-backed, and proportional to the risk of the change while preventing fast controlled completion from being mistaken for full battle coverage.

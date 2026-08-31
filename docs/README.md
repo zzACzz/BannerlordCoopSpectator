@@ -1,6 +1,6 @@
 # Documentation Index
 
-Index updated: 2026-08-28
+Index updated: 2026-08-31
 Project: `BannerlordCoopSpectator3`
 
 ## Canonical Living Documentation
@@ -12,7 +12,12 @@ For new engineering work, start with `docs/ai/README.md`. The `docs/ai/` set is 
 3. `docs/ai/CODE_MAP.md` — source, subsystem, adapter, patch, UI, command, test, and script map.
 4. `docs/ai/RUNTIME_FLOWS.md` — campaign capture, topology handshake, snapshot transfer, materialization, phases, reconnect, and writeback.
 5. `docs/ai/BUILD_TEST_DEBUG.md` — side-effecting build behavior, reference profiles, contract tests, scripts, logs, and diagnostics.
-6. `docs/ai/INVARIANTS_AND_RISKS.md` — protected runtime contracts, known limitations, high-risk files, and regression checklists.
+6. `docs/ai/RELEASE_PACKAGING.md` — canonical GitHub/Nexus archive layouts, commands, exclusions, validation, and publication boundaries.
+7. `docs/ai/INVARIANTS_AND_RISKS.md` — protected runtime contracts, known limitations, high-risk files, and regression checklists.
+8. `docs/ai/BATTLE_TEST_AUTOMATION_SPEC.md` — canonical staged battle-test automation requirements.
+9. `docs/ai/BATTLE_TEST_AUTOMATION_M1_FEASIBILITY.md` — installed-runtime feasibility evidence and blockers.
+10. `docs/ai/BATTLE_TEST_AUTOMATION_CLIENT_JOIN_IMPLEMENTATION.md` — run-scoped client launcher/lobby-control implementation evidence and remaining runtime gates.
+11. `docs/ai/BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md` — completed non-runtime runner/protocol/compile-only foundation, authoritative L0/L1 evidence, and the Milestone 2B boundary.
 
 Current source and runtime evidence outrank dated plans. Preserve the remaining documents below as focused investigation history, implementation evidence, and technical specifications; do not assume that a newer dated specification is already implemented.
 
@@ -108,6 +113,7 @@ Read in this order when opening a new window:
 
 ## Build / Run / Diagnostics
 
+- `docs/ai/RELEASE_PACKAGING.md`
 - `BUILD_RUNBOOK.md`
 - `DEDICATED_TROUBLESHOOTING.md`
 - `docs/DEDICATED_SCENE_RESOLUTION_PROBE_2026-03-31.md`

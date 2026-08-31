@@ -1,0 +1,25 @@
+{
+  "SchemaVersion": 1,
+  "Projects": [
+    { "Name": "CampaignlessConversationMissionSafety.ContractTests", "Path": "Tests/CampaignlessConversationMissionSafety.ContractTests/CampaignlessConversationMissionSafety.ContractTests.csproj" },
+    { "Name": "CoopAutomationJoin.ContractTests", "Path": "Tests/CoopAutomationJoin.ContractTests/CoopAutomationJoin.ContractTests.csproj" },
+    { "Name": "CoopAutomationProtocol.ContractTests", "Path": "Tests/CoopAutomationProtocol.ContractTests/CoopAutomationProtocol.ContractTests.csproj" },
+    { "Name": "CoopBattlePower.ContractTests", "Path": "Tests/CoopBattlePower.ContractTests/CoopBattlePower.ContractTests.csproj" },
+    { "Name": "CoopBattleResultCampaignGuard.ContractTests", "Path": "Tests/CoopBattleResultCampaignGuard.ContractTests/CoopBattleResultCampaignGuard.ContractTests.csproj" },
+    { "Name": "CoopBattleResultReadCache.ContractTests", "Path": "Tests/CoopBattleResultReadCache.ContractTests/CoopBattleResultReadCache.ContractTests.csproj" },
+    { "Name": "CoopBattleStartup.ContractTests", "Path": "Tests/CoopBattleStartup.ContractTests/CoopBattleStartup.ContractTests.csproj" },
+    { "Name": "CoopCampaignMapPrototype.ContractTests", "Path": "Tests/CoopCampaignMapPrototype.ContractTests/CoopCampaignMapPrototype.ContractTests.csproj" },
+    { "Name": "CoopCompileOnly.ContractTests", "Path": "Tests/CoopCompileOnly.ContractTests/CoopCompileOnly.ContractTests.csproj" },
+    { "Name": "CoopExactCampaignSiegePeerPerkSafety.ContractTests", "Path": "Tests/CoopExactCampaignSiegePeerPerkSafety.ContractTests/CoopExactCampaignSiegePeerPerkSafety.ContractTests.csproj" },
+    { "Name": "CoopExactSiegeLadderMerlonVisualParity.ContractTests", "Path": "Tests/CoopExactSiegeLadderMerlonVisualParity.ContractTests/CoopExactSiegeLadderMerlonVisualParity.ContractTests.csproj" },
+    { "Name": "CoopHeroBattleProgression.ContractTests", "Path": "Tests/CoopHeroBattleProgression.ContractTests/CoopHeroBattleProgression.ContractTests.csproj" },
+    { "Name": "CoopHeroCreation.ContractTests", "Path": "Tests/CoopHeroCreation.ContractTests/CoopHeroCreation.ContractTests.csproj" },
+    { "Name": "CoopHideoutBossPhase.ContractTests", "Path": "Tests/CoopHideoutBossPhase.ContractTests/CoopHideoutBossPhase.ContractTests.csproj" },
+    { "Name": "CoopRemoteSiegeOcclusionSafety.ContractTests", "Path": "Tests/CoopRemoteSiegeOcclusionSafety.ContractTests/CoopRemoteSiegeOcclusionSafety.ContractTests.csproj" },
+    { "Name": "CoopShaderCacheModeSwitch.ContractTests", "Path": "Tests/CoopShaderCacheModeSwitch.ContractTests/CoopShaderCacheModeSwitch.ContractTests.csproj" },
+    { "Name": "CoopSiegeFormationMembershipSafety.ContractTests", "Path": "Tests/CoopSiegeFormationMembershipSafety.ContractTests/CoopSiegeFormationMembershipSafety.ContractTests.csproj" },
+    { "Name": "CoopSiegeLadderInteraction.ContractTests", "Path": "Tests/CoopSiegeLadderInteraction.ContractTests/CoopSiegeLadderInteraction.ContractTests.csproj" },
+    { "Name": "CoopSiegeSceneScriptRegistration.ContractTests", "Path": "Tests/CoopSiegeSceneScriptRegistration.ContractTests/CoopSiegeSceneScriptRegistration.ContractTests.csproj" },
+    { "Name": "NativeAftermath.ContractTests", "Path": "Tests/NativeAftermath.ContractTests/NativeAftermath.ContractTests.csproj" }
+  ]
+}

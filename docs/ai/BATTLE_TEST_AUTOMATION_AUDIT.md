@@ -1,10 +1,15 @@
 # Battle Test Automation Audit
 
-Status: **Source-verified design audit**
+Status: **Source-verified design audit with completed Milestone 1 and Milestone 2A addenda**
 Audit date: **2026-08-29**
 Repository baseline: **`f5bd90ddb6a361f4341ea3771b4acadc266d684b`** (`f5bd90d`)
+Milestone 1 addendum date: **2026-08-31**
+Milestone 1 repository revision: **`3c513084ebbe9c99daa0b65849fab7b39b913ee1`** (`3c51308`)
+Milestone 2A addendum date: **2026-08-31**
 Superseded proposal: `TZ_Codex_Automation_Coop_Battles_and_Global_Map.md`
 Replacement specification: [BATTLE_TEST_AUTOMATION_SPEC.md](BATTLE_TEST_AUTOMATION_SPEC.md)
+Runtime feasibility report: [BATTLE_TEST_AUTOMATION_M1_FEASIBILITY.md](BATTLE_TEST_AUTOMATION_M1_FEASIBILITY.md)
+Milestone 2A report: [BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md](BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md)
 
 ## 1. Audit purpose and evidence boundary
 
@@ -22,7 +27,7 @@ The audit covered:
 - the existing campaign-map prototype;
 - selected installed dedicated-server assemblies by decompilation, as local supporting evidence only.
 
-No main module build, deployment, Bannerlord launch, live multiplayer run, campaign writeback run, or crash test was performed for this audit. Runtime claims remain unverified unless an existing dated report is explicitly cited by the living documentation.
+No main module build, deployment, Bannerlord launch, live multiplayer run, campaign writeback run, or crash test was performed during the original 2026-08-29 design audit. The bounded 2026-08-31 Milestone 1 addendum launched the installed dedicated and multiplayer client roles without opening a mission; only claims explicitly linked to the feasibility report are runtime-verified.
 
 ## 2. Executive verdict
 
@@ -300,6 +305,8 @@ Recorded local hashes for reproducibility of this audit only:
 
 These values must not be hard-coded as supported versions. The future environment doctor must discover and report the identities for each run.
 
+The installed client hash above is historical evidence from the original audit. The Milestone 1 run later loaded client hash `9B271E4E0CFA3AD0FF2DB4B3ACC5A69AE6405E833D52ECB4E1A4C0FDCA8C1B31`; use the run-specific report rather than either value as a permanent supported-version rule.
+
 ## 9. Recommendation
 
 Do not implement the supplied proposal directly. Use [BATTLE_TEST_AUTOMATION_SPEC.md](BATTLE_TEST_AUTOMATION_SPEC.md) as the canonical implementation specification.
@@ -314,3 +321,34 @@ The first implementation milestone should establish safety and trustworthy evide
 6. only then, a dedicated spawn smoke that ends safely at `PreBattleHold`.
 
 This ordering addresses the current manual-testing burden without risking installed modules, live campaign results, unrelated processes, or false-positive runtime reports.
+
+## 10. Milestone 1 runtime-feasibility addendum
+
+The bounded run `M1-20260831T013501Z-4114d2df` tested the installed public Steam profile on `LAPTOP-4IUGGR23` without a build, deployment, `start_game`, mission, client connection, or campaign action.
+
+Confirmed findings:
+
+- `DedicatedCustomServer.Starter.exe` was the module-hosting dedicated role; its exact entry identity and owned `Watchdog`/`conhost` descendants were recorded and cleaned up gracefully;
+- the dedicated `CoopSpectatorDedicated` module loaded and the stock token-file flow authenticated;
+- the real multiplayer client loaded `CoopSpectator` and reached a responsive multiplayer window after Steam was started;
+- exact bounded cleanup stopped only owned processes, required no forced termination, left the inventoried ports free, and released the exclusive probe lock;
+- the monitored global battle bridge files were unchanged.
+
+Changed assumptions and blockers:
+
+- Steam is a real prerequisite for direct client launch on this profile;
+- the installed/loaded client and dedicated modules are `0.3.1`, while repository outputs are `0.3.2` with different hashes;
+- the dedicated module loaded from its `Win64_Shipping_Client` module directory, not from the project output's server directory;
+- no-start-game authentication did not bind port `7210`;
+- at the time of the M1 run, no supported run-scoped normal-lobby command/acknowledgement path drove the client to the exact owned server;
+- a connection attempt remains unsafe until result publication is isolated or suppressed.
+
+The canonical evidence, capability matrix, staging-mode disposition, and revised gate plan are in [BATTLE_TEST_AUTOMATION_M1_FEASIBILITY.md](BATTLE_TEST_AUTOMATION_M1_FEASIBILITY.md). Milestone 2A may proceed. Milestone 2B and L2–L5 runtime work remain gated by the blocked client connection/control rows and current-build identity proof.
+
+Post-audit update: the developer reports that `0.3.2` was released after stable manual battle runs. This does not change the M1 loaded-binary observation or imply instability; it is a separate manual evidence source. A subsequent approved change added the default-off run-scoped normal-lobby control path in source and contract tests. That implementation is documented in [BATTLE_TEST_AUTOMATION_CLIENT_JOIN_IMPLEMENTATION.md](BATTLE_TEST_AUTOMATION_CLIENT_JOIN_IMPLEMENTATION.md), but no Bannerlord connection rerun has occurred, so the historical M1 runtime capability rows remain blocked.
+
+## 11. Milestone 2A non-runtime addendum
+
+The approved Milestone 2A implementation completed the audit's first four non-runtime recommendations. `m2a-contracts-20260831-07` passed all 20 reviewed contract projects, and `m2a-compile-only-20260831-03` independently compiled both current `0.3.2` projects below an isolated run root while recursive installed-module inventories remained identical. The runner now provides the named environment doctor, run/role/nonce/lease/event protocol, stable outcomes/reasons, assertions, artifact categories, reproduction descriptor, and required file-fault contracts.
+
+No product process was launched by those runs. Result isolation, current-build staging/loaded-hash proof, runtime ownership/cleanup/recovery, live connection, mission opening, and battle evidence remain outside Milestone 2A. The exact completion audit and artifact boundaries are in [BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md](BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md).

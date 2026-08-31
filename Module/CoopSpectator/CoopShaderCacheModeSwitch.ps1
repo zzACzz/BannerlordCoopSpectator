@@ -22,7 +22,9 @@ param(
     [long]$GameProcessStartTimeUtcTicks = 0,
 
     [ValidateRange(1, 120)]
-    [int]$CleanupRetrySeconds = 30
+    [int]$CleanupRetrySeconds = 30,
+
+    [string]$ContractTestWatcherReadyPath = ""
 )
 
 Set-StrictMode -Version Latest
@@ -181,6 +183,30 @@ function Wait-ForGameProcessAndClearCache
     throw "The background cleanup watcher exhausted its retries: $($lastFailure.Message)"
 }
 
+function Publish-ContractTestWatcherReady
+{
+    if ([string]::IsNullOrWhiteSpace($ContractTestWatcherReadyPath))
+    {
+        return
+    }
+
+    $normalizedProgramData = Get-NormalizedFullPath $ProgramDataRoot
+    $normalizedReadyPath = [IO.Path]::GetFullPath($ContractTestWatcherReadyPath)
+    $requiredPrefix = $normalizedProgramData + [IO.Path]::DirectorySeparatorChar
+    if (-not $normalizedReadyPath.StartsWith(
+            $requiredPrefix,
+            [StringComparison]::OrdinalIgnoreCase))
+    {
+        throw "Contract-test watcher readiness path must remain under ProgramDataRoot: $normalizedReadyPath"
+    }
+
+    $readyDirectory = [IO.Path]::GetDirectoryName($normalizedReadyPath)
+    [IO.Directory]::CreateDirectory($readyDirectory) | Out-Null
+    [IO.File]::WriteAllText(
+        $normalizedReadyPath,
+        "WatcherProcessId=$PID;GameProcessId=$GameProcessId")
+}
+
 function Start-DetachedCleanupWatcher
 {
     param(
@@ -195,11 +221,13 @@ function Start-DetachedCleanupWatcher
 
     $scriptPathLiteral = $PSCommandPath.Replace("'", "''")
     $programDataLiteral = $ProgramDataRoot.Replace("'", "''")
+    $watcherReadyPathLiteral = $ContractTestWatcherReadyPath.Replace("'", "''")
     $processStartTimeUtcTicks = $LifecycleProcess.StartTime.ToUniversalTime().Ticks
     $watcherCommandTemplate = (
         "& '{0}' -Phase WaitForMultiplayerExit -ProgramDataRoot '{1}' " +
-        "-GameProcessId {2} -GameProcessStartTimeUtcTicks {3} -CleanupRetrySeconds {4}")
-    $watcherCommand = $watcherCommandTemplate -f $scriptPathLiteral, $programDataLiteral, $LifecycleProcess.Id, $processStartTimeUtcTicks, $CleanupRetrySeconds
+        "-GameProcessId {2} -GameProcessStartTimeUtcTicks {3} -CleanupRetrySeconds {4} " +
+        "-ContractTestWatcherReadyPath '{5}'")
+    $watcherCommand = $watcherCommandTemplate -f $scriptPathLiteral, $programDataLiteral, $LifecycleProcess.Id, $processStartTimeUtcTicks, $CleanupRetrySeconds, $watcherReadyPathLiteral
     $encodedCommand = [Convert]::ToBase64String(
         [Text.Encoding]::Unicode.GetBytes($watcherCommand))
     $powershellExecutable = Join-Path $PSHOME "powershell.exe"
@@ -428,6 +456,7 @@ try
 {
     if ($Phase -eq "WaitForMultiplayerExit")
     {
+        Publish-ContractTestWatcherReady
         Wait-ForGameProcessAndClearCache
         exit 0
     }

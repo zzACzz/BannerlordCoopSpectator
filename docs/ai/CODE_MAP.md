@@ -1,6 +1,7 @@
 # Code Map
 
 Last source verification: **2026-08-28**
+Last automation-control source verification: **2026-08-31**
 
 ## Repository map
 
@@ -14,7 +15,7 @@ Last source verification: **2026-08-28**
 | `GameMode/` | Multiplayer mode registration and native/cooperative mission behavior composition |
 | `Mission/` | Live mission state owners, spawn/phase lifecycle, network transport, battle power, scenario controllers |
 | `MissionModels/` | Campaign-derived combat, damage, difficulty, and morale models used in multiplayer mission runtime |
-| `Infrastructure/` | Snapshot/runtime state, contracts, bridges, scenario adapters, feature flags, exact-transfer utilities |
+| `Infrastructure/` | Snapshot/runtime state, contracts, bridges, scenario adapters, feature flags, exact-transfer utilities, and run-scoped automation contracts |
 | `Network/` | TCP prototype layer, pre-mission topology component, and network message schemas |
 | `Patches/` | Harmony boundaries around native lobby, mission load, spawn, control, UI, siege, and compatibility code |
 | `UI/` | Gauntlet views/view-models for selection, deployment, hero creator, hideout, battle power, and map prototype |
@@ -22,7 +23,7 @@ Last source verification: **2026-08-28**
 | `DedicatedHelper/` | Dedicated launch settings/commands, hosting mode, helper launcher, web-panel authentication |
 | `Module/` | Client and dedicated module descriptors, XML game data, GUI prefabs, shader-cache helper |
 | `Tests/` | Standalone `net8.0` contract-test executables linked to narrow production contracts |
-| `scripts/` | Development loop, release packaging, and installed-DLL inventory audit |
+| `scripts/` | Development loop, release packaging, installed-DLL inventory audit, repository hygiene, and battle-test client launcher core |
 | `docs/` | Dated investigations, status reports, specifications, and the living `docs/ai/` index |
 
 Generated and investigative areas such as `bin/`, `obj/`, `.buildcheck/`, `.codex_tmp*/`, `dist/`, `work/`, copied root DLLs, ZIP packages, and decompilation scratch files are not primary source.
@@ -39,7 +40,7 @@ Key responsibilities and methods:
 - `TryApplyHarmonyPatches`: client patch groups and isolation flags.
 - assembly-load callback: reapplies patches whose target assembly arrived late.
 - `OnGameStart`: campaign behaviors or non-campaign mission-model wrappers.
-- application tick: network dispatcher, campaign map prototype, hero creation, and `BattleDetector.Tick`.
+- application tick: network dispatcher, campaign map prototype, hero creation, default-off lobby automation controller, and `BattleDetector.Tick`.
 - `OnSubModuleUnloaded`: shutdown and event cleanup.
 
 Important local constants at the top of the file define which manual patch groups are active. Do not infer them from patch class existence.
@@ -277,6 +278,27 @@ These types overlap deliberately: intent, authoritative request, spawn result, l
 - shared I/O: `AtomicBridgeFileIO.cs`
 - temporary local-host redirect state: `HostSelfJoinRedirectState.cs`
 
+### Battle-test client join
+
+- `Infrastructure/Automation/CoopAutomationJoinContract.cs`: schema, request validation, SHA-256 binding, exact server selection, and terminal-state rules.
+- `Infrastructure/Automation/CoopAutomationJoinBridge.cs`: complete environment/profile validation, loaded-assembly hash, run-scoped request read, and strict atomic status publication.
+- `Multiplayer/Automation/CoopLobbyAutomationDriver.cs`: narrow reflection adapter over TaleWorlds `NetworkMain.GameClient`, custom-server discovery, and custom-game join.
+- `Multiplayer/Automation/CoopLobbyAutomationController.cs`: main-thread polling, exact local-server ownership gate, native join lifecycle, acknowledgement, and safe cancellation boundary.
+- `Commands/CoopAutomationConsoleCommands.cs`: `coop.automation_join` status/start/cancel surface.
+- `Patches/LobbyCustomGameLocalJoinPatch.cs`: existing normal lobby handoff and loopback-rewrite boundary; now also notifies the run-scoped controller.
+
+This path is disabled by default, is independent of battle type, and stops at network connection evidence. It does not open a mission or own battle readiness/result state.
+
+### Battle-test non-runtime foundation
+
+- `Directory.Build.props`: shared default-false compile-only output/intermediate/package routing.
+- `Infrastructure/Automation/CoopAutomationRunContract.cs`: manifest, role instance, port/fixture identity, lease, envelope, event, stable outcome/reason, recovery, and known-issue contracts.
+- `Infrastructure/Automation/CoopAutomationProtocolFileIO.cs`: strict atomic JSON, bounded shared reads, append-safe JSONL, and same-volume inbox processing.
+- `scripts/Invoke-CoopTest.ps1`: `Doctor`, full `Contracts`, and client/dedicated `CompileOnly`; owns the fresh run root, runner lock, nonce fingerprint, lease, status, events, assertions, logs, and reports.
+- `Tests/contract-tests.manifest.json`: exact reviewed inventory consumed by the aggregate runner.
+
+This layer is non-authoritative and battle-type independent. It may inspect source/environment state and compile into a run root, but Milestone 2A does not stage modules, start product processes, connect roles, open missions, or publish battle results.
+
 ## Network files
 
 ### Transport components
@@ -398,6 +420,9 @@ From `CoopConsoleCommands`:
 - `coop.dedicated_start_vpn`
 - `coop.dedicated_open_tokens`
 - `coop.test_mp_team`
+- `coop.automation_join status`
+- `coop.automation_join start <RunId>`
+- `coop.automation_join cancel`
 
 ### Selection and spawn
 
@@ -447,6 +472,9 @@ Each project is a small `net8.0` executable. Most link a narrow production contr
 | `CoopSiegeFormationMembershipSafety.ContractTests` | Stored formation membership/coordinates |
 | `CoopSiegeLadderInteraction.ContractTests` | Ladder interaction mutation guards |
 | `CoopSiegeSceneScriptRegistration.ContractTests` | SandBox managed scene-script registration |
+| `CoopAutomationJoin.ContractTests` | Run/token/hash request validation, exact server selection, atomic status, and automation source-graph compilation |
+| `CoopAutomationProtocol.ContractTests` | Protocol compatibility, role/run/nonce ordering, lease/recovery, stable outcomes/reasons, known issues, atomic/append file faults, locks, and repeat reads |
+| `CoopCompileOnly.ContractTests` | Shared compile-only property, output routing, and deployment-target guards in both main project files |
 | `NativeAftermath.ContractTests` | Casualty math, staged siege totals, hideout/final siege aftermath |
 
 These tests prove contract logic only. They do not prove native mission loading, synchronized network ordering, or visual/runtime stability.
@@ -454,9 +482,12 @@ These tests prove contract logic only. They do not prove native mission loading,
 ## Scripts
 
 - `scripts/CoopDevLoop.ps1`: optional client/dedicated builds, process restart/launch, DLL timestamp checks, and log-marker scanning. With no action switches it builds both and checks logs. Its default `ProjectRoot` points to `C:\dev\projects\BannerlordCoopSpectator3`, not necessarily the active Codex worktree; pass `-ProjectRoot` explicitly.
-- `scripts/CreateReleasePackage.ps1`: Release builds unless `-SkipBuild`, then destructively recreates selected `dist/` package directories/ZIPs and assembles client/host payloads.
+- `scripts/CreateReleasePackage.ps1`: Release builds unless `-SkipBuild`, then recreates selected `dist/` artifacts. `-GitHubAssetsOnly` creates full GitHub client/host archives, `-NexusAssetsOnly` derives validated Nexus client/HostLite archives from existing GitHub archives, and `-ReleaseAssetsOnly` creates both sets. Nexus validation excludes BAT/PS1/PDB files and compares every retained payload entry and embedded release document by SHA-256. See [RELEASE_PACKAGING.md](RELEASE_PACKAGING.md) for the canonical layouts and workflow.
 - `scripts/DllInventoryAudit.ps1`: scans installed client/dedicated trees and writes repository reports/CSV. Its historical conclusion may not match the current installed version.
 - `scripts/Test-RepositoryHygiene.ps1`: read-only validation of repository-local Git EOL configuration, tracked text EOL state, mixed endings, and optional final working-tree cleanliness.
+- `scripts/Invoke-CoopTest.ps1`: canonical fresh-root L0/L1 runner for environment facts, all reviewed contract projects, and side-effect-free main-project compilation.
+- `scripts/Start-CoopBattleTestClient.ps1`: validates Steam, exact installed client hash, and run identity; `-ValidateOnly` performs no launch/run-root write; a live call writes only the selected temporary run root and launches the exact multiplayer executable.
+- `run_battle_test_client.bat`: short wrapper for the PowerShell battle-test client launcher. The password is intentionally environment-only and not a positional argument.
 
 ## High-risk hotspots
 

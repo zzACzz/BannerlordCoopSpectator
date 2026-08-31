@@ -34,6 +34,11 @@ namespace CoopSpectator.Patches
         {
             string originalAddress = serverAddress;
             bool consumed = HostSelfJoinRedirectState.TryConsumeLoopbackRewrite(ref serverAddress, port, "LobbyGameStateCustomGameClient.StartMultiplayer");
+            global::CoopSpectator.Multiplayer.Automation.CoopLobbyAutomationController.NotifyStartMultiplayerHandoff(
+                serverAddress,
+                port,
+                sessionKey,
+                peerIndex);
             ModLogger.Info(
                 "LobbyCustomGameLocalJoinPatch: lobby join handoff. " +
                 "originalAddress=" + (originalAddress ?? string.Empty) +

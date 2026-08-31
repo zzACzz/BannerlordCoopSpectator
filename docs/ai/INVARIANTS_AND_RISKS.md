@@ -1,6 +1,7 @@
 # Invariants and Risks
 
 Last source verification: **2026-08-28**
+Last automation-control source/contract verification: **2026-08-31**
 
 ## Non-negotiable runtime invariants
 
@@ -149,6 +150,22 @@ The dedicated build has no campaign state and therefore always uses the guarded 
 
 Missing/mismatched topology, non-siege scenarios, different mission shells, and server/listen-server roles must preserve native occlusion. The accepted decision is applied in `MissionMultiplayerCoopSiegeAssaultWithDeploymentClient.OnBehaviorInitialize` before base initialization/renderer activation.
 
+### 16. Battle-test lobby control remains run-scoped and non-authoritative
+
+`CoopLobbyAutomationController` is disabled unless the complete explicit automation profile is present. It may request the normal TaleWorlds lobby join only after the request matches the `RunId`, run-token hash, loaded client-module hash, command lifetime, exact server identity, persisted local-host marker, and active local UDP port.
+
+The controller must not create an alternate connection path, rewrite any address except through the existing validated local-host loopback patch, issue `start_game`, open a mission, fabricate readiness, or publish battle results. The server password must remain environment-only and absent from commands, artifacts, status, and logs. Status publication must remain strictly atomic and state-change-driven; per-tick logging is prohibited.
+
+Request expiry may block a native join from starting. Once TaleWorlds owns the native join task, the module must not claim that the operation was cancelled or terminally expired; the external runner owns the timeout and exact-process cleanup decision.
+
+### 17. Compile-only and run ownership never imply runtime proof
+
+`CoopCompileOnly=true` must always require an absolute caller-owned output root, suppress all three installation deployment targets, suppress the client's implicit dedicated build, and keep output/intermediate/package state below the exact run root. The proof must compare recursive before/after SHA-256 inventories of the installed client, legacy-client, and dedicated module trees.
+
+Every automation run root is fresh and exclusively owned by its `RunId`. Persist only the nonce fingerprint; reject cross-run, nonce, role-instance, duplicate, stale, reordered, malformed, partial, incompatible-protocol, and identity-mismatched records. An expired lease is abandoned evidence to inspect, not permission to delete or reuse the root.
+
+An L0/L1 `Pass` proves only the named environment assertion, contract inventory, or compile operation. It must not be reported as loaded-binary, client/server connection, mission-open, battle-lifecycle, natural-completion, result, or writeback evidence.
+
 ## Known current limitations and unverified areas
 
 ### Source-verified limitations
@@ -160,6 +177,9 @@ Missing/mismatched topology, non-siege scenarios, different mission shells, and 
 - Invasive late-join hooks for native late-client handling and agent/missile sends are disabled.
 - Siege single-player formation-marker UI and siege lobby equipment component are disabled.
 - Blockade and blockade sally out are unsupported.
+- Core battle roster, phase/start-request, and result bridge paths are still shared under the normal Documents profile and have no automation `RunId`; no mission-open automation is safe until those boundaries are isolated or result publication is explicitly suppressed.
+- A default-off run-scoped command/acknowledgement path now exists in source for the normal lobby join flow, but it has only isolated contract evidence. It is not Bannerlord-runtime-verified and does not remove the M1 connection/control blockers until a named connection rerun proves the exact handoff.
+- The Milestone 2A runner, protocol, full 20-project aggregate, and compile-only mode are source/build/test verified. They intentionally provide no staging, loaded-hash, process-cleanup, connection, mission, or battle evidence; those remain Milestone 2B or later.
 
 ### Recorded runtime gaps
 
@@ -172,6 +192,12 @@ From the July 2026 materialization status:
 - field-specific materialization/boundary behavior should not be transferred to other scenarios without its own test phase.
 - the campaignless conversation and remote exact-siege occlusion decision contracts passed focused tests on 2026-08-29, but their Harmony/native renderer behavior was not runtime-verified in Bannerlord after the checkpoint commits;
 - campaign-map tagged-mesh visual ticking is source-verified, but its visual result and per-frame cost were not runtime-verified after checkpoint `28ec8ca`.
+- the 2026-08-31 Milestone 1 probe loaded installed client and dedicated modules version `0.3.1`, while repository outputs were version `0.3.2` with different hashes; the successful launches are installed-profile evidence only;
+- the same probe confirmed that Steam must already be running for the direct multiplayer client launch on the named machine profile;
+- the dedicated module authenticated without `start_game`, but port `7210` remained unbound and client connection/control were not tested because result isolation was not yet safe.
+- the 2026-08-31 post-M1 client-control implementation passed isolated source compilation, request/server-selection/atomic-status contracts, PowerShell parsing, and launcher `-ValidateOnly` checks; no game process was started, and no live normal-lobby handoff or connection was observed;
+- the developer reports stable manual battle runs before releasing `0.3.2`; this is separate manual regression evidence and does not alter the M1 fact that its own locally loaded artifacts were `0.3.1`.
+- `m2a-contracts-20260831-07` passed all 20 contract projects and `m2a-compile-only-20260831-03` compiled both `0.3.2` assemblies without changing installed module inventories; neither run launched Bannerlord or verified runtime loading.
 
 ### Planned but not source-verified
 
@@ -189,6 +215,8 @@ The 2026-08-28 source review found extensive selection, auto-deploy, visual norm
 ### Version uncertainty
 
 Project comments mention both Bannerlord 1.3.14 and required 1.4.8 runtime files. Any native/Harmony/decompilation conclusion is version-bound until hashes and installation versions are recorded.
+
+The initial automation feasibility profile is recorded in [BATTLE_TEST_AUTOMATION_M1_FEASIBILITY.md](BATTLE_TEST_AUTOMATION_M1_FEASIBILITY.md) with Steam manifest build IDs, runtime build marker, executable hashes, module hashes, and exact evidence boundaries. It does not resolve the broader supported-version matrix.
 
 ## Risk map by subsystem
 

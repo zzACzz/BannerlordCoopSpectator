@@ -66,6 +66,32 @@ namespace CoopSpectator.Infrastructure
             }
         }
 
+        public static void WriteAllLinesStrictAtomic(string path, IEnumerable<string> lines)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                throw new ArgumentException("Path must be provided.", nameof(path));
+
+            string directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrWhiteSpace(directory))
+                Directory.CreateDirectory(directory);
+
+            string[] materializedLines = MaterializeLines(lines);
+            string tempPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                File.WriteAllLines(tempPath, materializedLines);
+                if (File.Exists(path))
+                    File.Replace(tempPath, path, null, ignoreMetadataErrors: true);
+                else
+                    File.Move(tempPath, path);
+            }
+            catch
+            {
+                TryDeleteTempFile(tempPath);
+                throw;
+            }
+        }
+
         public static string[] ReadAllLinesShared(string path)
         {
             if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))

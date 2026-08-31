@@ -4,6 +4,7 @@ using CoopSpectator.Campaign; // ÐŸÑ–Ð´ÐºÐ»ÑŽÑ‡Ð°Ñ”Ð¼Ð¾
 using CoopSpectator.GameMode; // Ð ÐµÑ”ÑÑ‚Ñ€Ð°Ñ†Ñ–Ñ TdmClone Ð½Ð° ÐºÐ»Ñ–Ñ”Ð½Ñ‚Ñ– Ð´Ð»Ñ Join Ð´Ð¾ ÑÐµÑ€Ð²ÐµÑ€Ð° Ð· GameType TdmClone (Ð•Ñ‚Ð°Ð¿ 3.3)
 #endif
 using CoopSpectator.Infrastructure; // ÐŸÑ–Ð´ÐºÐ»ÑŽÑ‡Ð°Ñ”Ð¼Ð¾ Ñ–Ð½Ñ„Ñ€Ð°ÑÑ‚Ñ€ÑƒÐºÑ‚ÑƒÑ€Ñƒ (Ð»Ð¾Ð³ÐµÑ€, dispatcher)
+using CoopSpectator.Multiplayer.Automation;
 using CoopSpectator.MissionModels; // Low-level mission model wrappers for CoopBattle
 using CoopSpectator.Patches; // LobbyCustomGameLocalJoinPatch
 using HarmonyLib; // ÐŸÑ–Ð´ÐºÐ»ÑŽÑ‡Ð°Ñ”Ð¼Ð¾ Harmony Ð´Ð»Ñ Ð¿Ð°Ñ‚Ñ‡Ð¸Ð½Ð³Ñƒ Ð¼ÐµÑ‚Ð¾Ð´Ñ–Ð² Ð³Ñ€Ð¸
@@ -770,6 +771,7 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
             base.OnApplicationTick(dt); // Ð’Ð¸ÐºÐ»Ð¸ÐºÐ°Ñ”Ð¼Ð¾ Ð±Ð°Ð·Ð¾Ð²Ñƒ Ñ€ÐµÐ°Ð»Ñ–Ð·Ð°Ñ†Ñ–ÑŽ
 
             CoopCampaignMapPrototypePublisherBehavior.PumpApplicationTick(dt);
+            CoopLobbyAutomationController.PumpApplicationTick();
 
             if (EnableCoopRuntimeStartup)
             {
@@ -817,5 +819,4 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
         } // Ð—Ð°Ð²ÐµÑ€ÑˆÑƒÑ”Ð¼Ð¾ Ð±Ð»Ð¾Ðº Ð¼ÐµÑ‚Ð¾Ð´Ñƒ
     } // Ð—Ð°Ð²ÐµÑ€ÑˆÑƒÑ”Ð¼Ð¾ Ð±Ð»Ð¾Ðº ÐºÐ»Ð°ÑÑƒ
 } // Ð—Ð°Ð²ÐµÑ€ÑˆÑƒÑ”Ð¼Ð¾ Ð±Ð»Ð¾Ðº Ð¿Ñ€Ð¾ÑÑ‚Ð¾Ñ€Ñƒ Ñ–Ð¼ÐµÐ½
-
 

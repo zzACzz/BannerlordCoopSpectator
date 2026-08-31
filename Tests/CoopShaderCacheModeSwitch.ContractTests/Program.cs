@@ -152,6 +152,11 @@ internal static class Program
         string executablePath = Environment.ProcessPath ??
             throw new InvalidOperationException(
                 "Could not resolve the contract-test executable path.");
+        string watcherReadyPath = Path.Combine(
+            programDataRoot,
+            "detached-watcher-ready.txt");
+        if (File.Exists(watcherReadyPath))
+            File.Delete(watcherReadyPath);
         var startInfo = CreatePowerShellStartInfo(scriptPath);
         startInfo.ArgumentList.Add("-Phase");
         startInfo.ArgumentList.Add("RunMultiplayer");
@@ -168,6 +173,8 @@ internal static class Program
         startInfo.ArgumentList.Add("15");
         startInfo.ArgumentList.Add("-CleanupRetrySeconds");
         startInfo.ArgumentList.Add("5");
+        startInfo.ArgumentList.Add("-ContractTestWatcherReadyPath");
+        startInfo.ArgumentList.Add(watcherReadyPath);
 
         using Process wrapper = Process.Start(startInfo) ??
             throw new InvalidOperationException(
@@ -176,8 +183,10 @@ internal static class Program
             () => File.Exists(Path.Combine(target, "shader_mapping.bin")),
             TimeSpan.FromSeconds(5),
             "The delayed fake game did not create its shader cache.");
-
-        Thread.Sleep(500);
+        WaitForCondition(
+            () => File.Exists(watcherReadyPath),
+            TimeSpan.FromSeconds(10),
+            "The detached watcher did not publish its readiness signal.");
         if (wrapper.HasExited)
         {
             string earlyOutput = wrapper.StandardOutput.ReadToEnd();
@@ -194,7 +203,7 @@ internal static class Program
 
         WaitForCondition(
             () => !Directory.Exists(target),
-            TimeSpan.FromSeconds(10),
+            TimeSpan.FromSeconds(20),
             "The detached watcher did not clear the cache after the primary wrapper was terminated.");
     }
 
