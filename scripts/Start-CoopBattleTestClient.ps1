@@ -363,8 +363,26 @@ try {
         -LaunchObservedUtc $clientLaunchObservedUtc `
         -DeadlineMilliseconds 5000
 
+    $verifiedProcessIdentity = [ordered]@{
+        IdentityState = 'Verified'
+        LaunchOperationId = [string]$provisionalIdentity.LaunchOperationId
+        RoleType = 'MultiplayerClient'
+        RoleInstanceId = 'multiplayer-client-01'
+        ProcessId = $process.Id
+        ParentProcessId = [int]$processObservation.ParentProcessId
+        ExpectedParentProcessId = $PID
+        ProcessStartUtc = [string]$processObservation.ProcessStartUtc
+        ExecutablePath = [string]$processObservation.ExecutablePath
+        ExecutableSha256 = Get-CoopFileSha256 -Path ([string]$processObservation.ExecutablePath)
+        PathEvidenceSource = [string]$processObservation.PathEvidenceSource
+        LaunchStartedUtc = [string]$provisionalIdentity.LaunchStartedUtc
+        LaunchObservedUtc = [string]$provisionalIdentity.LaunchObservedUtc
+        RegisteredUtc = [string]$provisionalIdentity.RegisteredUtc
+        VerifiedUtc = [DateTime]::UtcNow.ToString('O')
+    }
+
     $launchArtifact = [ordered]@{
-        Schema = 'coop-automation-client-launch-v3'
+        Schema = 'coop-automation-client-launch-v4'
         RunId = $RunId
         CommandId = $commandId
         LaunchOperationId = [string]$provisionalIdentity.LaunchOperationId
@@ -375,6 +393,7 @@ try {
         EntryParentPid = [int]$processObservation.ParentProcessId
         EntryStartUtc = [string]$processObservation.ProcessStartUtc
         PathEvidenceSource = [string]$processObservation.PathEvidenceSource
+        ProcessIdentity = $verifiedProcessIdentity
         ProvisionalArtifactPath = $provisionalLaunchArtifactPath
         WorkingDirectory = $startInfo.WorkingDirectory
         Arguments = $startInfo.Arguments

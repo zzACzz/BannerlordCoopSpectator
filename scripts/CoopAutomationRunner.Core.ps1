@@ -290,6 +290,174 @@ function ConvertTo-CoopUtcDateTime {
     }
 }
 
+function Get-CoopFileSha256 {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    if (-not [System.IO.File]::Exists($fullPath)) { throw "File does not exist: $fullPath" }
+    $stream = New-Object System.IO.FileStream(
+        $fullPath,
+        [System.IO.FileMode]::Open,
+        [System.IO.FileAccess]::Read,
+        ([System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete))
+    $algorithm = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return [BitConverter]::ToString($algorithm.ComputeHash($stream)).Replace('-', '')
+    }
+    finally {
+        $algorithm.Dispose()
+        $stream.Dispose()
+    }
+}
+
+function Assert-CoopClientLaunchArtifact {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Artifact,
+        [Parameter(Mandatory = $true)][string]$ExpectedRunId,
+        [Parameter(Mandatory = $true)][string]$ExpectedClientModuleSha256,
+        [Parameter(Mandatory = $true)][string]$ExpectedExecutablePath,
+        [Parameter(Mandatory = $true)][ValidateRange(1, [int]::MaxValue)][int]$ExpectedParentProcessId
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ExpectedRunId)) { throw 'ExpectedRunId is required.' }
+    if ($ExpectedClientModuleSha256 -notmatch '^[A-Fa-f0-9]{64}$') {
+        throw 'ExpectedClientModuleSha256 is invalid.'
+    }
+
+    $schema = [string](Get-CoopOptionalPropertyValue -InputObject $Artifact -Name 'Schema')
+    if (-not [string]::Equals($schema, 'coop-automation-client-launch-v4', [StringComparison]::Ordinal)) {
+        throw "Client launch artifact schema '$schema' is not supported."
+    }
+    if (-not [string]::Equals(
+        [string](Get-CoopOptionalPropertyValue -InputObject $Artifact -Name 'RunId'),
+        $ExpectedRunId,
+        [StringComparison]::Ordinal)) {
+        throw 'Client launch artifact RunId does not match the active run.'
+    }
+    if (-not [string]::Equals(
+        [string](Get-CoopOptionalPropertyValue -InputObject $Artifact -Name 'ClientModuleSha256'),
+        $ExpectedClientModuleSha256,
+        [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Client launch artifact module hash does not match the selected client identity.'
+    }
+    if (-not [string]::Equals(
+        [string](Get-CoopOptionalPropertyValue -InputObject $Artifact -Name 'IdentityState'),
+        'Verified',
+        [StringComparison]::Ordinal)) {
+        throw 'Client launch artifact is not verified.'
+    }
+    if (-not [bool](Get-CoopOptionalPropertyValue -InputObject $Artifact -Name 'ExistingRunContractUsed') -or
+        -not [string]::Equals(
+            [string](Get-CoopOptionalPropertyValue -InputObject $Artifact -Name 'ResultPolicy'),
+            'Suppress',
+            [StringComparison]::Ordinal) -or
+        [bool](Get-CoopOptionalPropertyValue -InputObject $Artifact -Name 'UiAutomationUsed') -or
+        [bool](Get-CoopOptionalPropertyValue -InputObject $Artifact -Name 'StartGameIssued') -or
+        [bool](Get-CoopOptionalPropertyValue -InputObject $Artifact -Name 'MissionOpenIssued')) {
+        throw 'Client launch artifact violates the connection-only automation boundary.'
+    }
+
+    $identity = Get-CoopOptionalPropertyValue -InputObject $Artifact -Name 'ProcessIdentity'
+    if ($null -eq $identity) { throw 'Client launch artifact process identity is missing.' }
+    if (-not [string]::Equals(
+        [string](Get-CoopOptionalPropertyValue -InputObject $identity -Name 'IdentityState'),
+        'Verified',
+        [StringComparison]::Ordinal) -or
+        -not [string]::Equals(
+            [string](Get-CoopOptionalPropertyValue -InputObject $identity -Name 'RoleType'),
+            'MultiplayerClient',
+            [StringComparison]::Ordinal) -or
+        -not [string]::Equals(
+            [string](Get-CoopOptionalPropertyValue -InputObject $identity -Name 'RoleInstanceId'),
+            'multiplayer-client-01',
+            [StringComparison]::Ordinal)) {
+        throw 'Client launch artifact process role identity is invalid.'
+    }
+
+    $entryProcessId = [int](Get-CoopOptionalPropertyValue -InputObject $Artifact -Name 'EntryPid')
+    $identityProcessId = [int](Get-CoopOptionalPropertyValue -InputObject $identity -Name 'ProcessId')
+    if ($entryProcessId -le 0 -or $identityProcessId -ne $entryProcessId) {
+        throw 'Client launch artifact process IDs do not match.'
+    }
+    $entryParentProcessId = [int](Get-CoopOptionalPropertyValue -InputObject $Artifact -Name 'EntryParentPid')
+    $identityParentProcessId = [int](Get-CoopOptionalPropertyValue -InputObject $identity -Name 'ParentProcessId')
+    $identityExpectedParentProcessId = [int](Get-CoopOptionalPropertyValue -InputObject $identity -Name 'ExpectedParentProcessId')
+    if ($entryParentProcessId -ne $ExpectedParentProcessId -or
+        $identityParentProcessId -ne $ExpectedParentProcessId -or
+        $identityExpectedParentProcessId -ne $ExpectedParentProcessId) {
+        throw 'Client launch artifact parent process identity does not match the aggregate runner.'
+    }
+
+    $expectedPath = [System.IO.Path]::GetFullPath($ExpectedExecutablePath)
+    $entryPath = [System.IO.Path]::GetFullPath(
+        [string](Get-CoopOptionalPropertyValue -InputObject $Artifact -Name 'EntryPath'))
+    $identityPath = [System.IO.Path]::GetFullPath(
+        [string](Get-CoopOptionalPropertyValue -InputObject $identity -Name 'ExecutablePath'))
+    if (-not [string]::Equals($entryPath, $expectedPath, [StringComparison]::OrdinalIgnoreCase) -or
+        -not [string]::Equals($identityPath, $expectedPath, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Client launch artifact executable path does not match the requested client executable.'
+    }
+
+    $artifactLaunchOperationId = [string](Get-CoopOptionalPropertyValue -InputObject $Artifact -Name 'LaunchOperationId')
+    $identityLaunchOperationId = [string](Get-CoopOptionalPropertyValue -InputObject $identity -Name 'LaunchOperationId')
+    if ([string]::IsNullOrWhiteSpace($artifactLaunchOperationId) -or
+        -not [string]::Equals($artifactLaunchOperationId, $identityLaunchOperationId, [StringComparison]::Ordinal)) {
+        throw 'Client launch operation identity is missing or inconsistent.'
+    }
+
+    $entryStartUtc = ConvertTo-CoopUtcDateTime -Value (
+        Get-CoopOptionalPropertyValue -InputObject $Artifact -Name 'EntryStartUtc')
+    $identityStartUtc = ConvertTo-CoopUtcDateTime -Value (
+        Get-CoopOptionalPropertyValue -InputObject $identity -Name 'ProcessStartUtc')
+    $launchStartedUtc = ConvertTo-CoopUtcDateTime -Value (
+        Get-CoopOptionalPropertyValue -InputObject $identity -Name 'LaunchStartedUtc')
+    $launchObservedUtc = ConvertTo-CoopUtcDateTime -Value (
+        Get-CoopOptionalPropertyValue -InputObject $identity -Name 'LaunchObservedUtc')
+    if ($null -eq $entryStartUtc -or $null -eq $identityStartUtc -or
+        $null -eq $launchStartedUtc -or $null -eq $launchObservedUtc) {
+        throw 'Client launch artifact process times are incomplete or invalid.'
+    }
+    if ($launchObservedUtc -lt $launchStartedUtc -or
+        [Math]::Abs(($entryStartUtc - $identityStartUtc).TotalSeconds) -ge 1.0 -or
+        $identityStartUtc -lt $launchStartedUtc.AddSeconds(-2) -or
+        $identityStartUtc -gt $launchObservedUtc.AddSeconds(2)) {
+        throw 'Client launch artifact process times do not match the exact launch window.'
+    }
+
+    $identityExecutableSha256 = [string](
+        Get-CoopOptionalPropertyValue -InputObject $identity -Name 'ExecutableSha256')
+    if ($identityExecutableSha256 -notmatch '^[A-Fa-f0-9]{64}$') {
+        throw 'Client launch artifact executable hash is invalid.'
+    }
+    $actualExecutableSha256 = Get-CoopFileSha256 -Path $expectedPath
+    if (-not [string]::Equals(
+        $identityExecutableSha256,
+        $actualExecutableSha256,
+        [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Client launch artifact executable hash does not match the requested client executable.'
+    }
+
+    return [ordered]@{
+        IdentityState = 'Verified'
+        LaunchOperationId = $identityLaunchOperationId
+        RoleType = 'MultiplayerClient'
+        RoleInstanceId = 'multiplayer-client-01'
+        ProcessId = $identityProcessId
+        ParentProcessId = $identityParentProcessId
+        ExpectedParentProcessId = $identityExpectedParentProcessId
+        ProcessStartUtc = $identityStartUtc.ToString('O')
+        ExecutablePath = $expectedPath
+        ExecutableSha256 = $actualExecutableSha256
+        PathEvidenceSource = [string](Get-CoopOptionalPropertyValue -InputObject $identity -Name 'PathEvidenceSource')
+        LaunchStartedUtc = $launchStartedUtc.ToString('O')
+        LaunchObservedUtc = $launchObservedUtc.ToString('O')
+        RegisteredUtc = [string](Get-CoopOptionalPropertyValue -InputObject $identity -Name 'RegisteredUtc')
+        VerifiedUtc = [string](Get-CoopOptionalPropertyValue -InputObject $identity -Name 'VerifiedUtc')
+    }
+}
+
 function New-CoopProvisionalProcessIdentity {
     [CmdletBinding()]
     param(
@@ -811,5 +979,17 @@ function Get-CoopPidCorrelatedNativeLogNames {
         ('rgl_log_' + $ProcessId.ToString([Globalization.CultureInfo]::InvariantCulture) + '.txt'),
         ('rgl_log_errors_' + $ProcessId.ToString([Globalization.CultureInfo]::InvariantCulture) + '.txt'),
         ('watchdog_log_' + $ProcessId.ToString([Globalization.CultureInfo]::InvariantCulture) + '.txt')
+    )
+}
+
+function Get-CoopPidCorrelatedNativeLogDescriptors {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][ValidateRange(1, [int]::MaxValue)][int]$ProcessId)
+
+    $names = @(Get-CoopPidCorrelatedNativeLogNames -ProcessId $ProcessId)
+    return @(
+        [pscustomobject][ordered]@{ FileName = $names[0]; Required = $true; Kind = 'Native' },
+        [pscustomobject][ordered]@{ FileName = $names[1]; Required = $true; Kind = 'NativeErrors' },
+        [pscustomobject][ordered]@{ FileName = $names[2]; Required = $false; Kind = 'Watchdog' }
     )
 }

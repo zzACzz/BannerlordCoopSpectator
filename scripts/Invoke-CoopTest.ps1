@@ -702,22 +702,40 @@ function Copy-CoopDedicatedNativeLogs {
     [System.IO.Directory]::CreateDirectory($DestinationRoot) | Out-Null
 
     $processId = [int]$DedicatedIdentity.ProcessId
-    $processStartUtc = [DateTime]::Parse(
-        [string]$DedicatedIdentity.ProcessStartUtc,
-        [Globalization.CultureInfo]::InvariantCulture,
-        [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+    $processStartUtc = ConvertTo-CoopUtcDateTime -Value (
+        Get-CoopOptionalPropertyValue -InputObject $DedicatedIdentity -Name 'ProcessStartUtc')
+    if ($null -eq $processStartUtc) {
+        throw 'Exact dedicated process start time is unavailable for PID-correlated native log capture.'
+    }
     $files = New-Object 'System.Collections.Generic.List[object]'
-    foreach ($fileName in @(Get-CoopPidCorrelatedNativeLogNames -ProcessId $processId)) {
+    foreach ($descriptor in @(Get-CoopPidCorrelatedNativeLogDescriptors -ProcessId $processId)) {
+        $fileName = [string]$descriptor.FileName
+        $required = [bool]$descriptor.Required
+        $kind = [string]$descriptor.Kind
         $sourcePath = Join-Path $sourceRoot $fileName
+        $destinationPath = Join-Path $DestinationRoot $fileName
         if (-not [System.IO.File]::Exists($sourcePath)) {
-            throw "Expected PID-correlated native log is missing: $sourcePath"
+            if ($required) {
+                throw "Required PID-correlated native log is missing: $sourcePath"
+            }
+            $files.Add([ordered]@{
+                FileName = $fileName
+                Kind = $kind
+                Required = $false
+                State = 'NotProduced'
+                SourcePath = [System.IO.Path]::GetFullPath($sourcePath)
+                DestinationPath = [System.IO.Path]::GetFullPath($destinationPath)
+                Length = 0L
+                LastWriteTimeUtc = $null
+                Sha256 = $null
+            }) | Out-Null
+            continue
         }
         $sourceItem = Get-Item -LiteralPath $sourcePath
         if ($sourceItem.LastWriteTimeUtc -lt $processStartUtc.AddSeconds(-10)) {
             throw "PID-correlated native log predates the exact dedicated process identity: $sourcePath"
         }
 
-        $destinationPath = Join-Path $DestinationRoot $fileName
         $copied = $false
         for ($attempt = 0; $attempt -lt 30 -and -not $copied; $attempt++) {
             try {
@@ -736,6 +754,9 @@ function Copy-CoopDedicatedNativeLogs {
         $destinationItem = Get-Item -LiteralPath $destinationPath
         $files.Add([ordered]@{
             FileName = $fileName
+            Kind = $kind
+            Required = $required
+            State = 'Captured'
             SourcePath = [System.IO.Path]::GetFullPath($sourcePath)
             DestinationPath = [System.IO.Path]::GetFullPath($destinationPath)
             Length = [long]$destinationItem.Length
@@ -745,7 +766,7 @@ function Copy-CoopDedicatedNativeLogs {
     }
 
     $inventory = [ordered]@{
-        Schema = 'coop-native-log-inventory-v1'
+        Schema = 'coop-native-log-inventory-v2'
         RunId = $RunId
         RoleType = [string]$DedicatedIdentity.RoleType
         RoleInstanceId = [string]$DedicatedIdentity.RoleInstanceId
@@ -1948,24 +1969,29 @@ function Invoke-CoopFeasibility {
 
         $clientLaunch = Read-CoopJsonShared -Path (Join-Path $runRoot 'artifacts\processes\client-launch.json')
         if ($null -eq $clientLaunch) { throw 'Client launch identity artifact is missing.' }
-        $clientLaunchStartUtc = [DateTime]::Parse(
-            [string]$clientLaunch.EntryStartUtc,
-            [Globalization.CultureInfo]::InvariantCulture,
-            [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
-        $clientIdentity = New-CoopProvisionalProcessIdentity `
-            -ProcessId ([int]$clientLaunch.EntryPid) `
-            -RoleType 'MultiplayerClient' `
-            -RoleInstanceId 'multiplayer-client-01' `
-            -ExpectedExecutablePath ([string]$clientLaunch.EntryPath) `
-            -LaunchStartedUtc $clientLaunchStartUtc `
-            -LaunchObservedUtc $clientLaunchStartUtc
-        $clientIdentity.ProcessStartUtc = $clientLaunchStartUtc.ToString('O')
+        $expectedClientExecutable = Join-Path $GameRoot 'bin\Win64_Shipping_Client\Bannerlord.exe'
+        try {
+            $clientIdentity = Assert-CoopClientLaunchArtifact `
+                -Artifact $clientLaunch `
+                -ExpectedRunId $RunId `
+                -ExpectedClientModuleSha256 $expectedClientHash `
+                -ExpectedExecutablePath $expectedClientExecutable `
+                -ExpectedParentProcessId $PID
+        }
+        catch {
+            $wrapped = [System.InvalidOperationException]::new(
+                'Client launch handoff validation failed: ' + $_.Exception.Message,
+                $_.Exception)
+            $wrapped.Data['CoopRuntimeOutcome'] = 'RunnerInternalError'
+            throw $wrapped
+        }
         Add-CoopOwnedRuntimeProcess -Identity $clientIdentity
         $clientIdentity = Get-CoopProcessIdentity `
             -ProcessId ([int]$clientLaunch.EntryPid) `
             -RoleType 'MultiplayerClient' `
             -RoleInstanceId 'multiplayer-client-01' `
-            -ExpectedExecutablePath ([string]$clientLaunch.EntryPath) `
+            -ExpectedExecutablePath $expectedClientExecutable `
+            -ObservedParentProcessId $PID `
             -ProvisionalIdentity $clientIdentity
         Add-CoopOwnedRuntimeProcess -Identity $clientIdentity
 

@@ -86,6 +86,11 @@ internal static class Program
             source.Contains("Copy-CoopDedicatedNativeLogs", StringComparison.Ordinal),
             "Feasibility must retain exact PID-correlated native logs.");
         Assert(
+            source.Contains("Get-CoopPidCorrelatedNativeLogDescriptors", StringComparison.Ordinal) &&
+            source.Contains("State = 'NotProduced'", StringComparison.Ordinal) &&
+            source.Contains("Required PID-correlated native log is missing", StringComparison.Ordinal),
+            "Native log capture must distinguish required engine logs from an optional absent watchdog log.");
+        Assert(
             source.Contains("Get-CoopSingularCommandResult", StringComparison.Ordinal),
             "Aggregate command dispatch must validate a singular structured result.");
         Assert(
@@ -117,7 +122,8 @@ internal static class Program
         Assert(
             clientLauncherSource.Contains(". $runnerCorePath", StringComparison.Ordinal) &&
             clientLauncherSource.Contains("-ExpectedParentProcessId $PID", StringComparison.Ordinal) &&
-            clientLauncherSource.Contains("Schema = 'coop-automation-client-launch-v3'", StringComparison.Ordinal),
+            clientLauncherSource.Contains("Schema = 'coop-automation-client-launch-v4'", StringComparison.Ordinal) &&
+            clientLauncherSource.Contains("ProcessIdentity = $verifiedProcessIdentity", StringComparison.Ordinal),
             "Client launch identity must use the tested core, exact runner parent PID, and versioned verified artifact.");
         Assert(
             clientLauncherSource.Contains("if (-not $finalLaunchArtifactPublished)", StringComparison.Ordinal) &&
@@ -127,6 +133,17 @@ internal static class Program
         Assert(
             clientLauncherSource.IndexOf("Write-Host", clientFinalArtifact, StringComparison.Ordinal) < 0,
             "No fallible user-output operation may follow the atomic final client handoff artifact.");
+
+        int clientHandoffValidation = source.IndexOf("$clientIdentity = Assert-CoopClientLaunchArtifact", StringComparison.Ordinal);
+        int clientOwnershipRegistration = source.IndexOf("Add-CoopOwnedRuntimeProcess -Identity $clientIdentity", clientHandoffValidation, StringComparison.Ordinal);
+        int clientIdentityPromotion = source.IndexOf("$clientIdentity = Get-CoopProcessIdentity", clientOwnershipRegistration, StringComparison.Ordinal);
+        Assert(
+            clientHandoffValidation >= 0 &&
+            clientOwnershipRegistration > clientHandoffValidation &&
+            clientIdentityPromotion > clientOwnershipRegistration &&
+            source.IndexOf("-ObservedParentProcessId $PID", clientHandoffValidation, StringComparison.Ordinal) > clientHandoffValidation &&
+            !source.Contains("[string]$clientLaunch.EntryStartUtc", StringComparison.Ordinal),
+            "Aggregate client handoff must preserve validated ownership before fallible live revalidation and must not stringify JSON dates.");
     }
 
     private static string ResolveRepositoryRoot()
@@ -483,6 +500,79 @@ Assert-True (Test-CoopProcessObservationMatchesIdentity -Identity $verifiedIdent
 Assert-True (-not (Test-CoopProcessObservationMatchesIdentity -Identity $verifiedIdentity -Observation $reusedPidObservation)) `
     'Verified ownership must reject PID reuse even when the executable path is unchanged.'
 
+$clientLaunchStartedUtc = [DateTime]::UtcNow.AddSeconds(-2)
+$clientProcessStartUtc = $clientLaunchStartedUtc.AddSeconds(1)
+$clientLaunchObservedUtc = $clientLaunchStartedUtc.AddSeconds(2)
+$clientExecutableSha256 = Get-CoopFileSha256 -Path $script:syntheticRequestedPath
+$clientModuleSha256 = 'C' * 64
+$clientLaunchOperationId = [Guid]::NewGuid().ToString('D')
+$clientLaunchArtifactJson = ([ordered]@{
+    Schema = 'coop-automation-client-launch-v4'
+    RunId = 'client-launch-contract'
+    CommandId = [Guid]::NewGuid().ToString('D')
+    LaunchOperationId = $clientLaunchOperationId
+    IdentityState = 'Verified'
+    EntryPid = 62001
+    EntryPath = $script:syntheticRequestedPath
+    EntryParentPid = $PID
+    EntryStartUtc = $clientProcessStartUtc.ToString('O')
+    ProcessIdentity = [ordered]@{
+        IdentityState = 'Verified'
+        LaunchOperationId = $clientLaunchOperationId
+        RoleType = 'MultiplayerClient'
+        RoleInstanceId = 'multiplayer-client-01'
+        ProcessId = 62001
+        ParentProcessId = $PID
+        ExpectedParentProcessId = $PID
+        ProcessStartUtc = $clientProcessStartUtc.ToString('O')
+        ExecutablePath = $script:syntheticRequestedPath
+        ExecutableSha256 = $clientExecutableSha256
+        PathEvidenceSource = 'ProcessAndWin32Process'
+        LaunchStartedUtc = $clientLaunchStartedUtc.ToString('O')
+        LaunchObservedUtc = $clientLaunchObservedUtc.ToString('O')
+        RegisteredUtc = $clientLaunchObservedUtc.ToString('O')
+        VerifiedUtc = $clientLaunchObservedUtc.ToString('O')
+    }
+    ClientModuleSha256 = $clientModuleSha256
+    ExistingRunContractUsed = $true
+    ResultPolicy = 'Suppress'
+    UiAutomationUsed = $false
+    StartGameIssued = $false
+    MissionOpenIssued = $false
+} | ConvertTo-Json -Depth 10)
+$clientLaunchArtifact = $clientLaunchArtifactJson | ConvertFrom-Json
+$deserializedEntryStart = Get-CoopOptionalPropertyValue -InputObject $clientLaunchArtifact -Name 'EntryStartUtc'
+$normalizedDeserializedStart = ConvertTo-CoopUtcDateTime -Value $deserializedEntryStart
+Assert-True ([Math]::Abs(($normalizedDeserializedStart - $clientProcessStartUtc).TotalMilliseconds) -lt 1.0) `
+    'UTC conversion must preserve a JSON timestamp whether ConvertFrom-Json returns a string or System.DateTime.'
+$normalizedClientIdentity = Assert-CoopClientLaunchArtifact `
+    -Artifact $clientLaunchArtifact `
+    -ExpectedRunId 'client-launch-contract' `
+    -ExpectedClientModuleSha256 $clientModuleSha256 `
+    -ExpectedExecutablePath $script:syntheticRequestedPath `
+    -ExpectedParentProcessId $PID
+$normalizedClientStartUtc = ConvertTo-CoopUtcDateTime -Value $normalizedClientIdentity.ProcessStartUtc
+Assert-True ([Math]::Abs(($normalizedClientStartUtc - $clientProcessStartUtc).TotalMilliseconds) -lt 1.0) `
+    'Client launch validation must not apply the local UTC offset twice.'
+Assert-True ($normalizedClientIdentity.ParentProcessId -eq $PID -and
+    $normalizedClientIdentity.LaunchOperationId -eq $clientLaunchOperationId) `
+    'Client launch validation must preserve the exact runner parent and launch-operation identity.'
+
+$shiftedClientLaunchArtifact = $clientLaunchArtifactJson | ConvertFrom-Json
+$shiftedClientLaunchArtifact.ProcessIdentity.ProcessStartUtc = $clientProcessStartUtc.AddHours(-3).ToString('O')
+$shiftedClientTimeRejected = $false
+try {
+    $null = Assert-CoopClientLaunchArtifact `
+        -Artifact $shiftedClientLaunchArtifact `
+        -ExpectedRunId 'client-launch-contract' `
+        -ExpectedClientModuleSha256 $clientModuleSha256 `
+        -ExpectedExecutablePath $script:syntheticRequestedPath `
+        -ExpectedParentProcessId $PID
+}
+catch { $shiftedClientTimeRejected = $_.Exception.Message -match 'process times do not match' }
+Assert-True $shiftedClientTimeRejected `
+    'A double-offset or otherwise shifted client process time must be rejected before ownership registration.'
+
 $cleanupProcess = $null
 try {
     $cleanupStartInfo = New-Object System.Diagnostics.ProcessStartInfo
@@ -551,9 +641,14 @@ catch { $missingPropertyRejected = $_.Exception.Message -match "missing required
 Assert-True $missingPropertyRejected 'A structurally incomplete aggregate result must be rejected.'
 
 $nativeLogNames = @(Get-CoopPidCorrelatedNativeLogNames -ProcessId 123600)
-Assert-True ($nativeLogNames.Count -eq 3) 'Exactly three PID-correlated native log names are required.'
+Assert-True ($nativeLogNames.Count -eq 3) 'Exactly three PID-correlated native log names are recognized.'
 Assert-True (($nativeLogNames -join ',') -eq 'rgl_log_123600.txt,rgl_log_errors_123600.txt,watchdog_log_123600.txt') `
     'Native log selection must use only exact PID-bound file names.'
+$nativeLogDescriptors = @(Get-CoopPidCorrelatedNativeLogDescriptors -ProcessId 123600)
+Assert-True ($nativeLogDescriptors.Count -eq 3) 'Exactly three PID-correlated native log descriptors are required.'
+Assert-True ($nativeLogDescriptors[0].Required -and $nativeLogDescriptors[1].Required -and
+    -not $nativeLogDescriptors[2].Required -and $nativeLogDescriptors[2].Kind -eq 'Watchdog') `
+    'Engine-native logs must remain required while a non-produced watchdog log is optional and explicit.'
 
 $captureRoot = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) ('capture-fixture-' + $PID)
 [System.IO.Directory]::CreateDirectory($captureRoot) | Out-Null
