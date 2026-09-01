@@ -98,7 +98,7 @@ Both build logs explicitly report compile-only mode. No `DeployModToGame`, `Buil
 | `Module/CoopSpectator/CoopShaderCacheModeSwitch.ps1` | Default-empty contract-test watcher readiness signal used only to remove a process-start race |
 | `Tests/CoopShaderCacheModeSwitch.ContractTests` | Deterministic watcher readiness before the fault-injection wrapper is terminated |
 
-The pre-existing client-control implementation was upgraded to join schema 2 / protocol 1.0 role identities so that it can share the Milestone 2A correlation model. Its Bannerlord-runtime status remains unchanged.
+The pre-existing client-control implementation was upgraded at this milestone to join schema 2 / protocol 1.0 role identities so that it could share the Milestone 2A correlation model. Revision 13 subsequently advances the join request to schema 3 for explicit native platform-login evidence; protocol 1.0 role identities remain unchanged. This historical Milestone 2A evidence still carries no Bannerlord-runtime claim.
 
 ## 4. Protocol and fault evidence
 

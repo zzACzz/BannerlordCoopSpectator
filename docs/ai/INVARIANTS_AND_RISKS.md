@@ -1,8 +1,8 @@
 # Invariants and Risks
 
-Last source verification: **2026-08-28**
-Last automation-control source/contract verification: **2026-08-31**
-Last dedicated-control runtime verification: **2026-08-31** (`m2b2c-client-handoff-live-20260831-01`)
+Last source verification: **2026-09-01**
+Last automation-control source/contract verification: **2026-09-01** (`m2e-contracts-20260901-03`, 22/22; `m2e-compile-20260901-02`)
+Last dedicated/client-control runtime verification: **2026-09-01** (`m2d-live-r3-01`; native platform-login candidate not yet staged or run)
 
 ## Non-negotiable runtime invariants
 
@@ -155,6 +155,8 @@ Missing/mismatched topology, non-siege scenarios, different mission shells, and 
 
 `CoopLobbyAutomationController` is disabled unless the complete explicit automation profile is present. It may request the normal TaleWorlds lobby join only after the request matches the `RunId`, run-token hash, loaded client-module hash, command lifetime, exact server identity, run-scoped owned-host record, still-live dedicated PID/path/start time, and active local UDP port. Automation must neither trust nor mutate the production persisted local-host marker.
 
+Before server discovery, the controller may invoke only the exact installed public `LobbyState.TryLogin()` path, from the main application tick, after proving the exact active `LobbyState`, reference equality with the resolved `NetworkMain.GameClient`, `Idle`, no login already active, and no known privilege denial. It must retain at most one returned task, publish explicit waiting/success/fault/cancellation/denial/still-idle evidence, and never click UI, accept credentials, bypass platform checks, cancel a TaleWorlds-owned task, or retry blindly. This login boundary precedes and therefore applies equally to every battle type.
+
 The controller must not create an alternate connection path, rewrite any address except through the existing validated local-host loopback patch, issue `start_game`, open a mission, fabricate readiness, or publish battle results. The server password must remain environment-only and absent from commands, artifacts, status, and logs. Status publication must remain strictly atomic and state-change-driven; per-tick logging is prohibited.
 
 Request expiry may block a native join from starting. Once TaleWorlds owns the native join task, the module must not claim that the operation was cancelled or terminally expired; the external runner owns the timeout and exact-process cleanup decision.
@@ -179,7 +181,7 @@ The Milestone 2B.2D source path enforces this invariant: the external runner own
 
 Run-scoped process timestamps may deserialize as ISO strings or `System.DateTime` values depending on the PowerShell provider. Validation must normalize the original value directly. Converting a deserialized `DateTime` to a culture-dependent string before parsing can apply the local UTC offset twice, reject an exact live PID as reuse, and prevent cleanup. A client launch handoff must retain the original launch window, parent PID, launch-operation ID, process start/path/hash, and role identity; the aggregate must register the validated identity before any later fallible enrichment.
 
-Exact dedicated `rgl_log` and `rgl_log_errors` evidence remains required. A server-PID watchdog log is profile-dependent: capture and validate it when present, otherwise record explicit optional `NotProduced`. Missing optional evidence must not supersede the primary runtime outcome, while a present stale or identity-incompatible file remains a runner evidence failure.
+Exact dedicated and client `rgl_log` plus `rgl_log_errors` evidence remains required for every started owned role. A role-PID watchdog log is profile-dependent: capture and validate it when present, otherwise record explicit optional `NotProduced`. Dedicated and client inventories must remain distinct; the terminal client status must survive a thrown wait failure into the aggregate report. Missing optional evidence must not supersede the primary runtime outcome, while a present stale or identity-incompatible file remains a runner evidence failure.
 
 ## Known current limitations and unverified areas
 
@@ -193,7 +195,7 @@ Exact dedicated `rgl_log` and `rgl_log_errors` evidence remains required. A serv
 - Siege single-player formation-marker UI and siege lobby equipment component are disabled.
 - Blockade and blockade sally out are unsupported.
 - Core battle roster and phase/start-request paths are still shared under the normal Documents profile and have no automation `RunId`. Milestone 2B.1 makes only result publication fail-closed: a complete explicit automation profile with exact `Suppress` records a run-scoped decision and cannot write campaign-consumable `battle_result.json`; an invalid enabled profile rejects publication instead of falling back to production. This permits only the minimum vanilla connectivity bootstrap, not a campaign fixture or L2/L3 battle run.
-- The default-off normal-lobby automation path has real client-launch and loaded-hash evidence, but the aggregate stopped before lobby selection because of the corrected UTC handoff defect. Connection remains unverified until a clean published-correction rerun.
+- The default-off normal-lobby automation path has real client-launch, loaded-hash, exact `NetworkMain` resolution, and stock pre-login state evidence. Revision 13 implements and contract-verifies the exact one-shot native login boundary plus terminal status/client-log evidence, but the candidate is not staged. Native login, server discovery, handoff, and connection remain runtime-unverified until a clean published-candidate rerun.
 - The run-scoped dedicated readiness/request/acknowledgement path is Bannerlord-runtime-verified for exact SHA-256 `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78`, all seven acknowledgements, native `start_game`, and UDP ownership. This connectivity bootstrap still provides no campaign, cooperative mission, L2, or L3 proof.
 - The Milestone 2A runner, protocol, full 20-project aggregate, and compile-only mode are source/build/test verified. They intentionally provide no staging, loaded-hash, process-cleanup, connection, mission, or battle evidence; those remain Milestone 2B or later.
 
