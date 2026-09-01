@@ -1,10 +1,10 @@
 # Battle Test Automation Milestone 2B Controlled Staging Evidence
 
-Status: **Milestone 2B.2A history retained; Milestone 2B.2D dedicated and Revision 13 corrected-client staging complete and live hash-confirmed**
+Status: **Historical staging retained; Revision 13 native platform-login client staged with path/hash proof, live proof pending**
 
 Execution dates: **2026-08-31 and 2026-09-01**
 
-Compiled source revisions: **`12abf363ae978d520558b7c3bbd226137a816a8a`** (`12abf36`), dedicated-only **`7628c85aef140e431f29982e016395b8f303a464`** (`7628c85`), and corrected client **`729fd2c325019ca026787b4ffcccf91beeced755`** (`729fd2c`)
+Compiled source revisions: **`12abf363ae978d520558b7c3bbd226137a816a8a`** (`12abf36`), dedicated-only **`7628c85aef140e431f29982e016395b8f303a464`** (`7628c85`), corrected resolver client **`729fd2c325019ca026787b4ffcccf91beeced755`** (`729fd2c`), and native-login client **`6ed40e883cd9909f5af8f10a8e9df19376b6ed52`** (`6ed40e8`)
 
 Branch: **`codex/v0.1.1-refresh`**, exact revision present on `origin`
 
@@ -16,6 +16,8 @@ Milestone 2B.2A rebuilt the Milestone 2B.1 runtime-safety source from the clean 
 
 No Bannerlord client, launcher, dedicated server, crash reporter, campaign, mission, or battle was launched by the staging operation. The staging evidence itself is `ConfirmedPathHashOnly`. A later [live feasibility attempt](BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md) established the exact dedicated `ConfirmedLoadedHash` and `Suppress` policy, but did not establish client loading, connectivity, successful mission bootstrap, result suppression inside a mission, or any L2/L3 battle claim.
 
+The latest `m2e-client-stage-r1` transaction installs the Revision 13 one-shot native platform-login client from clean pushed revision `6ed40e8`. It retains the complete prior 32-file client tree and leaves the dedicated installation plus protected result unchanged. This latest candidate remains `ConfirmedPathHashOnly` until a separately approved live feasibility run reports its loaded hash.
+
 ## 2. Authoritative runs
 
 | Purpose | Run ID | Outcome |
@@ -25,6 +27,9 @@ No Bannerlord client, launcher, dedicated server, crash reporter, campaign, miss
 | Superseded preparation attempt | `m2b2-stage-20260831-01` | Stopped before manifest, backup, lock, or installed-tree mutation; evidence retained |
 | Controlled installation with retained pre-images | `m2b2-stage-20260831-02` | `Installed`; installed inventories exactly equal prepared inventories |
 | Post-stage environment doctor | `m2b2-poststage-doctor-20260831-01` | `EnvironmentBlocked`; sole blocker `RuntimeVersionCombinationNotYetVerified` |
+| Native-login clean published contracts | `m2e-pub-contracts-r1` | `Pass`; 22/22 projects; no product process launched |
+| Native-login clean published compile | `m2e-pub-compile-r1` | `Pass`; both builds; installed inventories unchanged; no product process launched |
+| Native-login client-only staging | `m2e-client-stage-r1` | `Installed`; exact 32-file pre-image retained; only client DLL/PDB changed |
 
 The run roots are:
 
@@ -34,6 +39,9 @@ C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2b2-prestage-compile
 C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2b2-stage-20260831-01
 C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2b2-stage-20260831-02
 C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2b2-poststage-doctor-20260831-01
+C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2e-pub-contracts-r1
+C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2e-pub-compile-r1
+C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2e-client-stage-r1
 ```
 
 ## 3. Binary identity
@@ -173,3 +181,38 @@ C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2b2d-stage-20260901-
 The first postflight check produced a false protected-result timestamp mismatch because a deserialized `DateTime` was converted through culture-dependent string formatting. It performed no mutation and is retained at `artifacts/failure/postflight-comparison-01.json`. Exact UTC-tick comparison then passed together with all tree, hash, process, and port checks.
 
 Post-stage doctor run `m2b2d-poststage-doctor-20260901-01` reported `EnvironmentBlocked` with `InstalledDedicatedHashDiffersFromRepositoryOutput` and `RuntimeVersionCombinationNotYetVerified`. The former refers only to the intentionally untouched ignored repository output from the prior build; the installed tree exactly matches the clean run-owned compile artifact. No game process was launched. The new dedicated identity remains `ConfirmedPathHashOnly` until a named live run reports the loaded module hash.
+
+## 11. Revision 13 native platform-login client staging
+
+Clean pushed revision `6ed40e883cd9909f5af8f10a8e9df19376b6ed52` equaled its upstream with a clean worktree before verification or installation. Canonical run `m2e-pub-contracts-r1` passed all 22/22 contract projects. Compile-only run `m2e-pub-compile-r1` then built both product projects, launched no product process, and proved all installed inventories unchanged. Its exact outputs were:
+
+- client DLL SHA-256 `8089FC9FF0DB230AC358D4B5DDE611B73FEEBA16E6B7BFF3EB3126866E7C1FBB`, length `4669440`, product version `0.3.2`;
+- client PDB SHA-256 `90CE68CC0C9BF48881C0215C4AB60469EC951A331B95D3F646DD075D293A10F5`, length `1374892`;
+- dedicated DLL SHA-256 `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78`, unchanged.
+
+Run `m2e-client-stage-r1` copied the complete installed client tree into a run-owned prepared tree and overlaid only the clean-build DLL/PDB. Preparation recorded exact client, dedicated, and protected-result pre-images and proved that exactly these relative paths changed:
+
+- `bin/Win64_Shipping_Client/CoopSpectator.dll`;
+- `bin/Win64_Shipping_Client/CoopSpectator.pdb`.
+
+Apply revalidated the clean local/upstream revision, exact prepared and installed fingerprints, dedicated fingerprint, protected-result hash/length/UTC ticks, no Bannerlord/crash-reporter process, free ports `7210`/`7777`, exclusive DLL/PDB access, and the global client-installation mutex. It moved the complete installed tree to the run-owned backup and moved the complete prepared tree into the approved installation path. No rollback was required.
+
+| Fact | Observed result |
+|---|---|
+| Installed client tree | 32 files; fingerprint `2C5308A0958994AE96BA051D4D5AD5D48C6D8A540C4D88EB56FFF920B384735C` |
+| Retained exact pre-image | 32 files; fingerprint `A33B5A27232917F08A91D1993ACAD4593807DFE3B4A51145072EDCE860F63951` |
+| Installed client DLL | SHA-256 `8089FC9FF0DB230AC358D4B5DDE611B73FEEBA16E6B7BFF3EB3126866E7C1FBB` |
+| Installed client PDB | SHA-256 `90CE68CC0C9BF48881C0215C4AB60469EC951A331B95D3F646DD075D293A10F5` |
+| Retained prior client DLL | SHA-256 `1C500501CE25D4A520782F61B338F9D8D0A4C591A4748E80991A521B63379250` |
+| Dedicated installation | 218 files; fingerprint `CB85BBFF97FCF03F476E1D252B8A09FEFD7E7248BC36F6279A8D05572C9CD42E`; both DLLs remain `BD328...02A78` |
+| Protected result | SHA-256 `D5EF79D59FA97EF4C95BB7AB31803AE1F475EB24498F4469B83CD3B7AD955AD3`, length `217264`, and UTC ticks unchanged |
+| Product/port state | No product process; ports `7210` and `7777` unowned |
+| Steam/launcher validation | Steam was not running; launcher `ValidateOnly` was deferred rather than starting Steam or misclassifying the path/hash proof |
+
+The retained pre-image is:
+
+```text
+C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2e-client-stage-r1\backup\client\CoopSpectator
+```
+
+This closes only the client path/hash staging gate for the native-login implementation. It provides no loaded-binary, authentication, lobby, connection, campaign, mission, battle, L2, or L3 evidence. A live run requires Steam to be started explicitly and remains a separately approved operation.

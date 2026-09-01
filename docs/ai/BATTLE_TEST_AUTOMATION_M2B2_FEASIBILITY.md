@@ -1,6 +1,6 @@
 # Battle Test Automation Milestone 2B.2B Live Feasibility Attempts and Runner Findings
 
-Status: **Corrected client resolver live-confirmed; native platform-login source/contracts implemented, staging and live proof pending**
+Status: **Corrected client resolver live-confirmed; native platform-login source/contracts and client staging complete, live proof pending**
 
 Execution and correction date: **2026-09-01**
 
@@ -267,6 +267,10 @@ Revision 13 source resolves the exact installed `TaleWorlds.MountAndBlade.LobbyS
 
 The aggregate runner now attaches the final client status to the failure exception, re-reads and validates the run/token-bound terminal status during cleanup when needed, preserves it in `feasibility.json`, and captures separate exact-PID native-log inventories for the dedicated and client roles. The historical `NativeLogInventory` field remains as the dedicated-role compatibility alias.
 
-Focused join contracts prove exact assembly/type/state/client identity, single invocation, denial and already-logging no-retry behavior, non-lobby rejection, client mismatch rejection, and distinct controller outcomes. Focused runner contracts prove terminal status propagation and distinct client/dedicated PID-log routing in Windows PowerShell 5.1 and PowerShell 7. Final canonical run `m2e-contracts-20260901-03` passed 22/22 after the last test update. Final compile-only run `m2e-compile-20260901-02` built both projects after the last source-text update without changing installed inventories or launching a product process; it produced client candidate SHA-256 `6DE0B8AE1F38626FD11B7BDE59E86AD7AA106CD7E96596C7FECB2E137C4E8551` and unchanged dedicated output SHA-256 `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78`.
+Focused join contracts prove exact assembly/type/state/client identity, single invocation, denial and already-logging no-retry behavior, non-lobby rejection, client mismatch rejection, and distinct controller outcomes. Focused runner contracts prove terminal status propagation and distinct client/dedicated PID-log routing in Windows PowerShell 5.1 and PowerShell 7. Pre-publication canonical run `m2e-contracts-20260901-03` passed 22/22. After commit and push, clean published-revision run `m2e-pub-contracts-r1` passed the same 22/22, and compile-only run `m2e-pub-compile-r1` built both projects without changing installed inventories or launching a product process. The selected clean-published client DLL is `8089FC9FF0DB230AC358D4B5DDE611B73FEEBA16E6B7BFF3EB3126866E7C1FBB`; the dedicated output remains `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78`.
 
-This closes only the source, contract, compile, and runner-evidence portions of the gate. The candidate is not installed. No new client, dedicated, campaign, mission, or battle process was launched, and installed modules plus the protected result remain unchanged. Publication, transactional client-only staging, and a clean bounded live feasibility run remain separately controlled next steps.
+### 15.6 Native platform-login client staging
+
+Transaction `m2e-client-stage-r1` installed the clean-published client DLL/PDB from revision `6ed40e8`. It retained the complete prior 32-file client tree under its run root, proved that only the DLL/PDB changed, preserved the 218-file dedicated tree and both `BD328...02A78` DLLs, and preserved the protected result's SHA-256, length, and UTC ticks. No product process launched, ports `7210`/`7777` remained unowned, and rollback was not required. The installed client is version `0.3.2` with DLL SHA-256 `8089FC9FF0DB230AC358D4B5DDE611B73FEEBA16E6B7BFF3EB3126866E7C1FBB`.
+
+Steam was not running during postflight, so launcher `ValidateOnly` was explicitly deferred; direct path/hash/version and full-tree validation passed. The source, contract, clean-published compile, runner-evidence, and path/hash staging portions of the gate are now closed. Loaded client identity, native authentication, server discovery, network handoff, and connection remain pending a separately approved clean bounded live feasibility run. No campaign, mission, battle, L2, or L3 evidence is claimed.
