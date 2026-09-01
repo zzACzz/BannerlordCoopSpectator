@@ -1,6 +1,6 @@
 # Battle Test Automation Milestone 2B.2B Live Feasibility Attempts and Runner Findings
 
-Status: **Corrected client resolver live-confirmed; native platform-login source/contracts and client staging complete, live proof pending**
+Status: **Corrected client resolver and one-shot native platform login live-confirmed; exact lobby server discovery remains open**
 
 Execution and correction date: **2026-09-01**
 
@@ -12,9 +12,11 @@ Latest clean validation repository revision: `711f2cac20ca05d3e81233aa6acfa60816
 
 Dedicated-control live validation repository revision: `21042956b7928726dacb50c2de258437d5a65c6e`
 
+Native platform-login live validation repository revision: `aea5bddacce3644cbada95a7760d48d3e28b4e73`
+
 Installed game-side binary source revision: `12abf36`
 
-This document records the Milestone 2B live feasibility attempts through the first dedicated-control/client-launch run, their exact evidence boundaries, the shared runner defects they exposed, exact recovery/cleanup, and the non-runtime verification between attempts. It does not claim a client connection, campaign startup, cooperative mission, completed battle, L2, or L3 evidence.
+This document records the Milestone 2B live feasibility attempts through the native platform-login run, their exact evidence boundaries, the shared runner defects they exposed, exact recovery/cleanup, and the non-runtime verification between attempts. It does not claim a client connection, campaign startup, cooperative mission, completed battle, L2, or L3 evidence.
 
 ## 1. Outcome and evidence boundary
 
@@ -273,4 +275,16 @@ Focused join contracts prove exact assembly/type/state/client identity, single i
 
 Transaction `m2e-client-stage-r1` installed the clean-published client DLL/PDB from revision `6ed40e8`. It retained the complete prior 32-file client tree under its run root, proved that only the DLL/PDB changed, preserved the 218-file dedicated tree and both `BD328...02A78` DLLs, and preserved the protected result's SHA-256, length, and UTC ticks. No product process launched, ports `7210`/`7777` remained unowned, and rollback was not required. The installed client is version `0.3.2` with DLL SHA-256 `8089FC9FF0DB230AC358D4B5DDE611B73FEEBA16E6B7BFF3EB3126866E7C1FBB`.
 
-Steam was not running during postflight, so launcher `ValidateOnly` was explicitly deferred; direct path/hash/version and full-tree validation passed. The source, contract, clean-published compile, runner-evidence, and path/hash staging portions of the gate are now closed. Loaded client identity, native authentication, server discovery, network handoff, and connection remain pending a separately approved clean bounded live feasibility run. No campaign, mission, battle, L2, or L3 evidence is claimed.
+Steam was not running during staging postflight, so launcher `ValidateOnly` was explicitly deferred; direct path/hash/version and full-tree validation passed. The source, contract, clean-published compile, runner-evidence, and path/hash staging portions of the gate were closed before the live run below.
+
+### 15.7 Native platform-login live result
+
+Clean bounded run `m2e-live-r1-01` executed with local and upstream repository revision `aea5bddacce3644cbada95a7760d48d3e28b4e73`, Steam in the interactive desktop session, no pre-existing product process, free ports `7210` and `7777`, and a fresh run root. It loaded exact dedicated SHA-256 `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78` in PID `149040` and exact client SHA-256 `8089FC9FF0DB230AC358D4B5DDE611B73FEEBA16E6B7BFF3EB3126866E7C1FBB` in PID `134440`. The dedicated role published authoritative `InitialListedGameServerState.OnActivated` readiness, accepted all seven ordered bootstrap steps, confirmed native `start_game`, hosted `TeamDeathmatch` on `mp_tdm_map_001`, and owned UDP port `7210`.
+
+The client first reported `WaitingForLobby` / `Idle`. Once the exact active `LobbyState` and matching `NetworkMain.GameClient` became available, the controller published `RequestingPlatformLogin` at `14:57:59.887`, retained the one native task, and reached `PlatformLoginSucceeded` / `AtLobby` at `14:58:01.842`. The terminal schema-3 evidence records `PlatformLoginAttempted=true`, `PlatformLoginTaskState=RanToCompletion`, and `PlatformLoginOutcome=Succeeded`. This is runtime proof of the Revision 13 one-shot native platform-login path; no UI input, stored credentials, privilege bypass, or retry was used.
+
+The client then completed 52 normal `GetCustomGameServerList()` request/response cycles from `14:58:03.485` through `15:02:56.751`. Every response completed successfully, but none contained the exact `AC_COOP_m2e-live-r1-01` name/port identity. `RequestJoinCustomGame(...)` was therefore never called and no network handoff or connection occurred. The next open boundary is listed-server discovery/registration, which precedes every battle adapter and is potentially shared by all battle types. This run alone does not establish why the exact server was absent from the returned lists.
+
+The run ended as `AssertionFailed` with terminal `RequestExpired`. Its message, `The client join request expired before native platform login or join was started.`, is internally inaccurate because the same validated terminal record proves successful platform login. Treat that wording as a separate reporting defect; it is not the server-discovery cause. `feasibility.json` correctly retained the complete terminal client status and separate exact-PID native-log inventories, closing the two prior evidence gaps.
+
+Cleanup gracefully stopped the exact client and dedicated identities without force, found no remaining owned process or required-port owner, and captured both PID-correlated native/error/watchdog log sets. Installed DLL hashes remained unchanged. Protected `battle_result.json` retained SHA-256 `D5EF79D59FA97EF4C95BB7AB31803AE1F475EB24498F4469B83CD3B7AD955AD3`, length `217264`, and exact UTC write time. No crash reporter, campaign, cooperative mission, completed battle, L2, or L3 evidence was produced.

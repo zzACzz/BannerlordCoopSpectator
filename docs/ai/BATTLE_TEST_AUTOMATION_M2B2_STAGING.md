@@ -1,6 +1,6 @@
 # Battle Test Automation Milestone 2B Controlled Staging Evidence
 
-Status: **Historical staging retained; Revision 13 native platform-login client staged with path/hash proof, live proof pending**
+Status: **Historical staging retained; Revision 13 native platform-login client path/hash and loaded-runtime identity confirmed**
 
 Execution dates: **2026-08-31 and 2026-09-01**
 
@@ -14,9 +14,9 @@ Specification: [BATTLE_TEST_AUTOMATION_SPEC.md](BATTLE_TEST_AUTOMATION_SPEC.md),
 
 Milestone 2B.2A rebuilt the Milestone 2B.1 runtime-safety source from the clean pushed revision, proved all 21 contract projects, and installed the exact resulting client and dedicated assemblies through a bounded `DeployWithRestore` transaction. The installed trees, retained pre-images, run-owned staged inventories, and ignored repository output identities were verified by recursive path/length/SHA-256 inventories.
 
-No Bannerlord client, launcher, dedicated server, crash reporter, campaign, mission, or battle was launched by the staging operation. The staging evidence itself is `ConfirmedPathHashOnly`. A later [live feasibility attempt](BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md) established the exact dedicated `ConfirmedLoadedHash` and `Suppress` policy, but did not establish client loading, connectivity, successful mission bootstrap, result suppression inside a mission, or any L2/L3 battle claim.
+No Bannerlord client, launcher, dedicated server, crash reporter, campaign, mission, or battle was launched by the staging operation. The staging evidence itself is `ConfirmedPathHashOnly`. Later [live feasibility attempts](BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md) established exact dedicated and client `ConfirmedLoadedHash`, the `Suppress` policy, native dedicated bootstrap, and native client platform login. They did not establish exact-server discovery, connectivity, a cooperative mission, or any L2/L3 battle claim.
 
-The latest `m2e-client-stage-r1` transaction installs the Revision 13 one-shot native platform-login client from clean pushed revision `6ed40e8`. It retains the complete prior 32-file client tree and leaves the dedicated installation plus protected result unchanged. This latest candidate remains `ConfirmedPathHashOnly` until a separately approved live feasibility run reports its loaded hash.
+The latest `m2e-client-stage-r1` transaction installs the Revision 13 one-shot native platform-login client from clean pushed revision `6ed40e8`. It retains the complete prior 32-file client tree and leaves the dedicated installation plus protected result unchanged. Subsequent run `m2e-live-r1-01` promoted this exact client identity from `ConfirmedPathHashOnly` to `ConfirmedLoadedHash` and runtime-confirmed its one-shot native platform login.
 
 ## 2. Authoritative runs
 
@@ -30,6 +30,7 @@ The latest `m2e-client-stage-r1` transaction installs the Revision 13 one-shot n
 | Native-login clean published contracts | `m2e-pub-contracts-r1` | `Pass`; 22/22 projects; no product process launched |
 | Native-login clean published compile | `m2e-pub-compile-r1` | `Pass`; both builds; installed inventories unchanged; no product process launched |
 | Native-login client-only staging | `m2e-client-stage-r1` | `Installed`; exact 32-file pre-image retained; only client DLL/PDB changed |
+| Native-login loaded/runtime validation | `m2e-live-r1-01` | `AssertionFailed` after successful one-shot native login and 52 server-list responses; exact server absent; cleanup passed |
 
 The run roots are:
 
@@ -42,6 +43,7 @@ C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2b2-poststage-doctor
 C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2e-pub-contracts-r1
 C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2e-pub-compile-r1
 C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2e-client-stage-r1
+C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2e-live-r1-01
 ```
 
 ## 3. Binary identity
@@ -215,4 +217,4 @@ The retained pre-image is:
 C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2e-client-stage-r1\backup\client\CoopSpectator
 ```
 
-This closes only the client path/hash staging gate for the native-login implementation. It provides no loaded-binary, authentication, lobby, connection, campaign, mission, battle, L2, or L3 evidence. A live run requires Steam to be started explicitly and remains a separately approved operation.
+This transaction closed only the client path/hash staging gate for the native-login implementation. Later run `m2e-live-r1-01` loaded this exact DLL in Bannerlord, completed one native platform-login task, and reached `AtLobby`. It did not discover the exact listed server and therefore provides no native join, network handoff, connection, campaign, cooperative mission, battle, L2, or L3 evidence. See the feasibility document for the runtime boundary and the inaccurate terminal expiry wording.
