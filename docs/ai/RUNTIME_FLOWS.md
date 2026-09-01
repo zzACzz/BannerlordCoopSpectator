@@ -1,7 +1,7 @@
 # Runtime Flows
 
 Last source verification: **2026-08-28**
-Last automation-control source verification: **2026-08-31**
+Last automation-control source/runtime verification: **2026-09-01**
 
 ## Runtime state machines
 
@@ -76,7 +76,7 @@ fresh RunId
 
 `Doctor` inspects environment, versions/hashes, Git/EOL policy, selected dependencies, ports, writable roots, Steam, and the named version profile. `Contracts` requires the reviewed manifest to match every discovered test project and runs all 22 while preserving per-project output. `CompileOnly` inventories installed module trees, builds the two projects independently below the run root, then proves the installed inventories are unchanged. The historical Milestone 2A aggregate contained 20 projects; later runtime-safety and runner-control contracts extend the current inventory.
 
-No branch in this flow launches a product executable, enables the module automation profile, stages a DLL, joins a server, opens a campaign/mission, advances `CoopBattlePhaseRuntimeState`, or writes a battle result. Runtime ownership, result isolation, cancellation/recovery, and the first connection-only flow remain Milestone 2B.
+No branch in this flow launches a product executable, enables the module automation profile, stages a DLL, joins a server, opens a campaign/mission, advances `CoopBattlePhaseRuntimeState`, or writes a battle result. The separate Milestone 2B connection flow is now live-proven; its remaining work is the runner-safety closure for role liveness/progress, shared locks, cancellation/recovery contracts, and crash/hang evidence.
 
 ### Milestone 2B.1 connectivity-feasibility intent
 
@@ -119,7 +119,9 @@ The launcher and client module do not issue `start_game`. Only the external runn
 
 Clean run `m2e-live-r1-01` runtime-confirmed the staged dedicated/client hashes, authoritative ready state, all seven bootstrap acknowledgements, native `start_game`, exact UDP ownership, schema-v4 client ownership, exact `NetworkMain` resolution, one successful native login, `AtLobby`, and 52 successful custom-server-list responses. Installed-runtime inspection found that the runner had supplied scene `Map=mp_tdm_map_001` as optional native serialized `UniqueMapId`; correction `e55f1bd` removed that invalid filter.
 
-Clean run `m2e1-live-r1-01` then selected the exact server and traversed the real native path through `RequestJoinCustomGame(...)`, `GameNetwork.StartMultiplayerOnClient(...)`, loopback rewrite, `InCustomGame`, `Join game successful`, and server `CreatePlayer`. The visible client reached `Awaiting Server`. Formal status remained `JoinAccepted` because the notification existed only on an absent historical lobby signature, so the bounded runner returned `Timeout` and performed exact graceful cleanup. Corrections `d1af692` and `3fdcda3` move notification to the actual GameNetwork patch and retain last-valid timeout evidence; 22/22 contracts and isolated compilation passed. Clean published compile `m2e1-handoff-pub-compile-20260901-01` and controlled client-only transaction `m2e1-handoff-stage-r1` then installed corrected client SHA-256 `7CC2D759806D2F02D8BEBA15BCBC01EF61DDE4975004728F3D7E6C8332977E97` without launching a product process. That identity is not yet runtime-confirmed. The bootstrap opens no campaign fixture, advances no cooperative battle phase, consumes no result, and creates no L2/L3 evidence claim.
+Clean run `m2e1-live-r1-01` selected the exact server and traversed the real native path through `RequestJoinCustomGame(...)`, `GameNetwork.StartMultiplayerOnClient(...)`, loopback rewrite, `InCustomGame`, `Join game successful`, and server `CreatePlayer`, but remained at non-terminal `JoinAccepted`. Corrections `d1af692` and `3fdcda3` moved notification to the actual GameNetwork patch and retained last-valid timeout evidence. Clean published compile `m2e1-handoff-pub-compile-20260901-01` and controlled client-only transaction `m2e1-handoff-stage-r1` installed corrected client SHA-256 `7CC2D759806D2F02D8BEBA15BCBC01EF61DDE4975004728F3D7E6C8332977E97`. Clean run `m2e1-handoff-live-r1-01` then traversed the same flow with that loaded identity, published `NetworkHandoff`, reached terminal `Connected`, returned `Pass`, and completed exact graceful cleanup. The bootstrap opens no campaign fixture, advances no cooperative battle phase, consumes no result, and creates no L2/L3 evidence claim.
+
+The flow still lacks the complete Milestone 2B failure projection. Dedicated and client status must gain independent heartbeat and progress timestamps, state-entry/revision/error fields, and the runner must classify `NoHeartbeat` separately from `NoProgress`. The same runner boundary must acquire shared-resource runtime locks, turn aggregate cancellation into terminal `Cancelled` plus cleanup/recovery evidence, exercise the full `Recover` action matrix, and correlate owned crash/modal/hang evidence before fixture capture begins.
 
 ## Flow 1: campaign encounter capture
 

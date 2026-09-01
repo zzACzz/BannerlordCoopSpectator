@@ -1,6 +1,6 @@
 # Battle Test Automation Milestone 2B Controlled Staging Evidence
 
-Status: **Historical staging retained; Revision 15 handoff-corrected client path/hash confirmed; loaded-runtime confirmation pending**
+Status: **Historical staging retained; Revision 15 handoff-corrected client promoted to ConfirmedLoadedHash by clean live proof**
 
 Execution dates: **2026-08-31 and 2026-09-01**
 
@@ -8,15 +8,15 @@ Compiled source revisions: **`12abf363ae978d520558b7c3bbd226137a816a8a`** (`12ab
 
 Branch: **`codex/v0.1.1-refresh`**, exact revision present on `origin`
 
-Specification: [BATTLE_TEST_AUTOMATION_SPEC.md](BATTLE_TEST_AUTOMATION_SPEC.md), Revision 15
+Current specification: [BATTLE_TEST_AUTOMATION_SPEC.md](BATTLE_TEST_AUTOMATION_SPEC.md), Revision 16; the handoff-corrected staging transaction executed under Revision 15
 
 ## 1. Outcome
 
 Milestone 2B.2A rebuilt the Milestone 2B.1 runtime-safety source from the clean pushed revision, proved all 21 contract projects, and installed the exact resulting client and dedicated assemblies through a bounded `DeployWithRestore` transaction. The installed trees, retained pre-images, run-owned staged inventories, and ignored repository output identities were verified by recursive path/length/SHA-256 inventories.
 
-No Bannerlord client, launcher, dedicated server, crash reporter, campaign, mission, or battle was launched by the staging operation. The staging evidence itself is `ConfirmedPathHashOnly`. Later [live feasibility attempts](BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md) established exact dedicated and client `ConfirmedLoadedHash`, the `Suppress` policy, native dedicated bootstrap, and native client platform login. They did not establish exact-server discovery, connectivity, a cooperative mission, or any L2/L3 battle claim.
+No Bannerlord client, launcher, dedicated server, crash reporter, campaign, mission, or battle was launched by the staging operation. The staging evidence itself is `ConfirmedPathHashOnly`. Later [live feasibility attempts](BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md) established exact dedicated and client `ConfirmedLoadedHash`, the `Suppress` policy, native dedicated bootstrap, native client platform login, exact-server discovery, and terminal connection. They did not establish a cooperative mission or any L2/L3 battle claim.
 
-Historical transaction `m2e-client-stage-r1` installed the Revision 13 one-shot native platform-login client from clean pushed revision `6ed40e8`; subsequent run `m2e-live-r1-01` promoted that identity to `ConfirmedLoadedHash` and later proved exact server selection plus native join. Current transaction `m2e1-handoff-stage-r1` replaces only that client's DLL/PDB with the Revision 15 handoff-corrected clean published build from `a7bd528`, retains the complete prior 32-file tree, and leaves the dedicated installation plus protected result unchanged. The current client identity remains `ConfirmedPathHashOnly` until the next named live rerun reports its loaded hash.
+Historical transaction `m2e-client-stage-r1` installed the Revision 13 one-shot native platform-login client from clean pushed revision `6ed40e8`; subsequent run `m2e-live-r1-01` promoted that identity to `ConfirmedLoadedHash` and later proved exact server selection plus native join. Current transaction `m2e1-handoff-stage-r1` replaced only that client's DLL/PDB with the Revision 15 handoff-corrected clean published build from `a7bd528`, retained the complete prior 32-file tree, and left the dedicated installation plus protected result unchanged. Clean run `m2e1-handoff-live-r1-01` promoted the current client to `ConfirmedLoadedHash` and passed the formal connection gate.
 
 ## 2. Authoritative runs
 
@@ -263,4 +263,10 @@ The retained exact pre-image is:
 C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2e1-handoff-stage-r1\backup\client\CoopSpectator
 ```
 
-Independent postflight recomputed installed and backup inventories from disk and matched both evidence files exactly. This closes `ConfirmedPathHashOnly` for the Revision 15 corrected client. It does not relabel the earlier `m2e1-live-r1-01` loaded client, and it does not prove `ConfirmedLoadedHash`, formal `NetworkHandoff`, terminal `Connected`, a campaign, a cooperative mission, a battle, L2, or L3. The next gate is one separately approved clean hash-pinned `Feasibility` rerun with client `7CC2D759...2977E97` and dedicated `BD328AAC...702A78`.
+Independent postflight recomputed installed and backup inventories from disk and matched both evidence files exactly. At transaction completion, this established `ConfirmedPathHashOnly` for the Revision 15 corrected client without relabeling the earlier `m2e1-live-r1-01` identity. Section 13 records the later separately approved loaded-runtime promotion. The staging operation itself proves no campaign, cooperative mission, battle, L2, or L3 behavior.
+
+## 13. Revision 16 loaded-runtime promotion
+
+Clean run `m2e1-handoff-live-r1-01` loaded exact client SHA-256 `7CC2D759806D2F02D8BEBA15BCBC01EF61DDE4975004728F3D7E6C8332977E97` and unchanged dedicated SHA-256 `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78` from inside their exact processes. It completed authoritative bootstrap, native login, exact server selection, native join, post-rewrite `NetworkHandoff`, and terminal `Connected`, then returned `Pass` and cleaned both roles gracefully without force. Installed identities and the protected result remained unchanged, and both required ports were free afterward.
+
+The path/hash-to-loaded-hash chain for both roles is now complete. This runtime promotion does not alter the retained staging history and does not prove a campaign, cooperative mission, battle, L2, or L3 result. The next Milestone 2B work is the separately audited runtime-safety closure, not another identical staging or connection rerun.

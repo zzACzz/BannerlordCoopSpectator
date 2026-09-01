@@ -1,6 +1,6 @@
 # Battle Test Automation Milestone 2B.2D Dedicated Control Channel
 
-Status: **Dedicated control, exact server selection, and native join runtime-verified; formal Connected rerun pending after client observer staging**
+Status: **Dedicated control and terminal client connection runtime-verified; broader Milestone 2B safety closure remains open**
 Date: **2026-09-01**
 Published source revision: **`7628c85aef140e431f29982e016395b8f303a464`** (`7628c85`)
 Live-run source revision: **`21042956b7928726dacb50c2de258437d5a65c6e`** (`2104295`)
@@ -140,8 +140,6 @@ Focused runner contracts passed in Windows PowerShell `5.1.26100.9168` and Power
 
 ## 10. Evidence boundary and next gate
 
-The dedicated loaded hash, authoritative readiness, seven-step bootstrap, native `start_game`, and UDP ownership are runtime-confirmed. Later clean run `m2e1-live-r1-01` also confirmed exact server selection, native join acceptance, actual `GameNetwork.StartMultiplayerOnClient(...)`, `InCustomGame`, `Join game successful`, server `CreatePlayer`, and visible `Awaiting Server`. The formal controller status remained non-terminal `JoinAccepted`, so the aggregate returned `Timeout`; it did not prove `NetworkHandoff` or `Connected`.
+The dedicated loaded hash, authoritative readiness, seven-step bootstrap, native `start_game`, and UDP ownership are runtime-confirmed. Clean run `m2e1-handoff-live-r1-01` additionally loaded the corrected client SHA-256 `7CC2D759806D2F02D8BEBA15BCBC01EF61DDE4975004728F3D7E6C8332977E97`, retained exact server selection and native join evidence, observed post-rewrite `NetworkHandoff`, reached terminal `Connected`, captured the required client/dedicated PID-native logs, preserved the protected result, gracefully stopped both exact roles without force, and released both required ports. The connection gate for this dedicated-control slice is closed.
 
-Installed-runtime IL inspection traced that evidence gap to a notification attached only to an absent historical four-argument lobby signature. Published correction `d1af692` moves observation to the actual GameNetwork patch after final address rewrite, and `3fdcda3` retains last-valid non-terminal timeout evidence. Both corrections passed focused tests, full 22/22 contracts, and isolated compilation. The next runtime gate is a separately approved controlled client-only staging transaction followed by a clean hash-pinned `Feasibility` rerun. It must retain both loaded-role identities, the already-proven native join evidence, formal `NetworkHandoff`, terminal `Connected`, required/optional native-log inventory, unchanged protected result, and exact automatic cleanup.
-
-Until that rerun passes, no connection, campaign, cooperative mission, battle, L2, or L3 claim is permitted.
+This does not complete Milestone 2B. The remaining work is battle-type-independent runner safety: full role heartbeat/progress state and distinct no-heartbeat/no-progress classification, exclusive shared-resource runtime locks, aggregate cancellation evidence, complete automated `Recover` contracts, and owned crash/modal/hang evidence. Until that separately approved safety-closure slice passes, no campaign, cooperative mission, battle, L2, or L3 claim is permitted and Milestone 3 must not begin.

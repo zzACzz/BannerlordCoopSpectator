@@ -1,6 +1,6 @@
 # Battle Test Automation Milestone 2B.2B Live Feasibility Attempts and Runner Findings
 
-Status: **Exact server selection and native join live-confirmed; authoritative GameNetwork handoff observer corrected and staged; formal Connected rerun pending**
+Status: **Connection-feasibility path passed with terminal Connected; Milestone 2B safety closure remains incomplete**
 
 Execution and correction date: **2026-09-01**
 
@@ -24,9 +24,11 @@ Published timeout-evidence correction revision: `3fdcda3`
 
 Installed dedicated-control source revision: `7628c85`
 
-Installed handoff-corrected client source revision: `a7bd5285902d30793d0908186fb392fe537cf314` (`ConfirmedPathHashOnly`)
+Installed handoff-corrected client source revision: `a7bd5285902d30793d0908186fb392fe537cf314` (`ConfirmedLoadedHash` in `m2e1-handoff-live-r1-01`)
 
-This document records the Milestone 2B live feasibility attempts through the native custom-game join run, their exact evidence boundaries, the shared runner/module defects they exposed, exact recovery/cleanup, the non-runtime verification between attempts, and the subsequent handoff-corrected client staging. Native transport acceptance and server-side player creation are recorded separately from the still-unproved formal `Connected` acknowledgement. It does not claim campaign startup, a cooperative mission, a completed battle, L2, or L3 evidence.
+Formal connection live-proof repository revision: `d0648edf2f5033ec1ff48efe547a645c587e2ca1`
+
+This document records the Milestone 2B live feasibility attempts through the passing handoff-corrected connection run, their exact evidence boundaries, the shared runner/module defects they exposed, exact recovery/cleanup, and the non-runtime verification between attempts. Native transport acceptance, post-rewrite handoff, terminal `Connected`, and server-side player creation are now correlated to the exact loaded roles. It does not claim campaign startup, a cooperative mission, a completed battle, L2, or L3 evidence.
 
 ## 1. Outcome and evidence boundary
 
@@ -337,4 +339,48 @@ Controlled transaction `m2e1-handoff-stage-r1` copied the complete installed 32-
 
 Apply revalidated clean local/upstream `a7bd528`, the exact installed and prepared fingerprints, the unchanged 218-file dedicated tree, protected-result hash/length/UTC ticks, no product process, free ports `7210` and `7777`, exclusive DLL/PDB access, and the global client-installation mutex. It moved the complete prior client tree to the run-owned backup and the complete prepared tree into the game module path. Independent postflight proved exact artifact inventories, installed DLL `7CC2D759...2977E97`, installed PDB `92D3135A...1A01B17`, unchanged dedicated DLLs `BD328...02A78`, unchanged protected result, clean Git state, zero product processes, zero protected-port owners, and no apply failure or rollback.
 
-This closes only the corrected-client path/hash staging gate. The next gate is one separately approved clean hash-pinned `Feasibility` rerun. It must confirm the loaded client hash `7CC2D759...2977E97`, observe `NetworkHandoff` and terminal `Connected`, retain the same native join evidence, preserve the protected result, and complete exact cleanup. No campaign, cooperative mission, battle, L2, or L3 claim is allowed until their later milestones execute those paths explicitly.
+At staging completion, this closed only the corrected-client path/hash gate and required one separately approved clean hash-pinned `Feasibility` rerun. Section 17 records that later rerun and its exact claim boundary. The staging transaction itself remains non-runtime evidence and makes no campaign, cooperative mission, battle, L2, or L3 claim.
+
+## 17. Clean handoff-corrected live proof and Milestone 2B closure audit
+
+### 17.1 Run `m2e1-handoff-live-r1-01`
+
+The separately approved clean rerun executed from repository revision `d0648edf2f5033ec1ff48efe547a645c587e2ca1` with `RepositoryDirty=false`, Steam already running, no pre-existing product process, and free ports `7210` and `7777`. It used installed client SHA-256 `7CC2D759806D2F02D8BEBA15BCBC01EF61DDE4975004728F3D7E6C8332977E97` and installed dedicated SHA-256 `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78`.
+
+The runner returned exit code `0` with final outcome `Pass`. The dedicated role published its exact loaded identity, authoritative readiness, all seven ordered bootstrap acknowledgements, native `start_game`, and owned UDP port `7210`. The client published its exact loaded identity, completed the one-shot native platform login, reached `AtLobby`, selected `AC_COOP_m2e1-handoff-live-r1-01`, and joined the exact run-owned endpoint. Its native log recorded the post-rewrite `GameNetwork.StartMultiplayerOnClient(...)` handoff to `127.0.0.1:7210`, `Join game successful`, and server `CreatePlayer`. The final run-scoped client status was terminal `Connected` with `IsTerminal=true`.
+
+Automatic cleanup requested graceful close for client PID `160052` and dedicated PID `160892`, used no forced stop, retained no owned process, and left ports `7210` and `7777` unowned. Required native client/dedicated logs were captured separately. Installed module hashes remained unchanged. The protected global `battle_result.json` retained SHA-256 `D5EF79D59FA97EF4C95BB7AB31803AE1F475EB24498F4469B83CD3B7AD955AD3`, length `217264`, and exact UTC write time `2026-08-28T12:26:25.8849833Z`.
+
+Authoritative retained evidence:
+
+- run root: `C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2e1-handoff-live-r1-01`;
+- aggregate report: `artifacts/results/feasibility.json`;
+- terminal client status: `state/client-join.status.json`;
+- native client log: `artifacts/logs/client/native/rgl_log_160052.txt`.
+
+The run set `CampaignStarted=false`, `CampaignBattleFixtureOpened=false`, and `L2OrL3PassClaimed=false`. It proves the pre-mission connection path only.
+
+### 17.2 Milestone 1 capability promotion
+
+The two formerly blocked essential Milestone 1 rows are now promoted:
+
+| Capability | Final status | Evidence |
+|---|---|---|
+| Client connects to the owned server | `Confirmed` | Exact server selection, normal native join, post-rewrite handoff, terminal `Connected`, native join success, and server `CreatePlayer` all correlate to the run-owned dedicated/client identities |
+| Approved control intent reaches the client/module path | `Confirmed` | Schema-3 run/token/hash-bound request drove the normal lobby APIs and the actual GameNetwork boundary without UI input or an alternate transport |
+
+Together with the six previously confirmed rows, every essential Milestone 1 capability is now `Confirmed`.
+
+### 17.3 Milestone 2B remains open
+
+The successful connection run does not satisfy the complete Milestone 2B deliverable and exit-criteria set. A lowest-level source/test audit found these residual gaps:
+
+| Requirement area | Current evidence | Closure gap |
+|---|---|---|
+| PROC-004/PROC-007 role liveness and progress | Runner lease heartbeat and bounded waits exist | Dedicated/client role status does not yet publish the full heartbeat, progress, state-entry, revision, and structured-error projection; the runner cannot distinguish `NoHeartbeat` from `NoProgress` as required |
+| RUN-008 shared runtime locks | Fresh run-root lock, preflight port checks, staging mutexes, and clean postflight exist | The live runner does not acquire exclusive machine locks for the consumed game installation, dedicated installation, shared bridge/profile root, and fixed port set; a preflight port check alone is race-prone |
+| PROC-009 cancellation and runner failure | Exact cleanup paths, a synthetic post-start failure cleanup contract, and successful recovery of abandoned live attempts exist | No automated aggregate-runner `Ctrl+C` or explicit-cancellation contract proves terminal `Cancelled`, stop-scheduling behavior, cleanup, and retained recovery evidence |
+| PROC-005 `Recover` contract set | Read-only inspection/preview, fail-closed identity checks, zero-process apply, and real abandoned-run recovery are evidenced | Automated contracts do not yet cover the full read-only, active-lock refusal, exact target preview, immediate revalidation, live action, report, incomplete-recovery, and verified-lock-release matrix |
+| PROC-008 crash/modal/hang evidence | Crash outcome/reason vocabulary and crash-reporter preflight inventory exist | No owned crash-reporter/modal correlation path, structured `FatalAutomationFailure`, or guaranteed `crash.json`/`hang.json` evidence path and contract is implemented |
+
+The next implementation slice must close these battle-type-independent runtime-safety gaps before Milestone 3 begins. No additional connection rerun is required merely to repeat this passing evidence; later runtime execution should target the newly implemented safety contracts.
