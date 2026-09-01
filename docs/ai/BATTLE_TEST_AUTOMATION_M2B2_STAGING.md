@@ -1,14 +1,14 @@
 # Battle Test Automation Milestone 2B Controlled Staging Evidence
 
-Status: **Milestone 2B.2A client/runtime-foundation staging retained; Milestone 2B.2D dedicated-control on-disk staging complete; new dedicated runtime loading unverified**
+Status: **Milestone 2B.2A history retained; Milestone 2B.2D dedicated and Revision 13 corrected-client staging complete and live hash-confirmed**
 
 Execution dates: **2026-08-31 and 2026-09-01**
 
-Compiled source revisions: **`12abf363ae978d520558b7c3bbd226137a816a8a`** (`12abf36`) and dedicated-only **`7628c85aef140e431f29982e016395b8f303a464`** (`7628c85`)
+Compiled source revisions: **`12abf363ae978d520558b7c3bbd226137a816a8a`** (`12abf36`), dedicated-only **`7628c85aef140e431f29982e016395b8f303a464`** (`7628c85`), and corrected client **`729fd2c325019ca026787b4ffcccf91beeced755`** (`729fd2c`)
 
 Branch: **`codex/v0.1.1-refresh`**, exact revision present on `origin`
 
-Specification: [BATTLE_TEST_AUTOMATION_SPEC.md](BATTLE_TEST_AUTOMATION_SPEC.md), Revision 7
+Specification: [BATTLE_TEST_AUTOMATION_SPEC.md](BATTLE_TEST_AUTOMATION_SPEC.md), Revision 13
 
 ## 1. Outcome
 
@@ -124,6 +124,40 @@ Controlled run `m2b2d-stage-20260901-01` copied the complete installed dedicated
 | Tree or file | Before | After |
 |---|---|---|
 | Dedicated tree | 218 files; fingerprint `89B1630961307D90943ACFCA2936D1C4EC4ADC57FB59979111B26A6812B1F404` | 218 files; fingerprint `AE406714F10354A1B8C437EC4E4D8B2E90DD55B7B8A7CB968822C4E9BC9A465D` |
+
+## 10. Revision 13 corrected-client staging
+
+Published revision `729fd2c325019ca026787b4ffcccf91beeced755` was clean and equal to its upstream before build or installation. Fresh compile-only run `m2d-r13-pub-b1` built both projects with zero errors and proved all installed inventories unchanged. The dedicated output remained byte-identical at SHA-256 `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78`.
+
+The fresh client DLL SHA-256 was `1C500501CE25D4A520782F61B338F9D8D0A4C591A4748E80991A521B63379250`, not the earlier pre-publication build hash `2437D2386E306C12154553D641B477E123A247938C9C2F944F870BB36F5D6887`. Both files had the same length. Byte comparison found only 173 differing bytes, including build/debug metadata and the embedded absolute PDB path. ILSpy produced 620/620 identical decompiled C# files; only its generated project `HintPath` reflected the different compile root. The fresh published-revision artifact, rather than the earlier equivalent-code artifact, was therefore selected for staging. Its PDB SHA-256 is `8A63F4F566C8AC650BE923269F885CCD0B9B659661FDC132FEF680967AEF10F0`.
+
+Preparation run `m2d-client-stage-r1` copied and overlaid the exact client tree but stopped before locking or installation because an empty `Compare-Object` result was read through `.Count` without array wrapping. Its failure record proves the installed client remained `B576B8EA0FB223126A65E062CB562FD15815DF8BA1ADDB1797506914B48D7928`, no backup move occurred, and no product process existed. Preparation run `m2d-client-stage-r2` corrected that one-time orchestration expression. Its first apply preflight also stopped before the mutex or any move because a helper used `return[ordered]` without the required token separator; `artifacts/failure/apply-preflight-01.json` retains that non-mutating error.
+
+The corrected apply revalidated local/upstream revision, clean worktree, no product process, free ports, Steam presence, source hashes, exact client/dedicated inventories, the protected result, exclusive DLL/PDB access, and the global client-installation mutex. It then moved the complete 32-file installed client tree into the run-owned backup and moved the verified prepared tree into the approved installation path. Exactly these files changed:
+
+- `bin/Win64_Shipping_Client/CoopSpectator.dll`;
+- `bin/Win64_Shipping_Client/CoopSpectator.pdb`.
+
+Postflight evidence is:
+
+| Fact | Observed result |
+|---|---|
+| Installed client tree | 32 files; fingerprint `14DF5E30B7838D72E0F69F70A31C7BE6CF8FF13767A33F48A1C69A539D6A0AF0` |
+| Retained client pre-image | 32 files; fingerprint `A53B10EA8413A0AFCDAE90035115F72F6ED6DAD71B5D5A953563A0CDC51597F5` |
+| Installed client DLL | SHA-256 `1C500501CE25D4A520782F61B338F9D8D0A4C591A4748E80991A521B63379250` |
+| Retained prior client DLL | SHA-256 `B576B8EA0FB223126A65E062CB562FD15815DF8BA1ADDB1797506914B48D7928` |
+| Installed client PDB | SHA-256 `8A63F4F566C8AC650BE923269F885CCD0B9B659661FDC132FEF680967AEF10F0` |
+| Dedicated installation | 218 files; unchanged; both DLLs `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78` |
+| Protected result | SHA-256, length, and UTC write ticks unchanged |
+| Product/port state | No product process; ports `7210` and `7777` unowned |
+
+The retained exact client pre-image is:
+
+```text
+C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2d-client-stage-r2\backup\client\CoopSpectator
+```
+
+Launcher validation `m2d-client-stage-validate-r1` accepted the installed hash, version `0.3.2`, game path, and live Steam session without launching a product process. Clean live run `m2d-live-r3-01` subsequently confirmed the installed client and dedicated hashes from inside their exact processes. The staging gate is therefore closed; the remaining blocker is native multiplayer authentication, not binary identity.
 | Dedicated client-bin DLL | `1A9723A3249582FABCF08D3778C10CF448944B928549E6D9582FA7F3C0770626` | `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78` |
 | Dedicated server-bin DLL | `1A9723A3249582FABCF08D3778C10CF448944B928549E6D9582FA7F3C0770626` | `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78` |
 | Client tree | 32 files; fingerprint `19369B25E232718F1291A54853E0FA090B0AE53AC300E731BDD04123AC5BAAEE` | Unchanged |

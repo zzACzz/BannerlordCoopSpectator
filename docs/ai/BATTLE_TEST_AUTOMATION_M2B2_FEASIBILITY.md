@@ -1,6 +1,6 @@
 # Battle Test Automation Milestone 2B.2B Live Feasibility Attempts and Runner Findings
 
-Status: **Dedicated control, UDP ownership, real client launch, and both loaded hashes live-confirmed; corrected aggregate client handoff rerun pending**
+Status: **Corrected client resolver live-confirmed; native platform login is the next shared feasibility gate**
 
 Execution and correction date: **2026-09-01**
 
@@ -226,3 +226,37 @@ The run terminated with primary and final `AssertionFailed`: `Client join failed
 The client source log recorded `NetworkMain Initialized` at `01:52:14.945` and `MultiplayerLobbyGauntletScreen::HandleActivate` at `01:52:15.306`, while automation status still reported `NetworkMain.GameClient is not available yet.` Lowest-level ILSpy inspection located `TaleWorlds.MountAndBlade.NetworkMain` in installed `TaleWorlds.MountAndBlade.dll`; it is absent from `TaleWorlds.MountAndBlade.Multiplayer.dll`. The source adapter had selected the latter assembly and then called `Assembly.GetType`, which cannot traverse referenced assemblies. The observed wait was therefore a deterministic source lookup defect, independent of battle type. Client REST-session failures remain possible later environment evidence, but they did not cause this structural lookup failure.
 
 The correction changes only the client source adapter: it selects exact assembly `TaleWorlds.MountAndBlade`, resolves exact type `TaleWorlds.MountAndBlade.NetworkMain`, and distinguishes missing assembly, type, `GameClient` property, and null property value. A dynamic-assembly contract rejects the historical mismatch and accepts only the exact defining assembly. Focused tests passed, canonical run `m2d-r13-c1` passed all 22/22 projects, and isolated client/dedicated builds completed with zero errors. Candidate client SHA-256 is `2437D2386E306C12154553D641B477E123A247938C9C2F944F870BB36F5D6887`; dedicated output remains `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78`. The installed binaries were not changed. Runtime revalidation remains pending until the corrected client is reviewed, published, staged with a retained pre-image, and exercised by a new clean `Feasibility` run.
+
+## 15. Published resolver staging and native platform-login finding
+
+### 15.1 Fresh published build and artifact selection
+
+Clean published revision `729fd2c325019ca026787b4ffcccf91beeced755` was compiled under run `m2d-r13-pub-b1`. Both client and dedicated builds passed with installed inventories unchanged. The fresh client DLL SHA-256 was `1C500501CE25D4A520782F61B338F9D8D0A4C591A4748E80991A521B63379250`; the PDB SHA-256 was `8A63F4F566C8AC650BE923269F885CCD0B9B659661FDC132FEF680967AEF10F0`; and the dedicated DLL remained `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78`.
+
+The fresh DLL differed from the earlier `2437...6887` candidate despite identical source revision. Diagnostic root `%LOCALAPPDATA%\Temp\CoopSpectator\Diagnostics\m2d-r13-binary-compare-01` records equal file size, 173 differing bytes, and 620/620 identical ILSpy-decompiled C# files. The only decompiled-project difference was generated `HintPath` metadata containing the isolated build/PDB path. Because the published build was the freshest complete evidence chain, `1C500...79250` was selected for staging rather than assuming byte-for-byte reproducibility.
+
+### 15.2 Corrected-client staging transaction
+
+Preparation `m2d-client-stage-r1` failed before installation because the PowerShell comparison expression did not normalize an empty result to an array. The first `m2d-client-stage-r2` apply preflight likewise failed before lock acquisition or file movement because a helper had `return[ordered]` without required whitespace. Both failures are retained as non-mutating preparation evidence.
+
+The corrected `m2d-client-stage-r2` transaction then moved the entire installed 32-file client tree to `%LOCALAPPDATA%\Temp\CoopSpectator\Automation\m2d-client-stage-r2\backup\client\CoopSpectator` and installed the prepared tree. Only the DLL/PDB pair changed. The previous tree fingerprint was `A53B10EA8413A0AFCDAE90035115F72F6ED6DAD71B5D5A953563A0CDC51597F5`; the prepared and installed fingerprint was `14DF5E30B7838D72E0F69F70A31C7BE6CF8FF13767A33F48A1C69A539D6A0AF0`. Dedicated inventories and hashes remained unchanged. Protected `battle_result.json` retained SHA-256 `D5EF79D59FA97EF4C95BB7AB31803AE1F475EB24498F4469B83CD3B7AD955AD3`, length `217264`, and timestamp. Validate-only run `m2d-client-stage-validate-r1` passed without product launch.
+
+### 15.3 Clean live result
+
+Run `m2d-live-r3-01` loaded the exact staged client SHA-256 `1C500...79250` and dedicated SHA-256 `BD328...02A78`. The dedicated role reached authoritative readiness, accepted all seven ordered bootstrap steps, confirmed native `start_game`, `TeamDeathmatch` on `mp_tdm_map_001`, and exact UDP port `7210` ownership. The aggregate accepted exact client PID `159536`, process identity, schema-v4 handoff, and loaded hash.
+
+The corrected adapter resolved `NetworkMain.GameClient` and advanced to `WaitingForLobby` with `LobbyState=Idle`. This closes the wrong-assembly resolver finding. The client did not reach `AtLobby`, request a server list, select the local server, or start a native join. It expired with terminal client status `Failed` / `RequestExpired`: `The client join request expired before the native join was started.`
+
+The user-observed exact-PID screenshot at `artifacts/screenshots/user-observed-client-not-logged-in.png` shows the stock `Not Logged In` screen. Its SHA-256 is `7EBD0BFE09137CF481F594E9D7460EA33E21931A5F270D9353C88138F187B8E8`. Exact client-PID native logs retained under `artifacts/logs/client/native` record automation `ModuleReady`, `WaitingForLobby` / `Idle`, `NetworkMain Initialized`, `MultiplayerLobbyGauntletScreen::HandleActivate`, and two native REST requests that failed before assignment. The screenshot and logs correlate the timeout with the stock platform-login boundary rather than server discovery, battle routing, or the corrected resolver.
+
+Automatic cleanup gracefully stopped exact client PID `159536` and dedicated PID `159040` without force. Postflight found no owned product process and no owner of ports `7210` or `7777`; local and remote repository revision stayed `729fd2c325019ca026787b4ffcccf91beeced755`; installed hashes and the protected result remained unchanged.
+
+### 15.4 Lowest-level login boundary
+
+ILSpy inspection of the installed game assemblies located exact view-model type `TaleWorlds.MountAndBlade.Multiplayer.ViewModelCollection.Lobby.Authentication.MPAuthenticationVM`. Its stock `ExecuteLogin()` delegates to `LobbyState.TryLogin()`. The installed public `TaleWorlds.MountAndBlade.LobbyState.TryLogin()` method sets the logging state, performs multiplayer/crossplay/user-generated-content privilege checks, obtains the platform `CreateLobbyClientLoginProvider()`, and calls the native lobby client's connection path when the game client is `Idle`. No module-owned password or supported direct-connect bypass is involved.
+
+The next implementation must therefore remain inside the complete default-off automation profile and invoke at most one native `TryLogin()` attempt from the main application tick. It must require the exact active `LobbyState`, reference equality between that state's `LobbyClient` and the resolved `NetworkMain.GameClient`, `Idle`, and `IsLoggingIn=false`; retain the returned task; and publish explicit waiting, success, fault, cancellation, privilege-denied, and still-idle evidence. UI clicking, credential storage, authentication bypass, and blind retries are out of scope.
+
+The official TaleWorlds API site confirms that Bannerlord exposes versioned modding API documentation, but no indexed page for this exact current `LobbyState.TryLogin()` implementation was found. The installed `1.4.8` DLL is therefore the authoritative source for this runtime-specific boundary. The native login gate is shared by all later battle scenarios; this run provides no campaign, cooperative mission, L2, or L3 evidence.
+
+Two runner evidence gaps should be closed with the login change: `feasibility.json` currently leaves `ClientJoinStatus=null` when the status wait throws even though `state/client-join.status.json` contains the terminal failure, and client PID-native logs required manual post-cleanup collection. The aggregate should preserve the terminal status and capture the exact client-PID log inventory automatically on every outcome.
