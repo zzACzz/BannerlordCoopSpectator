@@ -1,7 +1,7 @@
 # Build, Test, and Debug Guide
 
 Last source verification: **2026-08-28**
-Last automation-control verification: **2026-08-31**
+Last automation-control verification: **2026-09-01** (`m2e1-c1`, 22/22; runner-only server-selection correction; no product launch or installed-module change)
 
 ## Safety first: builds deploy
 
@@ -405,9 +405,11 @@ After commit and push, clean revision `6ed40e8` passed 22/22 contracts in `m2e-p
 
 Transaction `m2e-client-stage-r1` installed exactly that DLL/PDB pair by moving the complete prior 32-file client tree into its run-owned backup and moving the validated complete prepared tree into the game module path. Postflight matched installed and backup fingerprints, kept both dedicated DLLs at `BD328...02A78`, preserved the protected result, and found no product process or port owner. Steam was not running during that staging postflight, so launcher `ValidateOnly` was deferred at that point.
 
-Clean bounded live run `m2e-live-r1-01` later supplied the missing loaded-runtime and authentication evidence. It loaded exact client hash `8089...C1FBB` and dedicated hash `BD328...02A78`, passed the complete dedicated bootstrap, confirmed native `start_game` and UDP `7210`, invoked one native `LobbyState.TryLogin()` task, and reached `AtLobby` with `PlatformLoginOutcome=Succeeded`. It then received 52 successful custom-server-list responses, but none contained exact server `AC_COOP_m2e-live-r1-01`; no `RequestJoinCustomGame(...)` call or network handoff followed. This server-discovery boundary precedes all battle types.
+Clean bounded live run `m2e-live-r1-01` later supplied the missing loaded-runtime and authentication evidence. It loaded exact client hash `8089...C1FBB` and dedicated hash `BD328...02A78`, passed the complete dedicated bootstrap, confirmed native `start_game` and UDP `7210`, invoked one native `LobbyState.TryLogin()` task, and reached `AtLobby` with `PlatformLoginOutcome=Succeeded`. It then received 52 successful custom-server-list responses, but no entry passed every active request selector; no `RequestJoinCustomGame(...)` call or network handoff followed. The retained artifacts do not include list-entry fields, so this is not proof that exact server name/port was absent. This selection boundary precedes all battle types.
 
-The terminal `RequestExpired` message from that run says expiry occurred before platform login or join was started. The preserved schema-3 status proves login was attempted and succeeded, so the wording is a reporting defect and must not be used as the root-cause classification. The run correctly remained non-pass, gracefully cleaned both exact processes without force, left ports free, preserved installed hashes and protected `battle_result.json`, and automatically captured separate exact-PID native logs. Diagnose listed-server registration/discovery before changing battle adapters or extending the timeout.
+The terminal `RequestExpired` message from that run says expiry occurred before platform login or join was started. The preserved schema-3 status proves login was attempted and succeeded, so the wording is a reporting defect and must not be used as the root-cause classification. The run correctly remained non-pass, gracefully cleaned both exact processes without force, left ports free, preserved installed hashes and protected `battle_result.json`, and automatically captured separate exact-PID native logs. Do not extend the timeout or change battle adapters to address this result.
+
+Lowest-level inspection found that the aggregate runner had supplied scene `Map` value `mp_tdm_map_001` as the optional request `UniqueMapId`. Installed `1.4.8` sends a separate serialized `UniqueSceneId`, or null, for that lobby field; the exact selector therefore could reject the correct server. Published correction `e55f1bd` omits the unavailable optional filter and retains exact run-unique name, port, game type, singular-match behavior, and owned-host validation. Focused contracts passed, and non-runtime canonical run `m2e1-c1` passed 22/22 without building or launching the product or changing installed modules. The next authoritative step is one clean feasibility rerun with the same installed DLL hashes. If selection still fails, add bounded default-off list-summary evidence before drawing a registration or listing conclusion.
 
 ### `scripts/CreateReleasePackage.ps1`
 

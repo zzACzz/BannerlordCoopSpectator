@@ -1,6 +1,6 @@
 # Battle Test Automation Milestone 2B.2B Live Feasibility Attempts and Runner Findings
 
-Status: **Corrected client resolver and one-shot native platform login live-confirmed; exact lobby server discovery remains open**
+Status: **Corrected client resolver and one-shot native platform login live-confirmed; invalid unique-map selector corrected in source; clean connection rerun pending**
 
 Execution and correction date: **2026-09-01**
 
@@ -13,6 +13,8 @@ Latest clean validation repository revision: `711f2cac20ca05d3e81233aa6acfa60816
 Dedicated-control live validation repository revision: `21042956b7928726dacb50c2de258437d5a65c6e`
 
 Native platform-login live validation repository revision: `aea5bddacce3644cbada95a7760d48d3e28b4e73`
+
+Server-selection source correction revision: `e55f1bd`
 
 Installed game-side binary source revision: `12abf36`
 
@@ -283,8 +285,16 @@ Clean bounded run `m2e-live-r1-01` executed with local and upstream repository r
 
 The client first reported `WaitingForLobby` / `Idle`. Once the exact active `LobbyState` and matching `NetworkMain.GameClient` became available, the controller published `RequestingPlatformLogin` at `14:57:59.887`, retained the one native task, and reached `PlatformLoginSucceeded` / `AtLobby` at `14:58:01.842`. The terminal schema-3 evidence records `PlatformLoginAttempted=true`, `PlatformLoginTaskState=RanToCompletion`, and `PlatformLoginOutcome=Succeeded`. This is runtime proof of the Revision 13 one-shot native platform-login path; no UI input, stored credentials, privilege bypass, or retry was used.
 
-The client then completed 52 normal `GetCustomGameServerList()` request/response cycles from `14:58:03.485` through `15:02:56.751`. Every response completed successfully, but none contained the exact `AC_COOP_m2e-live-r1-01` name/port identity. `RequestJoinCustomGame(...)` was therefore never called and no network handoff or connection occurred. The next open boundary is listed-server discovery/registration, which precedes every battle adapter and is potentially shared by all battle types. This run alone does not establish why the exact server was absent from the returned lists.
+The client then completed 52 normal `GetCustomGameServerList()` request/response cycles from `14:58:03.485` through `15:02:56.751`. Every response completed successfully, but no entry passed every active request selector. `RequestJoinCustomGame(...)` was therefore never called and no network handoff or connection occurred. The retained artifacts do not include the returned entry count or entry fields, so this run does not prove that the exact `AC_COOP_m2e-live-r1-01` name/port identity was absent. It proves only an exact-selection failure at a boundary shared by every battle type.
 
 The run ended as `AssertionFailed` with terminal `RequestExpired`. Its message, `The client join request expired before native platform login or join was started.`, is internally inaccurate because the same validated terminal record proves successful platform login. Treat that wording as a separate reporting defect; it is not the server-discovery cause. `feasibility.json` correctly retained the complete terminal client status and separate exact-PID native-log inventories, closing the two prior evidence gaps.
 
 Cleanup gracefully stopped the exact client and dedicated identities without force, found no remaining owned process or required-port owner, and captured both PID-correlated native/error/watchdog log sets. Installed DLL hashes remained unchanged. Protected `battle_result.json` retained SHA-256 `D5EF79D59FA97EF4C95BB7AB31803AE1F475EB24498F4469B83CD3B7AD955AD3`, length `217264`, and exact UTC write time. No crash reporter, campaign, cooperative mission, completed battle, L2, or L3 evidence was produced.
+
+### 15.8 Exact server-selection audit and source correction
+
+A read-only post-run audit compared the manual helper, aggregate runner, retained artifacts, official dedicated configuration samples, and exact installed `1.4.8` assemblies. The launch paths were materially equivalent at the listing boundary: the dedicated accepted the seven bootstrap steps, native `start_game`, selected `Map=mp_tdm_map_001`, completed its service registration, and exposed `IsPlaying=true`. The client successfully authenticated and repeatedly received the normal custom-server-list response.
+
+The deterministic source defect was in the aggregate request. `scripts/Invoke-CoopTest.ps1` passed `-UniqueMapId 'mp_tdm_map_001'`, but that value is the native scene `Map`, not `GameServerEntry.UniqueMapId`. Installed `TaleWorlds.Library.UniqueSceneId.Serialize()` produces a distinct length-prefixed `:ut[...]...:rev[...]...` value, and `ServerSideIntermissionManager` sends that serialized value, or null when unavailable, during `RegisterGame`. `CoopAutomationJoinContract` then compared the returned `UniqueMapId` to the incorrect scene name with ordinal equality. That predicate can reject the correct run-owned server even when its name, port, game type, and ownership evidence all match. Because the list entries were not retained, the audit does not claim this was the only possible listing issue.
+
+Published correction `e55f1bd` omits the unavailable optional `UniqueMapId` filter while retaining the run-unique server name, exact port, declared game type, singular-match rejection, run-token-bound owned-host record, live dedicated identity, and active UDP-port proof. Tests now model `Map` and serialized `UniqueMapId` as separate fields, prove that substituting the map name rejects a native-shaped entry, and guard the aggregate runner against reintroducing the literal. Focused join contracts passed; runner contracts passed in Windows PowerShell 5.1 and PowerShell 7; canonical run `m2e1-c1` passed all 22/22 projects. No Bannerlord process, product build, installed-module mutation, or staging operation occurred. A clean live feasibility rerun is required before claiming selection, join, network handoff, or connection.

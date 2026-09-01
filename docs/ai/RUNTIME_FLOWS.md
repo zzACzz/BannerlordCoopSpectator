@@ -98,9 +98,11 @@ fresh RunId + result policy Suppress
   -> launcher publishes schema-v4 complete verified process identity
   -> runner validates/registers cleanup identity before live revalidation
   -> client module validates run/token/loaded hash
-  -> wait for native lobby
+  -> wait for exact native LobbyState and issue at most one gated LobbyState.TryLogin task
+  -> require successful AtLobby state
   -> GetCustomGameServerList
-  -> select exactly one name/port/filter match
+  -> select exactly one run-unique name/port/game-type match
+     (optional UniqueMapId only when sourced from an authoritative native serialized value; never from Map)
   -> revalidate run-scoped owner PID/path/start time + active UDP port
   -> RequestJoinCustomGame
   -> existing lobby handoff/loopback patch
@@ -114,7 +116,7 @@ fresh RunId + result policy Suppress
 
 The launcher and client module do not issue `start_game`. Only the external runner may authorize the minimum standard server bootstrap, and only after `Suppress`, dedicated loaded-hash validation, and an authoritative readiness acknowledgement from the exact dedicated role. It publishes a fixed structured request rather than an arbitrary console line. The dedicated main tick invokes the native command path and must publish exact state-backed acknowledgements before the runner begins the UDP deadline. Successful process creation first establishes provisional cleanup ownership; bounded identity enrichment then resolves and validates the exact requested executable even when an immediate `Process.Path` read is null.
 
-Clean run `m2b2d-live-feasibility-20260901-01` runtime-confirmed the staged dedicated hash, authoritative ready state, all seven bootstrap acknowledgements, native `start_game`, exact UDP ownership, real client process creation, and the selected client loaded hash. It stopped before lobby selection because the aggregate converted an already-deserialized UTC `DateTime` through a culture-dependent string and applied the local offset twice. Revision 12 uses a complete schema-v4 process identity and registers it before fallible revalidation; JSON dates are normalized directly from either strings or `System.DateTime` values. Exact `rgl_log` and `rgl_log_errors` remain required, while a non-produced server-PID watchdog log is explicit optional evidence. Connection remains a runtime gap until the clean published-correction rerun. The bootstrap opens no campaign fixture, advances no cooperative battle phase, consumes no result, and creates no L2/L3 evidence claim.
+Clean run `m2e-live-r1-01` runtime-confirmed the staged dedicated/client hashes, authoritative ready state, all seven bootstrap acknowledgements, native `start_game`, exact UDP ownership, schema-v4 client ownership, exact `NetworkMain` resolution, one successful native login, `AtLobby`, 52 successful custom-server-list responses, terminal-status/PID-log retention, protected-result preservation, and exact cleanup. No entry passed every requested selector, but the run did not retain list-entry fields and therefore did not prove server absence. Installed-runtime inspection found that the runner had supplied scene `Map=mp_tdm_map_001` as optional native serialized `UniqueMapId`; exact comparison could reject the correct server. Published runner-only correction `e55f1bd` omits that unavailable filter and passed focused plus 22/22 canonical contracts. Connection remains a runtime gap until the clean correction rerun. The bootstrap opens no campaign fixture, advances no cooperative battle phase, consumes no result, and creates no L2/L3 evidence claim.
 
 ## Flow 1: campaign encounter capture
 

@@ -1,8 +1,8 @@
 # Invariants and Risks
 
 Last source verification: **2026-09-01**
-Last automation-control source/contract verification: **2026-09-01** (`m2e-contracts-20260901-03`, 22/22; `m2e-compile-20260901-02`)
-Last dedicated/client-control runtime verification: **2026-09-01** (`m2d-live-r3-01`; native platform-login candidate not yet staged or run)
+Last automation-control source/contract verification: **2026-09-01** (`e55f1bd`; `m2e1-c1`, 22/22; invalid map-name-as-unique-map filter removed)
+Last dedicated/client-control runtime verification: **2026-09-01** (`m2e-live-r1-01`; native platform login and repeated server-list retrieval confirmed; corrected selection rerun pending)
 
 ## Non-negotiable runtime invariants
 
@@ -155,6 +155,8 @@ Missing/mismatched topology, non-siege scenarios, different mission shells, and 
 
 `CoopLobbyAutomationController` is disabled unless the complete explicit automation profile is present. It may request the normal TaleWorlds lobby join only after the request matches the `RunId`, run-token hash, loaded client-module hash, command lifetime, exact server identity, run-scoped owned-host record, still-live dedicated PID/path/start time, and active local UDP port. Automation must neither trust nor mutate the production persisted local-host marker.
 
+Scene `Map` and native serialized `GameServerEntry.UniqueMapId` are distinct identities. The runner must never copy or infer the latter from the former. It may request a non-empty unique-map selector only from an authoritative native value for the same registered scene; otherwise it must omit that optional selector while retaining the run-unique name, exact port/game type, singular-match rejection, and owned-host proof. This boundary is shared by every battle type.
+
 Before server discovery, the controller may invoke only the exact installed public `LobbyState.TryLogin()` path, from the main application tick, after proving the exact active `LobbyState`, reference equality with the resolved `NetworkMain.GameClient`, `Idle`, no login already active, and no known privilege denial. It must retain at most one returned task, publish explicit waiting/success/fault/cancellation/denial/still-idle evidence, and never click UI, accept credentials, bypass platform checks, cancel a TaleWorlds-owned task, or retry blindly. This login boundary precedes and therefore applies equally to every battle type.
 
 The controller must not create an alternate connection path, rewrite any address except through the existing validated local-host loopback patch, issue `start_game`, open a mission, fabricate readiness, or publish battle results. The server password must remain environment-only and absent from commands, artifacts, status, and logs. Status publication must remain strictly atomic and state-change-driven; per-tick logging is prohibited.
@@ -195,7 +197,7 @@ Exact dedicated and client `rgl_log` plus `rgl_log_errors` evidence remains requ
 - Siege single-player formation-marker UI and siege lobby equipment component are disabled.
 - Blockade and blockade sally out are unsupported.
 - Core battle roster and phase/start-request paths are still shared under the normal Documents profile and have no automation `RunId`. Milestone 2B.1 makes only result publication fail-closed: a complete explicit automation profile with exact `Suppress` records a run-scoped decision and cannot write campaign-consumable `battle_result.json`; an invalid enabled profile rejects publication instead of falling back to production. This permits only the minimum vanilla connectivity bootstrap, not a campaign fixture or L2/L3 battle run.
-- The default-off normal-lobby automation path has real client-launch, loaded-hash, exact `NetworkMain` resolution, and stock pre-login state evidence. Revision 13 implements and contract-verifies the exact one-shot native login boundary plus terminal status/client-log evidence, but the candidate is not staged. Native login, server discovery, handoff, and connection remain runtime-unverified until a clean published-candidate rerun.
+- The default-off normal-lobby automation path has real client-launch, loaded-hash, exact `NetworkMain` resolution, successful one-shot native login, `AtLobby`, repeated server-list response, terminal-status, client-log, and cleanup evidence. The list entries themselves were not retained, so the prior no-match result is not proof that the server was absent. Runner-only correction `e55f1bd` removes the invalid scene-name-as-`UniqueMapId` filter; corrected selection, handoff, and connection remain runtime-unverified until a clean rerun.
 - The run-scoped dedicated readiness/request/acknowledgement path is Bannerlord-runtime-verified for exact SHA-256 `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78`, all seven acknowledgements, native `start_game`, and UDP ownership. This connectivity bootstrap still provides no campaign, cooperative mission, L2, or L3 proof.
 - The Milestone 2A runner, protocol, full 20-project aggregate, and compile-only mode are source/build/test verified. They intentionally provide no staging, loaded-hash, process-cleanup, connection, mission, or battle evidence; those remain Milestone 2B or later.
 
