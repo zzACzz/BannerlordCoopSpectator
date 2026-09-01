@@ -105,18 +105,21 @@ fresh RunId + result policy Suppress
      (optional UniqueMapId only when sourced from an authoritative native serialized value; never from Map)
   -> revalidate run-scoped owner PID/path/start time + active UDP port
   -> RequestJoinCustomGame
-  -> existing lobby handoff/loopback patch
+  -> GameNetwork.StartMultiplayerOnClient patch applies the one-shot loopback rewrite
+  -> the same lowest-level patch publishes NetworkHandoff with the final address
   -> GameNetwork client session active
   -> atomic Connected acknowledgement
   -> exact owned-process cleanup
   -> prove global battle_result.json unchanged
 ```
 
-`SubModule.OnApplicationTick` pumps `CoopLobbyAutomationController` on the main thread. The controller writes status only when the state or failure details change. A request may expire before native join starts; after the native task starts, only the future external runner may time out and clean up its exactly owned process.
+`SubModule.OnApplicationTick` pumps `CoopLobbyAutomationController` on the main thread. The controller writes status only when the state or failure details change. A request may expire before native join starts; after the native task starts, only the external runner may time out and clean up its exactly owned process. A timeout report retains the last run/token-validated non-terminal status with `IsTerminal=false`; it never fabricates `Connected`.
 
 The launcher and client module do not issue `start_game`. Only the external runner may authorize the minimum standard server bootstrap, and only after `Suppress`, dedicated loaded-hash validation, and an authoritative readiness acknowledgement from the exact dedicated role. It publishes a fixed structured request rather than an arbitrary console line. The dedicated main tick invokes the native command path and must publish exact state-backed acknowledgements before the runner begins the UDP deadline. Successful process creation first establishes provisional cleanup ownership; bounded identity enrichment then resolves and validates the exact requested executable even when an immediate `Process.Path` read is null.
 
-Clean run `m2e-live-r1-01` runtime-confirmed the staged dedicated/client hashes, authoritative ready state, all seven bootstrap acknowledgements, native `start_game`, exact UDP ownership, schema-v4 client ownership, exact `NetworkMain` resolution, one successful native login, `AtLobby`, 52 successful custom-server-list responses, terminal-status/PID-log retention, protected-result preservation, and exact cleanup. No entry passed every requested selector, but the run did not retain list-entry fields and therefore did not prove server absence. Installed-runtime inspection found that the runner had supplied scene `Map=mp_tdm_map_001` as optional native serialized `UniqueMapId`; exact comparison could reject the correct server. Published runner-only correction `e55f1bd` omits that unavailable filter and passed focused plus 22/22 canonical contracts. Connection remains a runtime gap until the clean correction rerun. The bootstrap opens no campaign fixture, advances no cooperative battle phase, consumes no result, and creates no L2/L3 evidence claim.
+Clean run `m2e-live-r1-01` runtime-confirmed the staged dedicated/client hashes, authoritative ready state, all seven bootstrap acknowledgements, native `start_game`, exact UDP ownership, schema-v4 client ownership, exact `NetworkMain` resolution, one successful native login, `AtLobby`, and 52 successful custom-server-list responses. Installed-runtime inspection found that the runner had supplied scene `Map=mp_tdm_map_001` as optional native serialized `UniqueMapId`; correction `e55f1bd` removed that invalid filter.
+
+Clean run `m2e1-live-r1-01` then selected the exact server and traversed the real native path through `RequestJoinCustomGame(...)`, `GameNetwork.StartMultiplayerOnClient(...)`, loopback rewrite, `InCustomGame`, `Join game successful`, and server `CreatePlayer`. The visible client reached `Awaiting Server`. Formal status remained `JoinAccepted` because the notification existed only on an absent historical lobby signature, so the bounded runner returned `Timeout` and performed exact graceful cleanup. Corrections `d1af692` and `3fdcda3` move notification to the actual GameNetwork patch and retain last-valid timeout evidence; 22/22 contracts and isolated compilation passed, but the changed client DLL is not staged. The bootstrap opens no campaign fixture, advances no cooperative battle phase, consumes no result, and creates no L2/L3 evidence claim.
 
 ## Flow 1: campaign encounter capture
 

@@ -1,6 +1,6 @@
 # Battle Test Automation Milestone 2B.2B Live Feasibility Attempts and Runner Findings
 
-Status: **Corrected client resolver and one-shot native platform login live-confirmed; invalid unique-map selector corrected in source; clean connection rerun pending**
+Status: **Exact server selection and native join live-confirmed; authoritative GameNetwork handoff observer corrected in source; formal Connected rerun pending**
 
 Execution and correction date: **2026-09-01**
 
@@ -16,9 +16,15 @@ Native platform-login live validation repository revision: `aea5bddacce3644cbada
 
 Server-selection source correction revision: `e55f1bd`
 
+Native join live validation repository revision: `9c3930b18c89b274d48dbb7f739fe054a8090dc6`
+
+Published handoff observer correction revision: `d1af692`
+
+Published timeout-evidence correction revision: `3fdcda3`
+
 Installed game-side binary source revision: `12abf36`
 
-This document records the Milestone 2B live feasibility attempts through the native platform-login run, their exact evidence boundaries, the shared runner defects they exposed, exact recovery/cleanup, and the non-runtime verification between attempts. It does not claim a client connection, campaign startup, cooperative mission, completed battle, L2, or L3 evidence.
+This document records the Milestone 2B live feasibility attempts through the native custom-game join run, their exact evidence boundaries, the shared runner/module defects they exposed, exact recovery/cleanup, and the non-runtime verification between attempts. Native transport acceptance and server-side player creation are recorded separately from the still-unproved formal `Connected` acknowledgement. It does not claim campaign startup, a cooperative mission, a completed battle, L2, or L3 evidence.
 
 ## 1. Outcome and evidence boundary
 
@@ -298,3 +304,29 @@ A read-only post-run audit compared the manual helper, aggregate runner, retaine
 The deterministic source defect was in the aggregate request. `scripts/Invoke-CoopTest.ps1` passed `-UniqueMapId 'mp_tdm_map_001'`, but that value is the native scene `Map`, not `GameServerEntry.UniqueMapId`. Installed `TaleWorlds.Library.UniqueSceneId.Serialize()` produces a distinct length-prefixed `:ut[...]...:rev[...]...` value, and `ServerSideIntermissionManager` sends that serialized value, or null when unavailable, during `RegisterGame`. `CoopAutomationJoinContract` then compared the returned `UniqueMapId` to the incorrect scene name with ordinal equality. That predicate can reject the correct run-owned server even when its name, port, game type, and ownership evidence all match. Because the list entries were not retained, the audit does not claim this was the only possible listing issue.
 
 Published correction `e55f1bd` omits the unavailable optional `UniqueMapId` filter while retaining the run-unique server name, exact port, declared game type, singular-match rejection, run-token-bound owned-host record, live dedicated identity, and active UDP-port proof. Tests now model `Map` and serialized `UniqueMapId` as separate fields, prove that substituting the map name rejects a native-shaped entry, and guard the aggregate runner against reintroducing the literal. Focused join contracts passed; runner contracts passed in Windows PowerShell 5.1 and PowerShell 7; canonical run `m2e1-c1` passed all 22/22 projects. No Bannerlord process, product build, installed-module mutation, or staging operation occurred. A clean live feasibility rerun is required before claiming selection, join, network handoff, or connection.
+
+## 16. Corrected-selection live join and handoff-observer correction
+
+### 16.1 Clean live result
+
+Clean bounded run `m2e1-live-r1-01` executed from exact clean local/upstream revision `9c3930b18c89b274d48dbb7f739fe054a8090dc6`, with Steam in the interactive session, no pre-existing product process, free ports `7210` and `7777`, a fresh run root, installed client SHA-256 `8089FC9FF0DB230AC358D4B5DDE611B73FEEBA16E6B7BFF3EB3126866E7C1FBB`, and installed dedicated SHA-256 `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78`. The protected result pre-image was SHA-256 `D5EF79D59FA97EF4C95BB7AB31803AE1F475EB24498F4469B83CD3B7AD955AD3`, length `217264`, with exact UTC write time `2026-08-28T12:26:25.8849833Z`.
+
+The dedicated role again published authoritative lifecycle readiness, accepted all seven ordered bootstrap steps, confirmed `IsPlaying=true`, hosted `TeamDeathmatch` on `mp_tdm_map_001`, and owned UDP port `7210`. The client loaded its exact expected module, completed native platform login, reached `AtLobby`, selected the exact run-owned server `AC_COOP_m2e1-live-r1-01` at port `7210`, and completed the native join task with status `JoinAccepted`. The request correctly omitted the unavailable optional `UniqueMapId`.
+
+The exact client PID log then recorded `GameNetwork.StartMultiplayerOnClient` with one-shot same-machine rewrite from advertised `46.211.52.104` to `127.0.0.1`, followed by `Join game successful`, transition to `InCustomGame`, and the server message `CreatePlayer` for player index `0`. The visible client displayed `Awaiting Server`, independently confirming that it was inside the custom-game session and waiting for a mission. This closes exact selection and native join/transport acceptance for the installed binaries. It does not prove the formal controller `Connected` state, a mission, or a battle.
+
+The controller status remained non-terminal `JoinAccepted`, and the aggregate correctly ended as `Timeout` after 420 seconds. Automatic cleanup gracefully stopped the exact client and dedicated processes without force, left no owned process or required-port owner, retained separate exact-PID logs, and preserved the installed module hashes plus the protected result byte-for-byte.
+
+### 16.2 Lowest-level handoff finding
+
+The client startup log stated `LobbyCustomGameLocalJoinPatch: StartMultiplayer(string,int,int,int) not found.` Source review showed that only that optional reflection patch called `CoopLobbyAutomationController.NotifyStartMultiplayerHandoff(...)`. Once `_joinAccepted` became true, the controller returned until `_networkHandoffObserved` was set, so it could not observe the already-active native session.
+
+ILSpy inspection of installed Bannerlord `1.4.8` established the exact call chain: `LobbyGameStateCustomGameClient.StartMultiplayer()` is a parameterless override that calls public static `GameNetwork.StartMultiplayerOnClient(string,int,int,int)`. The existing `LocalJoinAddressPatch` already intercepted that exact method and performed the successful loopback rewrite, but did not notify the controller. This is a shared pre-mission defect and is independent of battle type.
+
+Published correction `d1af692` makes the actual `GameNetwork.StartMultiplayerOnClient(...)` prefix the sole handoff notifier after the final address rewrite and removes notification from the optional historical lobby patch. Published correction `3fdcda3` makes a connection timeout carry the last run/token-validated non-terminal client status into `feasibility.json` while preserving `IsTerminal=false` and the `Timeout` outcome.
+
+Focused join contracts passed. Runner contracts passed in Windows PowerShell 5.1 and PowerShell 7.6.4. Canonical run `m2e1-handoff-fix-contracts-20260901-01` passed all 22/22 projects. Isolated run `m2e1-handoff-fix-compile-20260901-01` compiled both modules without a product launch or installed-tree mutation; candidate client SHA-256 is `049850693D98C300BAE2F5D297C1FD4F4A350E91854078D4AB103CCBE0B4ECF2`, while the dedicated output remains `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78`.
+
+### 16.3 Remaining gate
+
+The candidate client has not been installed. The next gate is a separately approved controlled client-only staging transaction with a complete retained pre-image, followed by one clean hash-pinned `Feasibility` rerun. That rerun must observe `NetworkHandoff` and terminal `Connected`, retain the same native join evidence, preserve the protected result, and complete exact cleanup. No campaign, cooperative mission, battle, L2, or L3 claim is allowed until their later milestones execute those paths explicitly.
