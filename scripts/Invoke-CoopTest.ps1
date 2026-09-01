@@ -904,6 +904,7 @@ function Wait-CoopClientConnection {
         $ProcessTextCapture
     )
 
+    $lastValidatedStatus = $null
     while ([DateTime]::UtcNow -lt $DeadlineUtc) {
         if ($null -ne $ProcessTextCapture) {
             Update-CoopProcessTextCapture -Capture $ProcessTextCapture
@@ -912,6 +913,7 @@ function Wait-CoopClientConnection {
         if ($null -ne $status) {
             if ([string]$status.RunId -ne $RunId) { throw 'Client join status RunId mismatch.' }
             if ([string]$status.RunTokenSha256 -ne $nonceSha256) { throw 'Client join status token mismatch.' }
+            $lastValidatedStatus = $status
             if ([string]$status.State -eq 'Failed') {
                 $failure = [System.InvalidOperationException]::new(
                     "Client join failed: " + [string]$status.FailureCode + ': ' + [string]$status.FailureMessage)
@@ -929,7 +931,11 @@ function Wait-CoopClientConnection {
         Update-CoopLease
         Start-Sleep -Milliseconds 250
     }
-    throw "Timed out waiting for the multiplayer client to connect."
+    $timeout = [System.TimeoutException]::new('Timed out waiting for the multiplayer client to connect.')
+    if ($null -ne $lastValidatedStatus) {
+        $timeout.Data['CoopClientJoinStatus'] = $lastValidatedStatus
+    }
+    throw $timeout
 }
 
 function Test-CoopWritableDirectory {

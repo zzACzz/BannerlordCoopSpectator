@@ -95,9 +95,11 @@ internal static class Program
             "Native log capture must distinguish required engine logs from an optional absent watchdog log.");
         Assert(
             source.Contains("$failure.Data['CoopClientJoinStatus'] = $status", StringComparison.Ordinal) &&
+            source.Contains("$lastValidatedStatus = $status", StringComparison.Ordinal) &&
+            source.Contains("$timeout.Data['CoopClientJoinStatus'] = $lastValidatedStatus", StringComparison.Ordinal) &&
             source.Contains("$clientJoinStatus = $statusHint", StringComparison.Ordinal) &&
             source.Contains("ClientJoinStatus = $clientJoinStatus", StringComparison.Ordinal),
-            "A terminal client failure must survive the wait exception into the feasibility report.");
+            "A terminal failure or the last validated non-terminal client status must survive the wait exception into the feasibility report.");
         Assert(
             source.Contains("Get-CoopSingularCommandResult", StringComparison.Ordinal),
             "Aggregate command dispatch must validate a singular structured result.");
