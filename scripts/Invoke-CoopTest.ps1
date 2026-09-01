@@ -1968,7 +1968,6 @@ function Invoke-CoopFeasibility {
                 -Port $Port `
                 -GameRoot $GameRoot `
                 -GameType 'TeamDeathmatch' `
-                -UniqueMapId 'mp_tdm_map_001' `
                 -RequestLifetimeSeconds $RuntimeTimeoutSeconds `
                 -UseExistingRunContract
         }

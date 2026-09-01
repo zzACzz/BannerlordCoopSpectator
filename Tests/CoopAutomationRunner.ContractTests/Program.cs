@@ -102,6 +102,10 @@ internal static class Program
             source.Contains("Get-CoopSingularCommandResult", StringComparison.Ordinal),
             "Aggregate command dispatch must validate a singular structured result.");
         Assert(
+            source.Contains("-GameType 'TeamDeathmatch'", StringComparison.Ordinal) &&
+            !source.Contains("-UniqueMapId 'mp_tdm_map_001'", StringComparison.Ordinal),
+            "The aggregate runner must keep the native map name out of the optional UniqueMapId filter.");
+        Assert(
             coreSource.Contains("Wait-CoopProcessExitNoOutput -Process $process", StringComparison.Ordinal) &&
             !coreSource.Contains("$process.WaitForExit($GraceSeconds * 1000)", StringComparison.Ordinal) &&
             !coreSource.Contains("$process.WaitForExit(10000)", StringComparison.Ordinal) &&

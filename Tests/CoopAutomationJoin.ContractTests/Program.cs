@@ -26,6 +26,7 @@ internal static class Program
             ValidateExcessiveLifetime();
             ValidateExactServerSelection();
             ValidateOptionalServerFilters();
+            ValidateMapIdIsNotUniqueMapId();
             ValidateNoServerMatch();
             ValidateAmbiguousServerMatch();
             ValidateTerminalStates();
@@ -152,18 +153,60 @@ internal static class Program
     {
         CoopAutomationJoinRequest request = ValidRequest(DateTime.UtcNow);
         request.GameType = "TeamDeathmatch";
-        request.UniqueMapId = "battle_terrain_a";
+        request.UniqueMapId = ":ut[5]token:rev[8]revision";
         IReadOnlyList<CoopAutomationServerDescriptor> servers = new[]
         {
-            Server("wrong-game-type", "AC_COOP", 7210, "Battle", "battle_terrain_a"),
-            Server("wrong-map", "AC_COOP", 7210, "TeamDeathmatch", "battle_terrain_b"),
-            Server("selected", "AC_COOP", 7210, "TeamDeathmatch", "battle_terrain_a")
+            Server(
+                "wrong-game-type",
+                "AC_COOP",
+                7210,
+                gameType: "Battle",
+                map: "mp_tdm_map_001",
+                uniqueMapId: ":ut[5]token:rev[8]revision"),
+            Server(
+                "wrong-unique-map-id",
+                "AC_COOP",
+                7210,
+                gameType: "TeamDeathmatch",
+                map: "mp_tdm_map_001",
+                uniqueMapId: ":ut[5]other:rev[8]revision"),
+            Server(
+                "selected",
+                "AC_COOP",
+                7210,
+                gameType: "TeamDeathmatch",
+                map: "mp_tdm_map_001",
+                uniqueMapId: ":ut[5]token:rev[8]revision")
         };
 
         CoopAutomationServerSelection selection = CoopAutomationJoinContract.SelectExactServer(request, servers);
         Assert(
             selection.Status == CoopAutomationServerSelectionStatus.Selected && selection.SelectedIndex == 2,
             "Declared game-type and unique-map filters must participate in exact selection.");
+    }
+
+    private static void ValidateMapIdIsNotUniqueMapId()
+    {
+        CoopAutomationJoinRequest request = ValidRequest(DateTime.UtcNow);
+        request.GameType = "TeamDeathmatch";
+        request.UniqueMapId = "mp_tdm_map_001";
+
+        CoopAutomationServerSelection selection = CoopAutomationJoinContract.SelectExactServer(
+            request,
+            new[]
+            {
+                Server(
+                    "native-server",
+                    "AC_COOP",
+                    7210,
+                    gameType: "TeamDeathmatch",
+                    map: "mp_tdm_map_001",
+                    uniqueMapId: ":ut[5]token:rev[8]revision")
+            });
+
+        Assert(
+            selection.Status == CoopAutomationServerSelectionStatus.None,
+            "A native map name must not be treated as the serialized UniqueMapId value.");
     }
 
     private static void ValidateNoServerMatch()
@@ -466,7 +509,8 @@ internal static class Program
         string name,
         int port,
         string gameType = "TeamDeathmatch",
-        string uniqueMapId = "battle_terrain_a")
+        string map = "mp_tdm_map_001",
+        string uniqueMapId = ":ut[5]token:rev[8]revision")
     {
         return new CoopAutomationServerDescriptor
         {
@@ -475,7 +519,7 @@ internal static class Program
             Address = "203.0.113.1",
             Port = port,
             GameType = gameType,
-            Map = uniqueMapId,
+            Map = map,
             UniqueMapId = uniqueMapId,
             PasswordProtected = false
         };
