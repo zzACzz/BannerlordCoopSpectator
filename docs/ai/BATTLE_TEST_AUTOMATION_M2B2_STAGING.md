@@ -1,14 +1,14 @@
 # Battle Test Automation Milestone 2B Controlled Staging Evidence
 
-Status: **Historical staging retained; Revision 13 native platform-login client path/hash and loaded-runtime identity confirmed**
+Status: **Historical staging retained; Revision 15 handoff-corrected client path/hash confirmed; loaded-runtime confirmation pending**
 
 Execution dates: **2026-08-31 and 2026-09-01**
 
-Compiled source revisions: **`12abf363ae978d520558b7c3bbd226137a816a8a`** (`12abf36`), dedicated-only **`7628c85aef140e431f29982e016395b8f303a464`** (`7628c85`), corrected resolver client **`729fd2c325019ca026787b4ffcccf91beeced755`** (`729fd2c`), and native-login client **`6ed40e883cd9909f5af8f10a8e9df19376b6ed52`** (`6ed40e8`)
+Compiled source revisions: **`12abf363ae978d520558b7c3bbd226137a816a8a`** (`12abf36`), dedicated-only **`7628c85aef140e431f29982e016395b8f303a464`** (`7628c85`), corrected resolver client **`729fd2c325019ca026787b4ffcccf91beeced755`** (`729fd2c`), native-login client **`6ed40e883cd9909f5af8f10a8e9df19376b6ed52`** (`6ed40e8`), and handoff-corrected client **`a7bd5285902d30793d0908186fb392fe537cf314`** (`a7bd528`)
 
 Branch: **`codex/v0.1.1-refresh`**, exact revision present on `origin`
 
-Specification: [BATTLE_TEST_AUTOMATION_SPEC.md](BATTLE_TEST_AUTOMATION_SPEC.md), Revision 13
+Specification: [BATTLE_TEST_AUTOMATION_SPEC.md](BATTLE_TEST_AUTOMATION_SPEC.md), Revision 15
 
 ## 1. Outcome
 
@@ -16,7 +16,7 @@ Milestone 2B.2A rebuilt the Milestone 2B.1 runtime-safety source from the clean 
 
 No Bannerlord client, launcher, dedicated server, crash reporter, campaign, mission, or battle was launched by the staging operation. The staging evidence itself is `ConfirmedPathHashOnly`. Later [live feasibility attempts](BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md) established exact dedicated and client `ConfirmedLoadedHash`, the `Suppress` policy, native dedicated bootstrap, and native client platform login. They did not establish exact-server discovery, connectivity, a cooperative mission, or any L2/L3 battle claim.
 
-The latest `m2e-client-stage-r1` transaction installs the Revision 13 one-shot native platform-login client from clean pushed revision `6ed40e8`. It retains the complete prior 32-file client tree and leaves the dedicated installation plus protected result unchanged. Subsequent run `m2e-live-r1-01` promoted this exact client identity from `ConfirmedPathHashOnly` to `ConfirmedLoadedHash` and runtime-confirmed its one-shot native platform login.
+Historical transaction `m2e-client-stage-r1` installed the Revision 13 one-shot native platform-login client from clean pushed revision `6ed40e8`; subsequent run `m2e-live-r1-01` promoted that identity to `ConfirmedLoadedHash` and later proved exact server selection plus native join. Current transaction `m2e1-handoff-stage-r1` replaces only that client's DLL/PDB with the Revision 15 handoff-corrected clean published build from `a7bd528`, retains the complete prior 32-file tree, and leaves the dedicated installation plus protected result unchanged. The current client identity remains `ConfirmedPathHashOnly` until the next named live rerun reports its loaded hash.
 
 ## 2. Authoritative runs
 
@@ -31,6 +31,8 @@ The latest `m2e-client-stage-r1` transaction installs the Revision 13 one-shot n
 | Native-login clean published compile | `m2e-pub-compile-r1` | `Pass`; both builds; installed inventories unchanged; no product process launched |
 | Native-login client-only staging | `m2e-client-stage-r1` | `Installed`; exact 32-file pre-image retained; only client DLL/PDB changed |
 | Native-login loaded/runtime validation | `m2e-live-r1-01` | `AssertionFailed` after successful one-shot native login and 52 server-list responses; exact server absent; cleanup passed |
+| Handoff correction clean published compile | `m2e1-handoff-pub-compile-20260901-01` | `Pass`; exact clean/upstream `a7bd528`; `RepositoryDirty=false`; both builds passed; installed inventories unchanged; no product process launched |
+| Handoff-corrected client-only staging | `m2e1-handoff-stage-r1` | `Installed`; exact 32-file pre-image retained; only client DLL/PDB changed; dedicated tree and protected result unchanged; no rollback |
 
 The run roots are:
 
@@ -44,6 +46,8 @@ C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2e-pub-contracts-r1
 C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2e-pub-compile-r1
 C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2e-client-stage-r1
 C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2e-live-r1-01
+C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2e1-handoff-pub-compile-20260901-01
+C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2e1-handoff-stage-r1
 ```
 
 ## 3. Binary identity
@@ -218,3 +222,45 @@ C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2e-client-stage-r1\b
 ```
 
 This transaction closed only the client path/hash staging gate for the native-login implementation. Later run `m2e-live-r1-01` loaded this exact DLL in Bannerlord, completed one native platform-login task, and reached `AtLobby`. It did not discover the exact listed server and therefore provides no native join, network handoff, connection, campaign, cooperative mission, battle, L2, or L3 evidence. See the feasibility document for the runtime boundary and the inaccurate terminal expiry wording.
+
+## 12. Revision 15 handoff-corrected client staging
+
+Published corrections `d1af692` and `3fdcda3` move the post-rewrite handoff notification to the actual `GameNetwork.StartMultiplayerOnClient(...)` patch and retain the last validated non-terminal status when the external connection wait expires. Focused tests passed, canonical run `m2e1-handoff-fix-contracts-20260901-01` passed 22/22, and pre-publication compile `m2e1-handoff-fix-compile-20260901-01` built both projects without installed mutation. That compile manifest identified revision `9c3930b` with `RepositoryDirty=true`, so its client DLL SHA-256 `049850693D98C300BAE2F5D297C1FD4F4A350E91854078D4AB103CCBE0B4ECF2` was retained as pre-publication evidence and was not staged.
+
+Fresh run `m2e1-handoff-pub-compile-20260901-01` executed from exact clean local/upstream revision `a7bd5285902d30793d0908186fb392fe537cf314` with `RepositoryDirty=false`. All four compile-only assertions passed, no product process launched, and the installed client, legacy-client, and dedicated inventories remained unchanged. Its selected outputs were:
+
+- client DLL SHA-256 `7CC2D759806D2F02D8BEBA15BCBC01EF61DDE4975004728F3D7E6C8332977E97`, length `4669440`, product version `0.3.2`;
+- client PDB SHA-256 `92D3135A10D05B663169F24D4BC18BB948497BDFCF09C50350344EB23BF7ABAE`, length `1374916`;
+- dedicated DLL SHA-256 `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78`, unchanged.
+
+The clean client DLL had the same length as the pre-publication candidate but a different file hash. Targeted ILSpy decompilation produced byte-identical C# output for both changed types, `LocalJoinAddressPatch` and `LobbyCustomGameLocalJoinPatch`. Full-project decompilation of the pre-publication candidate stopped inside ILSpy with an access violation before comparison, so the evidence makes no broader whole-assembly semantic-equality claim. The clean published artifact was selected independently as the authoritative source-to-binary identity.
+
+Transaction `m2e1-handoff-stage-r1` copied the complete installed client tree and overlaid only the selected DLL/PDB. The first preparation command encountered a Windows PowerShell empty-result `.Count` error while validating an empty `Compare-Object` result. It had created only the run-owned prepared copy: no manifest, installation mutex, backup, or installed-tree move existed. Read-only comparison proved the installed 32-file tree still matched the prior baseline exactly, and `artifacts/failure/preparation-01.json` records the non-mutating, battle-type-independent orchestration failure. The corrected command wrapped comparison results in `@(...)`, revalidated every input, and completed preparation.
+
+Apply revalidated clean local/upstream identity, exact installed/prepared/dedicated fingerprints, the protected-result hash/length/UTC ticks, no product process, free ports `7210` and `7777`, exclusive DLL/PDB access, and the global client-installation mutex. It moved the complete current client tree to the run-owned backup and the complete prepared tree into the exact installed path. The prepared-versus-pre-image delta contained exactly:
+
+- `bin/Win64_Shipping_Client/CoopSpectator.dll`;
+- `bin/Win64_Shipping_Client/CoopSpectator.pdb`.
+
+The transaction's version-2 canonical path/length/SHA-256 inventory evidence is:
+
+| Fact | Observed result |
+|---|---|
+| Installed client tree | 32 files; fingerprint `BB89CAC35C1D8BCF2EACAEF9B6640071A4E117A650F8CEB67C6AAF41DC0E0FCD` |
+| Retained exact pre-image | 32 files; fingerprint `9DE54FCD22347B0EAFD4798641D70BCCDA8150F8BFF9F58A4EB1039FE6A874B1` |
+| Installed client DLL | SHA-256 `7CC2D759806D2F02D8BEBA15BCBC01EF61DDE4975004728F3D7E6C8332977E97` |
+| Installed client PDB | SHA-256 `92D3135A10D05B663169F24D4BC18BB948497BDFCF09C50350344EB23BF7ABAE` |
+| Retained prior client DLL | SHA-256 `8089FC9FF0DB230AC358D4B5DDE611B73FEEBA16E6B7BFF3EB3126866E7C1FBB` |
+| Dedicated installation | 218 files; fingerprint `AE406714F10354A1B8C437EC4E4D8B2E90DD55B7B8A7CB968822C4E9BC9A465D`; both DLLs remain `BD328...02A78` |
+| Protected result | SHA-256 `D5EF79D59FA97EF4C95BB7AB31803AE1F475EB24498F4469B83CD3B7AD955AD3`, length `217264`, UTC write time `2026-08-28T12:26:25.8849833Z`; unchanged |
+| Product/port state | No product process; ports `7210` and `7777` unowned |
+| Git state | Local and upstream `a7bd528`; working tree clean before documentation edits |
+| Recovery | No apply failure and no rollback; prepared tree consumed; backup retained |
+
+The retained exact pre-image is:
+
+```text
+C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2e1-handoff-stage-r1\backup\client\CoopSpectator
+```
+
+Independent postflight recomputed installed and backup inventories from disk and matched both evidence files exactly. This closes `ConfirmedPathHashOnly` for the Revision 15 corrected client. It does not relabel the earlier `m2e1-live-r1-01` loaded client, and it does not prove `ConfirmedLoadedHash`, formal `NetworkHandoff`, terminal `Connected`, a campaign, a cooperative mission, a battle, L2, or L3. The next gate is one separately approved clean hash-pinned `Feasibility` rerun with client `7CC2D759...2977E97` and dedicated `BD328AAC...702A78`.

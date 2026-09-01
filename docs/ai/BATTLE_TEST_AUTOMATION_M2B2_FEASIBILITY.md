@@ -1,6 +1,6 @@
 # Battle Test Automation Milestone 2B.2B Live Feasibility Attempts and Runner Findings
 
-Status: **Exact server selection and native join live-confirmed; authoritative GameNetwork handoff observer corrected in source; formal Connected rerun pending**
+Status: **Exact server selection and native join live-confirmed; authoritative GameNetwork handoff observer corrected and staged; formal Connected rerun pending**
 
 Execution and correction date: **2026-09-01**
 
@@ -22,9 +22,11 @@ Published handoff observer correction revision: `d1af692`
 
 Published timeout-evidence correction revision: `3fdcda3`
 
-Installed game-side binary source revision: `12abf36`
+Installed dedicated-control source revision: `7628c85`
 
-This document records the Milestone 2B live feasibility attempts through the native custom-game join run, their exact evidence boundaries, the shared runner/module defects they exposed, exact recovery/cleanup, and the non-runtime verification between attempts. Native transport acceptance and server-side player creation are recorded separately from the still-unproved formal `Connected` acknowledgement. It does not claim campaign startup, a cooperative mission, a completed battle, L2, or L3 evidence.
+Installed handoff-corrected client source revision: `a7bd5285902d30793d0908186fb392fe537cf314` (`ConfirmedPathHashOnly`)
+
+This document records the Milestone 2B live feasibility attempts through the native custom-game join run, their exact evidence boundaries, the shared runner/module defects they exposed, exact recovery/cleanup, the non-runtime verification between attempts, and the subsequent handoff-corrected client staging. Native transport acceptance and server-side player creation are recorded separately from the still-unproved formal `Connected` acknowledgement. It does not claim campaign startup, a cooperative mission, a completed battle, L2, or L3 evidence.
 
 ## 1. Outcome and evidence boundary
 
@@ -325,8 +327,14 @@ ILSpy inspection of installed Bannerlord `1.4.8` established the exact call chai
 
 Published correction `d1af692` makes the actual `GameNetwork.StartMultiplayerOnClient(...)` prefix the sole handoff notifier after the final address rewrite and removes notification from the optional historical lobby patch. Published correction `3fdcda3` makes a connection timeout carry the last run/token-validated non-terminal client status into `feasibility.json` while preserving `IsTerminal=false` and the `Timeout` outcome.
 
-Focused join contracts passed. Runner contracts passed in Windows PowerShell 5.1 and PowerShell 7.6.4. Canonical run `m2e1-handoff-fix-contracts-20260901-01` passed all 22/22 projects. Isolated run `m2e1-handoff-fix-compile-20260901-01` compiled both modules without a product launch or installed-tree mutation; candidate client SHA-256 is `049850693D98C300BAE2F5D297C1FD4F4A350E91854078D4AB103CCBE0B4ECF2`, while the dedicated output remains `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78`.
+Focused join contracts passed. Runner contracts passed in Windows PowerShell 5.1 and PowerShell 7.6.4. Canonical run `m2e1-handoff-fix-contracts-20260901-01` passed all 22/22 projects. Pre-publication run `m2e1-handoff-fix-compile-20260901-01` compiled both modules without a product launch or installed-tree mutation and produced client SHA-256 `049850693D98C300BAE2F5D297C1FD4F4A350E91854078D4AB103CCBE0B4ECF2`. Because its manifest was bound to revision `9c3930b` with `RepositoryDirty=true`, it was not selected for installation.
 
-### 16.3 Remaining gate
+Fresh clean-published run `m2e1-handoff-pub-compile-20260901-01` used exact clean local/upstream revision `a7bd5285902d30793d0908186fb392fe537cf314`, recorded `RepositoryDirty=false`, passed all four compile-only assertions, launched no product process, and proved the installed inventories unchanged. It produced selected client DLL SHA-256 `7CC2D759806D2F02D8BEBA15BCBC01EF61DDE4975004728F3D7E6C8332977E97`, PDB SHA-256 `92D3135A10D05B663169F24D4BC18BB948497BDFCF09C50350344EB23BF7ABAE`, and unchanged dedicated DLL `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78`. The clean DLL had the same length as the pre-publication candidate; targeted ILSpy output for `LocalJoinAddressPatch` and `LobbyCustomGameLocalJoinPatch` was byte-identical between them. Full-project ILSpy decompilation of the earlier candidate stopped inside ILSpy with an access violation, so no broader equality claim is made.
 
-The candidate client has not been installed. The next gate is a separately approved controlled client-only staging transaction with a complete retained pre-image, followed by one clean hash-pinned `Feasibility` rerun. That rerun must observe `NetworkHandoff` and terminal `Connected`, retain the same native join evidence, preserve the protected result, and complete exact cleanup. No campaign, cooperative mission, battle, L2, or L3 claim is allowed until their later milestones execute those paths explicitly.
+### 16.3 Controlled client-only staging and remaining gate
+
+Controlled transaction `m2e1-handoff-stage-r1` copied the complete installed 32-file client tree, overlaid only the clean DLL/PDB pair, and proved those were the only changed relative paths. Its first preparation command stopped before manifest, lock, backup, or installed mutation because an empty `Compare-Object` result was read through `.Count` without array wrapping. Read-only verification proved the installed tree still matched its prior 32-file baseline exactly. The corrected preparation recorded that failure as battle-type-independent, revalidated every input, and continued.
+
+Apply revalidated clean local/upstream `a7bd528`, the exact installed and prepared fingerprints, the unchanged 218-file dedicated tree, protected-result hash/length/UTC ticks, no product process, free ports `7210` and `7777`, exclusive DLL/PDB access, and the global client-installation mutex. It moved the complete prior client tree to the run-owned backup and the complete prepared tree into the game module path. Independent postflight proved exact artifact inventories, installed DLL `7CC2D759...2977E97`, installed PDB `92D3135A...1A01B17`, unchanged dedicated DLLs `BD328...02A78`, unchanged protected result, clean Git state, zero product processes, zero protected-port owners, and no apply failure or rollback.
+
+This closes only the corrected-client path/hash staging gate. The next gate is one separately approved clean hash-pinned `Feasibility` rerun. It must confirm the loaded client hash `7CC2D759...2977E97`, observe `NetworkHandoff` and terminal `Connected`, retain the same native join evidence, preserve the protected result, and complete exact cleanup. No campaign, cooperative mission, battle, L2, or L3 claim is allowed until their later milestones execute those paths explicitly.
