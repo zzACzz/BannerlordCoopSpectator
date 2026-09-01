@@ -35,6 +35,7 @@ internal static class Program
             ValidateLobbyStateAssemblyResolution();
             ValidatePlatformLoginContextAndInvocation();
             ValidateOneShotPlatformLoginControllerGuard();
+            ValidateNetworkHandoffPatchOwnership();
             Console.WriteLine("Coop automation join contract tests passed.");
             return 0;
         }
@@ -443,6 +444,39 @@ internal static class Program
             typeof(CoopAutomationJoinStatus).GetProperty("PlatformLoginTaskState") != null &&
             typeof(CoopAutomationJoinStatus).GetProperty("PlatformLoginOutcome") != null,
             "Schema 3 must publish explicit platform login evidence.");
+    }
+
+    private static void ValidateNetworkHandoffPatchOwnership()
+    {
+        string repositoryRoot = ResolveRepositoryRoot();
+        string networkPatchSource = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "Patches",
+            "LocalJoinAddressPatch.cs"));
+        string legacyLobbyPatchSource = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "Patches",
+            "LobbyCustomGameLocalJoinPatch.cs"));
+
+        int targetIndex = networkPatchSource.IndexOf(
+            "[HarmonyPatch(\"StartMultiplayerOnClient\")]",
+            StringComparison.Ordinal);
+        int redirectIndex = networkPatchSource.IndexOf(
+            "HostSelfJoinRedirectState.TryConsumeLoopbackRewrite",
+            targetIndex,
+            StringComparison.Ordinal);
+        int notificationIndex = networkPatchSource.IndexOf(
+            "CoopLobbyAutomationController.NotifyStartMultiplayerHandoff",
+            redirectIndex,
+            StringComparison.Ordinal);
+        Assert(
+            targetIndex >= 0 && redirectIndex > targetIndex && notificationIndex > redirectIndex,
+            "The authoritative GameNetwork handoff patch must notify automation after applying the final address rewrite.");
+        Assert(
+            !legacyLobbyPatchSource.Contains(
+                "CoopLobbyAutomationController.NotifyStartMultiplayerHandoff",
+                StringComparison.Ordinal),
+            "The optional legacy lobby reflection patch must not duplicate the authoritative GameNetwork handoff notification.");
     }
 
     private static AssemblyBuilder DefineNetworkMainAssembly(string assemblyName)

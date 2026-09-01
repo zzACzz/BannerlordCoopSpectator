@@ -1,6 +1,7 @@
 using HarmonyLib; // HarmonyPatch, HarmonyArgument
 using TaleWorlds.MountAndBlade; // GameNetwork
 using CoopSpectator.Infrastructure;
+using CoopSpectator.Multiplayer.Automation;
 
 namespace CoopSpectator.Patches
 {
@@ -23,6 +24,11 @@ namespace CoopSpectator.Patches
             {
                 string originalAddress = serverAddress;
                 bool consumed = HostSelfJoinRedirectState.TryConsumeLoopbackRewrite(ref serverAddress, port, "GameNetwork.StartMultiplayerOnClient");
+                CoopLobbyAutomationController.NotifyStartMultiplayerHandoff(
+                    serverAddress,
+                    port,
+                    sessionKey,
+                    playerIndex);
                 ModLogger.Info(
                     "LocalJoinAddressPatch: final StartMultiplayerOnClient address. " +
                     "originalAddress=" + (originalAddress ?? string.Empty) +
