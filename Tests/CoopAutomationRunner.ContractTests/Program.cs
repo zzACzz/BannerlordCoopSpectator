@@ -83,13 +83,21 @@ internal static class Program
             !source.Contains("$dedicatedProcess.StandardInput.WriteLine", StringComparison.Ordinal),
             "Feasibility must use run-scoped dedicated readiness/bootstrap acknowledgements and no standard-input command writes.");
         Assert(
-            source.Contains("Copy-CoopDedicatedNativeLogs", StringComparison.Ordinal),
-            "Feasibility must retain exact PID-correlated native logs.");
+            source.Contains("Copy-CoopPidCorrelatedNativeLogs", StringComparison.Ordinal) &&
+            source.Contains("DedicatedNativeLogInventory", StringComparison.Ordinal) &&
+            source.Contains("ClientNativeLogInventory", StringComparison.Ordinal) &&
+            source.Contains("artifacts\\logs\\client\\native", StringComparison.Ordinal),
+            "Feasibility must retain separate exact PID-correlated dedicated and client native logs.");
         Assert(
             source.Contains("Get-CoopPidCorrelatedNativeLogDescriptors", StringComparison.Ordinal) &&
             source.Contains("State = 'NotProduced'", StringComparison.Ordinal) &&
             source.Contains("Required PID-correlated native log is missing", StringComparison.Ordinal),
             "Native log capture must distinguish required engine logs from an optional absent watchdog log.");
+        Assert(
+            source.Contains("$failure.Data['CoopClientJoinStatus'] = $status", StringComparison.Ordinal) &&
+            source.Contains("$clientJoinStatus = $statusHint", StringComparison.Ordinal) &&
+            source.Contains("ClientJoinStatus = $clientJoinStatus", StringComparison.Ordinal),
+            "A terminal client failure must survive the wait exception into the feasibility report.");
         Assert(
             source.Contains("Get-CoopSingularCommandResult", StringComparison.Ordinal),
             "Aggregate command dispatch must validate a singular structured result.");
@@ -122,9 +130,10 @@ internal static class Program
         Assert(
             clientLauncherSource.Contains(". $runnerCorePath", StringComparison.Ordinal) &&
             clientLauncherSource.Contains("-ExpectedParentProcessId $PID", StringComparison.Ordinal) &&
+            clientLauncherSource.Contains("SchemaVersion = 3", StringComparison.Ordinal) &&
             clientLauncherSource.Contains("Schema = 'coop-automation-client-launch-v4'", StringComparison.Ordinal) &&
             clientLauncherSource.Contains("ProcessIdentity = $verifiedProcessIdentity", StringComparison.Ordinal),
-            "Client launch identity must use the tested core, exact runner parent PID, and versioned verified artifact.");
+            "Client launch identity must use schema-3 join intent, the tested core, exact runner parent PID, and versioned verified artifact.");
         Assert(
             clientLauncherSource.Contains("if (-not $finalLaunchArtifactPublished)", StringComparison.Ordinal) &&
             clientLauncherSource.Contains("Stop-CoopExactProcessIdentityCore", StringComparison.Ordinal) &&
@@ -720,6 +729,22 @@ try {
 }
 catch { $missingEvidenceRejected = $true }
 Assert-True $missingEvidenceRejected 'A completed process with incomplete native evidence must be rejected.'
+
+$terminalClientStatus = [pscustomobject][ordered]@{
+    State = 'Failed'
+    FailureCode = 'PlatformLoginStillIdle'
+    FailureMessage = 'Synthetic terminal client evidence.'
+}
+try {
+    $terminalFailure = [System.InvalidOperationException]::new('Synthetic client failure.')
+    $terminalFailure.Data['CoopClientJoinStatus'] = $terminalClientStatus
+    throw $terminalFailure
+}
+catch {
+    Assert-True `
+        ([object]::ReferenceEquals($_.Exception.Data['CoopClientJoinStatus'], $terminalClientStatus)) `
+        'PowerShell must preserve the exact terminal client status object through Exception.Data.'
+}
 
 Write-Output ('PASS ' + $PSVersionTable.PSVersion.ToString())
 """;

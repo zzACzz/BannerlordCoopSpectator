@@ -14,10 +14,23 @@ namespace CoopSpectator.Multiplayer.Automation
         public CoopAutomationServerDescriptor Descriptor { get; set; }
     }
 
+    internal sealed class CoopPlatformLoginContext
+    {
+        public object LobbyState { get; set; }
+        public object LobbyClient { get; set; }
+        public string LobbyClientState { get; set; }
+        public bool IsLoggingIn { get; set; }
+        public bool? HasMultiplayerPrivilege { get; set; }
+    }
+
     internal static class CoopLobbyAutomationDriver
     {
+        internal const string CoreAssemblyName = "TaleWorlds.Core";
+        internal const string GameTypeName = "TaleWorlds.Core.Game";
         internal const string NetworkMainAssemblyName = "TaleWorlds.MountAndBlade";
         internal const string NetworkMainTypeName = "TaleWorlds.MountAndBlade.NetworkMain";
+        internal const string LobbyStateAssemblyName = "TaleWorlds.MountAndBlade.Multiplayer";
+        internal const string LobbyStateTypeName = "TaleWorlds.MountAndBlade.LobbyState";
 
         public static bool TryGetLobbyClient(
             out object lobbyClient,
@@ -70,26 +83,227 @@ namespace CoopSpectator.Multiplayer.Automation
             out Type networkMainType,
             out string failureMessage)
         {
-            networkMainType = null;
+            return TryResolveExactType(
+                assemblies,
+                NetworkMainAssemblyName,
+                NetworkMainTypeName,
+                out networkMainType,
+                out failureMessage);
+        }
+
+        internal static bool TryResolveLobbyStateType(
+            IEnumerable<Assembly> assemblies,
+            out Type lobbyStateType,
+            out string failureMessage)
+        {
+            return TryResolveExactType(
+                assemblies,
+                LobbyStateAssemblyName,
+                LobbyStateTypeName,
+                out lobbyStateType,
+                out failureMessage);
+        }
+
+        public static bool TryGetPlatformLoginContext(
+            object expectedLobbyClient,
+            out CoopPlatformLoginContext context,
+            out string failureCode,
+            out string failureMessage)
+        {
+            context = null;
+            failureCode = string.Empty;
             failureMessage = string.Empty;
 
-            Assembly assembly = assemblies?.FirstOrDefault(candidate =>
-                string.Equals(candidate.GetName().Name, NetworkMainAssemblyName, StringComparison.Ordinal));
-            if (assembly == null)
+            Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            if (!TryResolveExactType(
+                    assemblies,
+                    CoreAssemblyName,
+                    GameTypeName,
+                    out Type gameType,
+                    out failureMessage))
             {
-                failureMessage = "The " + NetworkMainAssemblyName + " assembly is not loaded.";
+                failureCode = "PlatformLoginGameTypeMissing";
                 return false;
             }
 
-            networkMainType = assembly.GetType(NetworkMainTypeName);
-            if (networkMainType == null)
+            if (!TryResolveLobbyStateType(assemblies, out Type lobbyStateType, out failureMessage))
             {
-                failureMessage = "The " + NetworkMainTypeName + " type was not found in " +
-                                 NetworkMainAssemblyName + ".";
+                failureCode = "PlatformLoginLobbyStateTypeMissing";
                 return false;
             }
 
-            return true;
+            return TryGetPlatformLoginContext(
+                gameType,
+                lobbyStateType,
+                expectedLobbyClient,
+                out context,
+                out failureCode,
+                out failureMessage);
+        }
+
+        internal static bool TryGetPlatformLoginContext(
+            Type gameType,
+            Type lobbyStateType,
+            object expectedLobbyClient,
+            out CoopPlatformLoginContext context,
+            out string failureCode,
+            out string failureMessage)
+        {
+            context = null;
+            failureCode = string.Empty;
+            failureMessage = string.Empty;
+
+            try
+            {
+                if (gameType == null)
+                    return Fail("PlatformLoginGameTypeMissing", "The exact TaleWorlds.Core.Game type is unavailable.", out failureCode, out failureMessage);
+                if (lobbyStateType == null)
+                    return Fail("PlatformLoginLobbyStateTypeMissing", "The exact TaleWorlds.MountAndBlade.LobbyState type is unavailable.", out failureCode, out failureMessage);
+                if (expectedLobbyClient == null)
+                    return Fail("PlatformLoginLobbyClientMissing", "NetworkMain.GameClient is unavailable.", out failureCode, out failureMessage);
+
+                PropertyInfo currentProperty = gameType.GetProperty(
+                    "Current",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                if (currentProperty == null)
+                    return Fail("PlatformLoginGameCurrentPropertyMissing", "Game.Current was not found.", out failureCode, out failureMessage);
+
+                object game = currentProperty.GetValue(null);
+                if (game == null)
+                    return Fail("PlatformLoginGameNotReady", "Game.Current is not available yet.", out failureCode, out failureMessage);
+
+                object gameStateManager = GetPropertyValue(game, "GameStateManager");
+                if (gameStateManager == null)
+                    return Fail("PlatformLoginGameStateManagerNotReady", "Game.Current.GameStateManager is not available yet.", out failureCode, out failureMessage);
+
+                object activeState = GetPropertyValue(gameStateManager, "ActiveState");
+                if (activeState == null)
+                    return Fail("PlatformLoginActiveStateNotReady", "The active game state is not available yet.", out failureCode, out failureMessage);
+                if (activeState.GetType() != lobbyStateType)
+                {
+                    return Fail(
+                        "PlatformLoginLobbyStateNotActive",
+                        "The exact active game state is " + activeState.GetType().FullName + ", not " + LobbyStateTypeName + ".",
+                        out failureCode,
+                        out failureMessage);
+                }
+
+                PropertyInfo lobbyClientProperty = lobbyStateType.GetProperty(
+                    "LobbyClient",
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (lobbyClientProperty == null)
+                    return Fail("PlatformLoginLobbyClientPropertyMissing", "LobbyState.LobbyClient was not found.", out failureCode, out failureMessage);
+
+                object stateLobbyClient = lobbyClientProperty.GetValue(activeState);
+                if (!ReferenceEquals(stateLobbyClient, expectedLobbyClient))
+                {
+                    return Fail(
+                        "PlatformLoginLobbyClientMismatch",
+                        "The active LobbyState does not own the resolved NetworkMain.GameClient instance.",
+                        out failureCode,
+                        out failureMessage);
+                }
+
+                object isLoggingInValue = GetPropertyValue(activeState, "IsLoggingIn");
+                if (!(isLoggingInValue is bool isLoggingIn))
+                    return Fail("PlatformLoginStateShapeInvalid", "LobbyState.IsLoggingIn is unavailable or is not Boolean.", out failureCode, out failureMessage);
+
+                object privilegeValue = GetPropertyValue(activeState, "HasMultiplayerPrivilege");
+                if (privilegeValue != null && !(privilegeValue is bool))
+                    return Fail("PlatformLoginStateShapeInvalid", "LobbyState.HasMultiplayerPrivilege is not nullable Boolean.", out failureCode, out failureMessage);
+
+                context = new CoopPlatformLoginContext
+                {
+                    LobbyState = activeState,
+                    LobbyClient = stateLobbyClient,
+                    LobbyClientState = GetPropertyValue(expectedLobbyClient, "CurrentState")?.ToString() ?? string.Empty,
+                    IsLoggingIn = isLoggingIn,
+                    HasMultiplayerPrivilege = privilegeValue == null ? (bool?)null : (bool)privilegeValue
+                };
+                return true;
+            }
+            catch (TargetInvocationException ex)
+            {
+                return Fail(
+                    "PlatformLoginContextFailed",
+                    "Platform login context discovery failed: " + (ex.InnerException?.Message ?? ex.Message),
+                    out failureCode,
+                    out failureMessage);
+            }
+            catch (Exception ex)
+            {
+                return Fail(
+                    "PlatformLoginContextFailed",
+                    "Platform login context discovery failed: " + ex.Message,
+                    out failureCode,
+                    out failureMessage);
+            }
+        }
+
+        public static bool TryStartPlatformLogin(
+            CoopPlatformLoginContext context,
+            out Task task,
+            out string failureCode,
+            out string failureMessage)
+        {
+            task = null;
+            failureCode = string.Empty;
+            failureMessage = string.Empty;
+
+            if (context?.LobbyState == null || context.LobbyClient == null)
+                return Fail("PlatformLoginContextMissing", "The exact platform login context is missing.", out failureCode, out failureMessage);
+            if (!string.Equals(context.LobbyClientState, "Idle", StringComparison.Ordinal))
+                return Fail("PlatformLoginClientNotIdle", "The native lobby client is not Idle.", out failureCode, out failureMessage);
+            if (context.IsLoggingIn)
+                return Fail("PlatformLoginAlreadyActive", "LobbyState is already performing a login.", out failureCode, out failureMessage);
+            if (context.HasMultiplayerPrivilege == false)
+                return Fail("PlatformLoginPrivilegeDenied", "The platform has denied multiplayer privilege.", out failureCode, out failureMessage);
+
+            try
+            {
+                MethodInfo method = context.LobbyState.GetType().GetMethod(
+                    "TryLogin",
+                    BindingFlags.Instance | BindingFlags.Public,
+                    null,
+                    Type.EmptyTypes,
+                    null);
+                if (method == null || !typeof(Task).IsAssignableFrom(method.ReturnType))
+                {
+                    return Fail(
+                        "PlatformLoginMethodMissing",
+                        "LobbyState.TryLogin() returning Task was not found.",
+                        out failureCode,
+                        out failureMessage);
+                }
+
+                task = method.Invoke(context.LobbyState, null) as Task;
+                if (task == null)
+                {
+                    return Fail(
+                        "PlatformLoginTaskMissing",
+                        "LobbyState.TryLogin() did not return a Task.",
+                        out failureCode,
+                        out failureMessage);
+                }
+
+                return true;
+            }
+            catch (TargetInvocationException ex)
+            {
+                return Fail(
+                    "PlatformLoginStartFailed",
+                    "LobbyState.TryLogin() failed synchronously: " + (ex.InnerException?.Message ?? ex.Message),
+                    out failureCode,
+                    out failureMessage);
+            }
+            catch (Exception ex)
+            {
+                return Fail(
+                    "PlatformLoginStartFailed",
+                    "LobbyState.TryLogin() failed synchronously: " + ex.Message,
+                    out failureCode,
+                    out failureMessage);
+            }
         }
 
         public static bool IsReadyForServerList(object lobbyClient, string lobbyState)
@@ -340,6 +554,45 @@ namespace CoopSpectator.Multiplayer.Automation
         {
             object value = GetPropertyValue(target, propertyName);
             return value is bool boolValue && boolValue;
+        }
+
+        private static bool TryResolveExactType(
+            IEnumerable<Assembly> assemblies,
+            string assemblyName,
+            string typeName,
+            out Type resolvedType,
+            out string failureMessage)
+        {
+            resolvedType = null;
+            failureMessage = string.Empty;
+
+            Assembly assembly = assemblies?.FirstOrDefault(candidate =>
+                string.Equals(candidate.GetName().Name, assemblyName, StringComparison.Ordinal));
+            if (assembly == null)
+            {
+                failureMessage = "The " + assemblyName + " assembly is not loaded.";
+                return false;
+            }
+
+            resolvedType = assembly.GetType(typeName);
+            if (resolvedType == null)
+            {
+                failureMessage = "The " + typeName + " type was not found in " + assemblyName + ".";
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool Fail(
+            string code,
+            string message,
+            out string failureCode,
+            out string failureMessage)
+        {
+            failureCode = code;
+            failureMessage = message;
+            return false;
         }
     }
 }

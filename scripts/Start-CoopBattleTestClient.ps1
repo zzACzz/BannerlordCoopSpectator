@@ -290,7 +290,7 @@ try {
     $commandId = [Guid]::NewGuid().ToString('D')
 
     $request = [ordered]@{
-        SchemaVersion = 2
+        SchemaVersion = 3
         ProtocolMajorVersion = 1
         ProtocolMinorVersion = 0
         RunId = $RunId

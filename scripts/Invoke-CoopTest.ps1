@@ -688,9 +688,9 @@ function Stop-CoopOwnedRuntimeProcesses {
     })
 }
 
-function Copy-CoopDedicatedNativeLogs {
+function Copy-CoopPidCorrelatedNativeLogs {
     param(
-        [Parameter(Mandatory = $true)]$DedicatedIdentity,
+        [Parameter(Mandatory = $true)]$ProcessIdentity,
         [Parameter(Mandatory = $true)][string]$DestinationRoot
     )
 
@@ -701,11 +701,11 @@ function Copy-CoopDedicatedNativeLogs {
     }
     [System.IO.Directory]::CreateDirectory($DestinationRoot) | Out-Null
 
-    $processId = [int]$DedicatedIdentity.ProcessId
+    $processId = [int]$ProcessIdentity.ProcessId
     $processStartUtc = ConvertTo-CoopUtcDateTime -Value (
-        Get-CoopOptionalPropertyValue -InputObject $DedicatedIdentity -Name 'ProcessStartUtc')
+        Get-CoopOptionalPropertyValue -InputObject $ProcessIdentity -Name 'ProcessStartUtc')
     if ($null -eq $processStartUtc) {
-        throw 'Exact dedicated process start time is unavailable for PID-correlated native log capture.'
+        throw 'Exact process start time is unavailable for PID-correlated native log capture.'
     }
     $files = New-Object 'System.Collections.Generic.List[object]'
     foreach ($descriptor in @(Get-CoopPidCorrelatedNativeLogDescriptors -ProcessId $processId)) {
@@ -768,8 +768,8 @@ function Copy-CoopDedicatedNativeLogs {
     $inventory = [ordered]@{
         Schema = 'coop-native-log-inventory-v2'
         RunId = $RunId
-        RoleType = [string]$DedicatedIdentity.RoleType
-        RoleInstanceId = [string]$DedicatedIdentity.RoleInstanceId
+        RoleType = [string]$ProcessIdentity.RoleType
+        RoleInstanceId = [string]$ProcessIdentity.RoleInstanceId
         ProcessId = $processId
         ProcessStartUtc = $processStartUtc.ToString('O')
         SourceRoot = [System.IO.Path]::GetFullPath($sourceRoot)
@@ -913,7 +913,16 @@ function Wait-CoopClientConnection {
             if ([string]$status.RunId -ne $RunId) { throw 'Client join status RunId mismatch.' }
             if ([string]$status.RunTokenSha256 -ne $nonceSha256) { throw 'Client join status token mismatch.' }
             if ([string]$status.State -eq 'Failed') {
-                throw ("Client join failed: " + [string]$status.FailureCode + ': ' + [string]$status.FailureMessage)
+                $failure = [System.InvalidOperationException]::new(
+                    "Client join failed: " + [string]$status.FailureCode + ': ' + [string]$status.FailureMessage)
+                $failure.Data['CoopClientJoinStatus'] = $status
+                throw $failure
+            }
+            if ([string]$status.State -eq 'Cancelled') {
+                $failure = [System.InvalidOperationException]::new(
+                    "Client join cancelled: " + [string]$status.FailureCode + ': ' + [string]$status.FailureMessage)
+                $failure.Data['CoopClientJoinStatus'] = $status
+                throw $failure
             }
             if ([string]$status.State -eq 'Connected') { return $status }
         }
@@ -1771,11 +1780,13 @@ function Invoke-CoopFeasibility {
     $ownedHostStatus = $null
     $dedicatedProcess = $null
     $dedicatedIdentity = $null
+    $clientIdentity = $null
     $dedicatedTextCapture = $null
     $dedicatedControlReadinessEvidence = $null
     $dedicatedBootstrapStatus = $null
     $bootstrapCommandEvidence = New-Object 'System.Collections.Generic.List[object]'
-    $nativeLogInventory = $null
+    $dedicatedNativeLogInventory = $null
+    $clientNativeLogInventory = $null
 
     try {
         $dedicatedExecutable = Join-Path $DedicatedServerRoot 'bin\Win64_Shipping_Server\DedicatedCustomServer.Starter.exe'
@@ -2012,6 +2023,10 @@ function Invoke-CoopFeasibility {
     }
     catch {
         $runtimeReason = $_.Exception.Message
+        $statusHint = $_.Exception.Data['CoopClientJoinStatus']
+        if ($null -ne $statusHint) {
+            $clientJoinStatus = $statusHint
+        }
         $outcomeHint = [string]$_.Exception.Data['CoopRuntimeOutcome']
         $runtimeOutcome = if ($outcomeExitCodes.ContainsKey($outcomeHint)) { $outcomeHint }
         elseif ($runtimeReason -match 'Timed out') { 'Timeout' }
@@ -2021,6 +2036,25 @@ function Invoke-CoopFeasibility {
     finally {
         $primaryRuntimeOutcome = $runtimeOutcome
         $primaryRuntimeReason = $runtimeReason
+        if ($null -eq $clientJoinStatus) {
+            try {
+                $terminalClientStatus = Read-CoopJsonShared -Path (Join-Path $runRoot 'state\client-join.status.json')
+                if ($null -ne $terminalClientStatus -and [bool]$terminalClientStatus.IsTerminal) {
+                    if ([string]$terminalClientStatus.RunId -ne $RunId) {
+                        throw 'Terminal client join status RunId mismatch during final evidence capture.'
+                    }
+                    if ([string]$terminalClientStatus.RunTokenSha256 -ne $nonceSha256) {
+                        throw 'Terminal client join status token mismatch during final evidence capture.'
+                    }
+                    $clientJoinStatus = $terminalClientStatus
+                }
+            }
+            catch {
+                $runtimeOutcome = 'RunnerInternalError'
+                $runtimeReason = 'Terminal client join status capture failed: ' + $_.Exception.Message
+                $runtimeSupersession = 'ClientJoinStatusCaptureFailed'
+            }
+        }
         try {
             $rootProcessIds = @($ownedRuntimeProcesses | Where-Object {
                 [string]$_.RoleType -eq 'DedicatedServer' -or [string]$_.RoleType -eq 'MultiplayerClient'
@@ -2050,14 +2084,27 @@ function Invoke-CoopFeasibility {
         if ($null -ne $dedicatedIdentity -and
             -not [string]::IsNullOrWhiteSpace([string](Get-CoopOptionalPropertyValue -InputObject $dedicatedIdentity -Name 'ProcessStartUtc'))) {
             try {
-                $nativeLogInventory = Copy-CoopDedicatedNativeLogs `
-                    -DedicatedIdentity $dedicatedIdentity `
+                $dedicatedNativeLogInventory = Copy-CoopPidCorrelatedNativeLogs `
+                    -ProcessIdentity $dedicatedIdentity `
                     -DestinationRoot (Join-Path $runRoot 'artifacts\logs\dedicated\native')
             }
             catch {
                 $runtimeOutcome = 'RunnerInternalError'
                 $runtimeReason = 'PID-correlated native log capture failed: ' + $_.Exception.Message
                 $runtimeSupersession = 'NativeLogCaptureFailed'
+            }
+        }
+        if ($null -ne $clientIdentity -and
+            -not [string]::IsNullOrWhiteSpace([string](Get-CoopOptionalPropertyValue -InputObject $clientIdentity -Name 'ProcessStartUtc'))) {
+            try {
+                $clientNativeLogInventory = Copy-CoopPidCorrelatedNativeLogs `
+                    -ProcessIdentity $clientIdentity `
+                    -DestinationRoot (Join-Path $runRoot 'artifacts\logs\client\native')
+            }
+            catch {
+                $runtimeOutcome = 'RunnerInternalError'
+                $runtimeReason = 'Client PID-correlated native log capture failed: ' + $_.Exception.Message
+                $runtimeSupersession = 'ClientNativeLogCaptureFailed'
             }
         }
     }
@@ -2123,7 +2170,9 @@ function Invoke-CoopFeasibility {
         GlobalBattleResultAfter = $globalResultAfter
         GlobalBattleResultUnchanged = $globalResultUnchanged
         Cleanup = $runtimeCleanupEvidence.ToArray()
-        NativeLogInventory = $nativeLogInventory
+        NativeLogInventory = $dedicatedNativeLogInventory
+        DedicatedNativeLogInventory = $dedicatedNativeLogInventory
+        ClientNativeLogInventory = $clientNativeLogInventory
         RemainingOwnedProcesses = $remainingOwnedProcesses
         CompletedUtc = [DateTime]::UtcNow.ToString('O')
     }

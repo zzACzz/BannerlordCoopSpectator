@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Threading.Tasks;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.Infrastructure.Automation;
 using CoopSpectator.Multiplayer.Automation;
@@ -30,6 +31,9 @@ internal static class Program
             ValidateTerminalStates();
             ValidateStrictAtomicStatusWrite();
             ValidateNetworkMainAssemblyResolution();
+            ValidateLobbyStateAssemblyResolution();
+            ValidatePlatformLoginContextAndInvocation();
+            ValidateOneShotPlatformLoginControllerGuard();
             Console.WriteLine("Coop automation join contract tests passed.");
             return 0;
         }
@@ -239,17 +243,193 @@ internal static class Program
             "NetworkMain must resolve from TaleWorlds.MountAndBlade, but failed with: " + resolutionFailure);
     }
 
+    private static void ValidateLobbyStateAssemblyResolution()
+    {
+        AssemblyBuilder wrongAssembly = DefineTypeAssembly(
+            "TaleWorlds.MountAndBlade.ContractTest",
+            CoopLobbyAutomationDriver.LobbyStateTypeName);
+        Assert(
+            !CoopLobbyAutomationDriver.TryResolveLobbyStateType(
+                new Assembly[] { wrongAssembly },
+                out _,
+                out string wrongAssemblyFailure) &&
+            wrongAssemblyFailure.Contains(CoopLobbyAutomationDriver.LobbyStateAssemblyName),
+            "LobbyState resolution must reject a type from the wrong assembly.");
+
+        AssemblyBuilder multiplayerAssembly = DefineTypeAssembly(
+            CoopLobbyAutomationDriver.LobbyStateAssemblyName,
+            CoopLobbyAutomationDriver.LobbyStateTypeName);
+        Assert(
+            CoopLobbyAutomationDriver.TryResolveLobbyStateType(
+                new Assembly[] { wrongAssembly, multiplayerAssembly },
+                out Type resolvedType,
+                out string resolutionFailure) &&
+            string.Equals(resolvedType?.FullName, CoopLobbyAutomationDriver.LobbyStateTypeName, StringComparison.Ordinal),
+            "LobbyState must resolve from TaleWorlds.MountAndBlade.Multiplayer, but failed with: " + resolutionFailure);
+    }
+
+    private static void ValidatePlatformLoginContextAndInvocation()
+    {
+        var lobbyClient = new FakeLobbyClient { CurrentState = "Idle" };
+        var loginCompletion = new TaskCompletionSource<bool>();
+        var lobbyState = new FakeLobbyState(lobbyClient, loginCompletion.Task)
+        {
+            IsLoggingIn = false,
+            HasMultiplayerPrivilege = null
+        };
+        FakeGame.Current = new FakeGame
+        {
+            GameStateManager = new FakeGameStateManager { ActiveState = lobbyState }
+        };
+
+        Assert(
+            CoopLobbyAutomationDriver.TryGetPlatformLoginContext(
+                typeof(FakeGame),
+                typeof(FakeLobbyState),
+                lobbyClient,
+                out CoopPlatformLoginContext context,
+                out string contextFailureCode,
+                out string contextFailureMessage),
+            "The exact active LobbyState context must be accepted, but failed with " +
+            contextFailureCode + ": " + contextFailureMessage);
+        Assert(
+            ReferenceEquals(context.LobbyState, lobbyState) &&
+            ReferenceEquals(context.LobbyClient, lobbyClient) &&
+            context.LobbyClientState == "Idle" &&
+            !context.IsLoggingIn &&
+            !context.HasMultiplayerPrivilege.HasValue,
+            "The platform login context must preserve exact object identity and nullable privilege state.");
+
+        Assert(
+            CoopLobbyAutomationDriver.TryStartPlatformLogin(
+                context,
+                out System.Threading.Tasks.Task loginTask,
+                out string startFailureCode,
+                out string startFailureMessage),
+            "The valid stock TryLogin path must start, but failed with " + startFailureCode + ": " + startFailureMessage);
+        Assert(
+            ReferenceEquals(loginTask, loginCompletion.Task) && lobbyState.TryLoginCallCount == 1,
+            "The driver must return the exact native login task and invoke TryLogin exactly once per start request.");
+
+        lobbyState.IsLoggingIn = false;
+        lobbyState.HasMultiplayerPrivilege = false;
+        Assert(
+            CoopLobbyAutomationDriver.TryGetPlatformLoginContext(
+                typeof(FakeGame),
+                typeof(FakeLobbyState),
+                lobbyClient,
+                out context,
+                out _,
+                out _) &&
+            !CoopLobbyAutomationDriver.TryStartPlatformLogin(
+                context,
+                out _,
+                out string privilegeFailureCode,
+                out _) &&
+            privilegeFailureCode == "PlatformLoginPrivilegeDenied" &&
+            lobbyState.TryLoginCallCount == 1,
+            "A known privilege denial must be terminal before another native login invocation.");
+
+        lobbyState.HasMultiplayerPrivilege = true;
+        lobbyState.IsLoggingIn = true;
+        Assert(
+            CoopLobbyAutomationDriver.TryGetPlatformLoginContext(
+                typeof(FakeGame),
+                typeof(FakeLobbyState),
+                lobbyClient,
+                out context,
+                out _,
+                out _) &&
+            !CoopLobbyAutomationDriver.TryStartPlatformLogin(
+                context,
+                out _,
+                out string activeFailureCode,
+                out _) &&
+            activeFailureCode == "PlatformLoginAlreadyActive" &&
+            lobbyState.TryLoginCallCount == 1,
+            "An already active native login must not be invoked again.");
+
+        FakeGame.Current.GameStateManager.ActiveState = new FakeOtherState();
+        Assert(
+            !CoopLobbyAutomationDriver.TryGetPlatformLoginContext(
+                typeof(FakeGame),
+                typeof(FakeLobbyState),
+                lobbyClient,
+                out _,
+                out string stateFailureCode,
+                out _) &&
+            stateFailureCode == "PlatformLoginLobbyStateNotActive",
+            "A non-LobbyState active state must remain a pending precondition rather than a login target.");
+
+        FakeGame.Current.GameStateManager.ActiveState = lobbyState;
+        var differentClient = new FakeLobbyClient { CurrentState = "Idle" };
+        Assert(
+            !CoopLobbyAutomationDriver.TryGetPlatformLoginContext(
+                typeof(FakeGame),
+                typeof(FakeLobbyState),
+                differentClient,
+                out _,
+                out string identityFailureCode,
+                out _) &&
+            identityFailureCode == "PlatformLoginLobbyClientMismatch",
+            "The active LobbyState client must be reference-equal to NetworkMain.GameClient.");
+    }
+
+    private static void ValidateOneShotPlatformLoginControllerGuard()
+    {
+        string repositoryRoot = ResolveRepositoryRoot();
+        string controllerSource = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "Multiplayer",
+            "Automation",
+            "CoopLobbyAutomationController.cs"));
+        Assert(
+            controllerSource.Contains("if (_platformLoginAttempted)", StringComparison.Ordinal) &&
+            controllerSource.Contains("_platformLoginAttempted = true;", StringComparison.Ordinal) &&
+            controllerSource.Contains("_platformLoginAttempted || _platformLoginTask != null", StringComparison.Ordinal),
+            "The controller must gate retries and safe cancellation after the one native login attempt.");
+        Assert(
+            controllerSource.Contains("PlatformLoginFaulted", StringComparison.Ordinal) &&
+            controllerSource.Contains("PlatformLoginCancelled", StringComparison.Ordinal) &&
+            controllerSource.Contains("PlatformLoginPrivilegeDenied", StringComparison.Ordinal) &&
+            controllerSource.Contains("PlatformLoginStillIdle", StringComparison.Ordinal),
+            "The controller must preserve distinct native login terminal outcomes.");
+        Assert(
+            CoopAutomationJoinContract.CurrentSchemaVersion == 3 &&
+            typeof(CoopAutomationJoinStatus).GetProperty("PlatformLoginAttempted") != null &&
+            typeof(CoopAutomationJoinStatus).GetProperty("PlatformLoginTaskState") != null &&
+            typeof(CoopAutomationJoinStatus).GetProperty("PlatformLoginOutcome") != null,
+            "Schema 3 must publish explicit platform login evidence.");
+    }
+
     private static AssemblyBuilder DefineNetworkMainAssembly(string assemblyName)
     {
-        AssemblyBuilder assembly = AssemblyBuilder.DefineDynamicAssembly(
-            new AssemblyName(assemblyName),
-            AssemblyBuilderAccess.Run);
+        return DefineTypeAssembly(assemblyName, CoopLobbyAutomationDriver.NetworkMainTypeName);
+    }
+
+    private static AssemblyBuilder DefineTypeAssembly(string assemblyName, string typeName)
+    {
+        AssemblyBuilder assembly = AssemblyBuilder.DefineDynamicAssembly(new AssemblyName(assemblyName), AssemblyBuilderAccess.Run);
         ModuleBuilder module = assembly.DefineDynamicModule(assemblyName + ".dll");
-        module.DefineType(
-                CoopLobbyAutomationDriver.NetworkMainTypeName,
-                TypeAttributes.Public | TypeAttributes.Abstract | TypeAttributes.Sealed)
-            .CreateType();
+        module.DefineType(typeName, TypeAttributes.Public | TypeAttributes.Abstract | TypeAttributes.Sealed).CreateType();
         return assembly;
+    }
+
+    private static string ResolveRepositoryRoot()
+    {
+        string configured = Environment.GetEnvironmentVariable("COOPSPECTATOR_REPOSITORY_ROOT");
+        if (!string.IsNullOrWhiteSpace(configured))
+            return Path.GetFullPath(configured);
+
+        DirectoryInfo directory = new DirectoryInfo(Environment.CurrentDirectory);
+        while (directory != null)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "CoopSpectator.csproj")))
+                return directory.FullName;
+            directory = directory.Parent;
+        }
+
+        throw new InvalidOperationException("Repository root could not be resolved from the contract-test output path.");
     }
 
     private static CoopAutomationJoinRequest ValidRequest(DateTime now)
@@ -305,5 +485,48 @@ internal static class Program
     {
         if (!condition)
             throw new InvalidOperationException(message);
+    }
+
+    private sealed class FakeLobbyClient
+    {
+        public string CurrentState { get; set; }
+    }
+
+    private sealed class FakeLobbyState
+    {
+        private readonly System.Threading.Tasks.Task _loginTask;
+
+        public FakeLobbyState(FakeLobbyClient lobbyClient, System.Threading.Tasks.Task loginTask)
+        {
+            LobbyClient = lobbyClient;
+            _loginTask = loginTask;
+        }
+
+        public FakeLobbyClient LobbyClient { get; }
+        public bool IsLoggingIn { get; set; }
+        public bool? HasMultiplayerPrivilege { get; set; }
+        public int TryLoginCallCount { get; private set; }
+
+        public System.Threading.Tasks.Task TryLogin()
+        {
+            TryLoginCallCount++;
+            IsLoggingIn = true;
+            return _loginTask;
+        }
+    }
+
+    private sealed class FakeOtherState
+    {
+    }
+
+    private sealed class FakeGameStateManager
+    {
+        public object ActiveState { get; set; }
+    }
+
+    private sealed class FakeGame
+    {
+        public static FakeGame Current { get; set; }
+        public FakeGameStateManager GameStateManager { get; set; }
     }
 }

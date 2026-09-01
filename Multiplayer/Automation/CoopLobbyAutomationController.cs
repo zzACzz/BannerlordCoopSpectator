@@ -26,9 +26,13 @@ namespace CoopSpectator.Multiplayer.Automation
         private static CoopAutomationJoinConfiguration _configuration;
         private static CoopAutomationJoinRequest _request;
         private static object _lobbyClient;
+        private static Task _platformLoginTask;
         private static Task _serverListTask;
         private static Task _joinTask;
         private static CoopObservedLobbyServer _selectedServer;
+        private static bool _platformLoginAttempted;
+        private static string _platformLoginTaskState = "NotStarted";
+        private static string _platformLoginOutcome = "NotAttempted";
         private static string _state = "Disabled";
         private static string _lobbyState = string.Empty;
         private static string _lastFailureCode = string.Empty;
@@ -56,15 +60,22 @@ namespace CoopSpectator.Multiplayer.Automation
                 return;
             }
 
-            // Expiry bounds whether a native join may be started. Once TaleWorlds owns
-            // the join task, the module must not report a false terminal failure while
-            // that non-cancellable operation can still complete in the background.
+            // Expiry bounds whether a native platform-login or join task may be started.
+            // Once TaleWorlds owns either non-cancellable task, the module must not report
+            // a false terminal failure while it can still complete in the background.
             if (_request.ExpiresUtc.ToUniversalTime() <= nowUtc &&
+                _platformLoginTask == null &&
                 _joinTask == null &&
                 !_joinAccepted &&
                 !_networkHandoffObserved)
             {
-                Transition("Failed", _lobbyState, "RequestExpired", "The client join request expired before the native join was started.");
+                Transition("Failed", _lobbyState, "RequestExpired", "The client join request expired before native platform login or join was started.");
+                return;
+            }
+
+            if (_platformLoginTask != null)
+            {
+                PumpPlatformLoginTask();
                 return;
             }
 
@@ -106,9 +117,45 @@ namespace CoopSpectator.Multiplayer.Automation
 
             if (!CoopLobbyAutomationDriver.IsReadyForServerList(_lobbyClient, _lobbyState))
             {
+                if (string.Equals(_lobbyState, "Idle", StringComparison.Ordinal))
+                {
+                    if (_platformLoginAttempted)
+                    {
+                        _platformLoginOutcome = "StillIdle";
+                        Transition(
+                            "Failed",
+                            _lobbyState,
+                            "PlatformLoginStillIdle",
+                            "The native platform login task completed but the lobby client remained Idle.");
+                        return;
+                    }
+
+                    StartPlatformLogin();
+                    return;
+                }
+
+                if (_platformLoginAttempted)
+                {
+                    Transition(
+                        "WaitingForLobbyAfterPlatformLogin",
+                        _lobbyState,
+                        "",
+                        "The native platform login task completed and the lobby is still transitioning.");
+                    return;
+                }
+
                 Transition("WaitingForLobby", _lobbyState, "", "The lobby client is not ready for custom-server discovery.");
                 return;
             }
+
+            if (_platformLoginAttempted && !string.Equals(_platformLoginOutcome, "Succeeded", StringComparison.Ordinal))
+            {
+                _platformLoginOutcome = "Succeeded";
+                Transition("PlatformLoginSucceeded", _lobbyState, "", "");
+                return;
+            }
+            if (!_platformLoginAttempted)
+                _platformLoginOutcome = "NotRequiredAlreadyAtLobby";
 
             if (!CoopLobbyAutomationDriver.TryStartServerListRequest(_lobbyClient, out _serverListTask, out string listFailure))
             {
@@ -126,6 +173,7 @@ namespace CoopSpectator.Multiplayer.Automation
                 return "AutomationJoin State=" + _state +
                        " RunId=" + (_configuration?.RunId ?? "(not configured)") +
                        " LobbyState=" + (_lobbyState ?? string.Empty) +
+                       " PlatformLogin=" + _platformLoginOutcome +
                        " Server=" + (_selectedServer?.Descriptor?.ServerName ?? _request?.ServerName ?? string.Empty) +
                        ":" + (_selectedServer?.Descriptor?.Port ?? _request?.ServerPort ?? 0) +
                        (string.IsNullOrWhiteSpace(_lastFailureCode)
@@ -172,9 +220,10 @@ namespace CoopSpectator.Multiplayer.Automation
         public static bool TryCancel(out string message)
         {
             if (!ExperimentalFeatures.EnableTestAutomation || _terminal ||
+                _platformLoginAttempted || _platformLoginTask != null ||
                 _joinTask != null || _joinAccepted || _networkHandoffObserved)
             {
-                message = "ERROR: No safely cancellable automation join is active. A native join already in progress cannot be marked cancelled.";
+                message = "ERROR: No safely cancellable automation join is active. A native platform login or join already in progress cannot be marked cancelled.";
                 return false;
             }
 
@@ -280,6 +329,139 @@ namespace CoopSpectator.Multiplayer.Automation
                 " serverName=" + _request.ServerName +
                 " port=" + _request.ServerPort +
                 " passwordProvided=" + _request.PasswordProvided + ".");
+        }
+
+        private static void StartPlatformLogin()
+        {
+            if (!CoopLobbyAutomationDriver.TryGetPlatformLoginContext(
+                    _lobbyClient,
+                    out CoopPlatformLoginContext context,
+                    out string contextFailureCode,
+                    out string contextFailureMessage))
+            {
+                if (IsPlatformLoginContextPending(contextFailureCode))
+                {
+                    Transition("WaitingForLobby", _lobbyState, "", contextFailureMessage);
+                    return;
+                }
+
+                _platformLoginOutcome = "ContextRejected";
+                Transition("Failed", _lobbyState, contextFailureCode, contextFailureMessage);
+                return;
+            }
+
+            if (!CoopLobbyAutomationDriver.TryStartPlatformLogin(
+                    context,
+                    out _platformLoginTask,
+                    out string loginFailureCode,
+                    out string loginFailureMessage))
+            {
+                _platformLoginTaskState = "NotStarted";
+                _platformLoginOutcome = string.Equals(
+                    loginFailureCode,
+                    "PlatformLoginPrivilegeDenied",
+                    StringComparison.Ordinal)
+                    ? "PrivilegeDenied"
+                    : "StartFailed";
+                Transition("Failed", _lobbyState, loginFailureCode, loginFailureMessage);
+                return;
+            }
+
+            _platformLoginAttempted = true;
+            _platformLoginTaskState = "Running";
+            _platformLoginOutcome = "Requested";
+            Transition("RequestingPlatformLogin", _lobbyState, "", "");
+        }
+
+        private static void PumpPlatformLoginTask()
+        {
+            if (!_platformLoginTask.IsCompleted)
+            {
+                Transition("WaitingForPlatformLogin", _lobbyState, "", "");
+                return;
+            }
+
+            Task completedTask = _platformLoginTask;
+            _platformLoginTask = null;
+            if (completedTask.IsCanceled)
+            {
+                _platformLoginTaskState = "Canceled";
+                _platformLoginOutcome = "Canceled";
+                Transition("Failed", _lobbyState, "PlatformLoginCancelled", "The native platform login task was cancelled.");
+                return;
+            }
+            if (completedTask.IsFaulted)
+            {
+                _platformLoginTaskState = "Faulted";
+                _platformLoginOutcome = "Faulted";
+                Transition(
+                    "Failed",
+                    _lobbyState,
+                    "PlatformLoginFaulted",
+                    completedTask.Exception?.GetBaseException().Message ?? "The native platform login task failed.");
+                return;
+            }
+
+            _platformLoginTaskState = "RanToCompletion";
+            if (!CoopLobbyAutomationDriver.TryGetLobbyClient(out _lobbyClient, out _lobbyState, out string clientFailure))
+            {
+                _platformLoginOutcome = "PostLoginClientUnavailable";
+                Transition("Failed", _lobbyState, "PlatformLoginPostStateUnavailable", clientFailure);
+                return;
+            }
+            if (!CoopLobbyAutomationDriver.TryGetPlatformLoginContext(
+                    _lobbyClient,
+                    out CoopPlatformLoginContext context,
+                    out string contextFailureCode,
+                    out string contextFailureMessage))
+            {
+                _platformLoginOutcome = "PostLoginContextUnavailable";
+                Transition("Failed", _lobbyState, contextFailureCode, contextFailureMessage);
+                return;
+            }
+
+            _lobbyState = context.LobbyClientState;
+            if (context.HasMultiplayerPrivilege == false)
+            {
+                _platformLoginOutcome = "PrivilegeDenied";
+                Transition(
+                    "Failed",
+                    _lobbyState,
+                    "PlatformLoginPrivilegeDenied",
+                    "The platform denied multiplayer privilege during the native login attempt.");
+                return;
+            }
+            if (string.Equals(_lobbyState, "AtLobby", StringComparison.Ordinal))
+            {
+                _platformLoginOutcome = "Succeeded";
+                Transition("PlatformLoginSucceeded", _lobbyState, "", "");
+                return;
+            }
+            if (string.Equals(_lobbyState, "Idle", StringComparison.Ordinal))
+            {
+                _platformLoginOutcome = "StillIdle";
+                Transition(
+                    "Failed",
+                    _lobbyState,
+                    "PlatformLoginStillIdle",
+                    "The native platform login task completed but the lobby client remained Idle.");
+                return;
+            }
+
+            _platformLoginOutcome = "TaskCompletedLobbyTransitionPending";
+            Transition(
+                "WaitingForLobbyAfterPlatformLogin",
+                _lobbyState,
+                "",
+                "The native platform login task completed and the lobby is still transitioning.");
+        }
+
+        private static bool IsPlatformLoginContextPending(string failureCode)
+        {
+            return string.Equals(failureCode, "PlatformLoginGameNotReady", StringComparison.Ordinal) ||
+                   string.Equals(failureCode, "PlatformLoginGameStateManagerNotReady", StringComparison.Ordinal) ||
+                   string.Equals(failureCode, "PlatformLoginActiveStateNotReady", StringComparison.Ordinal) ||
+                   string.Equals(failureCode, "PlatformLoginLobbyStateNotActive", StringComparison.Ordinal);
         }
 
         private static void PumpServerListTask(DateTime nowUtc)
@@ -432,7 +614,10 @@ namespace CoopSpectator.Multiplayer.Automation
                     _lobbyState,
                     server,
                     _lastFailureCode,
-                    _lastFailureMessage);
+                    _lastFailureMessage,
+                    _platformLoginAttempted,
+                    _platformLoginTaskState,
+                    _platformLoginOutcome);
             }
             catch (Exception ex)
             {

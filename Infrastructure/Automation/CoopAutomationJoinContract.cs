@@ -58,7 +58,7 @@ namespace CoopSpectator.Infrastructure.Automation
 
     public static class CoopAutomationJoinContract
     {
-        public const int CurrentSchemaVersion = 2;
+        public const int CurrentSchemaVersion = 3;
         public const string RequestRelativePath = "commands/client-join.request.json";
         public const string StatusRelativePath = "state/client-join.status.json";
         public const string LaunchArtifactRelativePath = "artifacts/processes/client-launch.json";

@@ -44,6 +44,9 @@ namespace CoopSpectator.Infrastructure.Automation
         public string ServerName { get; set; }
         public string ServerAddress { get; set; }
         public int ServerPort { get; set; }
+        public bool PlatformLoginAttempted { get; set; }
+        public string PlatformLoginTaskState { get; set; }
+        public string PlatformLoginOutcome { get; set; }
         public string FailureCode { get; set; }
         public string FailureMessage { get; set; }
     }
@@ -183,7 +186,10 @@ namespace CoopSpectator.Infrastructure.Automation
             string lobbyState,
             CoopAutomationServerDescriptor server,
             string failureCode,
-            string failureMessage)
+            string failureMessage,
+            bool platformLoginAttempted = false,
+            string platformLoginTaskState = "NotStarted",
+            string platformLoginOutcome = "NotAttempted")
         {
             if (configuration == null || request == null)
                 return;
@@ -212,6 +218,9 @@ namespace CoopSpectator.Infrastructure.Automation
                 ServerName = server?.ServerName ?? request.ServerName ?? string.Empty,
                 ServerAddress = server?.Address ?? string.Empty,
                 ServerPort = server?.Port ?? request.ServerPort,
+                PlatformLoginAttempted = platformLoginAttempted,
+                PlatformLoginTaskState = platformLoginTaskState ?? string.Empty,
+                PlatformLoginOutcome = platformLoginOutcome ?? string.Empty,
                 FailureCode = failureCode ?? string.Empty,
                 FailureMessage = failureMessage ?? string.Empty
             };
