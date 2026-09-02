@@ -99,7 +99,7 @@ existing BattleDetector snapshot construction
 
 When the profile is disabled, the recorder returns before inspecting the roster path. When another scenario reaches the shared roster writer, the recorder publishes `Skipped` only for an explicitly requested capture and does not modify that scenario. A recording failure is evidence failure, not permission to mutate campaign or mission state.
 
-Milestone 3A has passed synthetic exact-byte, corruption/schema/path, battle-type admission, 23-project contract, and both-project compile-only checks. Milestone 3B supplies and live-proves the aggregate-owned campaign process/environment/reproduction path. Clean run `m3b-live-capture-02` captured the first real private fixture from a purpose-made campaign sample and verified exact byte/hash/provenance/qualification, protected-result isolation, and cleanup. Independent content/privacy review, any required sanitized derivative, and replay still remain. See [BATTLE_TEST_AUTOMATION_M3_FIELD_FIXTURE.md](BATTLE_TEST_AUTOMATION_M3_FIELD_FIXTURE.md).
+Milestone 3A passed synthetic exact-byte, corruption/schema/path, battle-type admission, 23-project contract, and both-project compile-only checks. Milestone 3B supplies and live-proves the aggregate-owned campaign process/environment/reproduction path. Clean run `m3b-live-capture-02` captured the real private fixture from a purpose-made campaign sample and verified exact byte/hash/provenance/qualification, protected-result isolation, and cleanup. Milestone 3C independently reviewed that payload, retained it outside Git, created the deterministic linked derivative and separate oracle, and passed hash-gated contract replay. See [BATTLE_TEST_AUTOMATION_M3_FIELD_FIXTURE.md](BATTLE_TEST_AUTOMATION_M3_FIELD_FIXTURE.md).
 
 ### Milestone 3B aggregate campaign capture
 
@@ -129,7 +129,31 @@ Invoke-CoopTest.ps1 -Command Record
   -> retain private/non-sanitized/non-oracle/non-L2 report plus reproduction descriptor
 ```
 
-The launcher does not modify `LauncherData.xml`, select a save, automate UI, start a multiplayer client, issue `start_game`, or require mission/full-battle completion. Bannerlord can still mutate normal user save/configuration state after manual interaction, so live capture must use a purpose-made save copy. `m3b-dirty-block-01` proves dirty-source rejection without product launch; `m3b-contracts-01` passed all 23 contracts; `m3b-compile-01` passed both builds with installed inventories unchanged. Controlled transaction `m3b-stage-01` retained the complete installed client pre-image and changed only its DLL/PDB. The first live attempt exposed stale runner literals after the recorder had already produced valid private bytes; published `baf5c69` corrects and cross-contract guards them. Corrected `m3b-fix-pub-contracts-01` passed 23/23, `m3b-fix-pub-compile-01` passed both builds without installed mutation, and `m3b-live-capture-02` returned `Pass` with one exact private field fixture, unchanged protected result, and zero remaining product processes or listeners. The payload is not yet independently reviewed, sanitized, committed, or replayed.
+The launcher does not modify `LauncherData.xml`, select a save, automate UI, start a multiplayer client, issue `start_game`, or require mission/full-battle completion. Bannerlord can still mutate normal user save/configuration state after manual interaction, so live capture must use a purpose-made save copy. `m3b-dirty-block-01` proves dirty-source rejection without product launch; `m3b-contracts-01` passed all 23 contracts; `m3b-compile-01` passed both builds with installed inventories unchanged. Controlled transaction `m3b-stage-01` retained the complete installed client pre-image and changed only its DLL/PDB. The first live attempt exposed stale runner literals after the recorder had already produced valid private bytes; published `baf5c69` corrects and cross-contract guards them. Corrected `m3b-fix-pub-contracts-01` passed 23/23, `m3b-fix-pub-compile-01` passed both builds without installed mutation, and `m3b-live-capture-02` returned `Pass` with one exact private field fixture, unchanged protected result, and zero remaining product processes or listeners. That private capture remains outside Git and is linked by hash to the reviewed derivative.
+
+### Milestone 3C offline sanitization and contract replay
+
+```text
+private m3b-live-capture-02 field payload
+  -> require exact reviewed SHA-256 and source metadata
+  -> independently audit counts, references, composition, equipment, mounts, and privacy
+  -> New-CoopSanitizedFieldFixture.ps1
+       refuse source overwrite, nonempty output, and implicit repository output
+       replace campaign-derived identities with deterministic fixture identities
+       retain static game IDs and replay-relevant combat state
+       emit only sanitized payload + linked sanitized metadata
+  -> compare Windows PowerShell 5.1 and PowerShell 7 bytes
+  -> add separately authored fixture.oracle.json
+  -> contract replay:
+       require exact three-file allowlist and both provenance hashes
+       reject path/account/credential patterns
+       deserialize through BattleSnapshotMessage
+       validate independent counts/references/equipment/mount facts
+       admit ordinary SCN-001 and reject a non-field mutation
+  -> no Bannerlord process, mission, client, or result
+```
+
+The committed derivative is 259,744 bytes with SHA-256 `B47D7AF7FA057C36CA8EF759A6D597C00007158A22E3A556AC57A1299579D49D`. Final canonical `m3c-sanitized-contracts-02` passed 23/23 after the committed encoding/oracle assertions were complete, and `m3c-sanitized-compile-01` built the client and dedicated projects below the run root with installed inventories unchanged. This closes Milestone 3 only at the offline exact-fixture/contract boundary. Dedicated mission startup and `PreBattleHold` are Milestone 4.
 
 ### Milestone 2B.1 connectivity-feasibility intent
 

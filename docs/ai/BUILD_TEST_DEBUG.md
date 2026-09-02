@@ -3,7 +3,7 @@
 Last source verification: **2026-08-28**
 Last automation-control source verification: **2026-09-02** (`m2b3a-lockfix-pub-c-01`; exact clean published revision `c6507e9`; per-resource construction/collision contracts passed in both PowerShell hosts; 22/22)
 Last automation-control live verification: **2026-09-02** (`m2b3a-live-r2-01`; exact client/dedicated loaded identities, live schema-2 role health, formal `Connected`, six independently acquired/released resources, graceful exact cleanup, free ports, protected-state preservation, and no crash/hang artifact confirmed)
-Last exact-fixture verification: **2026-09-02** (`baf5c69`; `m3b-fix-pub-contracts-01`, 23/23; `m3b-fix-pub-compile-01`, client and dedicated passed with installed inventories unchanged; `m3b-live-capture-02`, exact private field payload captured and validated with protected result/cleanup preserved; independent content/privacy review and replay pending)
+Last exact-fixture verification: **2026-09-02** (`m3b-live-capture-02`, exact private source retained outside Git; deterministic derivative SHA-256 `B47D7AF7...579D49D`; independent oracle and hash-gated contract replay passed; final `m3c-sanitized-contracts-02`, 23/23; `m3c-sanitized-compile-01`, client and dedicated passed with installed inventories unchanged)
 
 ## Safety first: builds deploy
 
@@ -452,7 +452,7 @@ artifacts\fixtures\field-current\fixture.metadata.json
 state\fixture-record.status.json
 ```
 
-No raw fixture is currently committed. Treat any future raw run artifact as private until its campaign/user identifiers are independently reviewed. Never normalize, reformat, or line-ending-convert the exact payload before hash verification.
+No raw fixture is committed. The reviewed shareable derivative is stored separately under `Tests/Fixtures/Automation/field-current`; it never replaces or relabels the exact private bytes. Treat any future raw run artifact as private until its campaign/user identifiers are independently reviewed. Never normalize, reformat, or line-ending-convert the exact payload before hash verification.
 
 Focused fixture tests preserve CRLF/spacing exactly, prove disabled-mode no-I/O, enforce immutable repeated metadata, reject all non-SCN-001 adapters, and reject corrupted bytes, length/schema mismatch, and path escape. Canonical `m3a-contracts-03` passed 23/23. Final `m3a-compile-03` compiled both projects below the run root, launched no product process, and proved installed inventories unchanged. The first compile `m3a-compile-01` is retained as diagnostic evidence: the client passed and the dedicated explicit source list exposed the missing shared-file includes; after adding exactly those two includes, the targeted server build and final full compile passed.
 
@@ -497,7 +497,35 @@ The runner validates exact payload length/SHA-256/provenance/qualification, perf
 
 Source evidence: `m3b-contracts-01` passed 23/23; `m3b-compile-01` passed both projects with installed inventories unchanged; `m3b-dirty-block-01` returned `EnvironmentBlocked` and launched no product process. Controlled transaction `m3b-stage-01` retained a complete 32-file pre-image and installed only client DLL/PDB SHA-256 `2A1E17E4...250FFB4`; the dedicated module remained unchanged. Diagnostic run `m3b-live-capture-01` produced valid private bytes but exposed two stale aggregate literals relative to the canonical C# payload kind/boundary. Published correction `baf5c69` restores that parity and adds a cross-language guard. Corrected `m3b-fix-pub-contracts-01` passed 23/23 and `m3b-fix-pub-compile-01` passed both projects without installed mutation.
 
-Clean run `m3b-live-capture-02` returned `Pass` from exact runner revision `baf5c69` with the explicitly pinned staged client hash. It retained 451,762 exact payload bytes with SHA-256 `ECF29661E44B64C1AEE77EC2B44E61F63926287A3A05A9BFD6DC545EC073B9C7`, two populated sides, 30 infantry stacks, 17 mounted stacks, and 4 hero/captain stacks. Status/metadata/runner hashes matched; the protected global result was unchanged; exact cleanup left no product process or UDP 7210 listener. `PrivateRawArtifact=true`, `SanitizationReviewed=false`, `IndependentOracleComplete=false`, `FullBattleCompleted=false`, and `L2OrL3PassClaimed=false` remain authoritative. Do not commit or share the raw payload before the next approved review gate.
+Clean run `m3b-live-capture-02` returned `Pass` from exact runner revision `baf5c69` with the explicitly pinned staged client hash. It retained 451,762 exact payload bytes with SHA-256 `ECF29661E44B64C1AEE77EC2B44E61F63926287A3A05A9BFD6DC545EC073B9C7`, two populated sides, 30 infantry stacks, 17 mounted stacks, and 4 hero/captain stacks. Status/metadata/runner hashes matched; the protected global result was unchanged; exact cleanup left no product process or UDP 7210 listener. `PrivateRawArtifact=true`, `SanitizationReviewed=false`, `IndependentOracleComplete=false`, `FullBattleCompleted=false`, and `L2OrL3PassClaimed=false` remain authoritative for that capture run. Do not commit or share the raw payload; Milestone 3C links only its reviewed derivative by hash.
+
+### Milestone 3C reviewed shareable field fixture
+
+The private `m3b-live-capture-02` payload and broader run root remain outside Git. Their source identity is length 451,762 and SHA-256 `ECF29661E44B64C1AEE77EC2B44E61F63926287A3A05A9BFD6DC545EC073B9C7`.
+
+Generate a derivative only from that reviewed source into a new absent or empty temporary directory:
+
+```powershell
+pwsh.exe -NoLogo -NoProfile `
+  -File .\scripts\New-CoopSanitizedFieldFixture.ps1 `
+  -SourceFixtureRoot <private-field-current-root> `
+  -ExpectedSourcePayloadSha256 ECF29661E44B64C1AEE77EC2B44E61F63926287A3A05A9BFD6DC545EC073B9C7 `
+  -OutputRoot <new-temporary-output-root>
+```
+
+Do not use `-AllowRepositoryOutput` until the temporary output has passed independent privacy/content review. The sanitizer refuses source overwrite, nonempty output, an unsupported source hash, and repository output without that explicit switch. It emits only `battle_roster.sanitized.json` and `fixture.sanitized.metadata.json`; it does not copy `battle_roster.raw.json`, recorder metadata, saves, or logs.
+
+The reviewed committed derivative is 259,744 bytes with SHA-256 `B47D7AF7FA057C36CA8EF759A6D597C00007158A22E3A556AC57A1299579D49D`. Windows PowerShell 5.1 and PowerShell 7 produced identical payload and metadata bytes. The three committed files are:
+
+```text
+Tests\Fixtures\Automation\field-current\battle_roster.sanitized.json
+Tests\Fixtures\Automation\field-current\fixture.sanitized.metadata.json
+Tests\Fixtures\Automation\field-current\fixture.oracle.json
+```
+
+`fixture.oracle.json` is authored from the independent read-only audit, not from recorder qualification. `CoopAutomationFixture.ContractTests` enforces the three-file allowlist, hashes/lengths, raw-file absence, privacy patterns, deterministic identities, 2 sides, 3 parties, 47 positive stacks, 74 units, 17 mounted, 11 ranged, 4 heroes, mission-order multiplicity, side/party references, equipment/mount coverage, production-schema deserialization, ordinary-field admission, and non-field mutation rejection.
+
+Focused fixture contracts passed. Final canonical run `m3c-sanitized-contracts-02` passed all 23 projects after the committed encoding/oracle assertions were complete. `m3c-sanitized-compile-01` built the client and dedicated projects under the run root and proved all installed inventories unchanged. These checks launch no product process and prove no mission, multiplayer connection, battle completion, L2, or L3 behavior.
 
 ### `scripts/CreateReleasePackage.ps1`
 
