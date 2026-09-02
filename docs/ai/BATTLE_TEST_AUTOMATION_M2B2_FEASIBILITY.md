@@ -1,6 +1,6 @@
 # Battle Test Automation Milestone 2B.2B Live Feasibility Attempts and Runner Findings
 
-Status: **Connection and live role-health path passed; per-resource RUN-008 proof remains pending after a runner-only correction**
+Status: **Connection, live role health, exact cleanup, and per-resource RUN-008 isolation passed; Milestone 2B complete**
 
 Execution and correction date: **2026-09-01**
 
@@ -378,12 +378,12 @@ The successful connection run did not satisfy the complete Milestone 2B delivera
 | Requirement area | Milestone 2B.3A source/contract evidence | Remaining live gate |
 |---|---|---|
 | PROC-004/PROC-007 role liveness and progress | Schema-2 role projection includes heartbeat, progress, state entry/revision, monotonic elapsed values, authoritative source, and structured error; focused tests distinguish `NoHeartbeat` and `NoProgress` | Completed by `m2b3a-live-r1-01` through connection and cleanup |
-| RUN-008 shared runtime locks | Canonical sorted locks cover game/dedicated roots, bridge root, machine profile, and ports; corrected construction, cardinality, conflict, and release probes are contract-tested | Repeat live `Feasibility` after clean publication must contain and release six independent records |
+| RUN-008 shared runtime locks | Canonical sorted locks cover game/dedicated roots, bridge root, machine profile, and ports; corrected construction, cardinality, conflict, and release probes are contract-tested | Completed by `m2b3a-live-r2-01`: six expected ids, six distinct lock paths, six verified releases |
 | PROC-009 cancellation and runner failure | Real isolated console signals passed in Windows PowerShell 5.1 and 7.6.4; exact explicit `Cancel` passed against a synthetic active runner | No new game run is required solely for cancellation; terminal live cancellation may be added only through separately approved non-destructive fault injection |
 | PROC-005 `Recover` contract set | Read-only active-run preview, active-lock refusal, exact process cleanup, PID-reuse rejection, completed-run preview/apply, `recovery.json`, and no-run-root-deletion evidence pass | Reconfirm recovery only if the next live run is interrupted; do not induce interruption merely to repeat the contract |
 | PROC-008 crash/modal/hang evidence | Exact path plus owned-tree/command-line-PID correlation, exact cleanup promotion, `FatalAutomationFailure`, `CrashReporterDetected`, `crash.json`, and `hang.json` paths are implemented and source/contract-verified | Passing-path absence completed by `m2b3a-live-r1-01`; real fault capture remains pending an approved fault-injection run or an organic failure |
 
-The source/contract implementation and evidence are detailed in [BATTLE_TEST_AUTOMATION_M2B3_SAFETY_CLOSURE.md](BATTLE_TEST_AUTOMATION_M2B3_SAFETY_CLOSURE.md). The safety binaries completed staging and partial live confirmation; Milestone 3 remains blocked only on the corrected clean-published per-resource lock artifact described below.
+The source/contract implementation and evidence are detailed in [BATTLE_TEST_AUTOMATION_M2B3_SAFETY_CLOSURE.md](BATTLE_TEST_AUTOMATION_M2B3_SAFETY_CLOSURE.md). The safety binaries completed staging and live confirmation, including corrected per-resource isolation. Milestone 3 may begin under a separately approved fixture plan.
 
 ## 18. Revision 17 safety-closure live run and Revision 18 lock audit
 
@@ -403,4 +403,14 @@ Lowest-level reproduction in Windows PowerShell 5.1 and PowerShell 7.6.4 showed 
 
 Revision 18 source constructs the identifiers in `Get-CoopSharedRuntimeResourceIdsCore`, adds them independently with `String.Concat`, deduplicates the requested/default ports, and validates both expected and acquired cardinality before any product launch. Contracts now require six default records, five records when ports overlap, an independent conflict for every resource, and complete release in both PowerShell hosts. Focused tests and dirty-source aggregate `m2b3a-lockfix-c-01` passed 22/22.
 
-No product DLL changed, so restaging is not required. The remaining gate is a clean-published runner correction followed by one repeat live `Feasibility` run whose artifact contains six independent records and proves their release. Until then, RUN-008 remains open and Milestone 3 fixture work remains blocked.
+No product DLL changed, so restaging was not required. Clean published contracts `m2b3a-lockfix-pub-c-01` and repeat live run `m2b3a-live-r2-01` complete this gate as recorded below.
+
+### 18.3 Corrected clean-published closure run `m2b3a-live-r2-01`
+
+Clean aggregate `m2b3a-lockfix-pub-c-01` ran from exact local/upstream revision `c6507e99d7bc71665e839b2adc90401921428a3d` with `RepositoryDirty=false`, passed all 22 canonical projects, and verified runner-lock release. The live run then used the same clean revision and the already installed client `A363B19B...C91C0075` plus dedicated `2E1494BC...C0CA1414` identities.
+
+The run returned `Pass`. `shared-runtime-locks.json` contains exactly six expected resource ids and six distinct lock paths: bridge root, game installation, dedicated installation, machine profile, UDP port `7210`, and UDP port `7777`. `shared-runtime-lock-release.json` contains the same six ids with `ReleasedAndReacquired=true` and no failure for every record. This closes RUN-008.
+
+The same run repeated live schema-2 role health, all seven dedicated bootstrap acknowledgements, native platform login, exact server selection, and terminal `Connected`. Cleanup used no forced stop, retained no owned process, released both ports, and preserved the installed client DLL/PDB, both dedicated DLLs, and the protected result including exact hash, length, and UTC ticks. Six exact-PID native log files were retained with no fatal signal; neither `crash.json` nor `hang.json` exists. `CampaignStarted=false`, `CampaignBattleFixtureOpened=false`, and `L2OrL3PassClaimed=false` preserve the connection-only evidence boundary.
+
+Milestone 2B exit criteria are complete. Real crash/hang fault injection remains optional future evidence because cancellation, simulated runner failure, RecoveryV2, and structured failure artifacts already satisfy the mandatory source/contract criteria. Milestone 3 fixture capture may begin only through its own approved plan.

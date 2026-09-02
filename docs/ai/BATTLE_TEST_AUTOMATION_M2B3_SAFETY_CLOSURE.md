@@ -1,6 +1,6 @@
 # Milestone 2B.3A Runtime Safety Closure
 
-Status: **Runtime binaries staged; role health and connection live-confirmed; per-resource shared-lock correction source/contract-verified; clean publication and repeat live lock proof pending**
+Status: **Complete; runtime binaries staged, clean contracts passed 22/22, and six-resource isolation plus release live-confirmed**
 Source verification date: **2026-09-02**
 Protocol: **1.1**
 
@@ -101,6 +101,8 @@ Crash evidence selects `crash.json`; non-crash deadline/hang evidence selects `h
 | Exact production-expression reproduction | Reproduced identically in Windows PowerShell 5.1 and PowerShell 7.6.4 |
 | Shared-lock construction correction contracts | Passed in both PowerShell hosts; every generated resource independently collides and releases |
 | Dirty-source aggregate `m2b3a-lockfix-c-01` | Passed 22/22; no product process launched |
+| Clean published aggregate `m2b3a-lockfix-pub-c-01` | Exact local/upstream `c6507e9`; `RepositoryDirty=false`; passed 22/22; runner lock released; no product process launched |
+| Corrected live run `m2b3a-live-r2-01` | `Pass`; exact six resource ids, six distinct lock paths, six verified releases; role health, seven-step bootstrap, native login, terminal `Connected`, graceful cleanup, protected result, and passing-path crash/hang absence reconfirmed |
 
 The first completed-run apply attempt exposed a strict-mode empty-collection defect when no shared-runtime-lock artifact existed. It stopped before `recovery.json` publication and had no process target. The collection was normalized explicitly and the identical apply was repeated successfully.
 
@@ -112,14 +114,15 @@ Selected clean-published identities installed by `m2b3a-stage-01` are:
 
 The retained client pre-image contains DLL `7CC2...7E97`; the dedicated pre-image contains both DLLs at `BD328...02A78`. The staging operation changed only the client DLL/PDB and two dedicated DLL paths. No rollback was required.
 
-## 9. Remaining gate
+## 9. Closure
 
-Role health, exact binary identity, connection, cleanup, and passing-path crash/hang absence are now live-confirmed. RUN-008 per-resource lock isolation remains open. Before promoting the complete Milestone 2B runtime-safety row to live-confirmed:
+Role health, exact binary identity, connection, cleanup, passing-path crash/hang absence, and RUN-008 per-resource isolation are live-confirmed. The final gate completed as follows:
 
-1. commit and push the per-resource lock correction and revised evidence separately as approved;
-2. rerun the 22-project inventory from the exact clean published revision;
-3. retain the already installed DLLs because the correction changes only runner scripts/tests and documentation;
-4. execute a separately approved clean `Feasibility` run;
-5. require exactly six independently recorded/released resources for the default `7210`/`7777` profile, plus the already proven heartbeat/progress, exact cleanup, unchanged protected result, and passing-path crash/hang absence.
+1. the per-resource correction and evidence were committed and pushed separately;
+2. `m2b3a-lockfix-pub-c-01` passed the 22-project inventory from exact clean revision `c6507e9` and verified runner-lock release;
+3. the already installed DLLs were retained because the correction changed only runner scripts/tests and documentation;
+4. separately approved `m2b3a-live-r2-01` returned `Pass`;
+5. its artifacts contain the exact six independently recorded resources, six distinct lock paths, and six successful release/reacquire probes for the default `7210`/`7777` profile;
+6. the same run reconfirmed heartbeat/progress, exact cleanup without force, unchanged installed hashes and protected result, free ports, and passing-path crash/hang absence.
 
-Fault-path JSON and recovery contracts remain source/synthetic evidence until an explicitly approved non-destructive fault-injection run is performed. Milestone 3 must not start from this document alone.
+Fault-path JSON and recovery remain source/synthetic contract evidence until an explicitly approved non-destructive fault-injection run or organic failure supplies real fault evidence. That optional extension is not a Milestone 2B exit-criteria blocker: cancellation and simulated runner failure already preserve exact recovery evidence, and RecoveryV2 passes its required contract set. Milestone 2B is complete. Milestone 3 may start only through its own approved plan and must preserve the no-L2/L3-overclaim boundary until a real battle fixture is executed.

@@ -1,6 +1,6 @@
 # Battle Test Automation Milestone 2B Controlled Staging Evidence
 
-Status: **Historical staging retained; Revision 17 safety-closure binaries staged and promoted to ConfirmedLoadedHash, with the Revision 18 runner-only shared-lock correction pending repeat live proof**
+Status: **Historical staging retained; Revision 17 binaries remain installed and loaded-hash confirmed; Revision 18 runner-only correction passed clean repeat live proof without restaging**
 
 Execution dates: **2026-08-31 through 2026-09-02**
 
@@ -8,7 +8,7 @@ Compiled source revisions: **`12abf363ae978d520558b7c3bbd226137a816a8a`** (`12ab
 
 Branch: **`codex/v0.1.1-refresh`**, exact revision present on `origin`
 
-Current specification: [BATTLE_TEST_AUTOMATION_SPEC.md](BATTLE_TEST_AUTOMATION_SPEC.md), Revision 18; the handoff-corrected staging transaction executed under Revision 15 and the latest safety-closure staging transaction used clean published Revision 17 source
+Current specification: [BATTLE_TEST_AUTOMATION_SPEC.md](BATTLE_TEST_AUTOMATION_SPEC.md), Revision 19; the handoff-corrected staging transaction executed under Revision 15 and the latest safety-closure staging transaction used clean published Revision 17 source
 
 ## 1. Outcome
 
@@ -302,4 +302,4 @@ C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2b3a-stage-01\backup
 
 Post-stage doctor run `m2b3a-poststage-doctor-01` returned only the expected ignored-output hash differences and the not-yet-verified runtime combination. Launcher run `m2b3a-poststage-client-validate-01` accepted the exact installed client hash, version `0.3.2`, game path, and live Steam session without launching a product process. Clean live run `m2b3a-live-r1-01` subsequently loaded the exact selected client and dedicated hashes and promoted both to `ConfirmedLoadedHash`.
 
-Artifact audit of that live run found a runner-only defect: the six intended shared runtime resource identifiers were serialized as one space-concatenated lock record. The correction is confined to PowerShell runner/core construction and contracts; no client or dedicated DLL changed. Therefore the installed Revision 17 binaries remain the correct candidates and another staging transaction is not required. Clean publication of the runner-only correction and a repeat live run showing six independent lock records remain separate gates.
+Artifact audit of that live run found a runner-only defect: the six intended shared runtime resource identifiers were serialized as one space-concatenated lock record. The correction was confined to PowerShell runner/core construction and contracts; no client or dedicated DLL changed. Therefore the installed Revision 17 binaries remained the correct candidates and another staging transaction was not required. Clean published contracts `m2b3a-lockfix-pub-c-01` passed 22/22 from exact revision `c6507e9`, and `m2b3a-live-r2-01` used the unchanged installed binaries while recording six independent lock ids, six distinct lock paths, and six verified releases. The staging-to-loaded-hash chain remains valid and Milestone 2B is complete.
