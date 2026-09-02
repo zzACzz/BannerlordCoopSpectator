@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Doctor', 'Contracts', 'CompileOnly', 'Feasibility', 'Inspect', 'Recover', 'Cancel')]
+    [ValidateSet('Doctor', 'Contracts', 'CompileOnly', 'Feasibility', 'Record', 'Inspect', 'Recover', 'Cancel')]
     [string]$Command,
 
     [Parameter(Mandatory = $true)]
@@ -23,6 +23,8 @@ param(
     [string]$ExpectedClientModuleSha256,
 
     [string]$ExpectedDedicatedModuleSha256,
+
+    [string]$FixtureId = 'field-current',
 
     [ValidateRange(60, 1800)]
     [int]$RuntimeTimeoutSeconds = 420,
@@ -89,7 +91,7 @@ $releaseVerified = $false
 $ownedRuntimeProcesses = New-Object System.Collections.Generic.List[object]
 $runtimeCleanupEvidence = New-Object System.Collections.Generic.List[object]
 $runnerCapabilities = @(
-    'Doctor', 'Contracts', 'CompileOnly', 'Feasibility', 'Inspect', 'Recover', 'Cancel',
+    'Doctor', 'Contracts', 'CompileOnly', 'Feasibility', 'Record', 'Inspect', 'Recover', 'Cancel',
     'AtomicManifest', 'LeaseHeartbeat', 'RoleHealthV1', 'CancellationV1', 'RecoveryV2', 'FailureEvidenceV1')
 $runnerState = 'Initializing'
 $runnerStateEnteredUtc = [DateTime]::UtcNow
@@ -101,6 +103,10 @@ $automationRunRootVariableName = 'COOPSPECTATOR_AUTOMATION_RUN_ROOT'
 $automationRunTokenVariableName = 'COOPSPECTATOR_AUTOMATION_RUN_TOKEN'
 $automationExpectedModuleHashVariableName = 'COOPSPECTATOR_AUTOMATION_EXPECTED_MODULE_SHA256'
 $automationResultPolicyVariableName = 'COOPSPECTATOR_AUTOMATION_RESULT_POLICY'
+$automationFixtureRecordVariableName = 'COOPSPECTATOR_AUTOMATION_FIXTURE_RECORD'
+$automationFixtureIdVariableName = 'COOPSPECTATOR_AUTOMATION_FIXTURE_ID'
+$automationSourceRevisionVariableName = 'COOPSPECTATOR_AUTOMATION_SOURCE_REVISION'
+$automationGameVersionVariableName = 'COOPSPECTATOR_AUTOMATION_GAME_VERSION'
 
 if ([string]::IsNullOrWhiteSpace($MachineProfileName)) {
     $configuredMachineProfileName = [Environment]::GetEnvironmentVariable('COOPSPECTATOR_MACHINE_PROFILE', 'Process')
@@ -769,9 +775,10 @@ function Stop-CoopExactProcessIdentity {
 
 function Stop-CoopOwnedRuntimeProcesses {
     $ordered = @($ownedRuntimeProcesses | Sort-Object {
-        if ([string]$_.RoleType -eq 'MultiplayerClient') { 0 }
-        elseif ([string]$_.RoleType -eq 'DedicatedServer') { 1 }
-        else { 2 }
+        if ([string]$_.RoleType -eq 'CampaignHost') { 0 }
+        elseif ([string]$_.RoleType -eq 'MultiplayerClient') { 1 }
+        elseif ([string]$_.RoleType -eq 'DedicatedServer') { 2 }
+        else { 3 }
     })
     foreach ($identity in $ordered) {
         Stop-CoopExactProcessIdentity -Identity $identity
@@ -1254,6 +1261,21 @@ function Write-CoopReproductionDescriptor {
         '-DedicatedServerRoot', $DedicatedServerRoot
     )
     if ($All) { $arguments += '-All' }
+    if (Test-CoopSha256Hex -Value $ExpectedClientModuleSha256) {
+        $arguments += @('-ExpectedClientModuleSha256', $ExpectedClientModuleSha256.Trim().ToUpperInvariant())
+    }
+    if (Test-CoopSha256Hex -Value $ExpectedDedicatedModuleSha256) {
+        $arguments += @('-ExpectedDedicatedModuleSha256', $ExpectedDedicatedModuleSha256.Trim().ToUpperInvariant())
+    }
+    if ($Command -eq 'Record') {
+        $arguments += @('-FixtureId', $FixtureId, '-RuntimeTimeoutSeconds', [string]$RuntimeTimeoutSeconds)
+    }
+    elseif ($Command -eq 'Feasibility') {
+        $arguments += @('-Port', [string]$Port, '-RuntimeTimeoutSeconds', [string]$RuntimeTimeoutSeconds)
+        if (-not [string]::IsNullOrWhiteSpace($ServerName)) {
+            $arguments += @('-ServerName', $ServerName)
+        }
+    }
     $suggestedCommand = 'powershell.exe ' + (($arguments | ForEach-Object {
         ConvertTo-CoopCommandLineArgument -Value $_
     }) -join ' ')
@@ -2631,6 +2653,436 @@ function Invoke-CoopFeasibility {
     }
 }
 
+function Assert-CoopFixtureCaptureLaunchArtifact {
+    param(
+        [Parameter(Mandatory = $true)]$LaunchArtifact,
+        [Parameter(Mandatory = $true)][string]$ExpectedFixtureId,
+        [Parameter(Mandatory = $true)][string]$ExpectedClientHash,
+        [Parameter(Mandatory = $true)][string]$ExpectedSourceRevision,
+        [Parameter(Mandatory = $true)][string]$ExpectedGameVersion,
+        [Parameter(Mandatory = $true)][string]$ExpectedExecutablePath
+    )
+
+    if ($null -eq $LaunchArtifact -or
+        [string]$LaunchArtifact.Schema -ne 'coop-campaign-capture-launch-v1' -or
+        [string]$LaunchArtifact.RunId -ne $RunId -or
+        [string]$LaunchArtifact.FixtureId -ne $ExpectedFixtureId -or
+        [string]$LaunchArtifact.ClientModuleSha256 -ne $ExpectedClientHash -or
+        [string]$LaunchArtifact.SourceRevision -ne $ExpectedSourceRevision -or
+        [string]$LaunchArtifact.GameVersion -ne $ExpectedGameVersion -or
+        [string]$LaunchArtifact.ResultPolicy -ne 'Suppress' -or
+        [bool]$LaunchArtifact.RunTokenPersisted -or
+        [bool]$LaunchArtifact.CredentialsPersisted -or
+        [bool]$LaunchArtifact.UiAutomationUsed) {
+        throw 'Campaign fixture-capture launch artifact identity or safety contract is invalid.'
+    }
+
+    $identity = $LaunchArtifact.ProcessIdentity
+    if ($null -eq $identity -or
+        [string]$identity.IdentityState -ne 'Verified' -or
+        [string]$identity.RoleType -ne 'CampaignHost' -or
+        [string]$identity.RoleInstanceId -ne 'campaign-host-01' -or
+        [int]$identity.ProcessId -le 0 -or
+        [int]$identity.ParentProcessId -ne $PID -or
+        [int]$identity.ExpectedParentProcessId -ne $PID -or
+        -not [string]::Equals(
+            [System.IO.Path]::GetFullPath([string]$identity.ExecutablePath),
+            [System.IO.Path]::GetFullPath($ExpectedExecutablePath),
+            [StringComparison]::OrdinalIgnoreCase) -or
+        [string]::IsNullOrWhiteSpace([string]$identity.ProcessStartUtc)) {
+        throw 'Campaign fixture-capture process identity is incomplete or does not belong to the aggregate runner.'
+    }
+    return $identity
+}
+
+function Wait-CoopFixtureRecordStatus {
+    param(
+        [Parameter(Mandatory = $true)][string]$StatusPath,
+        [Parameter(Mandatory = $true)][string]$ExpectedFixtureId,
+        [Parameter(Mandatory = $true)]$CampaignIdentity,
+        [Parameter(Mandatory = $true)][DateTime]$DeadlineUtc
+    )
+
+    $lastValidatedStatus = $null
+    while ([DateTime]::UtcNow -lt $DeadlineUtc) {
+        Assert-CoopRunNotCancelled
+        $status = Read-CoopJsonShared -Path $StatusPath
+        if ($null -ne $status) {
+            if ([int]$status.SchemaVersion -ne 1 -or
+                [string]$status.RunId -ne $RunId -or
+                [string]$status.FixtureId -ne $ExpectedFixtureId) {
+                throw 'Fixture record status schema, RunId, or FixtureId mismatch.'
+            }
+            $lastValidatedStatus = $status
+            if ([string]$status.State -eq 'Failed') {
+                $failure = [System.InvalidOperationException]::new(
+                    'Fixture recording failed: ' + [string]$status.FailureCode + ': ' + [string]$status.FailureMessage)
+                $failure.Data['CoopFixtureRecordStatus'] = $status
+                throw $failure
+            }
+            if ([string]$status.State -eq 'Recorded') { return $status }
+            if ([string]$status.State -ne 'Skipped') {
+                throw 'Fixture record status contains an unsupported state: ' + [string]$status.State
+            }
+        }
+
+        if (-not (Test-CoopLiveProcessIdentity -Identity $CampaignIdentity)) {
+            $failure = [System.InvalidOperationException]::new(
+                'The exact campaign process exited before a qualifying field fixture was recorded.')
+            if ($null -ne $lastValidatedStatus) {
+                $failure.Data['CoopFixtureRecordStatus'] = $lastValidatedStatus
+            }
+            throw $failure
+        }
+        Update-CoopLease
+        Start-Sleep -Milliseconds 250
+    }
+
+    $timeout = [System.TimeoutException]::new(
+        'Timed out waiting for one qualifying ordinary field-battle fixture. A Skipped status may be followed by another battle attempt in the same campaign process.')
+    if ($null -ne $lastValidatedStatus) {
+        $timeout.Data['CoopFixtureRecordStatus'] = $lastValidatedStatus
+    }
+    throw $timeout
+}
+
+function Confirm-CoopRecordedFixture {
+    param(
+        [Parameter(Mandatory = $true)]$Status,
+        [Parameter(Mandatory = $true)][string]$ExpectedFixtureId,
+        [Parameter(Mandatory = $true)][string]$ExpectedClientHash,
+        [Parameter(Mandatory = $true)][string]$ExpectedSourceRevision,
+        [Parameter(Mandatory = $true)][string]$ExpectedGameVersion
+    )
+
+    $fixtureRoot = Join-Path $runRoot 'artifacts\fixtures\field-current'
+    $payloadPath = Join-Path $fixtureRoot 'battle_roster.raw.json'
+    $metadataPath = Join-Path $fixtureRoot 'fixture.metadata.json'
+    if (-not [System.IO.File]::Exists($payloadPath) -or -not [System.IO.File]::Exists($metadataPath)) {
+        throw 'Recorded status exists but the immutable fixture payload or metadata is missing.'
+    }
+
+    $metadata = Read-CoopJsonShared -Path $metadataPath
+    $payloadItem = Get-Item -LiteralPath $payloadPath
+    $payloadSha256 = (Get-FileHash -LiteralPath $payloadPath -Algorithm SHA256).Hash.ToUpperInvariant()
+    if ($null -eq $metadata -or
+        [int]$metadata.SchemaVersion -ne 1 -or
+        [string]$metadata.RunId -ne $RunId -or
+        [string]$metadata.FixtureId -ne $ExpectedFixtureId -or
+        [string]$metadata.PayloadKind -ne 'CampaignBattleRoster' -or
+        [string]$metadata.Boundary -ne 'Campaign.BattleRosterFileHelper.WriteRoster.PostWrite' -or
+        [string]$metadata.SourceRole -ne 'CampaignHost' -or
+        [string]$metadata.TargetRole -ne 'DedicatedServer' -or
+        [string]$metadata.PayloadFile -ne 'battle_roster.raw.json' -or
+        [string]$metadata.PayloadSchema -ne 'BattleRosterFileDto.CurrentUnversioned' -or
+        [string]$metadata.CompatibilityStatus -ne 'CurrentOnlyUnversioned' -or
+        [string]$metadata.ScenarioKind -ne 'FieldBattle' -or
+        [string]$metadata.BattleStage -ne 'PreMissionCampaignRoster' -or
+        [string]$metadata.ModuleSha256 -ne $ExpectedClientHash -or
+        [string]$metadata.ExpectedModuleSha256 -ne $ExpectedClientHash -or
+        [string]$metadata.SourceRevision -ne $ExpectedSourceRevision -or
+        [string]$metadata.GameVersion -ne $ExpectedGameVersion -or
+        [string]$metadata.SanitizationStatus -ne 'UnreviewedPrivateRunArtifact' -or
+        [string]$metadata.IndependentOracleStatus -ne 'PendingIndependentReview' -or
+        [long]$metadata.PayloadLength -ne $payloadItem.Length -or
+        [string]$metadata.PayloadSha256 -ne $payloadSha256 -or
+        [string]$Status.PayloadSha256 -ne $payloadSha256 -or
+        [int]$metadata.Qualification.SideCount -ne 2 -or
+        [int]$metadata.Qualification.InfantryStackCount -lt 1 -or
+        [int]$metadata.Qualification.MountedStackCount -lt 1 -or
+        [int]$metadata.Qualification.HeroOrCaptainStackCount -lt 1) {
+        throw 'Recorded field fixture failed the independent runner identity, hash, provenance, or qualification checks.'
+    }
+
+    try {
+        $null = [System.IO.File]::ReadAllText($payloadPath) | ConvertFrom-Json
+    }
+    catch {
+        throw 'Recorded field fixture payload is not valid JSON: ' + $_.Exception.Message
+    }
+
+    return [ordered]@{
+        FixtureId = $ExpectedFixtureId
+        PayloadPath = $payloadPath
+        MetadataPath = $metadataPath
+        PayloadLength = $payloadItem.Length
+        PayloadSha256 = $payloadSha256
+        ScenarioKind = [string]$metadata.ScenarioKind
+        BattleStage = [string]$metadata.BattleStage
+        SideCount = [int]$metadata.Qualification.SideCount
+        InfantryStackCount = [int]$metadata.Qualification.InfantryStackCount
+        MountedStackCount = [int]$metadata.Qualification.MountedStackCount
+        HeroOrCaptainStackCount = [int]$metadata.Qualification.HeroOrCaptainStackCount
+        SanitizationStatus = [string]$metadata.SanitizationStatus
+        IndependentOracleStatus = [string]$metadata.IndependentOracleStatus
+    }
+}
+
+function Invoke-CoopFixtureRecord {
+    if ($FixtureId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$') {
+        return [ordered]@{ Outcome = 'PreconditionsFailed'; Reason = 'FixtureId must contain only ASCII letters, digits, dot, underscore, or hyphen.'; ArtifactPath = '' }
+    }
+    if (-not (Test-CoopSha256Hex -Value $ExpectedClientModuleSha256)) {
+        return [ordered]@{ Outcome = 'PreconditionsFailed'; Reason = 'Record requires an explicit ExpectedClientModuleSha256.'; ArtifactPath = '' }
+    }
+
+    $expectedClientHash = $ExpectedClientModuleSha256.Trim().ToUpperInvariant()
+    if (-not $installedClientFact.Exists -or
+        -not [string]::Equals([string]$installedClientFact.Sha256, $expectedClientHash, [StringComparison]::Ordinal)) {
+        return [ordered]@{ Outcome = 'EnvironmentBlocked'; Reason = 'Installed client module hash does not match the explicitly selected fixture-capture identity.'; ArtifactPath = '' }
+    }
+    if ($manifest.RepositoryDirty) {
+        return [ordered]@{ Outcome = 'EnvironmentBlocked'; Reason = 'Record requires a clean repository revision.'; ArtifactPath = '' }
+    }
+    $divergence = (Get-CoopGitValue -Arguments @('rev-list', '--left-right', '--count', '@{upstream}...HEAD')) -replace '\s+', ' '
+    if (-not [string]::Equals($divergence.Trim(), '0 0', [StringComparison]::Ordinal)) {
+        return [ordered]@{ Outcome = 'EnvironmentBlocked'; Reason = 'Record requires the local revision and configured upstream to be identical.'; ArtifactPath = '' }
+    }
+
+    $nativeDescriptor = Join-Path $GameRoot 'Modules\Native\SubModule.xml'
+    if (-not [System.IO.File]::Exists($nativeDescriptor)) {
+        return [ordered]@{ Outcome = 'EnvironmentBlocked'; Reason = 'The installed Native module descriptor is missing.'; ArtifactPath = '' }
+    }
+    try {
+        [xml]$nativeModuleXml = [System.IO.File]::ReadAllText($nativeDescriptor)
+        $gameVersion = ([string]$nativeModuleXml.Module.Version.value).Trim()
+    }
+    catch {
+        return [ordered]@{ Outcome = 'EnvironmentBlocked'; Reason = 'The installed Native module version could not be read: ' + $_.Exception.Message; ArtifactPath = '' }
+    }
+    if ([string]::IsNullOrWhiteSpace($gameVersion)) {
+        return [ordered]@{ Outcome = 'EnvironmentBlocked'; Reason = 'The installed Native module version is empty.'; ArtifactPath = '' }
+    }
+
+    $productProcesses = @(Get-Process -Name @(
+        'Bannerlord',
+        'TaleWorlds.MountAndBlade.Launcher',
+        'DedicatedCustomServer.Starter',
+        'DedicatedCustomServer',
+        'TaleWorlds.CrashReporter') -ErrorAction SilentlyContinue)
+    if ($productProcesses.Count -gt 0) {
+        return [ordered]@{ Outcome = 'EnvironmentBlocked'; Reason = 'A Bannerlord, dedicated-server, launcher, or crash-reporter process is already running.'; ArtifactPath = '' }
+    }
+    $steamProcesses = @(Get-Process -Name 'steam' -ErrorAction SilentlyContinue | Where-Object {
+        try { [string]::Equals([System.IO.Path]::GetFileName($_.Path), 'Steam.exe', [StringComparison]::OrdinalIgnoreCase) }
+        catch { $false }
+    })
+    if ($steamProcesses.Count -eq 0) {
+        return [ordered]@{ Outcome = 'EnvironmentBlocked'; Reason = 'Steam.exe must already be running for campaign capture.'; ArtifactPath = '' }
+    }
+    $portOwnership = Get-CoopPortOwnership
+    if (-not $portOwnership.InspectionAvailable -or @($portOwnership.Entries).Count -gt 0) {
+        return [ordered]@{ Outcome = 'EnvironmentBlocked'; Reason = 'The required runtime ports cannot be proven free before campaign capture.'; ArtifactPath = '' }
+    }
+
+    $gameExecutable = Join-Path $GameRoot 'bin\Win64_Shipping_Client\Bannerlord.exe'
+    $globalResultPath = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments)) 'Mount and Blade II Bannerlord\CoopSpectator\battle_result.json'
+    $globalResultBefore = Get-CoopFileFact -Path $globalResultPath
+    $reportPath = Join-Path $runRoot 'artifacts\results\fixture-record.json'
+    $launchArtifactPath = Join-Path $runRoot 'artifacts\processes\campaign-capture-launch.json'
+    $statusPath = Join-Path $runRoot 'state\fixture-record.status.json'
+    $runtimeOutcome = 'RunnerInternalError'
+    $runtimeReason = 'Fixture capture did not complete.'
+    $primaryRuntimeOutcome = 'RunnerInternalError'
+    $primaryRuntimeReason = 'Fixture capture did not complete.'
+    $runtimeSupersession = ''
+    $campaignIdentity = $null
+    $fixtureStatus = $null
+    $fixtureEvidence = $null
+    $nativeLogInventory = $null
+    $lastStatusHint = $null
+    $oldAutomationEnvironment = @{}
+    $environmentNames = @(
+        $automationFlagName,
+        $automationRunIdVariableName,
+        $automationRunRootVariableName,
+        $automationRunTokenVariableName,
+        $automationExpectedModuleHashVariableName,
+        $automationResultPolicyVariableName,
+        $automationFixtureRecordVariableName,
+        $automationFixtureIdVariableName,
+        $automationSourceRevisionVariableName,
+        $automationGameVersionVariableName)
+
+    try {
+        foreach ($name in $environmentNames) {
+            $oldAutomationEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+        }
+        [Environment]::SetEnvironmentVariable($automationFlagName, '1', 'Process')
+        [Environment]::SetEnvironmentVariable($automationRunIdVariableName, $RunId, 'Process')
+        [Environment]::SetEnvironmentVariable($automationRunRootVariableName, $runRoot, 'Process')
+        [Environment]::SetEnvironmentVariable($automationRunTokenVariableName, $noncePlaintext, 'Process')
+        [Environment]::SetEnvironmentVariable($automationExpectedModuleHashVariableName, $expectedClientHash, 'Process')
+        [Environment]::SetEnvironmentVariable($automationResultPolicyVariableName, 'Suppress', 'Process')
+        [Environment]::SetEnvironmentVariable($automationFixtureRecordVariableName, $null, 'Process')
+        [Environment]::SetEnvironmentVariable($automationFixtureIdVariableName, $null, 'Process')
+        [Environment]::SetEnvironmentVariable($automationSourceRevisionVariableName, $null, 'Process')
+        [Environment]::SetEnvironmentVariable($automationGameVersionVariableName, $null, 'Process')
+
+        & (Join-Path $PSScriptRoot 'Start-CoopFieldFixtureCapture.ps1') `
+            -RunId $RunId `
+            -FixtureId $FixtureId `
+            -ExpectedClientModuleSha256 $expectedClientHash `
+            -SourceRevision $manifest.RepositoryRevision `
+            -GameVersion $gameVersion `
+            -GameRoot $GameRoot `
+            -UseExistingRunContract
+
+        $launchArtifact = Read-CoopJsonShared -Path $launchArtifactPath
+        $campaignIdentity = Assert-CoopFixtureCaptureLaunchArtifact `
+            -LaunchArtifact $launchArtifact `
+            -ExpectedFixtureId $FixtureId `
+            -ExpectedClientHash $expectedClientHash `
+            -ExpectedSourceRevision $manifest.RepositoryRevision `
+            -ExpectedGameVersion $gameVersion `
+            -ExpectedExecutablePath $gameExecutable
+        Add-CoopOwnedRuntimeProcess -Identity $campaignIdentity
+        $campaignIdentity = Get-CoopProcessIdentity `
+            -ProcessId ([int]$campaignIdentity.ProcessId) `
+            -RoleType 'CampaignHost' `
+            -RoleInstanceId 'campaign-host-01' `
+            -ExpectedExecutablePath $gameExecutable `
+            -ObservedParentProcessId $PID `
+            -ProvisionalIdentity $campaignIdentity
+        Add-CoopOwnedRuntimeProcess -Identity $campaignIdentity
+
+        Add-CoopEvent -EventType 'CampaignCaptureLaunched' -Message 'Exact campaign process launched; waiting for a qualifying ordinary field boundary.'
+        $deadlineUtc = [DateTime]::UtcNow.AddSeconds($RuntimeTimeoutSeconds)
+        $fixtureStatus = Wait-CoopFixtureRecordStatus `
+            -StatusPath $statusPath `
+            -ExpectedFixtureId $FixtureId `
+            -CampaignIdentity $campaignIdentity `
+            -DeadlineUtc $deadlineUtc
+        $fixtureEvidence = Confirm-CoopRecordedFixture `
+            -Status $fixtureStatus `
+            -ExpectedFixtureId $FixtureId `
+            -ExpectedClientHash $expectedClientHash `
+            -ExpectedSourceRevision $manifest.RepositoryRevision `
+            -ExpectedGameVersion $gameVersion
+        $runtimeOutcome = 'Pass'
+        $runtimeReason = 'One exact ordinary field-battle fixture was recorded and validated as a private run artifact.'
+        $primaryRuntimeOutcome = $runtimeOutcome
+        $primaryRuntimeReason = $runtimeReason
+    }
+    catch {
+        $statusHint = $_.Exception.Data['CoopFixtureRecordStatus']
+        if ($null -ne $statusHint) { $lastStatusHint = $statusHint }
+        $outcomeHint = [string]$_.Exception.Data['CoopRuntimeOutcome']
+        $runtimeOutcome = if ($outcomeExitCodes.ContainsKey($outcomeHint)) { $outcomeHint }
+            elseif ($_.Exception -is [System.OperationCanceledException]) { 'Cancelled' }
+            elseif ($_.Exception -is [System.TimeoutException]) { 'Timeout' }
+            else { 'AssertionFailed' }
+        $runtimeReason = $_.Exception.Message
+        $primaryRuntimeOutcome = $runtimeOutcome
+        $primaryRuntimeReason = $runtimeReason
+    }
+    finally {
+        foreach ($name in $environmentNames) {
+            [Environment]::SetEnvironmentVariable($name, $oldAutomationEnvironment[$name], 'Process')
+        }
+
+        if ($null -ne $campaignIdentity) {
+            try {
+                $null = Add-CoopOwnedDescendants -RootProcessIds @([int]$campaignIdentity.ProcessId) -DeadlineSeconds 30
+            }
+            catch {
+                if ($runtimeOutcome -eq 'Pass') {
+                    $runtimeOutcome = 'RunnerInternalError'
+                    $runtimeReason = 'Owned campaign descendant discovery failed: ' + $_.Exception.Message
+                    $runtimeSupersession = 'OwnedDescendantDiscoveryFailed'
+                }
+                else { $runtimeReason += ' Owned descendant discovery also failed: ' + $_.Exception.Message }
+            }
+            try {
+                Stop-CoopOwnedRuntimeProcesses
+            }
+            catch {
+                if ($runtimeOutcome -eq 'Pass') {
+                    $runtimeOutcome = 'RunnerInternalError'
+                    $runtimeReason = 'Exact campaign cleanup failed: ' + $_.Exception.Message
+                    $runtimeSupersession = 'CampaignCleanupFailed'
+                }
+                else { $runtimeReason += ' Exact campaign cleanup also failed: ' + $_.Exception.Message }
+            }
+            try {
+                $nativeLogInventory = Copy-CoopPidCorrelatedNativeLogs `
+                    -ProcessIdentity $campaignIdentity `
+                    -DestinationRoot (Join-Path $runRoot 'artifacts\logs\campaign\native')
+            }
+            catch {
+                if ($runtimeOutcome -eq 'Pass') {
+                    $runtimeOutcome = 'RunnerInternalError'
+                    $runtimeReason = 'PID-correlated campaign log capture failed: ' + $_.Exception.Message
+                    $runtimeSupersession = 'CampaignNativeLogCaptureFailed'
+                }
+                else { $runtimeReason += ' Campaign log capture also failed: ' + $_.Exception.Message }
+            }
+        }
+    }
+
+    $globalResultAfter = Get-CoopFileFact -Path $globalResultPath
+    $globalResultUnchanged = ($globalResultBefore.Exists -eq $globalResultAfter.Exists) -and
+        (-not $globalResultBefore.Exists -or [string]::Equals(
+            [string]$globalResultBefore.Sha256,
+            [string]$globalResultAfter.Sha256,
+            [StringComparison]::Ordinal))
+    if (-not $globalResultUnchanged) {
+        if ($runtimeOutcome -eq 'Pass') {
+            $runtimeOutcome = 'AssertionFailed'
+            $runtimeReason = 'The protected global battle_result.json changed during fixture capture.'
+            $runtimeSupersession = 'ProtectedResultChanged'
+        }
+        else { $runtimeReason += ' The protected global battle_result.json also changed.' }
+    }
+
+    $remainingOwnedProcesses = @($ownedRuntimeProcesses | Where-Object { Test-CoopLiveProcessIdentity -Identity $_ })
+    if ($remainingOwnedProcesses.Count -gt 0) {
+        if ($runtimeOutcome -ne 'RunnerInternalError') {
+            $runtimeOutcome = 'RunnerInternalError'
+            $runtimeReason = 'One or more exact owned campaign-capture processes remained after cleanup.'
+            $runtimeSupersession = 'OwnedProcessesRemaining'
+        }
+        else { $runtimeReason += ' One or more exact owned processes also remained after cleanup.' }
+    }
+
+    $report = [ordered]@{
+        Schema = 'coop-field-fixture-record-v1'
+        RunId = $RunId
+        FixtureId = $FixtureId
+        PrimaryOutcome = $primaryRuntimeOutcome
+        PrimaryReason = $primaryRuntimeReason
+        Outcome = $runtimeOutcome
+        Reason = $runtimeReason
+        OutcomeSupersession = $runtimeSupersession
+        SourceRevision = $manifest.RepositoryRevision
+        GameVersion = $gameVersion
+        ExpectedClientModuleSha256 = $expectedClientHash
+        FixtureStatus = if ($null -ne $fixtureStatus) { $fixtureStatus } else { $lastStatusHint }
+        FixtureEvidence = $fixtureEvidence
+        PrivateRawArtifact = $true
+        SanitizationReviewed = $false
+        IndependentOracleComplete = $false
+        FullBattleCompleted = $false
+        L2OrL3PassClaimed = $false
+        ResultPolicy = 'Suppress'
+        GlobalBattleResultBefore = $globalResultBefore
+        GlobalBattleResultAfter = $globalResultAfter
+        GlobalBattleResultUnchanged = $globalResultUnchanged
+        NativeLogInventory = $nativeLogInventory
+        Cleanup = $runtimeCleanupEvidence.ToArray()
+        RemainingOwnedProcesses = $remainingOwnedProcesses
+        CompletedUtc = [DateTime]::UtcNow.ToString('O')
+    }
+    Write-CoopJsonAtomic -Path $reportPath -Value $report
+    return [ordered]@{
+        PrimaryOutcome = $primaryRuntimeOutcome
+        PrimaryReason = $primaryRuntimeReason
+        Outcome = $runtimeOutcome
+        Reason = $runtimeReason
+        ArtifactPath = $reportPath
+    }
+}
+
 if (-not (Test-CoopRunId -Value $RunId)) {
     throw 'RunId must contain only ASCII letters, digits, dot, underscore, or hyphen, start with a letter/digit, and not exceed 80 characters.'
 }
@@ -2673,11 +3125,12 @@ try {
     $installedDedicatedFact = Get-CoopFileFact -Path (Join-Path $DedicatedServerRoot 'Modules\CoopSpectatorDedicated\bin\Win64_Shipping_Server\CoopSpectator.dll')
     $repositoryClientFact = Get-CoopFileFact -Path (Join-Path $repositoryRoot 'Module\CoopSpectator\bin\Win64_Shipping_Client\CoopSpectator.dll')
     $repositoryDedicatedFact = Get-CoopFileFact -Path (Join-Path $repositoryRoot 'Module\CoopSpectatorDedicated\bin\Win64_Shipping_Server\CoopSpectator.dll')
-    $selectedClientFact = if ($Command -eq 'Doctor' -or $Command -eq 'Feasibility') { $installedClientFact } else { $repositoryClientFact }
-    $selectedDedicatedFact = if ($Command -eq 'Doctor' -or $Command -eq 'Feasibility') { $installedDedicatedFact } else { $repositoryDedicatedFact }
+    $selectedClientFact = if ($Command -eq 'Doctor' -or $Command -eq 'Feasibility' -or $Command -eq 'Record') { $installedClientFact } else { $repositoryClientFact }
+    $selectedDedicatedFact = if ($Command -eq 'Doctor' -or $Command -eq 'Feasibility' -or $Command -eq 'Record') { $installedDedicatedFact } else { $repositoryDedicatedFact }
     $expectedArtifactSource = if ($Command -eq 'Doctor') { 'InstalledAndRepositoryDiagnostic' }
         elseif ($Command -eq 'CompileOnly') { 'RunOwnedCompileOnlyOutput' }
         elseif ($Command -eq 'Feasibility') { 'ExplicitInstalledRuntimeIdentity' }
+        elseif ($Command -eq 'Record') { 'ExplicitInstalledCampaignCaptureIdentity' }
         else { 'RepositorySourceContracts' }
     $manifestPortOwnership = Get-CoopPortOwnership
 
@@ -2688,9 +3141,9 @@ try {
         RunId = $RunId
         CreatedUtc = $runCreatedUtc.ToString('O')
         RequestedCommand = $Command
-        RequestedLevel = if ($Command -eq 'Doctor') { 'L0' } elseif ($Command -eq 'Feasibility') { 'Feasibility' } else { 'L1' }
-        ScenarioKind = if ($Command -eq 'Feasibility') { 'ConnectionOnlyRuntimeFoundation' } else { 'NonRuntime' }
-        Stage = if ($Command -eq 'Feasibility') { 'Milestone2B' } else { 'Milestone2A' }
+        RequestedLevel = if ($Command -eq 'Doctor') { 'L0' } elseif ($Command -eq 'Feasibility') { 'Feasibility' } elseif ($Command -eq 'Record') { 'CaptureOnly' } else { 'L1' }
+        ScenarioKind = if ($Command -eq 'Feasibility') { 'ConnectionOnlyRuntimeFoundation' } elseif ($Command -eq 'Record') { 'FieldBattleFixtureCapture' } else { 'NonRuntime' }
+        Stage = if ($Command -eq 'Feasibility') { 'Milestone2B' } elseif ($Command -eq 'Record') { 'Milestone3B' } else { 'Milestone2A' }
         MachineProfileName = $MachineProfileName
         BuildProfile = 'Release'
         ExpectedArtifactSource = $expectedArtifactSource
@@ -2706,12 +3159,13 @@ try {
         DedicatedExecutableVersion = if ($manifestDedicatedExecutable.Exists) { $manifestDedicatedExecutable.ProductVersion } else { '' }
         EffectiveFeatureFlags = [ordered]@{
             CoopCompileOnly = ($Command -eq 'CompileOnly')
-            TestAutomation = ($Command -eq 'Feasibility') -or (Test-CoopEnvironmentFlag -Name 'COOPSPECTATOR_TEST_AUTOMATION')
+            TestAutomation = ($Command -eq 'Feasibility') -or ($Command -eq 'Record') -or (Test-CoopEnvironmentFlag -Name 'COOPSPECTATOR_TEST_AUTOMATION')
+            FixtureRecord = ($Command -eq 'Record')
             VerboseDiagnostics = Test-CoopEnvironmentFlag -Name 'COOPSPECTATOR_VERBOSE_DIAGNOSTICS'
             CampaignMapPrototype = Test-CoopEnvironmentFlag -Name 'COOPSPECTATOR_CAMPAIGN_MAP_PROTOTYPE'
         }
-        ResultPolicy = if ($Command -eq 'Feasibility') { 'Suppress' } else { 'NotApplicable' }
-        CompletionMode = 'NotApplicable'
+        ResultPolicy = if ($Command -eq 'Feasibility' -or $Command -eq 'Record') { 'Suppress' } else { 'NotApplicable' }
+        CompletionMode = if ($Command -eq 'Record') { 'FixtureRecorded' } else { 'NotApplicable' }
         Roles = @([ordered]@{
             RoleType = $runnerRoleType
             RoleInstanceId = $runnerRoleInstanceId
@@ -2731,7 +3185,7 @@ try {
             Commands = if ($Command -eq 'Feasibility') { 'Run-scoped dedicated bootstrap and client-join requests with atomic acknowledgements.' } else { 'Atomic inbox and processed control records; none are issued by Milestone 2A commands.' }
             Status = 'Atomic role-instance state snapshots; retained with the run.'
             Events = 'Append-only ordered role event journal; retained with the run.'
-            Payloads = 'Exact future fixture payloads; empty in Milestone 2A.'
+            Payloads = if ($Command -eq 'Record') { 'Private exact campaign-roster fixture bytes and provenance below the selected run root.' } else { 'Exact future fixture payloads; empty in Milestone 2A.' }
             Logs = 'Per-command combined, stdout, and stderr logs; retained with the run.'
             Results = 'Aggregate and assertion reports; retained with the run.'
             Processes = 'Ownership and lock-release evidence; retained with the run.'
@@ -2748,7 +3202,7 @@ try {
     }
     Write-CoopJsonAtomic -Path $manifestPath -Value $manifest
     Update-CoopLease
-    if ($Command -eq 'Feasibility') {
+    if ($Command -eq 'Feasibility' -or $Command -eq 'Record') {
         $sharedLockRoot = Join-Path ([System.IO.Path]::GetTempPath()) 'CoopSpectator\Automation\_locks'
         $sharedRuntimePorts = [int[]]@($Port, 7777)
         $expectedSharedRuntimeResourceCount = 4 + @($sharedRuntimePorts | Sort-Object -Unique).Count
@@ -2794,6 +3248,8 @@ try {
     }
     Add-CoopEvent -EventType 'RunStarted' -Message $(if ($Command -eq 'Feasibility') {
         'Feasibility started with exact runtime ownership and ResultPolicy=Suppress.'
+    } elseif ($Command -eq 'Record') {
+        'Field fixture recording started with exact runtime ownership and ResultPolicy=Suppress.'
     } else {
         $Command + ' started; no product process launch is permitted in Milestone 2A.'
     })
@@ -2804,6 +3260,7 @@ try {
         'Contracts' { Invoke-CoopContracts }
         'CompileOnly' { Invoke-CoopCompileOnly }
         'Feasibility' { Invoke-CoopFeasibility }
+        'Record' { Invoke-CoopFixtureRecord }
     })
     $commandResult = Get-CoopSingularCommandResult -Results $commandResults -CommandName $Command
     $finalOutcome = $commandResult.Outcome
@@ -2818,7 +3275,7 @@ try {
         [string]$primaryReasonProperty.Value
     }
     else { [string]$commandResult.Reason }
-    if ($finalOutcome -ne 'Pass') {
+    if ($finalOutcome -ne 'Pass' -or $Command -eq 'Record') {
         $manifest.ReproductionDescriptorPath = Write-CoopReproductionDescriptor -Outcome $finalOutcome -Reason $finalReason
     }
 }

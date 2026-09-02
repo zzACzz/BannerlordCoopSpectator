@@ -13,10 +13,12 @@ internal static class Program
         string corePath = Path.Combine(repositoryRoot, "scripts", "CoopAutomationRunner.Core.ps1");
         string runnerPath = Path.Combine(repositoryRoot, "scripts", "Invoke-CoopTest.ps1");
         string clientLauncherPath = Path.Combine(repositoryRoot, "scripts", "Start-CoopBattleTestClient.ps1");
+        string fixtureCaptureLauncherPath = Path.Combine(repositoryRoot, "scripts", "Start-CoopFieldFixtureCapture.ps1");
         Assert(File.Exists(corePath), "Runner core helper must exist: " + corePath);
         Assert(File.Exists(runnerPath), "Aggregate runner must exist: " + runnerPath);
         Assert(File.Exists(clientLauncherPath), "Client launcher must exist: " + clientLauncherPath);
-        ValidateRunnerIntegration(runnerPath, corePath, clientLauncherPath);
+        Assert(File.Exists(fixtureCaptureLauncherPath), "Fixture capture launcher must exist: " + fixtureCaptureLauncherPath);
+        ValidateRunnerIntegration(runnerPath, corePath, clientLauncherPath, fixtureCaptureLauncherPath);
 
         string temporaryRoot = Path.Combine(
             Path.GetTempPath(),
@@ -43,11 +45,16 @@ internal static class Program
         }
     }
 
-    private static void ValidateRunnerIntegration(string runnerPath, string corePath, string clientLauncherPath)
+    private static void ValidateRunnerIntegration(
+        string runnerPath,
+        string corePath,
+        string clientLauncherPath,
+        string fixtureCaptureLauncherPath)
     {
         string source = File.ReadAllText(runnerPath);
         string coreSource = File.ReadAllText(corePath);
         string clientLauncherSource = File.ReadAllText(clientLauncherPath);
+        string fixtureCaptureLauncherSource = File.ReadAllText(fixtureCaptureLauncherPath);
         Assert(
             source.Contains(". $runnerCorePath", StringComparison.Ordinal),
             "Aggregate runner must dot-source the tested core helper.");
@@ -135,6 +142,19 @@ internal static class Program
             source.Contains("Get-CoopSingularCommandResult", StringComparison.Ordinal),
             "Aggregate command dispatch must validate a singular structured result.");
         Assert(
+            source.Contains("'Record' { Invoke-CoopFixtureRecord }", StringComparison.Ordinal) &&
+            source.Contains("FieldBattleFixtureCapture", StringComparison.Ordinal) &&
+            source.Contains("FixtureRecorded", StringComparison.Ordinal) &&
+            source.Contains("$Command -eq 'Feasibility' -or $Command -eq 'Record'", StringComparison.Ordinal),
+            "Record must be a first-class runner command with exact runtime locks and capture-only evidence semantics.");
+        Assert(
+            source.Contains("Wait-CoopFixtureRecordStatus", StringComparison.Ordinal) &&
+            source.Contains("Confirm-CoopRecordedFixture", StringComparison.Ordinal) &&
+            source.Contains("UnreviewedPrivateRunArtifact", StringComparison.Ordinal) &&
+            source.Contains("IndependentOracleComplete = $false", StringComparison.Ordinal) &&
+            source.Contains("L2OrL3PassClaimed = $false", StringComparison.Ordinal),
+            "Record must validate exact fixture bytes while retaining private, non-oracle, non-L2/L3 evidence boundaries.");
+        Assert(
             source.Contains("-GameType 'TeamDeathmatch'", StringComparison.Ordinal) &&
             !source.Contains("-UniqueMapId 'mp_tdm_map_001'", StringComparison.Ordinal),
             "The aggregate runner must keep the native map name out of the optional UniqueMapId filter.");
@@ -179,6 +199,63 @@ internal static class Program
         Assert(
             clientLauncherSource.IndexOf("Write-Host", clientFinalArtifact, StringComparison.Ordinal) < 0,
             "No fallible user-output operation may follow the atomic final client handoff artifact.");
+
+        int fixtureProcessStart = fixtureCaptureLauncherSource.IndexOf(
+            "$process = [System.Diagnostics.Process]::Start($startInfo)",
+            StringComparison.Ordinal);
+        int fixtureProvisionalIdentity = fixtureCaptureLauncherSource.IndexOf(
+            "$provisionalIdentity = New-CoopProvisionalProcessIdentity",
+            fixtureProcessStart,
+            StringComparison.Ordinal);
+        int fixtureProvisionalArtifact = fixtureCaptureLauncherSource.IndexOf(
+            "Write-JsonAtomic -Path $provisionalLaunchArtifactPath",
+            fixtureProvisionalIdentity,
+            StringComparison.Ordinal);
+        int fixtureExactObservation = fixtureCaptureLauncherSource.IndexOf(
+            "$processObservation = Resolve-CoopProcessObservation",
+            fixtureProvisionalArtifact,
+            StringComparison.Ordinal);
+        int fixtureFinalArtifact = fixtureCaptureLauncherSource.IndexOf(
+            "Write-JsonAtomic -Path $launchArtifactPath",
+            fixtureExactObservation,
+            StringComparison.Ordinal);
+        int fixtureHandoffPublished = fixtureCaptureLauncherSource.IndexOf(
+            "$finalLaunchArtifactPublished = $true",
+            fixtureFinalArtifact,
+            StringComparison.Ordinal);
+        Assert(
+            fixtureProcessStart >= 0 &&
+            fixtureProvisionalIdentity > fixtureProcessStart &&
+            fixtureProvisionalArtifact > fixtureProvisionalIdentity &&
+            fixtureExactObservation > fixtureProvisionalArtifact &&
+            fixtureFinalArtifact > fixtureExactObservation &&
+            fixtureHandoffPublished > fixtureFinalArtifact,
+            "Fixture capture launch must publish provisional ownership and exact identity before the final handoff artifact.");
+        Assert(
+            fixtureCaptureLauncherSource.Contains(
+                "$gameArguments = \"/singleplayer $modulesArgument\"",
+                StringComparison.Ordinal) &&
+            fixtureCaptureLauncherSource.Contains(
+                "_MODULES_*Native*SandBoxCore*CustomBattle*Sandbox*StoryMode*CoopSpectator*_MODULES_",
+                StringComparison.Ordinal) &&
+            fixtureCaptureLauncherSource.Contains("-ExpectedParentProcessId $PID", StringComparison.Ordinal) &&
+            fixtureCaptureLauncherSource.Contains("Schema = 'coop-campaign-capture-launch-v1'", StringComparison.Ordinal),
+            "Fixture capture must use the exact installed 1.4.8 singleplayer argument shape and runner-owned process identity.");
+        Assert(
+            fixtureCaptureLauncherSource.Contains("COOPSPECTATOR_AUTOMATION_FIXTURE_RECORD", StringComparison.Ordinal) &&
+            fixtureCaptureLauncherSource.Contains("COOPSPECTATOR_AUTOMATION_FIXTURE_ID", StringComparison.Ordinal) &&
+            fixtureCaptureLauncherSource.Contains("COOPSPECTATOR_AUTOMATION_SOURCE_REVISION", StringComparison.Ordinal) &&
+            fixtureCaptureLauncherSource.Contains("COOPSPECTATOR_AUTOMATION_GAME_VERSION", StringComparison.Ordinal) &&
+            fixtureCaptureLauncherSource.Contains("$startInfo.EnvironmentVariables.Remove($serverPasswordVariableName)", StringComparison.Ordinal) &&
+            fixtureCaptureLauncherSource.Contains("RunTokenPersisted = $false", StringComparison.Ordinal) &&
+            fixtureCaptureLauncherSource.Contains("CredentialsPersisted = $false", StringComparison.Ordinal) &&
+            fixtureCaptureLauncherSource.Contains("UiAutomationUsed = $false", StringComparison.Ordinal),
+            "Fixture capture must supply only the explicit recording environment and persist no token, credential, or UI automation claim.");
+        Assert(
+            fixtureCaptureLauncherSource.Contains("if ($null -ne $process -and -not $finalLaunchArtifactPublished)", StringComparison.Ordinal) &&
+            fixtureCaptureLauncherSource.Contains("Stop-CoopExactProcessIdentityCore", StringComparison.Ordinal) &&
+            fixtureCaptureLauncherSource.Contains("$wrapped.Data['CoopRuntimeOutcome'] = 'RunnerInternalError'", StringComparison.Ordinal),
+            "A post-start fixture-capture handoff failure must remain internal and clean the exact provisional campaign process.");
 
         int clientHandoffValidation = source.IndexOf("$clientIdentity = Assert-CoopClientLaunchArtifact", StringComparison.Ordinal);
         int clientOwnershipRegistration = source.IndexOf("Add-CoopOwnedRuntimeProcess -Identity $clientIdentity", clientHandoffValidation, StringComparison.Ordinal);
