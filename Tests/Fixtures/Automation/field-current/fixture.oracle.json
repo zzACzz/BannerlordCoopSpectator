@@ -1,0 +1,75 @@
+{
+  "SchemaVersion": 1,
+  "FixtureId": "field-current-sanitized-v1",
+  "OracleBasis": "IndependentReadOnlyJsonAuditV1",
+  "RecorderQualificationUsedAsOracle": false,
+  "SourceReview": {
+    "PrivatePayloadLength": 451762,
+    "PrivatePayloadSha256": "ECF29661E44B64C1AEE77EC2B44E61F63926287A3A05A9BFD6DC545EC073B9C7",
+    "RawPayloadCommitted": false
+  },
+  "Payload": {
+    "File": "battle_roster.sanitized.json",
+    "Length": 259744,
+    "Sha256": "B47D7AF7FA057C36CA8EF759A6D597C00007158A22E3A556AC57A1299579D49D"
+  },
+  "Expected": {
+    "ScenarioKind": "FieldBattle",
+    "CampaignBattleType": "FieldBattle",
+    "IsSiegeBattle": false,
+    "SideCount": 2,
+    "PartyCount": 3,
+    "PositiveStackCount": 47,
+    "PositiveUnitCount": 74,
+    "WoundedUnitCount": 0,
+    "UnmountedStackCount": 30,
+    "MountedStackCount": 17,
+    "RangedStackCount": 11,
+    "HeroStackCount": 4,
+    "PlayerCharacterStackCount": 1,
+    "PlayerClanHeroStackCount": 3,
+    "TopLevelTroopIdCount": 20,
+    "TopLevelDistinctTroopIdCount": 12,
+    "CraftedWeaponCount": 0,
+    "FrozenCaptainEntryCount": 0,
+    "FrozenCaptainCombatGroupCount": 0,
+    "ReferentialFailureCount": 0,
+    "Sides": [
+      {
+        "IsPlayerSide": true,
+        "PartyCount": 1,
+        "PositiveStackCount": 20,
+        "PositiveUnitCount": 30,
+        "MissionReadyEntryCount": 30
+      },
+      {
+        "IsPlayerSide": false,
+        "PartyCount": 2,
+        "PositiveStackCount": 27,
+        "PositiveUnitCount": 44,
+        "MissionReadyEntryCount": 44
+      }
+    ],
+    "Equipment": {
+      "AnyWeaponStackCount": 47,
+      "WeaponSlot0StackCount": 47,
+      "WeaponSlot1StackCount": 41,
+      "WeaponSlot2StackCount": 32,
+      "WeaponSlot3StackCount": 9,
+      "HeadArmorStackCount": 44,
+      "BodyArmorStackCount": 47,
+      "LegArmorStackCount": 47,
+      "GlovesStackCount": 40,
+      "CapeStackCount": 32,
+      "HorseStackCount": 17,
+      "HarnessStackCount": 17,
+      "MountedWithoutHorseCount": 0,
+      "UnmountedWithHorseCount": 0
+    }
+  },
+  "EvidenceBoundary": {
+    "BattleStage": "PreMissionCampaignRoster",
+    "FullBattleCompleted": false,
+    "L2OrL3PassClaimed": false
+  }
+}
