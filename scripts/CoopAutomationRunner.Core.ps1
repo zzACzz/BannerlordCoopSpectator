@@ -419,6 +419,54 @@ function Get-CoopFileSha256 {
     }
 }
 
+function Get-CoopSharedRuntimeResourceIdsCore {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$AutomationRoot,
+        [Parameter(Mandatory = $true)][string]$GameRoot,
+        [Parameter(Mandatory = $true)][string]$DedicatedServerRoot,
+        [Parameter(Mandatory = $true)][string]$ComputerName,
+        [Parameter(Mandatory = $true)][string]$MachineProfileName,
+        [Parameter(Mandatory = $true)][int[]]$UdpPorts
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ComputerName) -or
+        [string]::IsNullOrWhiteSpace($MachineProfileName)) {
+        throw 'Shared runtime lock machine and profile identities must be non-empty.'
+    }
+
+    $uniquePorts = @($UdpPorts | Sort-Object -Unique)
+    if ($uniquePorts.Count -eq 0 -or @($uniquePorts | Where-Object { $_ -lt 1 -or $_ -gt 65535 }).Count -ne 0) {
+        throw 'Shared runtime lock UDP ports must contain at least one valid port.'
+    }
+
+    $resourceIds = New-Object 'System.Collections.Generic.List[string]'
+    $resourceIds.Add([string]::Concat(
+        'bridge-root:',
+        ([System.IO.Path]::GetFullPath($AutomationRoot)).ToUpperInvariant())) | Out-Null
+    $resourceIds.Add([string]::Concat(
+        'game-install:',
+        ([System.IO.Path]::GetFullPath($GameRoot)).ToUpperInvariant())) | Out-Null
+    $resourceIds.Add([string]::Concat(
+        'dedicated-install:',
+        ([System.IO.Path]::GetFullPath($DedicatedServerRoot)).ToUpperInvariant())) | Out-Null
+    $resourceIds.Add([string]::Concat(
+        'machine-profile:',
+        $ComputerName.ToUpperInvariant(),
+        ':',
+        $MachineProfileName.ToUpperInvariant())) | Out-Null
+    foreach ($udpPort in $uniquePorts) {
+        $resourceIds.Add([string]::Concat('udp-port:', [string]$udpPort)) | Out-Null
+    }
+
+    $canonicalIds = @($resourceIds.ToArray() | Sort-Object -Unique)
+    $expectedCount = 4 + $uniquePorts.Count
+    if ($canonicalIds.Count -ne $expectedCount) {
+        throw "Shared runtime resource construction produced $($canonicalIds.Count) ids; expected $expectedCount."
+    }
+    return $canonicalIds
+}
+
 function Enter-CoopSharedRuntimeLocksCore {
     [CmdletBinding()]
     param(

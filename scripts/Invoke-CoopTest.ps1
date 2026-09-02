@@ -2750,16 +2750,22 @@ try {
     Update-CoopLease
     if ($Command -eq 'Feasibility') {
         $sharedLockRoot = Join-Path ([System.IO.Path]::GetTempPath()) 'CoopSpectator\Automation\_locks'
+        $sharedRuntimePorts = [int[]]@($Port, 7777)
+        $expectedSharedRuntimeResourceCount = 4 + @($sharedRuntimePorts | Sort-Object -Unique).Count
+        $sharedRuntimeResourceIds = @(Get-CoopSharedRuntimeResourceIdsCore `
+            -AutomationRoot ([System.IO.Path]::GetDirectoryName($runRoot)) `
+            -GameRoot $GameRoot `
+            -DedicatedServerRoot $DedicatedServerRoot `
+            -ComputerName $env:COMPUTERNAME `
+            -MachineProfileName $MachineProfileName `
+            -UdpPorts $sharedRuntimePorts)
+        if ($sharedRuntimeResourceIds.Count -ne $expectedSharedRuntimeResourceCount) {
+            throw "Shared runtime resource construction produced $($sharedRuntimeResourceIds.Count) ids; expected $expectedSharedRuntimeResourceCount."
+        }
         try {
             $sharedRuntimeLockSet = Enter-CoopSharedRuntimeLocksCore `
                 -LockRoot $sharedLockRoot `
-                -ResourceIds @(
-                    'bridge-root:' + ([System.IO.Path]::GetDirectoryName($runRoot)).ToUpperInvariant(),
-                    'game-install:' + ([System.IO.Path]::GetFullPath($GameRoot)).ToUpperInvariant(),
-                    'dedicated-install:' + ([System.IO.Path]::GetFullPath($DedicatedServerRoot)).ToUpperInvariant(),
-                    'machine-profile:' + $env:COMPUTERNAME.ToUpperInvariant() + ':' + $MachineProfileName.ToUpperInvariant(),
-                    'udp-port:' + $Port,
-                    'udp-port:7777') `
+                -ResourceIds $sharedRuntimeResourceIds `
                 -RunId $RunId `
                 -OwnerProcessId $PID `
                 -OwnerProcessStartUtc $runnerProcessStartUtc
@@ -2770,6 +2776,14 @@ try {
                 $_.Exception)
             $blocked.Data['CoopRuntimeOutcome'] = 'EnvironmentBlocked'
             throw $blocked
+        }
+        $acquiredSharedRuntimeResourceIds = @(
+            $sharedRuntimeLockSet.Records | ForEach-Object { [string]$_.ResourceId })
+        if ($acquiredSharedRuntimeResourceIds.Count -ne $expectedSharedRuntimeResourceCount -or
+            @(Compare-Object $sharedRuntimeResourceIds $acquiredSharedRuntimeResourceIds).Count -ne 0) {
+            $unexpectedLockRelease = @(Exit-CoopSharedRuntimeLocksCore -LockSet $sharedRuntimeLockSet)
+            $sharedRuntimeLockSet = $null
+            throw 'Shared runtime lock acquisition did not retain every exact requested resource id.'
         }
         Write-CoopJsonAtomic -Path (Join-Path $runRoot 'artifacts\processes\shared-runtime-locks.json') -Value ([ordered]@{
             Schema = 'coop-shared-runtime-locks-v1'

@@ -62,9 +62,11 @@ internal static class Program
             coreSource.Contains("'NoProgress'", StringComparison.Ordinal),
             "The aggregate runner must classify missing liveness and missing progress separately.");
         Assert(
+            source.Contains("Get-CoopSharedRuntimeResourceIdsCore", StringComparison.Ordinal) &&
             source.Contains("Enter-CoopSharedRuntimeLocksCore", StringComparison.Ordinal) &&
+            source.Contains("expectedSharedRuntimeResourceCount", StringComparison.Ordinal) &&
             source.Contains("shared-runtime-lock-release.json", StringComparison.Ordinal),
-            "Feasibility must own and verify canonical shared runtime locks.");
+            "Feasibility must construct, acquire, and verify every canonical shared runtime lock.");
         Assert(
             source.Contains("coop-runtime-recovery-v2", StringComparison.Ordinal) &&
             source.Contains("RejectedIdentities", StringComparison.Ordinal) &&
@@ -1088,31 +1090,63 @@ Assert-True `
     'A stale role heartbeat must take precedence as NoHeartbeat.'
 
 $lockFixtureRoot = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) ('locks-' + $PID)
+$resourceFixtureRoot = Join-Path $lockFixtureRoot 'resource-fixture'
+$productionResourceIds = @(Get-CoopSharedRuntimeResourceIdsCore `
+    -AutomationRoot (Join-Path $resourceFixtureRoot 'automation') `
+    -GameRoot (Join-Path $resourceFixtureRoot 'game') `
+    -DedicatedServerRoot (Join-Path $resourceFixtureRoot 'dedicated') `
+    -ComputerName 'fixture-machine' `
+    -MachineProfileName 'fixture-profile' `
+    -UdpPorts ([int[]]@(7210, 7777)))
+$expectedProductionResourceIds = @(@(
+        [string]::Concat('bridge-root:', ([System.IO.Path]::GetFullPath((Join-Path $resourceFixtureRoot 'automation'))).ToUpperInvariant()),
+        [string]::Concat('game-install:', ([System.IO.Path]::GetFullPath((Join-Path $resourceFixtureRoot 'game'))).ToUpperInvariant()),
+        [string]::Concat('dedicated-install:', ([System.IO.Path]::GetFullPath((Join-Path $resourceFixtureRoot 'dedicated'))).ToUpperInvariant()),
+        'machine-profile:FIXTURE-MACHINE:FIXTURE-PROFILE',
+        'udp-port:7210',
+        'udp-port:7777') | Sort-Object)
+Assert-True `
+    ($productionResourceIds.Count -eq 6 -and
+        @(Compare-Object $productionResourceIds $expectedProductionResourceIds).Count -eq 0) `
+    'The production resource-id builder must return six distinct canonical resources.'
+$deduplicatedPortResourceIds = @(Get-CoopSharedRuntimeResourceIdsCore `
+    -AutomationRoot (Join-Path $resourceFixtureRoot 'automation') `
+    -GameRoot (Join-Path $resourceFixtureRoot 'game') `
+    -DedicatedServerRoot (Join-Path $resourceFixtureRoot 'dedicated') `
+    -ComputerName 'fixture-machine' `
+    -MachineProfileName 'fixture-profile' `
+    -UdpPorts ([int[]]@(7777, 7777)))
+Assert-True `
+    ($deduplicatedPortResourceIds.Count -eq 5 -and
+        @($deduplicatedPortResourceIds | Where-Object { $_ -eq 'udp-port:7777' }).Count -eq 1) `
+    'The production resource-id builder must deduplicate an overlapping requested/default UDP port.'
 $lockSet = Enter-CoopSharedRuntimeLocksCore `
     -LockRoot $lockFixtureRoot `
-    -ResourceIds @('udp-port:7777', 'bridge-root:fixture', 'udp-port:7210') `
+    -ResourceIds $productionResourceIds `
     -RunId 'runner-contract' `
     -OwnerProcessId $PID `
     -OwnerProcessStartUtc (Get-Process -Id $PID).StartTime.ToUniversalTime()
 Assert-True `
-    ($lockSet.Records.Count -eq 3 -and
-        (($lockSet.Records | ForEach-Object { $_.ResourceId }) -join ',') -eq
-            'bridge-root:fixture,udp-port:7210,udp-port:7777') `
+    ($lockSet.Records.Count -eq 6 -and
+        @(Compare-Object $productionResourceIds @($lockSet.Records | ForEach-Object { $_.ResourceId })).Count -eq 0) `
     'Shared lock acquisition must publish the canonical sorted resource order.'
-$lockConflictRejected = $false
-try {
-    $null = Enter-CoopSharedRuntimeLocksCore `
-        -LockRoot $lockFixtureRoot `
-        -ResourceIds @('udp-port:7210') `
-        -RunId 'other-run' `
-        -OwnerProcessId $PID `
-        -OwnerProcessStartUtc (Get-Process -Id $PID).StartTime.ToUniversalTime()
+foreach ($lockedResourceId in $productionResourceIds) {
+    $lockConflictRejected = $false
+    try {
+        $null = Enter-CoopSharedRuntimeLocksCore `
+            -LockRoot $lockFixtureRoot `
+            -ResourceIds @($lockedResourceId) `
+            -RunId 'other-run' `
+            -OwnerProcessId $PID `
+            -OwnerProcessStartUtc (Get-Process -Id $PID).StartTime.ToUniversalTime()
+    }
+    catch { $lockConflictRejected = $true }
+    Assert-True $lockConflictRejected "A collision on $lockedResourceId must fail closed."
 }
-catch { $lockConflictRejected = $true }
-Assert-True $lockConflictRejected 'A shared runtime resource collision must fail closed.'
 $lockRelease = @(Exit-CoopSharedRuntimeLocksCore -LockSet $lockSet)
 Assert-True `
-    (@($lockRelease | Where-Object { -not $_.ReleasedAndReacquired }).Count -eq 0) `
+    ($lockRelease.Count -eq 6 -and
+        @($lockRelease | Where-Object { -not $_.ReleasedAndReacquired }).Count -eq 0) `
     'Every shared runtime lock must be verified released.'
 
 $allowedCrashPath = [System.IO.Path]::GetFullPath((Join-Path $lockFixtureRoot 'CrashUploader.Publish.exe'))
