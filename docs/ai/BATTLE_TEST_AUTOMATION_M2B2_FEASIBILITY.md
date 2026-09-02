@@ -371,16 +371,16 @@ The two formerly blocked essential Milestone 1 rows are now promoted:
 
 Together with the six previously confirmed rows, every essential Milestone 1 capability is now `Confirmed`.
 
-### 17.3 Milestone 2B remains open
+### 17.3 Milestone 2B safety-closure source status
 
-The successful connection run does not satisfy the complete Milestone 2B deliverable and exit-criteria set. A lowest-level source/test audit found these residual gaps:
+The successful connection run did not satisfy the complete Milestone 2B deliverable and exit-criteria set. Milestone 2B.3A subsequently implemented the audited safety surface. The remaining boundary is now clean publication, staging, and live confirmation rather than missing source:
 
-| Requirement area | Current evidence | Closure gap |
+| Requirement area | Milestone 2B.3A source/contract evidence | Remaining live gate |
 |---|---|---|
-| PROC-004/PROC-007 role liveness and progress | Runner lease heartbeat and bounded waits exist | Dedicated/client role status does not yet publish the full heartbeat, progress, state-entry, revision, and structured-error projection; the runner cannot distinguish `NoHeartbeat` from `NoProgress` as required |
-| RUN-008 shared runtime locks | Fresh run-root lock, preflight port checks, staging mutexes, and clean postflight exist | The live runner does not acquire exclusive machine locks for the consumed game installation, dedicated installation, shared bridge/profile root, and fixed port set; a preflight port check alone is race-prone |
-| PROC-009 cancellation and runner failure | Exact cleanup paths, a synthetic post-start failure cleanup contract, and successful recovery of abandoned live attempts exist | No automated aggregate-runner `Ctrl+C` or explicit-cancellation contract proves terminal `Cancelled`, stop-scheduling behavior, cleanup, and retained recovery evidence |
-| PROC-005 `Recover` contract set | Read-only inspection/preview, fail-closed identity checks, zero-process apply, and real abandoned-run recovery are evidenced | Automated contracts do not yet cover the full read-only, active-lock refusal, exact target preview, immediate revalidation, live action, report, incomplete-recovery, and verified-lock-release matrix |
-| PROC-008 crash/modal/hang evidence | Crash outcome/reason vocabulary and crash-reporter preflight inventory exist | No owned crash-reporter/modal correlation path, structured `FatalAutomationFailure`, or guaranteed `crash.json`/`hang.json` evidence path and contract is implemented |
+| PROC-004/PROC-007 role liveness and progress | Schema-2 role projection includes heartbeat, progress, state entry/revision, monotonic elapsed values, authoritative source, and structured error; focused tests distinguish `NoHeartbeat` and `NoProgress` | Load the clean staged client/dedicated binaries and retain live heartbeat/progress evidence through connection and cleanup |
+| RUN-008 shared runtime locks | Canonical sorted locks cover game/dedicated roots, bridge root, machine profile, and ports; conflict and release probes are contract-tested | Confirm acquisition/release artifacts in a clean live `Feasibility` run |
+| PROC-009 cancellation and runner failure | Real isolated console signals passed in Windows PowerShell 5.1 and 7.6.4; exact explicit `Cancel` passed against a synthetic active runner | No new game run is required solely for cancellation; terminal live cancellation may be added only through separately approved non-destructive fault injection |
+| PROC-005 `Recover` contract set | Read-only active-run preview, active-lock refusal, exact process cleanup, PID-reuse rejection, completed-run preview/apply, `recovery.json`, and no-run-root-deletion evidence pass | Reconfirm recovery only if the next live run is interrupted; do not induce interruption merely to repeat the contract |
+| PROC-008 crash/modal/hang evidence | Exact path plus owned-tree/command-line-PID correlation, exact cleanup promotion, `FatalAutomationFailure`, `CrashReporterDetected`, `crash.json`, and `hang.json` paths are implemented and source/contract-verified | A clean passing run must produce neither failure artifact; real fault capture remains pending an approved fault-injection run or an organic failure |
 
-The next implementation slice must close these battle-type-independent runtime-safety gaps before Milestone 3 begins. No additional connection rerun is required merely to repeat this passing evidence; later runtime execution should target the newly implemented safety contracts.
+The source/contract implementation and evidence are detailed in [BATTLE_TEST_AUTOMATION_M2B3_SAFETY_CLOSURE.md](BATTLE_TEST_AUTOMATION_M2B3_SAFETY_CLOSURE.md). Milestone 3 remains blocked until the clean-published safety binaries complete their staging and live confirmation gate.

@@ -1,7 +1,8 @@
 # Runtime Flows
 
 Last source verification: **2026-08-28**
-Last automation-control source/runtime verification: **2026-09-01**
+Last automation-control source verification: **2026-09-02**
+Last automation-control live verification: **2026-09-01**
 
 ## Runtime state machines
 
@@ -76,7 +77,7 @@ fresh RunId
 
 `Doctor` inspects environment, versions/hashes, Git/EOL policy, selected dependencies, ports, writable roots, Steam, and the named version profile. `Contracts` requires the reviewed manifest to match every discovered test project and runs all 22 while preserving per-project output. `CompileOnly` inventories installed module trees, builds the two projects independently below the run root, then proves the installed inventories are unchanged. The historical Milestone 2A aggregate contained 20 projects; later runtime-safety and runner-control contracts extend the current inventory.
 
-No branch in this flow launches a product executable, enables the module automation profile, stages a DLL, joins a server, opens a campaign/mission, advances `CoopBattlePhaseRuntimeState`, or writes a battle result. The separate Milestone 2B connection flow is now live-proven; its remaining work is the runner-safety closure for role liveness/progress, shared locks, cancellation/recovery contracts, and crash/hang evidence.
+No branch in this flow launches a product executable, enables the module automation profile, stages a DLL, joins a server, opens a campaign/mission, advances `CoopBattlePhaseRuntimeState`, or writes a battle result. The separate Milestone 2B connection flow is live-proven, and Milestone 2B.3A now implements its runner-safety closure in source and contracts. Clean publication, controlled staging, and live failure-oriented verification still precede campaign-fixture work.
 
 ### Milestone 2B.1 connectivity-feasibility intent
 
@@ -113,7 +114,7 @@ fresh RunId + result policy Suppress
   -> prove global battle_result.json unchanged
 ```
 
-`SubModule.OnApplicationTick` pumps `CoopLobbyAutomationController` on the main thread. The controller writes status only when the state or failure details change. A request may expire before native join starts; after the native task starts, only the external runner may time out and clean up its exactly owned process. A timeout report retains the last run/token-validated non-terminal status with `IsTerminal=false`; it never fabricates `Connected`.
+`SubModule.OnApplicationTick` pumps `CoopLobbyAutomationController` on the main thread, and the existing dedicated application tick pumps the dedicated control bridge. Under the explicit automation profile, both roles publish schema-2 health at most once per second unless state changes: UTC heartbeat/progress/state-entry fields, state revision, monotonic elapsed/progress ages, authoritative source, last structured error, and declared capabilities. The runner validates exact role identity and classifies a stale heartbeat as `NoHeartbeat` separately from stalled progress as `NoProgress`. A request may expire before native join starts; after the native task starts, only the external runner may time out and clean up its exactly owned process. A timeout report retains the last run/token-validated non-terminal status with `IsTerminal=false`; it never fabricates `Connected`.
 
 The launcher and client module do not issue `start_game`. Only the external runner may authorize the minimum standard server bootstrap, and only after `Suppress`, dedicated loaded-hash validation, and an authoritative readiness acknowledgement from the exact dedicated role. It publishes a fixed structured request rather than an arbitrary console line. The dedicated main tick invokes the native command path and must publish exact state-backed acknowledgements before the runner begins the UDP deadline. Successful process creation first establishes provisional cleanup ownership; bounded identity enrichment then resolves and validates the exact requested executable even when an immediate `Process.Path` read is null.
 
@@ -121,7 +122,7 @@ Clean run `m2e-live-r1-01` runtime-confirmed the staged dedicated/client hashes,
 
 Clean run `m2e1-live-r1-01` selected the exact server and traversed the real native path through `RequestJoinCustomGame(...)`, `GameNetwork.StartMultiplayerOnClient(...)`, loopback rewrite, `InCustomGame`, `Join game successful`, and server `CreatePlayer`, but remained at non-terminal `JoinAccepted`. Corrections `d1af692` and `3fdcda3` moved notification to the actual GameNetwork patch and retained last-valid timeout evidence. Clean published compile `m2e1-handoff-pub-compile-20260901-01` and controlled client-only transaction `m2e1-handoff-stage-r1` installed corrected client SHA-256 `7CC2D759806D2F02D8BEBA15BCBC01EF61DDE4975004728F3D7E6C8332977E97`. Clean run `m2e1-handoff-live-r1-01` then traversed the same flow with that loaded identity, published `NetworkHandoff`, reached terminal `Connected`, returned `Pass`, and completed exact graceful cleanup. The bootstrap opens no campaign fixture, advances no cooperative battle phase, consumes no result, and creates no L2/L3 evidence claim.
 
-The flow still lacks the complete Milestone 2B failure projection. Dedicated and client status must gain independent heartbeat and progress timestamps, state-entry/revision/error fields, and the runner must classify `NoHeartbeat` separately from `NoProgress`. The same runner boundary must acquire shared-resource runtime locks, turn aggregate cancellation into terminal `Cancelled` plus cleanup/recovery evidence, exercise the full `Recover` action matrix, and correlate owned crash/modal/hang evidence before fixture capture begins.
+Milestone 2B.3A completes that failure projection in source and contracts. Before product launch, the aggregate acquires canonical locks for the bridge root, game and dedicated installations, machine profile, and requested/default UDP ports. `Ctrl+C` or exact-run `Cancel` publishes a token-bound cancellation request, reaches terminal `Cancelled`, performs exact cleanup, and records release evidence. `Recover` remains preview-only unless explicitly applied, revalidates run identity, capabilities, process start time, and live locks before any action, never deletes the run root, and publishes schema-v2 recovery evidence. Owned helper processes and structured fatal/hang evidence are correlated by exact path plus owned ancestry or command-line PID rather than process name alone. These paths still require clean publication, staging, and live verification before fixture capture begins.
 
 ## Flow 1: campaign encounter capture
 

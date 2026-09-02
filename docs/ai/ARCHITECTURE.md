@@ -1,7 +1,8 @@
 # Architecture
 
 Last source verification: **2026-08-28**
-Last automation-control source/runtime verification: **2026-09-01**
+Last automation-control source verification: **2026-09-02**
+Last automation-control live verification: **2026-09-01**
 
 ## System objective
 
@@ -232,15 +233,15 @@ The initial battle-test client-control bridge is deliberately separate from prod
 
 Milestone 2A adds an isolated non-runtime control plane below `%TEMP%\CoopSpectator\Automation\<RunId>`. It does not replace any campaign, dedicated, mission-network, battle-phase, spawn, result, or writeback authority.
 
-`scripts/Invoke-CoopTest.ps1` is the only current general runner entry point. For non-runtime `Doctor`, `Contracts`, and `CompileOnly`, and source-prepared runtime `Feasibility`, `Inspect`, and `Recover`, it owns:
+`scripts/Invoke-CoopTest.ps1` is the only current general runner entry point. For non-runtime `Doctor`, `Contracts`, and `CompileOnly`, source-prepared runtime `Feasibility`, `Inspect`, and `Recover`, and exact-run `Cancel`, it owns:
 
 - a fresh exact run root and exclusive runner lock;
-- manifest schema 1 and protocol 1.0;
+- manifest schema 1, protocol 1.1 capability gates, and backward-readable protocol 1.0 requests;
 - a random nonce whose SHA-256 fingerprint, never plaintext, is persisted;
 - the `Runner/runner-01` role instance, process identity, capabilities, lease/heartbeat, atomic status, and ordered events;
 - categorized artifacts, assertion records, stable terminal outcomes, and non-pass reproduction metadata.
 
-`CoopAutomationRunContract` defines the cross-role identity and compatibility model, while `CoopAutomationProtocolFileIO` defines the verified local same-volume file semantics. The client-join request uses schema 3 / protocol 1.0 with exact `Runner/runner-01 -> MultiplayerClient/multiplayer-client-01` identity and explicit native platform-login evidence.
+`CoopAutomationRunContract` defines the cross-role identity and compatibility model, while `CoopAutomationProtocolFileIO` defines the verified local same-volume file semantics. Protocol 1.1 adds explicit `RoleHealthV1`, `CancellationV1`, `RecoveryV2`, and `FailureEvidenceV1` capability negotiation without reinterpreting historical 1.0 payloads. The client-join request retains schema 3 compatibility with exact `Runner/runner-01 -> MultiplayerClient/multiplayer-client-01` identity and explicit native platform-login evidence.
 
 Milestone 2B.1 adds `CoopAutomationRuntimeContract` and `CoopAutomationRuntimeBridge`. An explicitly enabled role must validate the exact run root, token, expected loaded assembly SHA-256, and `Suppress` result policy before publishing `ModuleReady`. The aggregate runner records a local server only after verifying that the requested UDP endpoint belongs to the exact dedicated process or its descendant. The client then revalidates a token-bound run-scoped owner record, live PID/path/start time, and UDP endpoint instead of trusting or mutating the production host marker.
 
@@ -256,7 +257,7 @@ Clean corrected-selection run `m2e1-live-r1-01` selected the exact run-owned ser
 
 The external aggregate remains responsible for evidence and cleanup. The runner preserves terminal client status through thrown wait failures and a validated cleanup fallback; after `3fdcda3`, it also preserves the last validated non-terminal status on external timeout while retaining the timeout outcome. It inventories exact client-PID native logs separately from dedicated logs before cleanup completes. Neither evidence correction changes native login authority or campaign/battle authority.
 
-The connection architecture is now proven, but the Milestone 2B runner architecture is not complete. Current role status files do not implement the full heartbeat/progress/state-revision projection or distinct `NoHeartbeat`/`NoProgress` classification. The aggregate also lacks exclusive shared-resource runtime locks, tested aggregate cancellation, a complete automated recovery-contract matrix, and owned crash/modal/hang evidence publication. These are runner-safety responsibilities and must be closed before campaign-fixture work; they do not belong in any battle adapter.
+Milestone 2B.3A implements the remaining runner-safety boundary in source and contracts: dedicated/client heartbeat and progress projection, monotonic health timing, distinct `NoHeartbeat`/`NoProgress`, canonical shared-resource locks, exact aggregate cancellation, `RecoveryV2`, and owned structured crash/modal/hang evidence. These mechanisms reuse the existing client and dedicated application ticks, remain automation-profile gated, and add no battle adapter. Clean publication, staging, and a live failure-oriented verification remain required before the Milestone 2B gate can be closed and campaign-fixture work can begin. See [BATTLE_TEST_AUTOMATION_M2B3_SAFETY_CLOSURE.md](BATTLE_TEST_AUTOMATION_M2B3_SAFETY_CLOSURE.md).
 
 The compile-only build plane is separate from both installed modules and repository module output folders. `Directory.Build.props` redirects all build/package state below the run root only when `CoopCompileOnly=true`; both main project files independently suppress their deployment targets in that mode. Normal developer builds retain their historical deployment behavior because the property defaults to false.
 
