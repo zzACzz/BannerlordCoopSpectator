@@ -297,6 +297,8 @@ This path is disabled by default, is independent of battle type, and stops at ne
 - `Infrastructure/Automation/CoopAutomationProtocolFileIO.cs`: strict atomic JSON, bounded shared reads, append-safe JSONL, and same-volume inbox processing.
 - `Infrastructure/Automation/CoopAutomationRuntimeContract.cs`: strict runtime profile, loaded-role identity, `Suppress` result policy, and run-scoped owned-host validation.
 - `Infrastructure/Automation/CoopAutomationRuntimeBridge.cs`: loaded assembly hashing, role status publication, result-policy resolution, and exact live owned-host confirmation.
+- `Infrastructure/Automation/CoopAutomationFixtureContract.cs`: schema-1 exact campaign-roster fixture metadata, ordinary SCN-001 admission, immutable byte/hash/provenance validation, stable rejection reasons, and run-root path containment.
+- `Infrastructure/Automation/CoopAutomationFixtureRecorder.cs`: separately opted-in post-write `battle_roster.json` byte capture, loaded-module identity check, immutable run-scoped payload/metadata/status publication, and disabled-mode no-I/O boundary.
 - `DedicatedServer/Automation/CoopAutomationDedicatedControlContract.cs`: fixed schema-1 dedicated ready/request/status identities, bounded `ConnectionFeasibilityV1` profile, request validation, and exact seven-acknowledgement terminal validation.
 - `DedicatedServer/Automation/CoopAutomationDedicatedControlBridge.cs`: default-off binding to `InitialListedGameServerState.OnActivated`, atomic request claim/status publication, main-tick native command dispatch, and native option/map/listed-server verification.
 - `DedicatedServer/SubModule.cs`: initializes and shuts down the dedicated control bridge after runtime-profile validation and pumps it before other early-return paths in `OnApplicationTick`.
@@ -483,6 +485,7 @@ Each project is a small `net8.0` executable. Most link a narrow production contr
 | `CoopSiegeLadderInteraction.ContractTests` | Ladder interaction mutation guards |
 | `CoopSiegeSceneScriptRegistration.ContractTests` | SandBox managed scene-script registration |
 | `CoopAutomationJoin.ContractTests` | Run/token/hash request validation, exact server selection, atomic status, and automation source-graph compilation |
+| `CoopAutomationFixture.ContractTests` | Exact post-write byte retention, disabled-mode no-I/O, first-field admission, other-scenario rejection, immutable metadata, corruption/schema rejection, and path containment |
 | `CoopAutomationProtocol.ContractTests` | Protocol compatibility, role/run/nonce ordering, lease/recovery, stable outcomes/reasons, known issues, atomic/append file faults, locks, and repeat reads |
 | `CoopAutomationRuntime.ContractTests` | Strict runtime profile, loaded-role hash status, fail-closed result suppression, and exact live owned-host validation |
 | `CoopCompileOnly.ContractTests` | Shared compile-only property, output routing, and deployment-target guards in both main project files |

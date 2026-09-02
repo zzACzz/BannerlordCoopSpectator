@@ -2,6 +2,7 @@
 
 Last source verification: **2026-09-02**
 Last automation-control source/contract verification: **2026-09-02** (`m2b3a-lockfix-pub-c-01`; exact clean published revision `c6507e9`; protocol 1.1 role health, cancellation, RecoveryV2, failure evidence, exact resource-id construction/cardinality, and per-resource lock collision/release; 22/22)
+Last exact-fixture source/contract verification: **2026-09-02** (`m3a-contracts-03`, 23/23; `m3a-compile-03`, client and dedicated passed; exact-byte/current-field/immutability/corruption/schema/path contracts passed; runtime fixture pending)
 Last controlled client/dedicated staging verification: **2026-09-02** (`m2b3a-pub-b-01`, `m2b3a-stage-01`; clean `5d6a6c6` client `A363B19B...C91C0075` and dedicated `2E1494BC...C0CA1414` installed with complete pre-images; no product process launched)
 Last dedicated/client-control runtime verification: **2026-09-02** (`m2b3a-live-r2-01`; exact loaded identities, live role health, terminal `Connected`, six independently acquired/released resources, exact cleanup, protected-state preservation, and passing-path crash/hang absence confirmed)
 
@@ -307,6 +308,9 @@ Touches deployment points, siege weapons, synchronized objects, scene entities, 
 - “Clear the one dictionary that failed; other static state will self-correct.”
 - “Catch the native compatibility error and continue with partially mutated siege state.”
 - “Copy the missing client DLL into dedicated until it compiles.”
+- “Reserialize the fixture DTO; it should produce the same bytes as the production boundary.”
+- “A captured user campaign file is safe to commit because only test automation reads it.”
+- “A qualifying fixture proves that the mission or full battle completed.”
 
 ## Change checklists
 
@@ -321,6 +325,19 @@ Touches deployment points, siege weapons, synchronized objects, scene entities, 
 - [ ] Add round-trip/invalid-input contract coverage.
 - [ ] Test a large roster and reconnect retransmission.
 - [ ] Update `ARCHITECTURE.md` and `RUNTIME_FLOWS.md`.
+
+### Exact automation fixture
+
+- [ ] Capture only an existing production boundary; do not create a second authoritative scenario model.
+- [ ] Hash the exact observed bytes before parsing, sanitizing, copying, or normalizing line endings.
+- [ ] Bind metadata to the full source revision, loaded module hash/version, game version, run id, battle identity, boundary, serializer, and compatibility status.
+- [ ] Keep recording separately opt-in and perform no recorder I/O when disabled.
+- [ ] Reject path escape, overwrite with different bytes, corruption, unsupported schema, and incomplete provenance.
+- [ ] Evaluate field, village, siege assault, sally out, siege ambush, relief, lords hall, and both hideout stages before changing shared roster capture.
+- [ ] Keep raw user/campaign data outside Git until privacy and redaction review is complete.
+- [ ] Build an independent literal oracle for critical values; do not use the production snapshot builder as its authority.
+- [ ] State whether evidence is source/contract-only, captured, replayed, L2, L3 controlled, or L3 natural.
+- [ ] Check dedicated explicit compile includes for every new shared source file.
 
 ### Network message or readiness gate
 

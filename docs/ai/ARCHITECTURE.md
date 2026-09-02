@@ -259,6 +259,8 @@ The external aggregate remains responsible for evidence and cleanup. The runner 
 
 Milestone 2B.3A implements the remaining runner-safety boundary in source and contracts: dedicated/client heartbeat and progress projection, monotonic health timing, distinct `NoHeartbeat`/`NoProgress`, canonical shared-resource locks, exact aggregate cancellation, `RecoveryV2`, and owned structured crash/modal/hang evidence. Clean run `m2b3a-live-r1-01` live-confirmed role health, exact identities, connection, graceful cleanup, result isolation, and passing-path crash/hang absence, while exposing one concatenated lock record. The corrected architecture constructs those ids in a tested core function and validates expected/acquired cardinality before product launch. Clean published run `m2b3a-lockfix-pub-c-01` passed 22/22, and `m2b3a-live-r2-01` then acquired and released the exact six independent resources while repeating the complete passing connection/cleanup evidence. These mechanisms reuse the existing client and dedicated application ticks, remain automation-profile gated, and add no battle adapter. Milestone 2B is complete; Milestone 3 fixture work may begin under a separately approved plan. See [BATTLE_TEST_AUTOMATION_M2B3_SAFETY_CLOSURE.md](BATTLE_TEST_AUTOMATION_M2B3_SAFETY_CLOSURE.md).
 
+Milestone 3A adds `CoopAutomationFixtureContract` and `CoopAutomationFixtureRecorder` without adding a second scenario or serializer authority. The only production integration follows the existing `BattleRosterFileHelper.WriteRoster` `File.WriteAllText` boundary. Under both the valid automation profile and a separate fixture-record flag, the recorder reads the exact resulting bytes, verifies the loaded module identity, admits only an ordinary mixed SCN-001 field snapshot with two populated sides plus infantry, cavalry, and a hero/captain, and writes immutable run-scoped payload/metadata/status artifacts. Other battle adapters are observed only to reject them from this first-slice capture; their production paths are unchanged. Disabled recording performs no recorder I/O. This architecture is source/contract and compile-verified only; no real fixture or L2/L3 evidence exists yet. See [BATTLE_TEST_AUTOMATION_M3_FIELD_FIXTURE.md](BATTLE_TEST_AUTOMATION_M3_FIELD_FIXTURE.md).
+
 The compile-only build plane is separate from both installed modules and repository module output folders. `Directory.Build.props` redirects all build/package state below the run root only when `CoopCompileOnly=true`; both main project files independently suppress their deployment targets in that mode. Normal developer builds retain their historical deployment behavior because the property defaults to false.
 
 ## Exact agent transfer architecture
@@ -295,6 +297,8 @@ The active architecture deliberately keeps `EnableExactCampaignRuntimeObjectRegi
 | Result de-duplication | `BattleResultWritebackJournalBehavior`, campaign guard contracts |
 | Automation run identity/lease/outcomes | `CoopAutomationRunContract`, `scripts/Invoke-CoopTest.ps1` |
 | Automation file publication | `CoopAutomationProtocolFileIO`, runner atomic JSON/JSONL helpers |
+| Exact field-fixture admission/integrity | `CoopAutomationFixtureContract` |
+| Default-off exact campaign-roster recording | `CoopAutomationFixtureRecorder`, post-write `BattleRosterFileHelper.WriteRoster` hook |
 
 Many owners are static and process-wide. Mission transition cleanup is therefore architectural, not cosmetic.
 

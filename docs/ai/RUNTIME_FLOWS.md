@@ -75,9 +75,31 @@ fresh RunId
   -> verified runner-lock release
 ```
 
-`Doctor` inspects environment, versions/hashes, Git/EOL policy, selected dependencies, ports, writable roots, Steam, and the named version profile. `Contracts` requires the reviewed manifest to match every discovered test project and runs all 22 while preserving per-project output. `CompileOnly` inventories installed module trees, builds the two projects independently below the run root, then proves the installed inventories are unchanged. The historical Milestone 2A aggregate contained 20 projects; later runtime-safety and runner-control contracts extend the current inventory.
+`Doctor` inspects environment, versions/hashes, Git/EOL policy, selected dependencies, ports, writable roots, Steam, and the named version profile. `Contracts` requires the reviewed manifest to match every discovered test project and runs all 23 while preserving per-project output. `CompileOnly` inventories installed module trees, builds the two projects independently below the run root, then proves the installed inventories are unchanged. The historical Milestone 2A aggregate contained 20 projects; later runtime-safety, runner-control, and exact-fixture contracts extend the current inventory.
 
 No branch in this flow launches a product executable, enables the module automation profile, stages a DLL, joins a server, opens a campaign/mission, advances `CoopBattlePhaseRuntimeState`, or writes a battle result. The separate Milestone 2B connection flow is live-proven, and Milestone 2B.3A now implements its runner-safety closure in source and contracts. Clean publication, controlled staging, and live failure-oriented verification still precede campaign-fixture work.
+
+### Milestone 3A exact campaign-roster recording
+
+The first fixture source slice observes one existing campaign boundary and does not automate the battle lifecycle:
+
+```text
+existing BattleDetector snapshot construction
+  -> existing BattleRosterFileDto + Newtonsoft.Json Formatting.Indented
+  -> existing File.WriteAllText(battle_roster.json)
+  -> if automation + fixture-record profiles are both enabled:
+       validate exact RunId root/token/expected loaded module hash/Suppress policy
+       validate ordinary SCN-001 + two populated sides + infantry + cavalry + hero/captain
+       read exact post-write file bytes
+       verify byte length/SHA-256/source/module/game/battle provenance
+       create-or-confirm immutable run-scoped raw payload
+       atomically publish metadata and record status
+  -> continue existing campaign/dedicated flow unchanged
+```
+
+When the profile is disabled, the recorder returns before inspecting the roster path. When another scenario reaches the shared roster writer, the recorder publishes `Skipped` only for an explicitly requested capture and does not modify that scenario. A recording failure is evidence failure, not permission to mutate campaign or mission state.
+
+Milestone 3A has passed synthetic exact-byte, corruption/schema/path, battle-type admission, 23-project contract, and both-project compile-only checks. It has not launched Bannerlord or captured a real fixture. The next controlled stage must provide the environment, loaded binary identity, purpose-made campaign sample, independent oracle, privacy review, and redacted reproduction descriptor. See [BATTLE_TEST_AUTOMATION_M3_FIELD_FIXTURE.md](BATTLE_TEST_AUTOMATION_M3_FIELD_FIXTURE.md).
 
 ### Milestone 2B.1 connectivity-feasibility intent
 

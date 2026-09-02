@@ -3,6 +3,7 @@
 Last source verification: **2026-08-28**
 Last automation-control source verification: **2026-09-02** (`m2b3a-lockfix-pub-c-01`; exact clean published revision `c6507e9`; per-resource construction/collision contracts passed in both PowerShell hosts; 22/22)
 Last automation-control live verification: **2026-09-02** (`m2b3a-live-r2-01`; exact client/dedicated loaded identities, live schema-2 role health, formal `Connected`, six independently acquired/released resources, graceful exact cleanup, free ports, protected-state preservation, and no crash/hang artifact confirmed)
+Last exact-fixture source/contract verification: **2026-09-02** (`m3a-contracts-03`, 23/23; `m3a-compile-03`, client and dedicated passed; installed inventories unchanged; no product process launched; real fixture capture pending)
 
 ## Safety first: builds deploy
 
@@ -427,6 +428,32 @@ Post-stage doctor `m2b3a-poststage-doctor-01` reported only the expected stale i
 Artifact audit prevented a false RUN-008 closure: `shared-runtime-locks.json` contained one record whose resource id was all six intended ids joined by spaces. Lowest-level reproduction in both PowerShell 5.1 and 7.6.4 showed that the inline `@('prefix:' + value, ...)` argument expression collapses to one string, while the lock primitive itself correctly handles a prebuilt array. The correction moves construction into `Get-CoopSharedRuntimeResourceIdsCore`, uses independent `String.Concat` additions, validates expected/acquired cardinality before product launch, and contract-tests each independent collision plus requested/default-port deduplication. Focused tests and dirty-source aggregate `m2b3a-lockfix-c-01` passed. Clean published aggregate `m2b3a-lockfix-pub-c-01` then passed 22/22 from exact revision `c6507e9`; no DLL changed, so restaging was not required.
 
 Repeat run `m2b3a-live-r2-01` returned `Pass` from exact clean local/upstream revision `c6507e9`. Its shared-lock artifact contains the expected bridge root, game installation, dedicated installation, machine profile, UDP `7210`, and UDP `7777` as six distinct ids backed by six distinct lock paths. Release evidence contains the same six ids, every `ReleasedAndReacquired=true`, and no failure. The run also repeated seven bootstrap acknowledgements, native platform login, terminal `Connected`, live role health, graceful cleanup without force, zero remaining owned processes, free ports, unchanged installed hashes and protected result, six retained native log files with no fatal signal, and no `crash.json` or `hang.json`. RUN-008 and the Milestone 2B runtime-safety gate are closed. This run opened no campaign, mission, or battle and provides no L2/L3 pass evidence.
+
+### Milestone 3A exact field-fixture source and contracts
+
+`CoopAutomationFixtureRecorder` is disabled unless both `COOPSPECTATOR_TEST_AUTOMATION=1` and `COOPSPECTATOR_AUTOMATION_FIXTURE_RECORD=1` are present. A valid capture additionally requires the standard run id/root/token/expected module hash/`Suppress` contract plus:
+
+```text
+COOPSPECTATOR_AUTOMATION_FIXTURE_ID=<safe-id>
+COOPSPECTATOR_AUTOMATION_SOURCE_REVISION=<full-40-or-64-hex-revision>
+COOPSPECTATOR_AUTOMATION_GAME_VERSION=<observed-version>
+```
+
+Do not set these manually in a normal Steam launch. The next approved capture launcher must construct the complete environment and loaded-build identity as one transaction.
+
+The recorder reads the exact `battle_roster.json` bytes only after the existing `File.WriteAllText` returns. Accepted run artifacts are:
+
+```text
+artifacts\fixtures\field-current\battle_roster.raw.json
+artifacts\fixtures\field-current\fixture.metadata.json
+state\fixture-record.status.json
+```
+
+No raw fixture is currently committed. Treat any future raw run artifact as private until its campaign/user identifiers are independently reviewed. Never normalize, reformat, or line-ending-convert the exact payload before hash verification.
+
+Focused fixture tests preserve CRLF/spacing exactly, prove disabled-mode no-I/O, enforce immutable repeated metadata, reject all non-SCN-001 adapters, and reject corrupted bytes, length/schema mismatch, and path escape. Canonical `m3a-contracts-03` passed 23/23. Final `m3a-compile-03` compiled both projects below the run root, launched no product process, and proved installed inventories unchanged. The first compile `m3a-compile-01` is retained as diagnostic evidence: the client passed and the dedicated explicit source list exposed the missing shared-file includes; after adding exactly those two includes, the targeted server build and final full compile passed.
+
+See [BATTLE_TEST_AUTOMATION_M3_FIELD_FIXTURE.md](BATTLE_TEST_AUTOMATION_M3_FIELD_FIXTURE.md). These checks do not prove that Bannerlord produced a real fixture.
 
 ### `scripts/CreateReleasePackage.ps1`
 
