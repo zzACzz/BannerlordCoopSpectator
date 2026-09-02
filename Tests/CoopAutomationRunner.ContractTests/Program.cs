@@ -14,11 +14,13 @@ internal static class Program
         string runnerPath = Path.Combine(repositoryRoot, "scripts", "Invoke-CoopTest.ps1");
         string clientLauncherPath = Path.Combine(repositoryRoot, "scripts", "Start-CoopBattleTestClient.ps1");
         string fixtureCaptureLauncherPath = Path.Combine(repositoryRoot, "scripts", "Start-CoopFieldFixtureCapture.ps1");
+        string fixtureContractPath = Path.Combine(repositoryRoot, "Infrastructure", "Automation", "CoopAutomationFixtureContract.cs");
         Assert(File.Exists(corePath), "Runner core helper must exist: " + corePath);
         Assert(File.Exists(runnerPath), "Aggregate runner must exist: " + runnerPath);
         Assert(File.Exists(clientLauncherPath), "Client launcher must exist: " + clientLauncherPath);
         Assert(File.Exists(fixtureCaptureLauncherPath), "Fixture capture launcher must exist: " + fixtureCaptureLauncherPath);
-        ValidateRunnerIntegration(runnerPath, corePath, clientLauncherPath, fixtureCaptureLauncherPath);
+        Assert(File.Exists(fixtureContractPath), "Fixture contract must exist: " + fixtureContractPath);
+        ValidateRunnerIntegration(runnerPath, corePath, clientLauncherPath, fixtureCaptureLauncherPath, fixtureContractPath);
 
         string temporaryRoot = Path.Combine(
             Path.GetTempPath(),
@@ -49,12 +51,16 @@ internal static class Program
         string runnerPath,
         string corePath,
         string clientLauncherPath,
-        string fixtureCaptureLauncherPath)
+        string fixtureCaptureLauncherPath,
+        string fixtureContractPath)
     {
         string source = File.ReadAllText(runnerPath);
         string coreSource = File.ReadAllText(corePath);
         string clientLauncherSource = File.ReadAllText(clientLauncherPath);
         string fixtureCaptureLauncherSource = File.ReadAllText(fixtureCaptureLauncherPath);
+        string fixtureContractSource = File.ReadAllText(fixtureContractPath);
+        string campaignRosterPayloadKind = ReadStringConstant(fixtureContractSource, "CampaignRosterPayloadKind");
+        string campaignRosterBoundary = ReadStringConstant(fixtureContractSource, "CampaignRosterBoundary");
         Assert(
             source.Contains(". $runnerCorePath", StringComparison.Ordinal),
             "Aggregate runner must dot-source the tested core helper.");
@@ -154,6 +160,14 @@ internal static class Program
             source.Contains("IndependentOracleComplete = $false", StringComparison.Ordinal) &&
             source.Contains("L2OrL3PassClaimed = $false", StringComparison.Ordinal),
             "Record must validate exact fixture bytes while retaining private, non-oracle, non-L2/L3 evidence boundaries.");
+        Assert(
+            source.Contains(
+                "[string]$metadata.PayloadKind -ne '" + campaignRosterPayloadKind + "'",
+                StringComparison.Ordinal) &&
+            source.Contains(
+                "[string]$metadata.Boundary -ne '" + campaignRosterBoundary + "'",
+                StringComparison.Ordinal),
+            "The independent runner must validate the exact canonical C# campaign-roster payload kind and boundary.");
         Assert(
             source.Contains("-GameType 'TeamDeathmatch'", StringComparison.Ordinal) &&
             !source.Contains("-UniqueMapId 'mp_tdm_map_001'", StringComparison.Ordinal),
@@ -267,6 +281,17 @@ internal static class Program
             source.IndexOf("-ObservedParentProcessId $PID", clientHandoffValidation, StringComparison.Ordinal) > clientHandoffValidation &&
             !source.Contains("[string]$clientLaunch.EntryStartUtc", StringComparison.Ordinal),
             "Aggregate client handoff must preserve validated ownership before fallible live revalidation and must not stringify JSON dates.");
+    }
+
+    private static string ReadStringConstant(string source, string constantName)
+    {
+        string marker = "public const string " + constantName + " = \"";
+        int valueStart = source.IndexOf(marker, StringComparison.Ordinal);
+        Assert(valueStart >= 0, "Fixture contract string constant is missing: " + constantName + ".");
+        valueStart += marker.Length;
+        int valueEnd = source.IndexOf('"', valueStart);
+        Assert(valueEnd > valueStart, "Fixture contract string constant is malformed: " + constantName + ".");
+        return source.Substring(valueStart, valueEnd - valueStart);
     }
 
     private static string ResolveRepositoryRoot()

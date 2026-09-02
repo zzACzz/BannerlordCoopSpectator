@@ -2769,8 +2769,8 @@ function Confirm-CoopRecordedFixture {
         [int]$metadata.SchemaVersion -ne 1 -or
         [string]$metadata.RunId -ne $RunId -or
         [string]$metadata.FixtureId -ne $ExpectedFixtureId -or
-        [string]$metadata.PayloadKind -ne 'CampaignBattleRoster' -or
-        [string]$metadata.Boundary -ne 'Campaign.BattleRosterFileHelper.WriteRoster.PostWrite' -or
+        [string]$metadata.PayloadKind -ne 'CampaignRoster' -or
+        [string]$metadata.Boundary -ne 'Campaign/BattleRosterFileHelper.WriteRoster/post-write' -or
         [string]$metadata.SourceRole -ne 'CampaignHost' -or
         [string]$metadata.TargetRole -ne 'DedicatedServer' -or
         [string]$metadata.PayloadFile -ne 'battle_roster.raw.json' -or
