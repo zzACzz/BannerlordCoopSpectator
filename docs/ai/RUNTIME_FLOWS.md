@@ -77,7 +77,7 @@ fresh RunId
 
 `Doctor` inspects environment, versions/hashes, Git/EOL policy, selected dependencies, ports, writable roots, Steam, and the named version profile. `Contracts` requires the reviewed manifest to match every discovered test project and runs all 23 while preserving per-project output. `CompileOnly` inventories installed module trees, builds the two projects independently below the run root, then proves the installed inventories are unchanged. The historical Milestone 2A aggregate contained 20 projects; later runtime-safety, runner-control, and exact-fixture contracts extend the current inventory.
 
-No branch in this flow launches a product executable, enables the module automation profile, stages a DLL, joins a server, opens a campaign/mission, advances `CoopBattlePhaseRuntimeState`, or writes a battle result. The separate Milestone 2B connection flow is live-proven, and Milestone 2B.3A now implements its runner-safety closure in source and contracts. Clean publication, controlled staging, and live failure-oriented verification still precede campaign-fixture work.
+No branch in this non-runtime flow launches a product executable, enables the module automation profile, stages a DLL, joins a server, opens a campaign/mission, advances `CoopBattlePhaseRuntimeState`, or writes a battle result. The separate Milestone 2B connection flow is live-proven, and Milestone 2B.3A implements its runner-safety closure. Milestone 3B now adds a separate aggregate `Record` runtime flow; it is not part of `Doctor`, `Contracts`, or `CompileOnly`.
 
 ### Milestone 3A exact campaign-roster recording
 
@@ -99,7 +99,37 @@ existing BattleDetector snapshot construction
 
 When the profile is disabled, the recorder returns before inspecting the roster path. When another scenario reaches the shared roster writer, the recorder publishes `Skipped` only for an explicitly requested capture and does not modify that scenario. A recording failure is evidence failure, not permission to mutate campaign or mission state.
 
-Milestone 3A has passed synthetic exact-byte, corruption/schema/path, battle-type admission, 23-project contract, and both-project compile-only checks. It has not launched Bannerlord or captured a real fixture. The next controlled stage must provide the environment, loaded binary identity, purpose-made campaign sample, independent oracle, privacy review, and redacted reproduction descriptor. See [BATTLE_TEST_AUTOMATION_M3_FIELD_FIXTURE.md](BATTLE_TEST_AUTOMATION_M3_FIELD_FIXTURE.md).
+Milestone 3A has passed synthetic exact-byte, corruption/schema/path, battle-type admission, 23-project contract, and both-project compile-only checks. It has not captured a real fixture. Milestone 3B supplies the aggregate-owned campaign process/environment/reproduction path, but clean publication, staging, a purpose-made campaign sample, independent oracle, and privacy review still remain. See [BATTLE_TEST_AUTOMATION_M3_FIELD_FIXTURE.md](BATTLE_TEST_AUTOMATION_M3_FIELD_FIXTURE.md).
+
+### Milestone 3B aggregate campaign capture
+
+```text
+Invoke-CoopTest.ps1 -Command Record
+  -> require fresh RunId + clean local/upstream revision
+  -> require explicit installed client SHA-256 + Steam + free ports + no product process
+  -> acquire canonical bridge/game/dedicated/profile/port locks
+  -> publish manifest with CaptureOnly / FieldBattleFixtureCapture / Suppress
+  -> Start-CoopFieldFixtureCapture.ps1 validates active runner lock, nonce fingerprint,
+     run root, installed module, source revision, Native version, and empty immutable paths
+  -> start exact Bannerlord.exe child:
+       /singleplayer
+       _MODULES_*Native*SandBoxCore*CustomBattle*Sandbox*StoryMode*CoopSpectator*_MODULES_
+  -> publish provisional CampaignHost ownership
+  -> resolve exact PID/path/parent/start identity
+  -> publish final credential-free campaign launch handoff
+  -> aggregate registers and revalidates exact CampaignHost
+  -> wait for state\fixture-record.status.json
+       Skipped  -> retain validated status and continue waiting for another user selection
+       Failed   -> exact AssertionFailed evidence
+       Recorded -> independently verify payload length/hash/provenance/qualification
+  -> snapshot and register exact descendants only
+  -> exact cleanup of CampaignHost and owned descendants
+  -> copy campaign PID-correlated native logs
+  -> prove protected battle_result.json unchanged and no owned process remains
+  -> retain private/non-sanitized/non-oracle/non-L2 report plus reproduction descriptor
+```
+
+The launcher does not modify `LauncherData.xml`, select a save, automate UI, start a multiplayer client, issue `start_game`, or require mission/full-battle completion. Bannerlord can still mutate normal user save/configuration state after manual interaction, so live capture must use a purpose-made save copy. `m3b-dirty-block-01` proves dirty-source rejection without product launch; `m3b-contracts-01` passed all 23 contracts; `m3b-compile-01` passed both builds with installed inventories unchanged. No clean-published live capture exists yet.
 
 ### Milestone 2B.1 connectivity-feasibility intent
 

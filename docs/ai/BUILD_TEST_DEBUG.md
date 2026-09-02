@@ -3,7 +3,7 @@
 Last source verification: **2026-08-28**
 Last automation-control source verification: **2026-09-02** (`m2b3a-lockfix-pub-c-01`; exact clean published revision `c6507e9`; per-resource construction/collision contracts passed in both PowerShell hosts; 22/22)
 Last automation-control live verification: **2026-09-02** (`m2b3a-live-r2-01`; exact client/dedicated loaded identities, live schema-2 role health, formal `Connected`, six independently acquired/released resources, graceful exact cleanup, free ports, protected-state preservation, and no crash/hang artifact confirmed)
-Last exact-fixture source/contract verification: **2026-09-02** (`m3a-contracts-03`, 23/23; `m3a-compile-03`, client and dedicated passed; installed inventories unchanged; no product process launched; real fixture capture pending)
+Last exact-fixture launcher/source verification: **2026-09-02** (`m3b-contracts-01`, 23/23; `m3b-compile-01`, client and dedicated passed; installed inventories unchanged; `m3b-dirty-block-01` rejected dirty capture without product launch; clean staging and real fixture capture pending)
 
 ## Safety first: builds deploy
 
@@ -56,10 +56,13 @@ The repository does not currently define a documented, verified property that di
 | `scripts/Test-RepositoryHygiene.ps1` | No | no content/output writes; Git may refresh index metadata | No | No |
 | `scripts/Invoke-CoopTest.ps1 -Command Doctor|Contracts|CompileOnly` | `Contracts`/`CompileOnly` only | Writes only the selected temporary automation run root; compile-only outputs remain below it | No | No |
 | `scripts/Invoke-CoopTest.ps1 -Command Feasibility` | No | Writes only the selected temporary automation run root; product runtimes may write normal external logs/configuration | No module writes | No module writes |
+| `scripts/Invoke-CoopTest.ps1 -Command Record` | No | Writes the selected temporary automation run root; launches one exact campaign process and may observe its exact descendants; Bannerlord may write normal logs/configuration/save state after user actions | No module writes | No module writes |
 | `scripts/Invoke-CoopTest.ps1 -Command Inspect|Recover` without `-ApplyRecovery` | No | Read-only for the existing run | No | No |
 | `scripts/Start-CoopBattleTestClient.ps1 -ValidateOnly` | No | No expected repository or run-root writes | No | No |
 | `run_battle_test_client.bat` / standalone live `Start-CoopBattleTestClient.ps1` | No | Current source fails before run-root creation; standalone mode cannot prove dedicated ownership | No | No |
 | `Start-CoopBattleTestClient.ps1 -UseExistingRunContract` | No | Writes only the aggregate runner's selected temporary automation run root; Bannerlord writes its normal external logs/configuration | No | No |
+| `Start-CoopFieldFixtureCapture.ps1 -ValidateOnly` | No | No expected repository or run-root writes | No | No |
+| `Start-CoopFieldFixtureCapture.ps1 -UseExistingRunContract` | No | Aggregate-owned only; writes immutable process handoff below the selected run root and launches the exact singleplayer process | No | No |
 
 This table records current project/script behavior, not a guarantee that an arbitrary command is safe. Every approved plan containing one of these operations must still state the exact command and resolved destinations.
 
@@ -454,6 +457,45 @@ No raw fixture is currently committed. Treat any future raw run artifact as priv
 Focused fixture tests preserve CRLF/spacing exactly, prove disabled-mode no-I/O, enforce immutable repeated metadata, reject all non-SCN-001 adapters, and reject corrupted bytes, length/schema mismatch, and path escape. Canonical `m3a-contracts-03` passed 23/23. Final `m3a-compile-03` compiled both projects below the run root, launched no product process, and proved installed inventories unchanged. The first compile `m3a-compile-01` is retained as diagnostic evidence: the client passed and the dedicated explicit source list exposed the missing shared-file includes; after adding exactly those two includes, the targeted server build and final full compile passed.
 
 See [BATTLE_TEST_AUTOMATION_M3_FIELD_FIXTURE.md](BATTLE_TEST_AUTOMATION_M3_FIELD_FIXTURE.md). These checks do not prove that Bannerlord produced a real fixture.
+
+### Milestone 3B controlled field-fixture capture
+
+Installed-1.4.8 IL inspection establishes the exact launcher construction: `/singleplayer` from `LauncherVM.GameTypeArgument`, followed by the topology-sorted `_MODULES_` block from `LauncherModsVM.ModuleListCode`. The current singleplayer selection is reproduced without editing `LauncherData.xml`:
+
+```text
+/singleplayer _MODULES_*Native*SandBoxCore*CustomBattle*Sandbox*StoryMode*CoopSpectator*_MODULES_
+```
+
+The standalone launcher is validation-only unless it inherits the active aggregate `Record` contract:
+
+```powershell
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+  -File .\scripts\Start-CoopFieldFixtureCapture.ps1 `
+  -RunId validate-only-01 `
+  -FixtureId field-current `
+  -ExpectedClientModuleSha256 <installed-client-sha256> `
+  -SourceRevision <full-clean-revision> `
+  -GameVersion v1.4.8 `
+  -ValidateOnly
+```
+
+The approved live entry point is the aggregate:
+
+```powershell
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+  -File .\scripts\Invoke-CoopTest.ps1 `
+  -Command Record `
+  -RunId <fresh-run-id> `
+  -FixtureId field-current `
+  -ExpectedClientModuleSha256 <exact-staged-client-sha256> `
+  -RuntimeTimeoutSeconds 1800
+```
+
+`Record` requires clean local/upstream identity, running Steam, no product process, free required ports, exact installed hash, and all shared runtime locks. It launches no dedicated or multiplayer role itself. After the campaign appears, the user loads a purpose-made save and starts one ordinary field battle containing infantry, mounted troops, and a hero/captain. A `Skipped` status remains non-terminal so another ordinary field battle may be selected in the same campaign process. The run stops after `Recorded`; full mission or battle completion is not required.
+
+The runner validates exact payload length/SHA-256/provenance/qualification, performs exact process-tree cleanup, copies the campaign PID-correlated logs, proves the protected result unchanged, and writes a redacted reproduction descriptor. The raw payload remains private and must not be committed before independent identity/content/privacy review.
+
+Source evidence: `m3b-contracts-01` passed 23/23; `m3b-compile-01` passed both projects with installed inventories unchanged; `m3b-dirty-block-01` returned `EnvironmentBlocked` and launched no product process. These are not a clean-published runtime capture. Do not run `Record` until the exact current client build has been published and staged with a complete pre-image.
 
 ### `scripts/CreateReleasePackage.ps1`
 
