@@ -3,7 +3,7 @@
 Last source verification: **2026-08-28**
 Last automation-control source verification: **2026-09-02** (`m2b3a-lockfix-pub-c-01`; exact clean published revision `c6507e9`; per-resource construction/collision contracts passed in both PowerShell hosts; 22/22)
 Last automation-control live verification: **2026-09-02** (`m2b3a-live-r2-01`; exact client/dedicated loaded identities, live schema-2 role health, formal `Connected`, six independently acquired/released resources, graceful exact cleanup, free ports, protected-state preservation, and no crash/hang artifact confirmed)
-Last exact-fixture launcher/source verification: **2026-09-02** (`m3b-contracts-01`, 23/23; `m3b-compile-01`, client and dedicated passed; installed inventories unchanged; `m3b-dirty-block-01` rejected dirty capture without product launch; clean staging and real fixture capture pending)
+Last exact-fixture verification: **2026-09-02** (`baf5c69`; `m3b-fix-pub-contracts-01`, 23/23; `m3b-fix-pub-compile-01`, client and dedicated passed with installed inventories unchanged; `m3b-live-capture-02`, exact private field payload captured and validated with protected result/cleanup preserved; independent content/privacy review and replay pending)
 
 ## Safety first: builds deploy
 
@@ -495,7 +495,9 @@ powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
 
 The runner validates exact payload length/SHA-256/provenance/qualification, performs exact process-tree cleanup, copies the campaign PID-correlated logs, proves the protected result unchanged, and writes a redacted reproduction descriptor. The raw payload remains private and must not be committed before independent identity/content/privacy review.
 
-Source evidence: `m3b-contracts-01` passed 23/23; `m3b-compile-01` passed both projects with installed inventories unchanged; `m3b-dirty-block-01` returned `EnvironmentBlocked` and launched no product process. These are not a clean-published runtime capture. Do not run `Record` until the exact current client build has been published and staged with a complete pre-image.
+Source evidence: `m3b-contracts-01` passed 23/23; `m3b-compile-01` passed both projects with installed inventories unchanged; `m3b-dirty-block-01` returned `EnvironmentBlocked` and launched no product process. Controlled transaction `m3b-stage-01` retained a complete 32-file pre-image and installed only client DLL/PDB SHA-256 `2A1E17E4...250FFB4`; the dedicated module remained unchanged. Diagnostic run `m3b-live-capture-01` produced valid private bytes but exposed two stale aggregate literals relative to the canonical C# payload kind/boundary. Published correction `baf5c69` restores that parity and adds a cross-language guard. Corrected `m3b-fix-pub-contracts-01` passed 23/23 and `m3b-fix-pub-compile-01` passed both projects without installed mutation.
+
+Clean run `m3b-live-capture-02` returned `Pass` from exact runner revision `baf5c69` with the explicitly pinned staged client hash. It retained 451,762 exact payload bytes with SHA-256 `ECF29661E44B64C1AEE77EC2B44E61F63926287A3A05A9BFD6DC545EC073B9C7`, two populated sides, 30 infantry stacks, 17 mounted stacks, and 4 hero/captain stacks. Status/metadata/runner hashes matched; the protected global result was unchanged; exact cleanup left no product process or UDP 7210 listener. `PrivateRawArtifact=true`, `SanitizationReviewed=false`, `IndependentOracleComplete=false`, `FullBattleCompleted=false`, and `L2OrL3PassClaimed=false` remain authoritative. Do not commit or share the raw payload before the next approved review gate.
 
 ### `scripts/CreateReleasePackage.ps1`
 

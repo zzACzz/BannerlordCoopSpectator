@@ -1,6 +1,6 @@
 # Milestone 3 Exact Field Fixture
 
-Status: **3B capture launcher source and contracts complete; clean publication, controlled client staging, and the first private Bannerlord capture remain pending**
+Status: **3B clean publication, controlled client staging, and the first private Bannerlord capture complete; independent content/privacy review and replay remain pending**
 Source verification date: **2026-09-02**
 Fixture contract schema: **1**
 
@@ -10,7 +10,7 @@ Milestone 3A adds the minimum default-off recording surface required to capture 
 
 The recorder runs only after that production write succeeds. It reads the resulting file bytes and retains those exact bytes under the active run root. It does not reserialize the DTO, change the production file encoding, add a payload field, advance a battle phase, open a mission, start a server, launch a client, or publish a result.
 
-This source/contract change is not a captured fixture and is not L2/L3 evidence. Milestone 3B now supplies the aggregate-owned campaign launcher and `Record` command, but a clean-published build must still be staged and exercised against a purpose-made campaign sample.
+The source/contract implementation alone is not a fixture or L2/L3 evidence. Clean run `m3b-live-capture-02` now supplies the first exact private runtime sample from the existing boundary. It remains unreviewed, unsanitized, uncommitted, and non-oracle evidence; it does not prove mission opening, multiplayer connection, or battle completion.
 
 ## 2. Default-off capture gate
 
@@ -108,6 +108,12 @@ The recorder is not placed in a per-agent, per-frame, network-message, or native
 | Dirty-source `Record` rejection `m3b-dirty-block-01` | Returned `EnvironmentBlocked`, retained a credential-free one-command reproduction descriptor, and launched no product process |
 | Milestone 3B canonical contracts `m3b-contracts-01` | Passed 23/23 in both Windows PowerShell 5.1 and PowerShell 7 where applicable |
 | Milestone 3B compile-only `m3b-compile-01` | Client and dedicated passed below the run root; installed inventories unchanged; no product process launched |
+| Controlled client-only staging `m3b-stage-01` | Complete 32-file pre-image retained; only the client DLL/PDB changed; installed client SHA-256 `2A1E17E4...250FFB4`; installed dedicated module unchanged |
+| First live diagnostic `m3b-live-capture-01` | Recorder produced a hash/length/provenance-qualified private field payload, but the aggregate returned `AssertionFailed` because two runner literals had drifted from the canonical C# payload kind/boundary; no product process or port remained |
+| Published runner correction `baf5c69` | Canonical C# values restored in `Confirm-CoopRecordedFixture`; a cross-language contract guard now derives both values from `CoopAutomationFixtureContract`; focused runner tests passed in Windows PowerShell 5.1 and PowerShell 7 and exact field-fixture tests passed |
+| Corrected published contracts `m3b-fix-pub-contracts-01` | Passed 23/23 from exact clean local/upstream revision `baf5c69` |
+| Corrected published compile-only `m3b-fix-pub-compile-01` | Client and dedicated passed below the run root; installed inventories unchanged; no product process launched |
+| Accepted private capture `m3b-live-capture-02` | `Pass`; 451,762 exact bytes; payload SHA-256 `ECF29661E44B64C1AEE77EC2B44E61F63926287A3A05A9BFD6DC545EC073B9C7`; two sides, 30 infantry stacks, 17 mounted stacks, and 4 hero/captain stacks; exact staged client hash and clean runner revision retained; protected result unchanged; zero remaining product processes/port listeners |
 
 Existing unreachable-code warnings remain outside this change. The final builds contain zero errors.
 
@@ -116,29 +122,26 @@ Existing unreachable-code warnings remain outside this change. The final builds 
 | Milestone 3 requirement | 3A status | Evidence or remaining gate |
 |---|---|---|
 | Opt-in recording at an existing first-slice boundary | Satisfied in source/contracts | Post-write `battle_roster.json` exact-byte capture |
-| One current mixed infantry/cavalry fixture with hero/captain | Not satisfied | Requires separately approved controlled Bannerlord campaign capture |
-| Exact raw bytes, metadata, hashes, provenance, compatibility | Implemented but not runtime-populated | Contract and synthetic exact-byte proof only |
+| One current mixed infantry/cavalry fixture with hero/captain | Satisfied as a private runtime artifact | `m3b-live-capture-02`; raw payload remains outside Git pending review |
+| Exact raw bytes, metadata, hashes, provenance, compatibility | Satisfied for capture/integrity | `m3b-live-capture-02`; payload hash, staged module hash, clean runner revision, game version, boundary, and current-only unversioned compatibility retained |
 | Sanitized derivative when sharing is needed | Not satisfied | Real capture must be reviewed; no user save or raw fixture may be committed before review |
 | Independent critical-value oracle | Not satisfied | Must be authored/reviewed independently after capture |
 | Corruption and schema-mismatch tests | Satisfied | Focused and canonical contract evidence |
-| Redacted one-command reproduction descriptor | Satisfied in source/contracts | `Record` retains fixture id, exact installed hash, roots, timeout, and revision-derived manifest identity without nonce or credentials; a passing live descriptor remains pending |
+| Redacted one-command reproduction descriptor | Satisfied in runtime | Passing `m3b-live-capture-02` descriptor retains fixture id, exact installed hash, roots, timeout, and revision-derived manifest identity without nonce or credentials |
 | Production serialization unchanged when recording is off | Satisfied in source/contracts | Existing serializer/write call retained; disabled mode performs no recorder I/O |
 | No parallel authoritative scenario model | Satisfied | Recorder only observes the existing snapshot and exact written file |
 
-Milestone 3 is therefore **in progress**, not complete. Milestone 3B closes the source/contract launcher gap only.
+Milestone 3 is therefore **in progress**, not complete. Milestone 3B closes capture control and produces the first private exact payload, but independent critical-value review, privacy disposition, any required sanitized derivative, and replay evidence remain open.
 
 ## 8. Next approved gate
 
 The next approved execution gate must:
 
-1. commit and push the source/contracts and documentation separately;
-2. produce clean-published build identities and perform client-only controlled staging with a complete retained pre-image;
-3. use a purpose-made or explicitly reviewed campaign sample without agent-side save mutation;
-4. launch `Record` with the exact staged client hash and let the user select one qualifying ordinary field boundary;
-5. stop after `Recorded`; no multiplayer client or full battle completion is required;
-6. independently review critical scene, side, entry, infantry/cavalry, hero/captain, equipment, and mount facts;
-7. decide whether the exact payload is safe to commit or requires a sanitized derivative;
-8. retain the exact private raw payload hash even when only a derivative is shared and close the remaining requirement rows.
+1. independently review critical scene, side, entry, infantry/cavalry, hero/captain, equipment, and mount facts without treating the recorder's qualification counts as the oracle;
+2. perform a content/privacy review and decide whether the exact payload is safe to retain/share or requires a sanitized derivative;
+3. keep the private raw payload outside Git until that decision, while retaining its exact SHA-256 even if only a derivative is shared;
+4. add replay validation that consumes bytes hash-matching the accepted private capture or its explicitly linked reviewed derivative;
+5. close the remaining oracle, sanitization, and replay rows before promoting Milestone 3 or beginning a Milestone 4 evidence claim.
 
 Full controlled and natural battle lifecycle proof remains Milestone 5 work. Fixture capture alone must never be described as a complete battle test.
 
@@ -157,3 +160,5 @@ Bannerlord.exe /singleplayer _MODULES_*Native*SandBoxCore*CustomBattle*Sandbox*S
 This shape comes from decompiling the exact installed SHA-256 `2BD46368...6320798` launcher library path and comparing it with the current singleplayer selection in `LauncherData.xml`; it was not inferred from the multiplayer wrapper. The capture launcher does not edit launcher configuration, a campaign save, the dedicated installation, or the protected result.
 
 The aggregate registers provisional campaign ownership before fallible identity enrichment, validates the exact executable/parent/start identity, waits for `Recorded`, tolerates `Skipped` so another ordinary field battle can be attempted in the same campaign process, rejects `Failed`, supports bounded timeout/cancellation, registers only exact descendants, and then performs exact cleanup. It independently rechecks payload length, SHA-256, metadata identity, source/module/game provenance, ordinary-field qualification counts, JSON validity, protected-result immutability, and remaining-process absence. Even a passing capture remains `PrivateRawArtifact=true`, `SanitizationReviewed=false`, `IndependentOracleComplete=false`, `FullBattleCompleted=false`, and `L2OrL3PassClaimed=false` until later review.
+
+Clean run `m3b-live-capture-02` exercised this path from runner revision `baf5c69` with the exact client-only staged SHA-256 `2A1E17E4FEC5330345D28387AF1C4E2D412D07F221EBE7EE02705FAAC250FFB4`. It stopped at the post-write pre-mission boundary, returned `Pass`, retained one private raw payload plus metadata/status/reproduction/log/cleanup evidence, forced only the exact verified campaign process after a graceful close request, observed the optional runtime-support descendant as already absent, left zero owned/product processes and no UDP 7210 listener, and preserved the protected global result. The run does not authorize committing or sharing the raw payload.
