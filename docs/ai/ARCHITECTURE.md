@@ -2,7 +2,7 @@
 
 Last source verification: **2026-08-28**
 Last automation-control source verification: **2026-09-02**
-Last automation-control live verification: **2026-09-01**
+Last automation-control live verification: **2026-09-02**
 
 ## System objective
 
@@ -257,7 +257,7 @@ Clean corrected-selection run `m2e1-live-r1-01` selected the exact run-owned ser
 
 The external aggregate remains responsible for evidence and cleanup. The runner preserves terminal client status through thrown wait failures and a validated cleanup fallback; after `3fdcda3`, it also preserves the last validated non-terminal status on external timeout while retaining the timeout outcome. It inventories exact client-PID native logs separately from dedicated logs before cleanup completes. Neither evidence correction changes native login authority or campaign/battle authority.
 
-Milestone 2B.3A implements the remaining runner-safety boundary in source and contracts: dedicated/client heartbeat and progress projection, monotonic health timing, distinct `NoHeartbeat`/`NoProgress`, canonical shared-resource locks, exact aggregate cancellation, `RecoveryV2`, and owned structured crash/modal/hang evidence. These mechanisms reuse the existing client and dedicated application ticks, remain automation-profile gated, and add no battle adapter. Clean publication, staging, and a live failure-oriented verification remain required before the Milestone 2B gate can be closed and campaign-fixture work can begin. See [BATTLE_TEST_AUTOMATION_M2B3_SAFETY_CLOSURE.md](BATTLE_TEST_AUTOMATION_M2B3_SAFETY_CLOSURE.md).
+Milestone 2B.3A implements the remaining runner-safety boundary in source and contracts: dedicated/client heartbeat and progress projection, monotonic health timing, distinct `NoHeartbeat`/`NoProgress`, canonical shared-resource locks, exact aggregate cancellation, `RecoveryV2`, and owned structured crash/modal/hang evidence. Clean run `m2b3a-live-r1-01` live-confirms role health, exact identities, connection, graceful cleanup, result isolation, and passing-path crash/hang absence. Its artifact audit found one concatenated lock record rather than six independently conflicting resources; the corrected architecture now constructs those ids in a tested core function and validates expected/acquired cardinality before product launch. These mechanisms reuse the existing client and dedicated application ticks, remain automation-profile gated, and add no battle adapter. Clean publication and repeat live six-lock proof remain required before the Milestone 2B gate can close and campaign-fixture work can begin. See [BATTLE_TEST_AUTOMATION_M2B3_SAFETY_CLOSURE.md](BATTLE_TEST_AUTOMATION_M2B3_SAFETY_CLOSURE.md).
 
 The compile-only build plane is separate from both installed modules and repository module output folders. `Directory.Build.props` redirects all build/package state below the run root only when `CoopCompileOnly=true`; both main project files independently suppress their deployment targets in that mode. Normal developer builds retain their historical deployment behavior because the property defaults to false.
 

@@ -1,6 +1,6 @@
 # Battle Test Automation Milestone 2B.1 Runtime-Safety Foundation
 
-Status: **Connection/runtime identity live-complete; Milestone 2B safety-closure gaps audited and still open**
+Status: **Connection/runtime identity and live role health complete; RUN-008 per-resource repeat proof remains open after a runner-only correction**
 
 Implementation date: **2026-08-31**
 
@@ -71,6 +71,8 @@ This is a vanilla connectivity bootstrap. It uses no campaign save, cooperative 
 | Milestone 2B.3A safety contracts | Passed: exact role-health classification, shared-lock collision/release, real PowerShell console cancellation, explicit target-bound cancellation, read-only active-run recovery preview, active-lock refusal, synthetic exact cleanup, PID-reuse rejection, failure-helper correlation, and RecoveryV2 reporting |
 | Final dirty-source aggregate `m2b3a-final-c-01` | Passed 22/22 projects; protocol 1.1 terminal `Pass`; verified runner-lock release; no product process launched |
 | Final dirty-source compile-only `m2b3a-final-b-01` | Passed; client/dedicated outputs created below the run root; installed inventories unchanged; verified runner-lock release; no product process launched |
+| Clean publication/staging/live slice | `m2b3a-pub-c-01` 22/22; `m2b3a-pub-b-01` clean binaries; `m2b3a-stage-01` retained both complete pre-images; `m2b3a-live-r1-01` confirmed role health, exact identities, terminal `Connected`, graceful cleanup, protected result, and no crash/hang artifact |
+| Live shared-lock audit and source correction | Live artifact contained one concatenated resource instead of six; exact expression reproduced in both PowerShell hosts; `Get-CoopSharedRuntimeResourceIdsCore` plus cardinality/per-resource conflict tests pass; `m2b3a-lockfix-c-01` passed 22/22 |
 | PowerShell parser validation | Passed in PowerShell 7 and Windows PowerShell 5.1 for the aggregate runner and client launcher |
 | Repository EOL/hygiene policy | Passed with `-AllowDirty`; all modified and new text files are LF; the only normal hygiene failure is the intentionally uncommitted working tree |
 
@@ -80,6 +82,6 @@ A deliberately invalid-hash `Feasibility` request stopped at `PreconditionsFaile
 
 Historical runs established exact recovery for interrupted dedicated and client attempts, then progressively closed dedicated readiness, native bootstrap, UDP ownership, client process handoff, exact assembly resolution, native platform login, server selection, and native join. Clean run `m2e1-handoff-live-r1-01` is the terminal connection proof for this slice: exact client SHA-256 `7CC2D759806D2F02D8BEBA15BCBC01EF61DDE4975004728F3D7E6C8332977E97` and dedicated SHA-256 `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78` were reported from the loaded roles; the client observed post-rewrite `NetworkHandoff` and terminal `Connected`; native logs retained join success and server `CreatePlayer`; cleanup was graceful and exact; ports were released; and the protected result remained unchanged. This promotes both formerly blocked Milestone 1 capability rows to `Confirmed`.
 
-Milestone 2B.3A closes the audited source/contract gaps for role liveness/progress, shared runtime locks, cancellation, RecoveryV2, and structured owned crash/modal/hang evidence. The safety foundation is still not live-complete: the change set must be committed, verified from the clean published revision, staged with retained pre-images, and exercised by one separately approved clean `Feasibility` run. The passing connection evidence remains valid; no campaign, mission, battle, L2, or L3 claim follows from this safety slice.
+Milestone 2B.3A closes the audited source/contract gaps for role liveness/progress, shared runtime locks, cancellation, RecoveryV2, and structured owned crash/modal/hang evidence. Role health and the passing connection/cleanup path are now live-confirmed, but RUN-008 remains open because the first live artifact contained one concatenated lock rather than six independent resources. The production construction defect is corrected and contract-tested without changing any DLL. The passing connection evidence remains valid; no campaign, mission, battle, L2, or L3 claim follows from this safety slice.
 
-The next gate is clean publication, controlled staging, and one live confirmation of the implemented battle-type-independent safety surface. It must not open a campaign, cooperative mission, or battle and must not claim L2/L3 evidence. Milestone 3 must not begin until that gate passes. See [BATTLE_TEST_AUTOMATION_M2B3_SAFETY_CLOSURE.md](BATTLE_TEST_AUTOMATION_M2B3_SAFETY_CLOSURE.md).
+The next gate is clean publication of the runner-only correction and one repeat live confirmation of six independently acquired/released resources. Existing installed DLLs and retained staging pre-images remain valid, so no restaging is required. The rerun must not open a campaign, cooperative mission, or battle and must not claim L2/L3 evidence. Milestone 3 must not begin until that gate passes. See [BATTLE_TEST_AUTOMATION_M2B3_SAFETY_CLOSURE.md](BATTLE_TEST_AUTOMATION_M2B3_SAFETY_CLOSURE.md).

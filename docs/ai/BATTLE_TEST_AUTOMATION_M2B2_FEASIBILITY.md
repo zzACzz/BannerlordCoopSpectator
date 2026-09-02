@@ -1,6 +1,6 @@
 # Battle Test Automation Milestone 2B.2B Live Feasibility Attempts and Runner Findings
 
-Status: **Connection-feasibility path passed with terminal Connected; Milestone 2B safety closure remains incomplete**
+Status: **Connection and live role-health path passed; per-resource RUN-008 proof remains pending after a runner-only correction**
 
 Execution and correction date: **2026-09-01**
 
@@ -373,14 +373,34 @@ Together with the six previously confirmed rows, every essential Milestone 1 cap
 
 ### 17.3 Milestone 2B safety-closure source status
 
-The successful connection run did not satisfy the complete Milestone 2B deliverable and exit-criteria set. Milestone 2B.3A subsequently implemented the audited safety surface. The remaining boundary is now clean publication, staging, and live confirmation rather than missing source:
+The successful connection run did not satisfy the complete Milestone 2B deliverable and exit-criteria set. Milestone 2B.3A subsequently implemented the audited safety surface. At that point, the remaining work was to publish, stage, and verify that safety surface rather than add more source. Section 18 records that those gates later completed except for corrected per-resource RUN-008 proof:
 
 | Requirement area | Milestone 2B.3A source/contract evidence | Remaining live gate |
 |---|---|---|
-| PROC-004/PROC-007 role liveness and progress | Schema-2 role projection includes heartbeat, progress, state entry/revision, monotonic elapsed values, authoritative source, and structured error; focused tests distinguish `NoHeartbeat` and `NoProgress` | Load the clean staged client/dedicated binaries and retain live heartbeat/progress evidence through connection and cleanup |
-| RUN-008 shared runtime locks | Canonical sorted locks cover game/dedicated roots, bridge root, machine profile, and ports; conflict and release probes are contract-tested | Confirm acquisition/release artifacts in a clean live `Feasibility` run |
+| PROC-004/PROC-007 role liveness and progress | Schema-2 role projection includes heartbeat, progress, state entry/revision, monotonic elapsed values, authoritative source, and structured error; focused tests distinguish `NoHeartbeat` and `NoProgress` | Completed by `m2b3a-live-r1-01` through connection and cleanup |
+| RUN-008 shared runtime locks | Canonical sorted locks cover game/dedicated roots, bridge root, machine profile, and ports; corrected construction, cardinality, conflict, and release probes are contract-tested | Repeat live `Feasibility` after clean publication must contain and release six independent records |
 | PROC-009 cancellation and runner failure | Real isolated console signals passed in Windows PowerShell 5.1 and 7.6.4; exact explicit `Cancel` passed against a synthetic active runner | No new game run is required solely for cancellation; terminal live cancellation may be added only through separately approved non-destructive fault injection |
 | PROC-005 `Recover` contract set | Read-only active-run preview, active-lock refusal, exact process cleanup, PID-reuse rejection, completed-run preview/apply, `recovery.json`, and no-run-root-deletion evidence pass | Reconfirm recovery only if the next live run is interrupted; do not induce interruption merely to repeat the contract |
-| PROC-008 crash/modal/hang evidence | Exact path plus owned-tree/command-line-PID correlation, exact cleanup promotion, `FatalAutomationFailure`, `CrashReporterDetected`, `crash.json`, and `hang.json` paths are implemented and source/contract-verified | A clean passing run must produce neither failure artifact; real fault capture remains pending an approved fault-injection run or an organic failure |
+| PROC-008 crash/modal/hang evidence | Exact path plus owned-tree/command-line-PID correlation, exact cleanup promotion, `FatalAutomationFailure`, `CrashReporterDetected`, `crash.json`, and `hang.json` paths are implemented and source/contract-verified | Passing-path absence completed by `m2b3a-live-r1-01`; real fault capture remains pending an approved fault-injection run or an organic failure |
 
-The source/contract implementation and evidence are detailed in [BATTLE_TEST_AUTOMATION_M2B3_SAFETY_CLOSURE.md](BATTLE_TEST_AUTOMATION_M2B3_SAFETY_CLOSURE.md). Milestone 3 remains blocked until the clean-published safety binaries complete their staging and live confirmation gate.
+The source/contract implementation and evidence are detailed in [BATTLE_TEST_AUTOMATION_M2B3_SAFETY_CLOSURE.md](BATTLE_TEST_AUTOMATION_M2B3_SAFETY_CLOSURE.md). The safety binaries completed staging and partial live confirmation; Milestone 3 remains blocked only on the corrected clean-published per-resource lock artifact described below.
+
+## 18. Revision 17 safety-closure live run and Revision 18 lock audit
+
+### 18.1 Run `m2b3a-live-r1-01`
+
+The separately approved clean run executed from exact clean local/upstream revision `5d6a6c6cd9ab37a6658b061565856a98c36badf4`, with Steam already running, no pre-existing product process, free ports `7210` and `7777`, and a fresh run root. It loaded installed client SHA-256 `A363B19BFFBDA8EEDEE99EEB90E12DA0BFD508C2EA67DE70A5ACAC9DC91C0075` and installed dedicated SHA-256 `2E1494BCAEE1DCE440B4373BBA99A4F724B9C32519AACD486DE8F041C0CA1414` from their exact processes.
+
+The runner returned formal `Pass`. Both roles published live schema-2 heartbeat and progress evidence. The dedicated role completed all seven ordered bootstrap acknowledgements, confirmed native `start_game`, and owned UDP port `7210`. The client completed native platform login, reached `AtLobby`, selected the exact run-owned server, joined it through the native path, and published terminal `Connected`. Automatic cleanup stopped both exact roles gracefully without force, left no owned process, and left both required ports free. The protected global result remained byte-for-byte unchanged. Neither `crash.json` nor `hang.json` was created, and the exact-PID native logs contained no fatal signal.
+
+This is valid live evidence for exact loaded identities, role heartbeat/progress, dedicated bootstrap, native client connection, graceful exact cleanup, protected-state preservation, and passing-path crash/hang absence. It does not prove a campaign, cooperative mission, battle, L2, or L3 result.
+
+### 18.2 RUN-008 evidence defect and correction boundary
+
+Post-run artifact audit found that `shared-runtime-locks.json` contained one lock record whose `ResourceId` was the six intended identifiers joined by spaces: bridge root, game root, dedicated root, machine profile, requested UDP port `7210`, and default UDP port `7777`. The run therefore does not close RUN-008 per-resource isolation, even though its connection and role-health evidence remains valid.
+
+Lowest-level reproduction in Windows PowerShell 5.1 and PowerShell 7.6.4 showed that passing inline expressions shaped like `@('prefix:' + value, ...)` into the parameter position can bind as one string. The shared-lock primitive itself correctly handles a prebuilt string array. This defect occurs before scenario or battle adapters and therefore applies equally to every future battle type.
+
+Revision 18 source constructs the identifiers in `Get-CoopSharedRuntimeResourceIdsCore`, adds them independently with `String.Concat`, deduplicates the requested/default ports, and validates both expected and acquired cardinality before any product launch. Contracts now require six default records, five records when ports overlap, an independent conflict for every resource, and complete release in both PowerShell hosts. Focused tests and dirty-source aggregate `m2b3a-lockfix-c-01` passed 22/22.
+
+No product DLL changed, so restaging is not required. The remaining gate is a clean-published runner correction followed by one repeat live `Feasibility` run whose artifact contains six independent records and proves their release. Until then, RUN-008 remains open and Milestone 3 fixture work remains blocked.

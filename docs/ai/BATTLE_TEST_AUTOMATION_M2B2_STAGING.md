@@ -1,14 +1,14 @@
 # Battle Test Automation Milestone 2B Controlled Staging Evidence
 
-Status: **Historical staging retained; Revision 15 handoff-corrected client promoted to ConfirmedLoadedHash by clean live proof**
+Status: **Historical staging retained; Revision 17 safety-closure binaries staged and promoted to ConfirmedLoadedHash, with the Revision 18 runner-only shared-lock correction pending repeat live proof**
 
-Execution dates: **2026-08-31 and 2026-09-01**
+Execution dates: **2026-08-31 through 2026-09-02**
 
 Compiled source revisions: **`12abf363ae978d520558b7c3bbd226137a816a8a`** (`12abf36`), dedicated-only **`7628c85aef140e431f29982e016395b8f303a464`** (`7628c85`), corrected resolver client **`729fd2c325019ca026787b4ffcccf91beeced755`** (`729fd2c`), native-login client **`6ed40e883cd9909f5af8f10a8e9df19376b6ed52`** (`6ed40e8`), and handoff-corrected client **`a7bd5285902d30793d0908186fb392fe537cf314`** (`a7bd528`)
 
 Branch: **`codex/v0.1.1-refresh`**, exact revision present on `origin`
 
-Current specification: [BATTLE_TEST_AUTOMATION_SPEC.md](BATTLE_TEST_AUTOMATION_SPEC.md), Revision 16; the handoff-corrected staging transaction executed under Revision 15
+Current specification: [BATTLE_TEST_AUTOMATION_SPEC.md](BATTLE_TEST_AUTOMATION_SPEC.md), Revision 18; the handoff-corrected staging transaction executed under Revision 15 and the latest safety-closure staging transaction used clean published Revision 17 source
 
 ## 1. Outcome
 
@@ -270,3 +270,36 @@ Independent postflight recomputed installed and backup inventories from disk and
 Clean run `m2e1-handoff-live-r1-01` loaded exact client SHA-256 `7CC2D759806D2F02D8BEBA15BCBC01EF61DDE4975004728F3D7E6C8332977E97` and unchanged dedicated SHA-256 `BD328AAC4F2A64C28D3EDCE28BCE3D72FF164BDAF817D9460B302ED538702A78` from inside their exact processes. It completed authoritative bootstrap, native login, exact server selection, native join, post-rewrite `NetworkHandoff`, and terminal `Connected`, then returned `Pass` and cleaned both roles gracefully without force. Installed identities and the protected result remained unchanged, and both required ports were free afterward.
 
 The path/hash-to-loaded-hash chain for both roles is now complete. This runtime promotion does not alter the retained staging history and does not prove a campaign, cooperative mission, battle, L2, or L3 result. The next Milestone 2B work is the separately audited runtime-safety closure, not another identical staging or connection rerun.
+
+## 14. Revision 17 safety-closure staging and Revision 18 runner-only follow-up
+
+Clean-published contract run `m2b3a-pub-c-01` and compile-only run `m2b3a-pub-b-01` used exact clean local/upstream revision `5d6a6c6cd9ab37a6658b061565856a98c36badf4`. The contracts passed 22/22. Compile-only built the client and dedicated projects with zero errors, launched no product process, and proved the installed module inventories unchanged. The selected outputs were:
+
+- client DLL SHA-256 `A363B19BFFBDA8EEDEE99EEB90E12DA0BFD508C2EA67DE70A5ACAC9DC91C0075`;
+- client PDB SHA-256 `E031D36E6F3F114A171EDDE12E6DFA2B7E14BCCFBC98BD57B9BC737640595DEF`;
+- dedicated DLL SHA-256 `2E1494BCAEE1DCE440B4373BBA99A4F724B9C32519AACD486DE8F041C0CA1414`.
+
+Controlled transaction `m2b3a-stage-01` copied both complete installed trees, overlaid only the selected client DLL/PDB and the two dedicated DLL locations, and recorded the exact changed-path allowlist. The first apply command contained a PowerShell parser error and was rejected before execution. Direct revalidation proved that the manifest remained `Prepared`, no backup existed, and the installed hashes were unchanged. The corrected apply then revalidated the complete safety boundary and completed without rollback.
+
+| Fact | Observed result |
+|---|---|
+| Installed client tree | 32 files; fingerprint `34A9F7672FB268D2B6383DAB55EA7528A845726DF0AC54E6788B03BE428B73AF` |
+| Retained client pre-image | 32 files; fingerprint `9FDC993CF9F7845B3B14154312704A1272E93AFC6594E68ED42F8A76D9A16A54` |
+| Installed dedicated tree | 218 files; fingerprint `D05870B0A887E70E4A8971E197ED88DF0DCDFF886094FF6452BAA7BF7DA2DB25` |
+| Retained dedicated pre-image | 218 files; fingerprint `B05E64FA34AC421A3ED3E45CC929482E231B9D20137E479D14B2D0E36315FF18` |
+| Changed client paths | `bin/Win64_Shipping_Client/CoopSpectator.dll`; `bin/Win64_Shipping_Client/CoopSpectator.pdb` |
+| Changed dedicated paths | `bin/Win64_Shipping_Client/CoopSpectator.dll`; `bin/Win64_Shipping_Server/CoopSpectator.dll` |
+| Protected result | SHA-256 `D5EF79D59FA97EF4C95BB7AB31803AE1F475EB24498F4469B83CD3B7AD955AD3`; length and UTC write ticks unchanged |
+| Product/port state | No product process; ports `7210` and `7777` unowned |
+| Recovery | No apply failure and no rollback; both complete pre-images retained |
+
+The retained pre-images are:
+
+```text
+C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2b3a-stage-01\backup\client\CoopSpectator
+C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m2b3a-stage-01\backup\dedicated\CoopSpectatorDedicated
+```
+
+Post-stage doctor run `m2b3a-poststage-doctor-01` returned only the expected ignored-output hash differences and the not-yet-verified runtime combination. Launcher run `m2b3a-poststage-client-validate-01` accepted the exact installed client hash, version `0.3.2`, game path, and live Steam session without launching a product process. Clean live run `m2b3a-live-r1-01` subsequently loaded the exact selected client and dedicated hashes and promoted both to `ConfirmedLoadedHash`.
+
+Artifact audit of that live run found a runner-only defect: the six intended shared runtime resource identifiers were serialized as one space-concatenated lock record. The correction is confined to PowerShell runner/core construction and contracts; no client or dedicated DLL changed. Therefore the installed Revision 17 binaries remain the correct candidates and another staging transaction is not required. Clean publication of the runner-only correction and a repeat live run showing six independent lock records remain separate gates.
