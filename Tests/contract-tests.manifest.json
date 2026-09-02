@@ -2,6 +2,7 @@
   "SchemaVersion": 1,
   "Projects": [
     { "Name": "CampaignlessConversationMissionSafety.ContractTests", "Path": "Tests/CampaignlessConversationMissionSafety.ContractTests/CampaignlessConversationMissionSafety.ContractTests.csproj" },
+    { "Name": "CoopAutomationFixture.ContractTests", "Path": "Tests/CoopAutomationFixture.ContractTests/CoopAutomationFixture.ContractTests.csproj" },
     { "Name": "CoopAutomationJoin.ContractTests", "Path": "Tests/CoopAutomationJoin.ContractTests/CoopAutomationJoin.ContractTests.csproj" },
     { "Name": "CoopAutomationProtocol.ContractTests", "Path": "Tests/CoopAutomationProtocol.ContractTests/CoopAutomationProtocol.ContractTests.csproj" },
     { "Name": "CoopAutomationRunner.ContractTests", "Path": "Tests/CoopAutomationRunner.ContractTests/CoopAutomationRunner.ContractTests.csproj" },

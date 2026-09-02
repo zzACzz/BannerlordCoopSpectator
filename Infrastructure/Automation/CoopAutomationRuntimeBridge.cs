@@ -14,6 +14,10 @@ namespace CoopSpectator.Infrastructure.Automation
         public const string RunTokenVariable = "COOPSPECTATOR_AUTOMATION_RUN_TOKEN";
         public const string ExpectedModuleSha256Variable = "COOPSPECTATOR_AUTOMATION_EXPECTED_MODULE_SHA256";
         public const string ResultPolicyVariable = "COOPSPECTATOR_AUTOMATION_RESULT_POLICY";
+        public const string FixtureRecordVariable = "COOPSPECTATOR_AUTOMATION_FIXTURE_RECORD";
+        public const string FixtureIdVariable = "COOPSPECTATOR_AUTOMATION_FIXTURE_ID";
+        public const string SourceRevisionVariable = "COOPSPECTATOR_AUTOMATION_SOURCE_REVISION";
+        public const string GameVersionVariable = "COOPSPECTATOR_AUTOMATION_GAME_VERSION";
 
         private const int MaximumProtocolFileBytes = 1024 * 1024;
         private static readonly object RoleStatusLock = new object();
@@ -37,6 +41,10 @@ namespace CoopSpectator.Infrastructure.Automation
 
         public static bool IsAutomationEnabled =>
             string.Equals(Environment.GetEnvironmentVariable(TestAutomationVariable), "1", StringComparison.Ordinal);
+
+        public static bool IsFixtureRecordingRequested =>
+            IsAutomationEnabled &&
+            string.Equals(Environment.GetEnvironmentVariable(FixtureRecordVariable), "1", StringComparison.Ordinal);
 
         public static bool TryInitializeRole(
             string roleType,

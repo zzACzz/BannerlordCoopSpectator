@@ -9,6 +9,7 @@ using System.Linq;
 using System.IO; // File, Path, Directory
 using Newtonsoft.Json; // JsonConvert, серіалізація
 using CoopSpectator.Infrastructure; // ModLogger
+using CoopSpectator.Infrastructure.Automation;
 using CoopSpectator.Network.Messages;
 
 namespace CoopSpectator.Campaign
@@ -66,6 +67,18 @@ namespace CoopSpectator.Campaign
                 };
                 string json = JsonConvert.SerializeObject(dto, Formatting.Indented);
                 File.WriteAllText(path, json);
+                if (!CoopAutomationFixtureRecorder.TryRecordCampaignRoster(
+                        path,
+                        snapshot,
+                        out string fixtureFailureCode,
+                        out string fixtureFailureMessage))
+                {
+                    ModLogger.Info(
+                        "BattleRosterFile: automation fixture recording failed. Code=" +
+                        fixtureFailureCode +
+                        " Message=" +
+                        fixtureFailureMessage);
+                }
                 ModLogger.Info("BattleRosterFile: wrote " + troopIds.Count + " troop IDs to " + path + " (snapshot sides=" + (snapshot?.Sides?.Count ?? 0) + ").");
                 return true;
             }

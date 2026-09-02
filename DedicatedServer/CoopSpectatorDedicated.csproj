@@ -187,6 +187,8 @@
     <Compile Include="..\Infrastructure\CoopBattlePeerReconnectState.cs" Link="Infrastructure\CoopBattlePeerReconnectState.cs" />
     <Compile Include="..\Infrastructure\CoopBattleAgentControlRuntimeState.cs" Link="Infrastructure\CoopBattleAgentControlRuntimeState.cs" />
     <Compile Include="..\Infrastructure\AtomicBridgeFileIO.cs" Link="Infrastructure\AtomicBridgeFileIO.cs" />
+    <Compile Include="..\Infrastructure\Automation\CoopAutomationFixtureContract.cs" Link="Infrastructure\Automation\CoopAutomationFixtureContract.cs" />
+    <Compile Include="..\Infrastructure\Automation\CoopAutomationFixtureRecorder.cs" Link="Infrastructure\Automation\CoopAutomationFixtureRecorder.cs" />
     <Compile Include="..\Infrastructure\Automation\CoopAutomationProtocolFileIO.cs" Link="Infrastructure\Automation\CoopAutomationProtocolFileIO.cs" />
     <Compile Include="..\Infrastructure\Automation\CoopAutomationRuntimeContract.cs" Link="Infrastructure\Automation\CoopAutomationRuntimeContract.cs" />
     <Compile Include="..\Infrastructure\Automation\CoopAutomationRuntimeBridge.cs" Link="Infrastructure\Automation\CoopAutomationRuntimeBridge.cs" />
