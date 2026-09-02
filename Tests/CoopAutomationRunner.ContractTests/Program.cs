@@ -1,7 +1,9 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 
 internal static class Program
 {
@@ -29,6 +31,8 @@ internal static class Program
         {
             RunHarness("powershell.exe", harnessPath, corePath);
             RunHarness("pwsh.exe", harnessPath, corePath);
+            ValidateActualConsoleCancellation("powershell.exe", corePath, temporaryRoot);
+            ValidateActualConsoleCancellation("pwsh.exe", corePath, temporaryRoot);
             Console.WriteLine("Coop automation runner contract tests passed in Windows PowerShell 5.1 and PowerShell 7.");
             return 0;
         }
@@ -47,6 +51,31 @@ internal static class Program
         Assert(
             source.Contains(". $runnerCorePath", StringComparison.Ordinal),
             "Aggregate runner must dot-source the tested core helper.");
+        Assert(
+            source.Contains("'Recover', 'Cancel'", StringComparison.Ordinal) &&
+            source.Contains("Invoke-CoopExistingRunCancellation", StringComparison.Ordinal) &&
+            source.Contains("CancellationV1", StringComparison.Ordinal),
+            "The aggregate runner must expose exact run-scoped CancellationV1.");
+        Assert(
+            source.Contains("Assert-CoopRuntimeRoleHealth", StringComparison.Ordinal) &&
+            coreSource.Contains("'NoHeartbeat'", StringComparison.Ordinal) &&
+            coreSource.Contains("'NoProgress'", StringComparison.Ordinal),
+            "The aggregate runner must classify missing liveness and missing progress separately.");
+        Assert(
+            source.Contains("Enter-CoopSharedRuntimeLocksCore", StringComparison.Ordinal) &&
+            source.Contains("shared-runtime-lock-release.json", StringComparison.Ordinal),
+            "Feasibility must own and verify canonical shared runtime locks.");
+        Assert(
+            source.Contains("coop-runtime-recovery-v2", StringComparison.Ordinal) &&
+            source.Contains("RejectedIdentities", StringComparison.Ordinal) &&
+            source.Contains("DeletedRunRoot = $false", StringComparison.Ordinal),
+            "RecoveryV2 must report PID-reuse rejection and must never delete the run root.");
+        Assert(
+            source.Contains("Write-CoopRuntimeFailureEvidence", StringComparison.Ordinal) &&
+            source.Contains("artifacts\\crashes\\' + $fileName", StringComparison.Ordinal) &&
+            source.Contains("DumpAttemptState", StringComparison.Ordinal) &&
+            coreSource.Contains("Get-CoopCorrelatedFailureProcessesFromSnapshot", StringComparison.Ordinal),
+            "FailureEvidenceV1 must retain structured crash/hang evidence and exact process correlation.");
         Assert(
             source.Contains("$dedicatedBootstrapRequest = New-CoopDedicatedBootstrapRequest", StringComparison.Ordinal),
             "Aggregate runner must use the tested structured dedicated-bootstrap request builder.");
@@ -216,6 +245,150 @@ internal static class Program
         Assert(process.ExitCode == 0, executable + " runner-core contract harness failed with exit code " + process.ExitCode + ".");
     }
 
+    private static void ValidateActualConsoleCancellation(
+        string executable,
+        string corePath,
+        string temporaryRoot)
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        string discriminator = Path.GetFileNameWithoutExtension(executable);
+        string scriptPath = Path.Combine(temporaryRoot, "ConsoleCancellation-" + discriminator + ".ps1");
+        string readyPath = Path.Combine(temporaryRoot, "ConsoleCancellation-" + discriminator + ".ready");
+        string observedPath = Path.Combine(temporaryRoot, "ConsoleCancellation-" + discriminator + ".observed");
+        string script = """
+param(
+    [Parameter(Mandatory = $true)][string]$CorePath,
+    [Parameter(Mandatory = $true)][string]$ReadyPath,
+    [Parameter(Mandatory = $true)][string]$ObservedPath)
+$ErrorActionPreference = 'Stop'
+. $CorePath
+Initialize-CoopCancellationSignalCore
+try {
+    [System.IO.File]::WriteAllText($ReadyPath, 'ready')
+    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    while ([DateTime]::UtcNow -lt $deadline -and -not (Test-CoopConsoleCancellationRequestedCore)) {
+        Start-Sleep -Milliseconds 50
+    }
+    if (-not (Test-CoopConsoleCancellationRequestedCore)) { exit 2 }
+    [System.IO.File]::WriteAllText($ObservedPath, 'observed')
+    exit 0
+}
+finally {
+    Remove-CoopCancellationSignalCore
+}
+""";
+        File.WriteAllText(scriptPath, script, new UTF8Encoding(false));
+
+        string commandLine = QuoteWindowsArgument(executable) +
+            " -NoProfile -ExecutionPolicy Bypass -File " + QuoteWindowsArgument(scriptPath) +
+            " -CorePath " + QuoteWindowsArgument(corePath) +
+            " -ReadyPath " + QuoteWindowsArgument(readyPath) +
+            " -ObservedPath " + QuoteWindowsArgument(observedPath);
+        var startup = new StartupInfo { cb = Marshal.SizeOf<StartupInfo>() };
+        Assert(
+            CreateProcess(
+                null,
+                new StringBuilder(commandLine),
+                IntPtr.Zero,
+                IntPtr.Zero,
+                false,
+                CreateNewProcessGroup,
+                IntPtr.Zero,
+                temporaryRoot,
+                ref startup,
+                out ProcessInformation processInformation),
+            executable + " must start in an isolated console process group. Win32=" + Marshal.GetLastWin32Error());
+
+        try
+        {
+            using Process process = Process.GetProcessById(unchecked((int)processInformation.dwProcessId));
+            Assert(WaitForFile(readyPath, TimeSpan.FromSeconds(10)), executable + " cancellation fixture did not become ready.");
+            Assert(
+                GenerateConsoleCtrlEvent(CtrlBreakEvent, processInformation.dwProcessId),
+                "CTRL_BREAK_EVENT must be delivered to the isolated " + executable + " process group. Win32=" + Marshal.GetLastWin32Error());
+            Assert(process.WaitForExit(10000), executable + " did not terminate after observing the console cancellation signal.");
+            Assert(File.Exists(observedPath), executable + " did not preserve cleanup control after CTRL_BREAK_EVENT.");
+        }
+        finally
+        {
+            CloseHandle(processInformation.hThread);
+            CloseHandle(processInformation.hProcess);
+        }
+    }
+
+    private static bool WaitForFile(string path, TimeSpan timeout)
+    {
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        while (stopwatch.Elapsed < timeout)
+        {
+            if (File.Exists(path))
+                return true;
+            Thread.Sleep(25);
+        }
+        return false;
+    }
+
+    private static string QuoteWindowsArgument(string value)
+    {
+        return "\"" + (value ?? string.Empty).Replace("\"", "\\\"") + "\"";
+    }
+
+    private const uint CreateNewProcessGroup = 0x00000200;
+    private const uint CtrlBreakEvent = 1;
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct StartupInfo
+    {
+        public int cb;
+        public string lpReserved;
+        public string lpDesktop;
+        public string lpTitle;
+        public uint dwX;
+        public uint dwY;
+        public uint dwXSize;
+        public uint dwYSize;
+        public uint dwXCountChars;
+        public uint dwYCountChars;
+        public uint dwFillAttribute;
+        public uint dwFlags;
+        public ushort wShowWindow;
+        public ushort cbReserved2;
+        public IntPtr lpReserved2;
+        public IntPtr hStdInput;
+        public IntPtr hStdOutput;
+        public IntPtr hStdError;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ProcessInformation
+    {
+        public IntPtr hProcess;
+        public IntPtr hThread;
+        public uint dwProcessId;
+        public uint dwThreadId;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool CreateProcess(
+        string applicationName,
+        StringBuilder commandLine,
+        IntPtr processAttributes,
+        IntPtr threadAttributes,
+        bool inheritHandles,
+        uint creationFlags,
+        IntPtr environment,
+        string currentDirectory,
+        ref StartupInfo startupInfo,
+        out ProcessInformation processInformation);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GenerateConsoleCtrlEvent(uint ctrlEvent, uint processGroupId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr handle);
+
     private static void Assert(bool condition, string message)
     {
         if (!condition)
@@ -294,7 +467,7 @@ Assert-True $unsafeServerNameRejected 'The server-name field must not expose con
 $readyStatus = [pscustomobject]@{
     SchemaVersion = 1
     ProtocolMajorVersion = 1
-    ProtocolMinorVersion = 0
+    ProtocolMinorVersion = 1
     RunId = $request.RunId
     RunTokenSha256 = $controlTokenHash
     RoleType = 'DedicatedServer'
@@ -330,7 +503,7 @@ $acknowledgements = @(
 $terminalStatus = [pscustomobject]@{
     SchemaVersion = 1
     ProtocolMajorVersion = 1
-    ProtocolMinorVersion = 0
+    ProtocolMinorVersion = 1
     RunId = $request.RunId
     Sequence = $request.Sequence
     CommandId = $request.CommandId
@@ -741,6 +914,242 @@ $terminalClientStatus = [pscustomobject][ordered]@{
     FailureCode = 'PlatformLoginStillIdle'
     FailureMessage = 'Synthetic terminal client evidence.'
 }
+
+Initialize-CoopCancellationSignalCore
+Assert-True (-not (Test-CoopConsoleCancellationRequestedCore)) 'Cancellation signal must start clear.'
+Request-CoopConsoleCancellationForTestCore
+Assert-True (Test-CoopConsoleCancellationRequestedCore) 'The thread-safe cancellation signal must be observable without pipeline output.'
+Remove-CoopCancellationSignalCore
+
+$cancelRunId = 'cancel-contract-' + $PID
+$automationRoot = [System.IO.Path]::GetFullPath(
+    (Join-Path ([System.IO.Path]::GetTempPath()) 'CoopSpectator\Automation'))
+$cancelRunRoot = [System.IO.Path]::GetFullPath((Join-Path $automationRoot $cancelRunId))
+Assert-True `
+    ($cancelRunRoot.StartsWith($automationRoot + [System.IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) `
+    'The explicit cancellation fixture must stay under the exact automation temp root.'
+$cancelNonce = ('A' * 64)
+$cancelReadyPath = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) ('cancel-ready-' + $PID)
+$cancelObservedPath = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) ('cancel-observed-' + $PID)
+$fakeRunnerPath = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) ('FakeRunner-' + $PID + '.ps1')
+$fakeRunnerScript = @'
+param(
+    [string]$RunRoot,
+    [string]$RunId,
+    [string]$NonceSha256,
+    [string]$ReadyPath,
+    [string]$ObservedPath)
+$ErrorActionPreference = 'Stop'
+$process = Get-Process -Id $PID
+[System.IO.Directory]::CreateDirectory((Join-Path $RunRoot 'work')) | Out-Null
+[System.IO.Directory]::CreateDirectory((Join-Path $RunRoot 'commands\inbox')) | Out-Null
+[System.IO.Directory]::CreateDirectory((Join-Path $RunRoot 'status')) | Out-Null
+$lock = New-Object System.IO.FileStream(
+    (Join-Path $RunRoot 'work\runner.lock'),
+    [System.IO.FileMode]::CreateNew,
+    [System.IO.FileAccess]::ReadWrite,
+    [System.IO.FileShare]::None)
+try {
+    $now = [DateTime]::UtcNow
+    $manifest = [ordered]@{
+        ProtocolMajorVersion = 1
+        ProtocolMinorVersion = 1
+        RunId = $RunId
+        NonceSha256 = $NonceSha256
+        Roles = @([ordered]@{
+            RoleType = 'Runner'
+            RoleInstanceId = 'runner-01'
+            ProcessId = $PID
+            ProcessStartUtc = $process.StartTime.ToUniversalTime().ToString('O')
+            ExecutablePath = $process.Path
+            Capabilities = @('CancellationV1', 'RecoveryV2')
+        })
+    }
+    $lease = [ordered]@{
+        RunId = $RunId
+        OwnerProcessId = $PID
+        OwnerProcessStartUtc = $process.StartTime.ToUniversalTime().ToString('O')
+        LastHeartbeatUtc = $now.ToString('O')
+        ExpiresUtc = $now.AddMinutes(5).ToString('O')
+        Status = 'Active'
+    }
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText((Join-Path $RunRoot 'manifest.json'), ($manifest | ConvertTo-Json -Depth 20), $utf8)
+    [System.IO.File]::WriteAllText((Join-Path $RunRoot 'work\runner.lease.json'), ($lease | ConvertTo-Json -Depth 20), $utf8)
+    [System.IO.File]::WriteAllText($ReadyPath, 'ready', $utf8)
+    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    $requestPath = Join-Path $RunRoot 'commands\inbox\cancel.request.json'
+    while ([DateTime]::UtcNow -lt $deadline -and -not [System.IO.File]::Exists($requestPath)) {
+        Start-Sleep -Milliseconds 50
+    }
+    if (-not [System.IO.File]::Exists($requestPath)) { exit 2 }
+    [System.IO.File]::WriteAllText($ObservedPath, 'observed', $utf8)
+    exit 0
+}
+finally {
+    $lock.Dispose()
+}
+'@
+[System.IO.File]::WriteAllText($fakeRunnerPath, $fakeRunnerScript, (New-Object System.Text.UTF8Encoding($false)))
+$hostPath = (Get-Process -Id $PID).Path
+function ConvertTo-CancelFixtureArgument {
+    param([string]$Value)
+    $text = if ($null -eq $Value) { '' } else { $Value }
+    return '"' + $text.Replace('"', '\"') + '"'
+}
+$fakeStartInfo = New-Object System.Diagnostics.ProcessStartInfo
+$fakeStartInfo.FileName = $hostPath
+$fakeStartInfo.UseShellExecute = $false
+$fakeStartInfo.CreateNoWindow = $true
+$fakeStartInfo.Arguments = @(
+    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $fakeRunnerPath,
+    '-RunRoot', $cancelRunRoot, '-RunId', $cancelRunId, '-NonceSha256', $cancelNonce,
+    '-ReadyPath', $cancelReadyPath, '-ObservedPath', $cancelObservedPath |
+        ForEach-Object { ConvertTo-CancelFixtureArgument -Value $_ }) -join ' '
+$fakeRunner = [System.Diagnostics.Process]::Start($fakeStartInfo)
+$cancelFixtureDeadline = [DateTime]::UtcNow.AddSeconds(10)
+while ([DateTime]::UtcNow -lt $cancelFixtureDeadline -and -not [System.IO.File]::Exists($cancelReadyPath)) {
+    Start-Sleep -Milliseconds 25
+}
+Assert-True ([System.IO.File]::Exists($cancelReadyPath)) 'The exact fake active runner must become ready.'
+$runnerScriptPath = Join-Path (Split-Path -Parent $CorePath) 'Invoke-CoopTest.ps1'
+$previewStartInfo = New-Object System.Diagnostics.ProcessStartInfo
+$previewStartInfo.FileName = $hostPath
+$previewStartInfo.UseShellExecute = $false
+$previewStartInfo.CreateNoWindow = $true
+$previewStartInfo.Arguments = @(
+    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $runnerScriptPath,
+    '-Command', 'Recover', '-RunId', $cancelRunId |
+        ForEach-Object { ConvertTo-CancelFixtureArgument -Value $_ }) -join ' '
+$previewController = [System.Diagnostics.Process]::Start($previewStartInfo)
+Assert-True ($previewController.WaitForExit(10000)) 'Recovery preview against an active run must terminate promptly.'
+Assert-True ($previewController.ExitCode -eq 0) 'Recovery preview must remain read-only even while the runner lock is active.'
+Assert-True `
+    (-not [System.IO.File]::Exists((Join-Path $cancelRunRoot 'artifacts\processes\recovery.json'))) `
+    'Recovery preview must not create recovery.json.'
+Assert-True (-not $fakeRunner.HasExited) 'Recovery preview must not interrupt the exact active runner.'
+$blockedRecoveryStartInfo = New-Object System.Diagnostics.ProcessStartInfo
+$blockedRecoveryStartInfo.FileName = $hostPath
+$blockedRecoveryStartInfo.UseShellExecute = $false
+$blockedRecoveryStartInfo.CreateNoWindow = $true
+$blockedRecoveryStartInfo.Arguments = @(
+    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $runnerScriptPath,
+    '-Command', 'Recover', '-RunId', $cancelRunId, '-ApplyRecovery' |
+        ForEach-Object { ConvertTo-CancelFixtureArgument -Value $_ }) -join ' '
+$blockedRecoveryController = [System.Diagnostics.Process]::Start($blockedRecoveryStartInfo)
+Assert-True ($blockedRecoveryController.WaitForExit(10000)) 'Blocked RecoveryV2 apply must terminate promptly.'
+Assert-True ($blockedRecoveryController.ExitCode -eq 10) 'RecoveryV2 apply must return EnvironmentBlocked while the exact runner lock is active.'
+Assert-True (-not $fakeRunner.HasExited) 'Blocked recovery must not interrupt the exact active runner.'
+$cancelStartInfo = New-Object System.Diagnostics.ProcessStartInfo
+$cancelStartInfo.FileName = $hostPath
+$cancelStartInfo.UseShellExecute = $false
+$cancelStartInfo.CreateNoWindow = $true
+$cancelStartInfo.Arguments = @(
+    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+    $runnerScriptPath,
+    '-Command', 'Cancel', '-RunId', $cancelRunId |
+        ForEach-Object { ConvertTo-CancelFixtureArgument -Value $_ }) -join ' '
+$cancelController = [System.Diagnostics.Process]::Start($cancelStartInfo)
+Assert-True ($cancelController.WaitForExit(10000)) 'The explicit Cancel command must terminate promptly.'
+Assert-True ($cancelController.ExitCode -eq 0) 'The explicit Cancel command must accept the exact active run.'
+Assert-True ($fakeRunner.WaitForExit(10000)) 'The fake runner must observe the run-scoped cancellation request.'
+Assert-True ([System.IO.File]::Exists($cancelObservedPath)) 'The active run must observe the exact cancellation file.'
+$cancelRequest = Get-Content -LiteralPath (Join-Path $cancelRunRoot 'commands\inbox\cancel.request.json') -Raw | ConvertFrom-Json
+Assert-True `
+    ($cancelRequest.ProtocolMinorVersion -eq 1 -and $cancelRequest.RunId -eq $cancelRunId -and
+        $cancelRequest.NonceSha256 -eq $cancelNonce -and $cancelRequest.TargetRoleInstanceId -eq 'runner-01') `
+    'The explicit cancellation request must retain exact protocol, run, nonce, and target identity.'
+if ([System.IO.Directory]::Exists($cancelRunRoot)) {
+    Remove-Item -LiteralPath $cancelRunRoot -Recurse -Force
+}
+
+$healthNow = [DateTime]::UtcNow
+$healthyStatus = [pscustomobject][ordered]@{
+    SchemaVersion = 2
+    ProtocolMajorVersion = 1
+    ProtocolMinorVersion = 1
+    HeartbeatUtc = $healthNow.ToString('O')
+    LastProgressUtc = $healthNow.ToString('O')
+    StateEnteredUtc = $healthNow.AddSeconds(-1).ToString('O')
+    StateRevision = 2L
+    AuthoritativeSource = 'RunnerContract'
+}
+Assert-True `
+    ((Get-CoopRoleHealthClassificationCore -Status $healthyStatus -NowUtc $healthNow) -eq 'Healthy') `
+    'A complete fresh RoleHealthV1 status must classify as Healthy.'
+$healthyStatus.LastProgressUtc = $healthNow.AddMinutes(-5).ToString('O')
+Assert-True `
+    ((Get-CoopRoleHealthClassificationCore -Status $healthyStatus -NowUtc $healthNow -ProgressDeadlineSeconds 30) -eq 'NoProgress') `
+    'A live role with stale progress must classify as NoProgress.'
+$healthyStatus.HeartbeatUtc = $healthNow.AddMinutes(-5).ToString('O')
+$healthyStatus.StateEnteredUtc = $healthNow.AddMinutes(-6).ToString('O')
+Assert-True `
+    ((Get-CoopRoleHealthClassificationCore -Status $healthyStatus -NowUtc $healthNow -HeartbeatDeadlineSeconds 5 -ProgressDeadlineSeconds 30) -eq 'NoHeartbeat') `
+    'A stale role heartbeat must take precedence as NoHeartbeat.'
+
+$lockFixtureRoot = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) ('locks-' + $PID)
+$lockSet = Enter-CoopSharedRuntimeLocksCore `
+    -LockRoot $lockFixtureRoot `
+    -ResourceIds @('udp-port:7777', 'bridge-root:fixture', 'udp-port:7210') `
+    -RunId 'runner-contract' `
+    -OwnerProcessId $PID `
+    -OwnerProcessStartUtc (Get-Process -Id $PID).StartTime.ToUniversalTime()
+Assert-True `
+    ($lockSet.Records.Count -eq 3 -and
+        (($lockSet.Records | ForEach-Object { $_.ResourceId }) -join ',') -eq
+            'bridge-root:fixture,udp-port:7210,udp-port:7777') `
+    'Shared lock acquisition must publish the canonical sorted resource order.'
+$lockConflictRejected = $false
+try {
+    $null = Enter-CoopSharedRuntimeLocksCore `
+        -LockRoot $lockFixtureRoot `
+        -ResourceIds @('udp-port:7210') `
+        -RunId 'other-run' `
+        -OwnerProcessId $PID `
+        -OwnerProcessStartUtc (Get-Process -Id $PID).StartTime.ToUniversalTime()
+}
+catch { $lockConflictRejected = $true }
+Assert-True $lockConflictRejected 'A shared runtime resource collision must fail closed.'
+$lockRelease = @(Exit-CoopSharedRuntimeLocksCore -LockSet $lockSet)
+Assert-True `
+    (@($lockRelease | Where-Object { -not $_.ReleasedAndReacquired }).Count -eq 0) `
+    'Every shared runtime lock must be verified released.'
+
+$allowedCrashPath = [System.IO.Path]::GetFullPath((Join-Path $lockFixtureRoot 'CrashUploader.Publish.exe'))
+$otherPath = [System.IO.Path]::GetFullPath((Join-Path $lockFixtureRoot 'other.exe'))
+$failureSnapshot = @(
+    [pscustomobject]@{ ProcessId = 100; ParentProcessId = 0; ExecutablePath = $otherPath; CommandLine = 'owned-root' },
+    [pscustomobject]@{ ProcessId = 101; ParentProcessId = 100; ExecutablePath = $allowedCrashPath; CommandLine = 'child-helper' },
+    [pscustomobject]@{ ProcessId = 102; ParentProcessId = 0; ExecutablePath = $allowedCrashPath; CommandLine = 'unrelated-helper' },
+    [pscustomobject]@{ ProcessId = 103; ParentProcessId = 0; ExecutablePath = $allowedCrashPath; CommandLine = 'WerFault -p 100' })
+$failureMatches = @(Get-CoopCorrelatedFailureProcessesFromSnapshot `
+    -Snapshot $failureSnapshot `
+    -OwnedRootProcessIds @(100) `
+    -AllowedExecutablePaths @($allowedCrashPath))
+Assert-True ($failureMatches.Count -eq 2) 'Only exact path plus owned-tree/command-line PID failure helpers may correlate.'
+Assert-True (-not ($failureMatches.ProcessId -contains 102)) 'An unrelated same-name/path helper must never correlate by name alone.'
+
+$cleanupStartInfo = New-Object System.Diagnostics.ProcessStartInfo
+$cleanupStartInfo.FileName = (Get-Process -Id $PID).Path
+$cleanupStartInfo.UseShellExecute = $false
+$cleanupStartInfo.CreateNoWindow = $true
+$cleanupStartInfo.Arguments = '-NoProfile -Command "Start-Sleep -Seconds 60"'
+$cleanupProcess = [System.Diagnostics.Process]::Start($cleanupStartInfo)
+$cleanupIdentity = Resolve-CoopProcessObservation `
+    -ProcessId $cleanupProcess.Id `
+    -ExpectedExecutablePath $cleanupStartInfo.FileName `
+    -ExpectedParentProcessId $PID `
+    -LaunchStartedUtc ([DateTime]::UtcNow.AddSeconds(-2)) `
+    -LaunchObservedUtc ([DateTime]::UtcNow.AddSeconds(2)) `
+    -DeadlineMilliseconds 5000
+$cleanupEvidence = Stop-CoopExactProcessIdentityCore -Identity $cleanupIdentity -GraceSeconds 1
+Assert-True ($cleanupEvidence.IdentityMatched -and $cleanupEvidence.Outcome -eq 'Stopped') 'Synthetic exact owned-process cleanup must stop only the revalidated identity.'
+$pidReuseIdentity = [pscustomobject][ordered]@{
+    ProcessId = $PID
+    ProcessStartUtc = (Get-Process -Id $PID).StartTime.ToUniversalTime().AddMinutes(-1).ToString('O')
+    ExecutablePath = (Get-Process -Id $PID).Path
+}
+Assert-True (-not (Test-CoopLiveProcessIdentityCore -Identity $pidReuseIdentity)) 'A shifted start time must reject a possible reused PID.'
 try {
     $terminalFailure = [System.InvalidOperationException]::new('Synthetic client failure.')
     $terminalFailure.Data['CoopClientJoinStatus'] = $terminalClientStatus

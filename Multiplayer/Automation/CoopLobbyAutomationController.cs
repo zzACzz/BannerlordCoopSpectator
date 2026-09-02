@@ -40,7 +40,24 @@ namespace CoopSpectator.Multiplayer.Automation
 
         public static void PumpApplicationTick()
         {
-            if (!ExperimentalFeatures.EnableTestAutomation || _terminal)
+            if (!ExperimentalFeatures.EnableTestAutomation)
+                return;
+
+            CoopAutomationRuntimeBridge.PumpRoleStatus(
+                "MultiplayerClient",
+                "multiplayer-client-01",
+                _state,
+                "CoopLobbyAutomationController.PumpApplicationTick",
+                (_lobbyState ?? string.Empty) + "|" +
+                (_platformLoginTaskState ?? string.Empty) + "|" +
+                (_platformLoginOutcome ?? string.Empty) + "|" +
+                (_serverListTask == null ? "ServerListIdle" : "ServerListActive") + "|" +
+                (_joinTask == null ? "JoinTaskIdle" : "JoinTaskActive") + "|" +
+                (_joinAccepted ? "JoinAccepted" : "JoinPending") + "|" +
+                (_networkHandoffObserved ? "NetworkHandoffObserved" : "NetworkHandoffPending"),
+                _lastFailureCode,
+                _lastFailureMessage);
+            if (_terminal)
                 return;
 
             DateTime nowUtc = DateTime.UtcNow;

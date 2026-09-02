@@ -28,6 +28,23 @@ namespace CoopSpectator.Infrastructure
     }
 }
 
+namespace CoopSpectator.Infrastructure.Automation
+{
+    internal static class CoopAutomationRuntimeBridge
+    {
+        public static void PumpRoleStatus(
+            string roleType,
+            string roleInstanceId,
+            string state,
+            string authoritativeSource,
+            string progressToken,
+            string failureCode,
+            string failureMessage)
+        {
+        }
+    }
+}
+
 namespace HarmonyLib
 {
     public sealed class Harmony

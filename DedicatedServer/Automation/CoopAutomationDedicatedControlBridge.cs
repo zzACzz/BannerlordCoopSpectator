@@ -122,7 +122,21 @@ namespace CoopSpectator.Infrastructure.Automation
 
         public static void Tick()
         {
-            if (!_enabled || _terminal)
+            if (!_enabled)
+                return;
+
+            CoopAutomationRuntimeBridge.PumpRoleStatus(
+                CoopAutomationDedicatedControlContract.DedicatedRoleType,
+                CoopAutomationDedicatedControlContract.DedicatedRoleInstanceId,
+                _status?.State ?? (_readyStatusPublished ? "DedicatedControlReady" : "WaitingForDedicatedReady"),
+                "CoopAutomationDedicatedControlBridge.Tick",
+                "Phase=" + _phase +
+                ";NativeReady=" + _nativeReady +
+                ";ReadyPublished=" + _readyStatusPublished +
+                ";Acknowledgements=" + (_status?.Acknowledgements?.Count ?? 0),
+                _status?.FailureCode ?? _bindingFailureCode,
+                _status?.FailureMessage ?? _bindingFailureMessage);
+            if (_terminal)
                 return;
 
             try

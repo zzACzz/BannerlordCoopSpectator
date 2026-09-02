@@ -122,6 +122,39 @@ namespace CoopSpectator.Infrastructure.Automation
         public string Message { get; set; }
     }
 
+    public sealed class CoopAutomationCancellationRequest
+    {
+        public int SchemaVersion { get; set; }
+        public int ProtocolMajorVersion { get; set; }
+        public int ProtocolMinorVersion { get; set; }
+        public string RunId { get; set; }
+        public string NonceSha256 { get; set; }
+        public string RequestId { get; set; }
+        public string SourceRoleType { get; set; }
+        public string SourceRoleInstanceId { get; set; }
+        public string TargetRoleType { get; set; }
+        public string TargetRoleInstanceId { get; set; }
+        public DateTime RequestedUtc { get; set; }
+        public string Reason { get; set; }
+    }
+
+    public sealed class CoopAutomationFailureEvidence
+    {
+        public int SchemaVersion { get; set; }
+        public int ProtocolMajorVersion { get; set; }
+        public int ProtocolMinorVersion { get; set; }
+        public string RunId { get; set; }
+        public string Outcome { get; set; }
+        public string FailureCode { get; set; }
+        public string FailureMessage { get; set; }
+        public string LastRoleState { get; set; }
+        public long LastStateRevision { get; set; }
+        public DateTime LastHeartbeatUtc { get; set; }
+        public DateTime LastProgressUtc { get; set; }
+        public DateTime CapturedUtc { get; set; }
+        public string DumpAttemptState { get; set; }
+    }
+
     public sealed class CoopAutomationKnownIssueAnnotation
     {
         public string KnownIssueId { get; set; }
@@ -147,7 +180,14 @@ namespace CoopSpectator.Infrastructure.Automation
     {
         public const int CurrentManifestSchemaVersion = 1;
         public const int CurrentProtocolMajorVersion = 1;
-        public const int CurrentProtocolMinorVersion = 0;
+        public const int CurrentProtocolMinorVersion = 1;
+        public const int CurrentCancellationSchemaVersion = 1;
+        public const int CurrentFailureEvidenceSchemaVersion = 1;
+
+        public const string RoleHealthCapability = "RoleHealthV1";
+        public const string CancellationCapability = "CancellationV1";
+        public const string RecoveryCapability = "RecoveryV2";
+        public const string FailureEvidenceCapability = "FailureEvidenceV1";
 
         private static readonly Dictionary<string, int> ExitCodes =
             new Dictionary<string, int>(StringComparer.Ordinal)
@@ -175,8 +215,59 @@ namespace CoopSpectator.Infrastructure.Automation
                 "SnapshotDecodeFailed", "MaterializationAckTimeout",
                 "ReadinessGateStuck", "ControlledAgentNotSpawned",
                 "ResultIdentityMismatch", "NoHeartbeat", "NoProgress",
-                "CrashReporterDetected"
+                "CrashReporterDetected", "FatalAutomationFailure",
+                "CancellationRequested", "RecoveryIncomplete"
             };
+
+        public static bool TryValidateRequiredCapabilities(
+            IEnumerable<string> capabilities,
+            IEnumerable<string> requiredCapabilities,
+            out string failureCode,
+            out string failureMessage)
+        {
+            var available = new HashSet<string>(capabilities ?? Array.Empty<string>(), StringComparer.Ordinal);
+            foreach (string required in requiredCapabilities ?? Array.Empty<string>())
+            {
+                if (string.IsNullOrWhiteSpace(required) || !available.Contains(required))
+                    return Fail("RequiredCapabilityMissing", "The required automation capability is missing: " + (required ?? string.Empty), out failureCode, out failureMessage);
+            }
+
+            failureCode = string.Empty;
+            failureMessage = string.Empty;
+            return true;
+        }
+
+        public static bool TryValidateCancellationRequest(
+            CoopAutomationCancellationRequest request,
+            string expectedRunId,
+            string expectedNonceSha256,
+            DateTime nowUtc,
+            out string failureCode,
+            out string failureMessage)
+        {
+            if (request == null)
+                return Fail("CancellationRequestMissing", "The cancellation request is missing.", out failureCode, out failureMessage);
+            if (request.SchemaVersion != CurrentCancellationSchemaVersion)
+                return Fail("CancellationProtocolUnsupported", "The cancellation request schema is unsupported.", out failureCode, out failureMessage);
+            if (!TryValidateProtocolVersion(request.ProtocolMajorVersion, request.ProtocolMinorVersion, out failureCode, out failureMessage))
+                return false;
+            if (!string.Equals(request.RunId, expectedRunId, StringComparison.Ordinal))
+                return Fail("CancellationRunIdMismatch", "The cancellation request belongs to another run.", out failureCode, out failureMessage);
+            if (!FixedTimeHexEquals(request.NonceSha256, expectedNonceSha256))
+                return Fail("CancellationNonceMismatch", "The cancellation request nonce does not match the active run.", out failureCode, out failureMessage);
+            if (!Guid.TryParse(request.RequestId, out Guid requestId) || requestId == Guid.Empty)
+                return Fail("CancellationRequestIdInvalid", "The cancellation request id must be a non-empty GUID.", out failureCode, out failureMessage);
+            if (!MatchesRole(request.TargetRoleType, request.TargetRoleInstanceId, "Runner", "runner-01"))
+                return Fail("CancellationTargetMismatch", "The cancellation request does not target runner-01.", out failureCode, out failureMessage);
+            DateTime requestedUtc = NormalizeUtc(request.RequestedUtc);
+            DateTime normalizedNowUtc = NormalizeUtc(nowUtc);
+            if (requestedUtc == DateTime.MinValue || requestedUtc > normalizedNowUtc.AddMinutes(1) || normalizedNowUtc - requestedUtc > TimeSpan.FromHours(1))
+                return Fail("CancellationTimestampInvalid", "The cancellation request timestamp is invalid, stale, or from the future.", out failureCode, out failureMessage);
+
+            failureCode = string.Empty;
+            failureMessage = string.Empty;
+            return true;
+        }
 
         public static bool IsStableFailureReason(string reasonCode)
         {

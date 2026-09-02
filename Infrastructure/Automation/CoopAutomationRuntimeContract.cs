@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -32,6 +33,15 @@ namespace CoopSpectator.Infrastructure.Automation
         public string RoleInstanceId { get; set; }
         public string State { get; set; }
         public DateTime UpdatedUtc { get; set; }
+        public DateTime HeartbeatUtc { get; set; }
+        public DateTime LastProgressUtc { get; set; }
+        public DateTime StateEnteredUtc { get; set; }
+        public long StateRevision { get; set; }
+        public long MonotonicElapsedMilliseconds { get; set; }
+        public long MonotonicSinceProgressMilliseconds { get; set; }
+        public string AuthoritativeSource { get; set; }
+        public string LastStructuredError { get; set; }
+        public List<string> Capabilities { get; set; } = new List<string>();
         public int ProcessId { get; set; }
         public DateTime ProcessStartUtc { get; set; }
         public string ExecutablePath { get; set; }
@@ -78,11 +88,73 @@ namespace CoopSpectator.Infrastructure.Automation
     public static class CoopAutomationRuntimeContract
     {
         public const int CurrentSchemaVersion = 1;
+        public const int CurrentRoleStatusSchemaVersion = 2;
         public const int CurrentProtocolMajorVersion = 1;
-        public const int CurrentProtocolMinorVersion = 0;
+        public const int CurrentProtocolMinorVersion = 1;
         public const string SuppressResultPolicy = "Suppress";
         public const string OwnedHostRelativePath = "state/dedicated-host.json";
         public const string ResultPublicationRelativePath = "state/result-publication.status.json";
+
+        public static bool TryValidateRoleStatus(
+            CoopAutomationRuntimeRoleStatus status,
+            CoopAutomationRuntimeConfiguration configuration,
+            string expectedRoleType,
+            string expectedRoleInstanceId,
+            DateTime nowUtc,
+            out string failureCode,
+            out string failureMessage)
+        {
+            if (status == null)
+                return Fail("RoleStatusMissing", "The runtime role status is missing.", out failureCode, out failureMessage);
+            if (configuration == null)
+                return Fail("RuntimeConfigurationMissing", "The runtime automation configuration is missing.", out failureCode, out failureMessage);
+            if (status.SchemaVersion != CurrentRoleStatusSchemaVersion ||
+                status.ProtocolMajorVersion != CurrentProtocolMajorVersion ||
+                status.ProtocolMinorVersion != CurrentProtocolMinorVersion)
+                return Fail("RoleStatusProtocolUnsupported", "The role-health status requires the exact current schema and protocol capability.", out failureCode, out failureMessage);
+            if (!string.Equals(status.RunId, configuration.RunId, StringComparison.Ordinal))
+                return Fail("RoleStatusRunMismatch", "The role status belongs to another run.", out failureCode, out failureMessage);
+            if (!FixedTimeHexEquals(status.RunTokenSha256, configuration.RunTokenSha256))
+                return Fail("RoleStatusTokenMismatch", "The role status token does not match the active run.", out failureCode, out failureMessage);
+            if (!string.Equals(status.RoleType, expectedRoleType, StringComparison.Ordinal) ||
+                !string.Equals(status.RoleInstanceId, expectedRoleInstanceId, StringComparison.Ordinal))
+                return Fail("RoleStatusIdentityMismatch", "The role status identity does not match the expected role instance.", out failureCode, out failureMessage);
+            if (string.IsNullOrWhiteSpace(status.State) || status.StateRevision <= 0 ||
+                string.IsNullOrWhiteSpace(status.AuthoritativeSource))
+                return Fail("RoleStatusProgressInvalid", "The role state, revision, and authoritative source are required.", out failureCode, out failureMessage);
+            if (status.Capabilities == null || !status.Capabilities.Contains("RoleHealthV1"))
+                return Fail("RoleHealthCapabilityMissing", "The runtime role did not declare RoleHealthV1.", out failureCode, out failureMessage);
+
+            DateTime now = NormalizeUtc(nowUtc);
+            DateTime heartbeat = NormalizeUtc(status.HeartbeatUtc);
+            DateTime progress = NormalizeUtc(status.LastProgressUtc);
+            DateTime entered = NormalizeUtc(status.StateEnteredUtc);
+            if (heartbeat == DateTime.MinValue || progress == DateTime.MinValue || entered == DateTime.MinValue ||
+                progress > heartbeat || entered > heartbeat || heartbeat > now.AddMinutes(1) ||
+                status.MonotonicElapsedMilliseconds < 0 || status.MonotonicSinceProgressMilliseconds < 0 ||
+                status.MonotonicSinceProgressMilliseconds > status.MonotonicElapsedMilliseconds)
+                return Fail("RoleStatusTimelineInvalid", "The role-health wall-clock or monotonic timeline is invalid.", out failureCode, out failureMessage);
+
+            failureCode = string.Empty;
+            failureMessage = string.Empty;
+            return true;
+        }
+
+        public static string ClassifyRoleHealth(
+            CoopAutomationRuntimeRoleStatus status,
+            DateTime nowUtc,
+            TimeSpan heartbeatDeadline,
+            TimeSpan progressDeadline)
+        {
+            if (status == null)
+                return "NoHeartbeat";
+            DateTime now = NormalizeUtc(nowUtc);
+            if (heartbeatDeadline <= TimeSpan.Zero || now - NormalizeUtc(status.HeartbeatUtc) > heartbeatDeadline)
+                return "NoHeartbeat";
+            if (progressDeadline <= TimeSpan.Zero || now - NormalizeUtc(status.LastProgressUtc) > progressDeadline)
+                return "NoProgress";
+            return "Healthy";
+        }
 
         public static bool TryCreateConfiguration(
             bool automationEnabled,
@@ -314,6 +386,13 @@ namespace CoopSpectator.Infrastructure.Automation
             for (int i = 0; i < left.Length; i++)
                 difference |= char.ToUpperInvariant(left[i]) ^ char.ToUpperInvariant(right[i]);
             return difference == 0;
+        }
+
+        private static DateTime NormalizeUtc(DateTime value)
+        {
+            if (value == DateTime.MinValue)
+                return value;
+            return value.Kind == DateTimeKind.Utc ? value : value.ToUniversalTime();
         }
 
         private static bool Fail(

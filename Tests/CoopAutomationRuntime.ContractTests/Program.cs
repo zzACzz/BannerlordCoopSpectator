@@ -128,8 +128,67 @@ internal static class Program
                 out failureMessage),
             "Role status must be readable: " + failureCode + ": " + failureMessage);
         Assert(status.State == "ModuleReady", "Role status must report ModuleReady.");
+        Assert(status.SchemaVersion == 2 && status.ProtocolMinorVersion == 1, "RoleHealthV1 must use exact schema 2 and protocol 1.1.");
         Assert(status.ModuleSha256 == moduleHash, "Role status must report the measured loaded module hash.");
         Assert(status.ExpectedModuleSha256 == moduleHash, "Role status must retain the requested module hash.");
+        Assert(status.Capabilities.Contains("RoleHealthV1"), "The role status must explicitly declare RoleHealthV1.");
+        Assert(status.StateRevision == 1 && status.HeartbeatUtc != default && status.LastProgressUtc != default,
+            "The initial role status must carry a complete liveness and progress timeline.");
+
+        Assert(CoopAutomationRuntimeBridge.TryResolveConfiguration(
+            out CoopAutomationRuntimeConfiguration configuration,
+            out failureCode,
+            out failureMessage),
+            "The role-health validator requires the exact active configuration: " + failureCode + ": " + failureMessage);
+        Assert(CoopAutomationRuntimeContract.TryValidateRoleStatus(
+            status,
+            configuration,
+            "ContractTest",
+            "contract-test-01",
+            DateTime.UtcNow,
+            out failureCode,
+            out failureMessage),
+            "The initial role-health status must validate: " + failureCode + ": " + failureMessage);
+
+        System.Threading.Thread.Sleep(1100);
+        CoopAutomationRuntimeBridge.PumpRoleStatus(
+            "ContractTest",
+            "contract-test-01",
+            "ContractProgress",
+            "CoopAutomationRuntime.ContractTests",
+            "step-2",
+            string.Empty,
+            string.Empty);
+        Assert(CoopAutomationProtocolFileIO.TryReadJson(
+            statusPath,
+            1024 * 1024,
+            out status,
+            out failureCode,
+            out failureMessage),
+            "Updated role status must be readable: " + failureCode + ": " + failureMessage);
+        Assert(status.State == "ContractProgress" && status.StateRevision == 2,
+            "A state transition must advance the exact monotonic state revision.");
+        Assert(CoopAutomationRuntimeContract.ClassifyRoleHealth(
+            status,
+            DateTime.UtcNow,
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromSeconds(5)) == "Healthy",
+            "A freshly pumped role must classify as healthy.");
+        status.HeartbeatUtc = DateTime.UtcNow.AddSeconds(-10);
+        Assert(CoopAutomationRuntimeContract.ClassifyRoleHealth(
+            status,
+            DateTime.UtcNow,
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromSeconds(30)) == "NoHeartbeat",
+            "A stale heartbeat must classify distinctly as NoHeartbeat.");
+        status.HeartbeatUtc = DateTime.UtcNow;
+        status.LastProgressUtc = DateTime.UtcNow.AddSeconds(-40);
+        Assert(CoopAutomationRuntimeContract.ClassifyRoleHealth(
+            status,
+            DateTime.UtcNow,
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromSeconds(30)) == "NoProgress",
+            "A live but stalled role must classify distinctly as NoProgress.");
     }
 
     private static void ValidateSuppressDecision()

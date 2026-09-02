@@ -16,6 +16,24 @@ namespace CoopSpectator.Infrastructure.Automation
         public const string ResultPolicyVariable = "COOPSPECTATOR_AUTOMATION_RESULT_POLICY";
 
         private const int MaximumProtocolFileBytes = 1024 * 1024;
+        private static readonly object RoleStatusLock = new object();
+        private static readonly TimeSpan RoleStatusWriteInterval = TimeSpan.FromSeconds(1);
+        private static readonly Stopwatch RoleStopwatch = new Stopwatch();
+        private static CoopAutomationRuntimeConfiguration _roleConfiguration;
+        private static string _roleType = string.Empty;
+        private static string _roleInstanceId = string.Empty;
+        private static string _roleModulePath = string.Empty;
+        private static string _roleModuleHash = string.Empty;
+        private static string _roleState = string.Empty;
+        private static string _roleProgressToken = string.Empty;
+        private static string _roleAuthoritativeSource = string.Empty;
+        private static string _roleFailureCode = string.Empty;
+        private static string _roleFailureMessage = string.Empty;
+        private static DateTime _roleStateEnteredUtc = DateTime.MinValue;
+        private static DateTime _roleLastProgressUtc = DateTime.MinValue;
+        private static DateTime _roleNextWriteUtc = DateTime.MinValue;
+        private static long _roleStateRevision;
+        private static long _roleLastProgressElapsedMilliseconds;
 
         public static bool IsAutomationEnabled =>
             string.Equals(Environment.GetEnvironmentVariable(TestAutomationVariable), "1", StringComparison.Ordinal);
@@ -48,7 +66,7 @@ namespace CoopSpectator.Infrastructure.Automation
 
             if (!string.Equals(moduleHash, configuration.ExpectedModuleSha256, StringComparison.Ordinal))
             {
-                TryWriteRoleStatus(
+                WriteOneShotRoleStatus(
                     configuration,
                     roleType,
                     roleInstanceId,
@@ -62,20 +80,75 @@ namespace CoopSpectator.Infrastructure.Automation
 
             try
             {
-                TryWriteRoleStatus(
-                    configuration,
-                    roleType,
-                    roleInstanceId,
-                    "ModuleReady",
-                    modulePath,
-                    moduleHash,
-                    string.Empty,
-                    string.Empty);
+                InitializeRoleStatus(configuration, roleType, roleInstanceId, modulePath, moduleHash);
                 return true;
             }
             catch (Exception ex)
             {
                 return Fail("RoleStatusWriteFailed", "The runtime role status could not be written: " + ex.Message, out failureCode, out failureMessage);
+            }
+        }
+
+        public static void PumpRoleStatus(
+            string roleType,
+            string roleInstanceId,
+            string state,
+            string authoritativeSource,
+            string progressToken,
+            string failureCode,
+            string failureMessage)
+        {
+            if (!IsAutomationEnabled)
+                return;
+
+            lock (RoleStatusLock)
+            {
+                if (_roleConfiguration == null ||
+                    !string.Equals(_roleType, roleType ?? string.Empty, StringComparison.Ordinal) ||
+                    !string.Equals(_roleInstanceId, roleInstanceId ?? string.Empty, StringComparison.Ordinal))
+                    return;
+
+                DateTime nowUtc = DateTime.UtcNow;
+                string nextState = state ?? string.Empty;
+                string nextProgressToken = progressToken ?? string.Empty;
+                string nextFailureCode = failureCode ?? string.Empty;
+                string nextFailureMessage = failureMessage ?? string.Empty;
+                bool stateChanged = !string.Equals(_roleState, nextState, StringComparison.Ordinal);
+                bool progressChanged = stateChanged ||
+                    !string.Equals(_roleProgressToken, nextProgressToken, StringComparison.Ordinal) ||
+                    !string.Equals(_roleFailureCode, nextFailureCode, StringComparison.Ordinal) ||
+                    !string.Equals(_roleFailureMessage, nextFailureMessage, StringComparison.Ordinal);
+
+                if (stateChanged)
+                {
+                    _roleState = nextState;
+                    _roleStateEnteredUtc = nowUtc;
+                    _roleStateRevision++;
+                }
+                if (progressChanged)
+                {
+                    _roleProgressToken = nextProgressToken;
+                    _roleFailureCode = nextFailureCode;
+                    _roleFailureMessage = nextFailureMessage;
+                    _roleLastProgressUtc = nowUtc;
+                    _roleLastProgressElapsedMilliseconds = RoleStopwatch.ElapsedMilliseconds;
+                }
+                _roleAuthoritativeSource = authoritativeSource ?? string.Empty;
+
+                if (!stateChanged && nowUtc < _roleNextWriteUtc)
+                    return;
+
+                try
+                {
+                    WriteCurrentRoleStatus(nowUtc);
+                    _roleNextWriteUtc = nowUtc.Add(RoleStatusWriteInterval);
+                }
+                catch (Exception ex)
+                {
+                    _roleFailureCode = "RoleStatusWriteFailed";
+                    _roleFailureMessage = ex.Message;
+                    _roleNextWriteUtc = nowUtc.Add(RoleStatusWriteInterval);
+                }
             }
         }
 
@@ -207,7 +280,57 @@ namespace CoopSpectator.Infrastructure.Automation
                 out failureMessage);
         }
 
-        private static void TryWriteRoleStatus(
+        private static void InitializeRoleStatus(
+            CoopAutomationRuntimeConfiguration configuration,
+            string roleType,
+            string roleInstanceId,
+            string modulePath,
+            string moduleHash)
+        {
+            lock (RoleStatusLock)
+            {
+                DateTime nowUtc = DateTime.UtcNow;
+                _roleConfiguration = configuration;
+                _roleType = roleType ?? string.Empty;
+                _roleInstanceId = roleInstanceId ?? string.Empty;
+                _roleModulePath = modulePath ?? string.Empty;
+                _roleModuleHash = moduleHash ?? string.Empty;
+                _roleState = "ModuleReady";
+                _roleProgressToken = "ModuleReady";
+                _roleAuthoritativeSource = "CoopAutomationRuntimeBridge.TryInitializeRole";
+                _roleFailureCode = string.Empty;
+                _roleFailureMessage = string.Empty;
+                _roleStateEnteredUtc = nowUtc;
+                _roleLastProgressUtc = nowUtc;
+                _roleStateRevision = 1;
+                RoleStopwatch.Restart();
+                _roleLastProgressElapsedMilliseconds = 0;
+                WriteCurrentRoleStatus(nowUtc);
+                _roleNextWriteUtc = nowUtc.Add(RoleStatusWriteInterval);
+            }
+        }
+
+        private static void WriteCurrentRoleStatus(DateTime nowUtc)
+        {
+            WriteRoleStatus(
+                _roleConfiguration,
+                _roleType,
+                _roleInstanceId,
+                _roleState,
+                _roleModulePath,
+                _roleModuleHash,
+                _roleFailureCode,
+                _roleFailureMessage,
+                _roleStateEnteredUtc,
+                _roleLastProgressUtc,
+                _roleStateRevision,
+                RoleStopwatch.ElapsedMilliseconds,
+                Math.Max(0L, RoleStopwatch.ElapsedMilliseconds - _roleLastProgressElapsedMilliseconds),
+                _roleAuthoritativeSource,
+                nowUtc);
+        }
+
+        private static void WriteOneShotRoleStatus(
             CoopAutomationRuntimeConfiguration configuration,
             string roleType,
             string roleInstanceId,
@@ -217,11 +340,47 @@ namespace CoopSpectator.Infrastructure.Automation
             string failureCode,
             string failureMessage)
         {
+            DateTime nowUtc = DateTime.UtcNow;
+            WriteRoleStatus(
+                configuration,
+                roleType,
+                roleInstanceId,
+                state,
+                modulePath,
+                moduleHash,
+                failureCode,
+                failureMessage,
+                nowUtc,
+                nowUtc,
+                1,
+                0,
+                0,
+                "CoopAutomationRuntimeBridge.TryInitializeRole",
+                nowUtc);
+        }
+
+        private static void WriteRoleStatus(
+            CoopAutomationRuntimeConfiguration configuration,
+            string roleType,
+            string roleInstanceId,
+            string state,
+            string modulePath,
+            string moduleHash,
+            string failureCode,
+            string failureMessage,
+            DateTime stateEnteredUtc,
+            DateTime lastProgressUtc,
+            long stateRevision,
+            long monotonicElapsedMilliseconds,
+            long monotonicSinceProgressMilliseconds,
+            string authoritativeSource,
+            DateTime nowUtc)
+        {
             using (Process process = Process.GetCurrentProcess())
             {
                 var status = new CoopAutomationRuntimeRoleStatus
                 {
-                    SchemaVersion = CoopAutomationRuntimeContract.CurrentSchemaVersion,
+                    SchemaVersion = CoopAutomationRuntimeContract.CurrentRoleStatusSchemaVersion,
                     ProtocolMajorVersion = CoopAutomationRuntimeContract.CurrentProtocolMajorVersion,
                     ProtocolMinorVersion = CoopAutomationRuntimeContract.CurrentProtocolMinorVersion,
                     RunId = configuration.RunId,
@@ -229,7 +388,22 @@ namespace CoopSpectator.Infrastructure.Automation
                     RoleType = roleType ?? string.Empty,
                     RoleInstanceId = roleInstanceId ?? string.Empty,
                     State = state ?? string.Empty,
-                    UpdatedUtc = DateTime.UtcNow,
+                    UpdatedUtc = nowUtc,
+                    HeartbeatUtc = nowUtc,
+                    LastProgressUtc = lastProgressUtc,
+                    StateEnteredUtc = stateEnteredUtc,
+                    StateRevision = stateRevision,
+                    MonotonicElapsedMilliseconds = monotonicElapsedMilliseconds,
+                    MonotonicSinceProgressMilliseconds = monotonicSinceProgressMilliseconds,
+                    AuthoritativeSource = authoritativeSource ?? string.Empty,
+                    LastStructuredError = string.IsNullOrWhiteSpace(failureCode)
+                        ? string.Empty
+                        : (failureCode ?? string.Empty) + ": " + (failureMessage ?? string.Empty),
+                    Capabilities = new System.Collections.Generic.List<string>
+                    {
+                        "RoleHealthV1",
+                        "FailureEvidenceV1"
+                    },
                     ProcessId = process.Id,
                     ProcessStartUtc = process.StartTime.ToUniversalTime(),
                     ExecutablePath = process.MainModule?.FileName ?? string.Empty,

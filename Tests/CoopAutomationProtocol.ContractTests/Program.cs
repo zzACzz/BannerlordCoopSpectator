@@ -25,6 +25,7 @@ internal static class Program
         try
         {
             ValidateProtocolCompatibility();
+            ValidateCapabilitiesAndCancellation();
             ValidateEnvelopeIdentityAndOrdering();
             ValidateLeaseTimeline();
             ValidateOutcomeCodesAndPrecedence();
@@ -48,9 +49,73 @@ internal static class Program
 
     private static void ValidateProtocolCompatibility()
     {
-        Assert(CoopAutomationRunContract.TryValidateProtocolVersion(1, 0, out _, out _), "The current protocol version must be accepted.");
+        Assert(CoopAutomationRunContract.TryValidateProtocolVersion(1, 1, out _, out _), "The current protocol version must be accepted.");
+        Assert(CoopAutomationRunContract.TryValidateProtocolVersion(1, 0, out _, out _), "The previous compatible minor protocol version must remain readable.");
         AssertFailure(CoopAutomationRunContract.TryValidateProtocolVersion(2, 0, out string majorCode, out _), majorCode, "ProtocolMajorUnsupported");
-        AssertFailure(CoopAutomationRunContract.TryValidateProtocolVersion(1, 1, out string minorCode, out _), minorCode, "ProtocolMinorUnsupported");
+        AssertFailure(CoopAutomationRunContract.TryValidateProtocolVersion(1, 2, out string minorCode, out _), minorCode, "ProtocolMinorUnsupported");
+    }
+
+    private static void ValidateCapabilitiesAndCancellation()
+    {
+        string[] capabilities =
+        {
+            CoopAutomationRunContract.RoleHealthCapability,
+            CoopAutomationRunContract.CancellationCapability,
+            CoopAutomationRunContract.RecoveryCapability,
+            CoopAutomationRunContract.FailureEvidenceCapability
+        };
+        Assert(
+            CoopAutomationRunContract.TryValidateRequiredCapabilities(
+                capabilities,
+                capabilities,
+                out string code,
+                out string message),
+            "The exact Milestone 2B safety capability set must be accepted: " + code + ": " + message);
+        AssertFailure(
+            CoopAutomationRunContract.TryValidateRequiredCapabilities(
+                capabilities,
+                new[] { "UnknownRequiredCapability" },
+                out code,
+                out _),
+            code,
+            "RequiredCapabilityMissing");
+
+        DateTime now = DateTime.UtcNow;
+        var request = new CoopAutomationCancellationRequest
+        {
+            SchemaVersion = CoopAutomationRunContract.CurrentCancellationSchemaVersion,
+            ProtocolMajorVersion = 1,
+            ProtocolMinorVersion = 1,
+            RunId = RunId,
+            NonceSha256 = NonceHash,
+            RequestId = Guid.NewGuid().ToString("D"),
+            SourceRoleType = "ExternalController",
+            SourceRoleInstanceId = "cancel-command",
+            TargetRoleType = "Runner",
+            TargetRoleInstanceId = "runner-01",
+            RequestedUtc = now,
+            Reason = "Contract test"
+        };
+        Assert(
+            CoopAutomationRunContract.TryValidateCancellationRequest(
+                request,
+                RunId,
+                NonceHash,
+                now,
+                out code,
+                out message),
+            "An exact current cancellation request must be accepted: " + code + ": " + message);
+        request.NonceSha256 = OtherHash;
+        AssertFailure(
+            CoopAutomationRunContract.TryValidateCancellationRequest(
+                request,
+                RunId,
+                NonceHash,
+                now,
+                out code,
+                out _),
+            code,
+            "CancellationNonceMismatch");
     }
 
     private static void ValidateEnvelopeIdentityAndOrdering()

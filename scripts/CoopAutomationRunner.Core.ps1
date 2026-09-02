@@ -72,7 +72,7 @@ function Assert-CoopDedicatedControlReadyStatus {
     if ($null -eq $Status) { throw 'Dedicated control readiness status is missing.' }
     if ([int](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'SchemaVersion') -ne 1 -or
         [int](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'ProtocolMajorVersion') -ne 1 -or
-        [int](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'ProtocolMinorVersion') -ne 0) {
+        [int](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'ProtocolMinorVersion') -ne 1) {
         throw 'Dedicated control readiness protocol is unsupported.'
     }
     if (-not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'RunId'), $ExpectedRunId, [StringComparison]::Ordinal) -or
@@ -128,7 +128,7 @@ function Confirm-CoopDedicatedBootstrapStatus {
     if ($null -eq $Status -or $null -eq $Request) { throw 'Dedicated bootstrap status validation context is missing.' }
     if ([int](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'SchemaVersion') -ne 1 -or
         [int](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'ProtocolMajorVersion') -ne 1 -or
-        [int](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'ProtocolMinorVersion') -ne 0) {
+        [int](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'ProtocolMinorVersion') -ne 1) {
         throw 'Dedicated bootstrap status protocol is unsupported.'
     }
     if (-not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'RunId'), $ExpectedRunId, [StringComparison]::Ordinal) -or
@@ -290,6 +290,114 @@ function ConvertTo-CoopUtcDateTime {
     }
 }
 
+if ($null -eq ('CoopAutomationCancellationSignal' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Threading;
+
+public static class CoopAutomationCancellationSignal
+{
+    private static int _requested;
+    private static ConsoleCancelEventHandler _handler;
+
+    public static bool IsRequested { get { return Volatile.Read(ref _requested) != 0; } }
+
+    public static void Install()
+    {
+        Interlocked.Exchange(ref _requested, 0);
+        if (_handler != null) return;
+        _handler = delegate(object sender, ConsoleCancelEventArgs args)
+        {
+            args.Cancel = true;
+            Interlocked.Exchange(ref _requested, 1);
+        };
+        Console.CancelKeyPress += _handler;
+    }
+
+    public static void Uninstall()
+    {
+        ConsoleCancelEventHandler handler = _handler;
+        if (handler != null)
+        {
+            Console.CancelKeyPress -= handler;
+            _handler = null;
+        }
+    }
+
+    public static void RequestForTest()
+    {
+        Interlocked.Exchange(ref _requested, 1);
+    }
+}
+'@
+}
+
+function Initialize-CoopCancellationSignalCore {
+    [CmdletBinding()]
+    param()
+
+    [CoopAutomationCancellationSignal]::Install()
+}
+
+function Remove-CoopCancellationSignalCore {
+    [CmdletBinding()]
+    param()
+
+    [CoopAutomationCancellationSignal]::Uninstall()
+}
+
+function Test-CoopConsoleCancellationRequestedCore {
+    [CmdletBinding()]
+    param()
+
+    return [CoopAutomationCancellationSignal]::IsRequested
+}
+
+function Request-CoopConsoleCancellationForTestCore {
+    [CmdletBinding()]
+    param()
+
+    [CoopAutomationCancellationSignal]::RequestForTest()
+}
+
+function Get-CoopRoleHealthClassificationCore {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]$Status,
+        [Parameter(Mandatory = $true)][DateTime]$NowUtc,
+        [ValidateRange(1, 3600)][int]$HeartbeatDeadlineSeconds = 5,
+        [ValidateRange(1, 86400)][int]$ProgressDeadlineSeconds = 180
+    )
+
+    if ($null -eq $Status) { return 'NoHeartbeat' }
+    if ([int](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'SchemaVersion') -ne 2 -or
+        [int](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'ProtocolMajorVersion') -ne 1 -or
+        [int](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'ProtocolMinorVersion') -ne 1) {
+        throw 'RoleHealthV1 requires exact role-status schema 2 and protocol 1.1.'
+    }
+    $heartbeatUtc = ConvertTo-CoopUtcDateTime -Value (
+        Get-CoopOptionalPropertyValue -InputObject $Status -Name 'HeartbeatUtc')
+    $progressUtc = ConvertTo-CoopUtcDateTime -Value (
+        Get-CoopOptionalPropertyValue -InputObject $Status -Name 'LastProgressUtc')
+    $enteredUtc = ConvertTo-CoopUtcDateTime -Value (
+        Get-CoopOptionalPropertyValue -InputObject $Status -Name 'StateEnteredUtc')
+    $revision = [long](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'StateRevision')
+    $source = [string](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'AuthoritativeSource')
+    if ($null -eq $heartbeatUtc -or $null -eq $progressUtc -or $null -eq $enteredUtc -or
+        $revision -le 0 -or [string]::IsNullOrWhiteSpace($source) -or
+        $progressUtc -gt $heartbeatUtc -or $enteredUtc -gt $heartbeatUtc -or
+        $heartbeatUtc -gt $NowUtc.ToUniversalTime().AddMinutes(1)) {
+        throw 'RoleHealthV1 contains an invalid identity or timeline.'
+    }
+    if ($NowUtc.ToUniversalTime() - $heartbeatUtc -gt [TimeSpan]::FromSeconds($HeartbeatDeadlineSeconds)) {
+        return 'NoHeartbeat'
+    }
+    if ($NowUtc.ToUniversalTime() - $progressUtc -gt [TimeSpan]::FromSeconds($ProgressDeadlineSeconds)) {
+        return 'NoProgress'
+    }
+    return 'Healthy'
+}
+
 function Get-CoopFileSha256 {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -309,6 +417,149 @@ function Get-CoopFileSha256 {
         $algorithm.Dispose()
         $stream.Dispose()
     }
+}
+
+function Enter-CoopSharedRuntimeLocksCore {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$LockRoot,
+        [Parameter(Mandatory = $true)][string[]]$ResourceIds,
+        [Parameter(Mandatory = $true)][string]$RunId,
+        [Parameter(Mandatory = $true)][int]$OwnerProcessId,
+        [Parameter(Mandatory = $true)][DateTime]$OwnerProcessStartUtc
+    )
+
+    $fullLockRoot = [System.IO.Path]::GetFullPath($LockRoot)
+    [System.IO.Directory]::CreateDirectory($fullLockRoot) | Out-Null
+    $streams = New-Object 'System.Collections.Generic.List[System.IO.FileStream]'
+    $records = New-Object 'System.Collections.Generic.List[object]'
+    try {
+        foreach ($resourceId in @($ResourceIds | Sort-Object -Unique)) {
+            if ([string]::IsNullOrWhiteSpace($resourceId)) { throw 'Shared runtime lock resource ids must be non-empty.' }
+            $hashBytes = [System.Text.Encoding]::UTF8.GetBytes($resourceId)
+            $algorithm = [System.Security.Cryptography.SHA256]::Create()
+            try { $hash = [BitConverter]::ToString($algorithm.ComputeHash($hashBytes)).Replace('-', '') }
+            finally { $algorithm.Dispose() }
+            $lockPath = Join-Path $fullLockRoot ($hash + '.lock')
+            try {
+                $stream = New-Object System.IO.FileStream(
+                    $lockPath,
+                    [System.IO.FileMode]::OpenOrCreate,
+                    [System.IO.FileAccess]::ReadWrite,
+                    [System.IO.FileShare]::None)
+            }
+            catch {
+                throw "Shared runtime resource is already locked: $resourceId. $($_.Exception.Message)"
+            }
+            $streams.Add($stream) | Out-Null
+            $record = [ordered]@{
+                ResourceId = $resourceId
+                LockPath = [System.IO.Path]::GetFullPath($lockPath)
+                RunId = $RunId
+                OwnerProcessId = $OwnerProcessId
+                OwnerProcessStartUtc = $OwnerProcessStartUtc.ToUniversalTime().ToString('O')
+                AcquiredUtc = [DateTime]::UtcNow.ToString('O')
+            }
+            $bytes = (New-Object System.Text.UTF8Encoding($false)).GetBytes(
+                (($record | ConvertTo-Json -Depth 10) + [Environment]::NewLine))
+            $stream.SetLength(0)
+            $stream.Write($bytes, 0, $bytes.Length)
+            $stream.Flush($true)
+            $records.Add([pscustomobject]$record) | Out-Null
+        }
+        return [pscustomobject]@{
+            Streams = $streams
+            Records = $records.ToArray()
+        }
+    }
+    catch {
+        foreach ($stream in $streams) { $stream.Dispose() }
+        throw
+    }
+}
+
+function Exit-CoopSharedRuntimeLocksCore {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)]$LockSet)
+
+    foreach ($stream in @($LockSet.Streams)) { if ($null -ne $stream) { $stream.Dispose() } }
+    $probes = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($record in @($LockSet.Records)) {
+        $released = $false
+        $failure = ''
+        try {
+            $probe = New-Object System.IO.FileStream(
+                ([string]$record.LockPath),
+                [System.IO.FileMode]::Open,
+                [System.IO.FileAccess]::ReadWrite,
+                [System.IO.FileShare]::None)
+            $probe.Dispose()
+            $released = $true
+        }
+        catch { $failure = $_.Exception.Message }
+        $probes.Add([pscustomobject][ordered]@{
+            ResourceId = [string]$record.ResourceId
+            LockPath = [string]$record.LockPath
+            ReleasedAndReacquired = $released
+            Failure = $failure
+        }) | Out-Null
+    }
+    return $probes.ToArray()
+}
+
+function Get-CoopCorrelatedFailureProcessesFromSnapshot {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Snapshot,
+        [Parameter(Mandatory = $true)][int[]]$OwnedRootProcessIds,
+        [Parameter(Mandatory = $true)][string[]]$AllowedExecutablePaths
+    )
+
+    if ($OwnedRootProcessIds.Count -eq 0) { return @() }
+    $allowed = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($path in $AllowedExecutablePaths) {
+        if (-not [string]::IsNullOrWhiteSpace($path)) {
+            $allowed.Add([System.IO.Path]::GetFullPath($path)) | Out-Null
+        }
+    }
+    $descendants = @(Get-CoopDescendantProcessRecordsFromSnapshot `
+        -Snapshot $Snapshot `
+        -RootProcessIds $OwnedRootProcessIds `
+        -MaximumDescendants 256)
+    $descendantIds = New-Object 'System.Collections.Generic.HashSet[int]'
+    foreach ($record in $descendants) { $descendantIds.Add([int]$record.ProcessId) | Out-Null }
+    $correlatedProcesses = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($record in $Snapshot) {
+        $pathValue = Get-CoopOptionalPropertyValue -InputObject $record -Name 'ExecutablePath'
+        if ([string]::IsNullOrWhiteSpace([string]$pathValue)) {
+            $pathValue = Get-CoopOptionalPropertyValue -InputObject $record -Name 'Path'
+        }
+        if ([string]::IsNullOrWhiteSpace([string]$pathValue) -or
+            -not $allowed.Contains([System.IO.Path]::GetFullPath([string]$pathValue))) { continue }
+
+        $processId = [int](Get-CoopOptionalPropertyValue -InputObject $record -Name 'ProcessId')
+        $commandLine = [string](Get-CoopOptionalPropertyValue -InputObject $record -Name 'CommandLine')
+        $correlationSource = if ($descendantIds.Contains($processId)) { 'OwnedProcessTree' } else { '' }
+        if ([string]::IsNullOrEmpty($correlationSource) -and -not [string]::IsNullOrWhiteSpace($commandLine)) {
+            foreach ($rootId in $OwnedRootProcessIds) {
+                if ($commandLine -match ('(?<!\d)' + [Regex]::Escape([string]$rootId) + '(?!\d)')) {
+                    $correlationSource = 'ExactCommandLinePid'
+                    break
+                }
+            }
+        }
+        if ([string]::IsNullOrEmpty($correlationSource)) { continue }
+        $match = [pscustomobject][ordered]@{
+            ProcessId = $processId
+            ParentProcessId = [int](Get-CoopOptionalPropertyValue -InputObject $record -Name 'ParentProcessId')
+            ExecutablePath = [System.IO.Path]::GetFullPath([string]$pathValue)
+            CommandLine = $commandLine
+            CreationDate = Get-CoopOptionalPropertyValue -InputObject $record -Name 'CreationDate'
+            CorrelationSource = $correlationSource
+        }
+        $correlatedProcesses.Add($match) | Out-Null
+    }
+    return $correlatedProcesses.ToArray()
 }
 
 function Assert-CoopClientLaunchArtifact {
