@@ -1,6 +1,8 @@
 # AI Knowledge Base
 
-Current field automation stage: **Milestone 3 complete; Milestone 4A source/contracts implemented, live L2 pending.** See [BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md) for profile, source map, validation artifacts and the same-process reset gap.
+Current field automation stage: **Milestone 3 complete; Milestone 4 source/contracts and local file isolation verified, live L2 pending.** See [BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md) for profile, source map, validation artifacts and the same-process reset gap.
+
+Latest local-isolation verification: **2026-09-09** (m4-local-contracts-20260909-01, 24/24; m4-local-compile-20260909-01, both modules compiled without installed changes). Field-profile bridges use local run storage; the personal result is not accessed. See [local ownership, evidence and audit](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#11-local-only-file-isolation-2026-09-09).
 
 Last source verification: **2026-09-02**
 Last bounded runtime-feasibility verification: **2026-09-02** (`m2b3a-live-r2-01`, exact clean revision `c6507e9`; exact dedicated/client loaded hashes, live schema-2 heartbeat/progress, complete bootstrap, native login, terminal `Connected`, six independently acquired/released resources, graceful cleanup, protected-state preservation, and no crash/hang artifact confirmed)

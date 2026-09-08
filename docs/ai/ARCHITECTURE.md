@@ -1,5 +1,7 @@
 # Architecture
 
+Local file ownership (2026-09-09): CoopAutomationRuntimeBridge.ResolveCoopFolderPath delegates to the pure runtime contract with a lazy production Documents provider. Exact field smoke selects only its validated local state/bridge directory; disabled/non-smoke callers retain the original directory. All shared module Documents factories now use this boundary, including optional diagnostics and helper modes. Phase remains under state/phase. The runner owns sentinel creation; the server independently admits its bytes and observes real result suppression. Attempt-v2 evidence explicitly describes local preservation and no personal-result access. [Source map and validation](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#11-local-only-file-isolation-2026-09-09).
+
 The default-off FieldDedicatedSpawnSmokeV1 profile binds an immutable run-owned field roster before the existing dedicated bootstrap opens CoopBattle / MultiplayerBattle. A dedicated-only observer reads native materialization once at PreBattleHold and requests normal early abort with result suppression. Physical spawn authority and disabled production paths are preserved. See [M4 field spawn smoke](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md); native proof remains pending.
 
 Last source verification: **2026-08-28**

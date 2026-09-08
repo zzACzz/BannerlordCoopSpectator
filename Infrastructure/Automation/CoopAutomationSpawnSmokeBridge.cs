@@ -8,7 +8,7 @@ namespace CoopSpectator.Infrastructure.Automation
     // Default-off process/run binding. No engine objects are inspected in this shared bridge.
     public static class CoopAutomationSpawnSmokeBridge
     {
-        public const string ProfileVariable = "COOPSPECTATOR_AUTOMATION_SPAWN_SMOKE_PROFILE";
+        public const string ProfileVariable = CoopAutomationRuntimeContract.SpawnSmokeProfileVariable;
         private static CoopAutomationRuntimeConfiguration _configuration;
         private static CoopAutomationSmokeFixture _fixture;
         private static object _mission;
@@ -46,16 +46,24 @@ namespace CoopSpectator.Infrastructure.Automation
                 out CoopAutomationSmokeFixture fixture, out failure)) return false;
             try
             {
-                string docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-                _protectedResultPath = Path.Combine(docs, "Mount and Blade II Bannerlord", "CoopSpectator", "battle_result.json");
-                _protectedResultHash = ReadProtectedResultIdentity();
+                string folder = CoopAutomationRuntimeContract.ResolveCoopFolderPath(
+                    true, profile, configuration, () => throw new InvalidOperationException("ProductionFolderForbidden"));
+                if (!CoopAutomationRuntimeContract.TryResolveContainedPath(folder, "battle_result.json",
+                    out string protectedPath, out failure)) return false;
+                string expectedHash = CoopAutomationRuntimeContract.ComputeSha256Hex(
+                    CoopAutomationRuntimeContract.LocalResultSentinelText(configuration.RunId));
+                if (!File.Exists(protectedPath) ||
+                    CoopAutomationRuntimeContract.ComputeFileSha256(protectedPath) != expectedHash)
+                { failure = "LocalResultSentinelMissingOrChanged"; return false; }
+                _protectedResultPath = protectedPath;
+                _protectedResultHash = expectedHash;
                 _configuration = configuration;
                 _fixture = fixture;
                 InitialStateWasClean = true;
                 failure = string.Empty;
                 return true;
             }
-            catch (Exception ex) { failure = "ProtectedResultBaselineFailed:" + ex.GetType().Name; return false; }
+            catch (Exception ex) { failure = "LocalResultBaselineFailed:" + ex.GetType().Name; return false; }
         }
 
         public static string ReadRosterJson()
@@ -153,6 +161,10 @@ namespace CoopSpectator.Infrastructure.Automation
 
         private static string ReadProtectedResultIdentity()
         {
+            if (!CoopAutomationRuntimeContract.TryResolveContainedPath(_configuration.RunRoot,
+                CoopAutomationRuntimeContract.LocalResultRelativePath, out string currentPath, out string failure) ||
+                !string.Equals(currentPath, _protectedResultPath, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(failure);
             return File.Exists(_protectedResultPath)
                 ? CoopAutomationRuntimeContract.ComputeFileSha256(_protectedResultPath)
                 : "Absent";

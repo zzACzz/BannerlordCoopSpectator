@@ -27,7 +27,8 @@ internal static class Program
             RunRootVariable,
             RunTokenVariable,
             ExpectedHashVariable,
-            ResultPolicyVariable
+            ResultPolicyVariable,
+            CoopAutomationRuntimeContract.SpawnSmokeProfileVariable
         };
         string[] oldValues = new string[names.Length];
         for (int i = 0; i < names.Length; i++)
@@ -36,9 +37,11 @@ internal static class Program
         try
         {
             Directory.CreateDirectory(runRoot);
+            Environment.SetEnvironmentVariable(CoopAutomationRuntimeContract.SpawnSmokeProfileVariable, null);
             ValidateProductionDecision();
             ConfigureValidRun(runId, runRoot, token, moduleHash);
             ValidateConfiguration(runId, runRoot, token, moduleHash);
+            ValidateLocalStorage(runId, runRoot, token, moduleHash);
             ValidateRoleIdentity(runRoot, moduleHash);
             ValidateSuppressDecision();
             ValidateOwnedHost(runId, runRoot, token);
@@ -55,6 +58,51 @@ internal static class Program
                 Directory.Delete(runRoot, recursive: true);
         }
     }
+
+    private static void ValidateLocalStorage(string runId, string runRoot, string token, string moduleHash)
+    {
+        Assert(CoopAutomationRuntimeBridge.TryResolveConfiguration(out var config, out _, out _), "Valid local config missing.");
+        int documentsCalls = 0;
+        Func<string> fakeDocuments = () => { documentsCalls++; return Path.Combine(runRoot, "fake-documents"); };
+        Func<string> forbiddenDocuments = () => throw new Exception("Production Documents resolver was invoked.");
+        string expectedProduction = Path.Combine(runRoot, "fake-documents", "Mount and Blade II Bannerlord", "CoopSpectator");
+        Assert(CoopAutomationRuntimeContract.ResolveCoopFolderPath(false, "stale-profile", null, fakeDocuments) == expectedProduction,
+            "Disabled automation must retain the production path.");
+        Assert(CoopAutomationRuntimeContract.ResolveCoopFolderPath(true, null, null, fakeDocuments) == expectedProduction && documentsCalls == 2,
+            "Existing non-smoke automation must retain its original path.");
+        string local = CoopAutomationRuntimeContract.ResolveCoopFolderPath(true,
+            CoopAutomationRuntimeContract.SpawnSmokeProfile, config, forbiddenDocuments);
+        Assert(local == Path.Combine(runRoot, "state", "bridge"), "Smoke storage is not run-local.");
+        foreach (string profile in new[] { "unknown", " ", "fielddedicatedspawnsmokev1" })
+            AssertLocalStorageRejects(() => CoopAutomationRuntimeContract.ResolveCoopFolderPath(true, profile, config, forbiddenDocuments));
+        AssertLocalStorageRejects(() => CoopAutomationRuntimeContract.ResolveCoopFolderPath(true,
+            CoopAutomationRuntimeContract.SpawnSmokeProfile, null, forbiddenDocuments));
+        string oldRoot = config.RunRoot;
+        config.RunRoot = runRoot + "-foreign";
+        AssertLocalStorageRejects(() => CoopAutomationRuntimeContract.ResolveCoopFolderPath(true,
+            CoopAutomationRuntimeContract.SpawnSmokeProfile, config, forbiddenDocuments));
+        config.RunRoot = oldRoot;
+        config.ResultPolicy = "Publish";
+        AssertLocalStorageRejects(() => CoopAutomationRuntimeContract.ResolveCoopFolderPath(true,
+            CoopAutomationRuntimeContract.SpawnSmokeProfile, config, forbiddenDocuments));
+        config.ResultPolicy = "Suppress";
+        foreach (string relative in new[] { "../outside", "state/../../outside", "state/file:stream", runRoot, "." })
+            Assert(!CoopAutomationRuntimeContract.TryResolveContainedPath(runRoot, relative, out _, out _), "Escaping local path accepted.");
+        Environment.SetEnvironmentVariable(CoopAutomationRuntimeContract.SpawnSmokeProfileVariable, CoopAutomationRuntimeContract.SpawnSmokeProfile);
+        Assert(CoopAutomationRuntimeBridge.ResolveCoopFolderPath() == local, "Runtime adapter did not select local storage.");
+        Environment.SetEnvironmentVariable(RunRootVariable, runRoot + "-foreign");
+        AssertLocalStorageRejects(() => CoopAutomationRuntimeBridge.ResolveCoopFolderPath());
+        ConfigureValidRun(runId, runRoot, token, moduleHash);
+        Environment.SetEnvironmentVariable(CoopAutomationRuntimeContract.SpawnSmokeProfileVariable, null);
+    }
+
+    private static void AssertLocalStorageRejects(Action action)
+    {
+        bool rejected = false;
+        try { action(); } catch (InvalidOperationException) { rejected = true; }
+        Assert(rejected, "Invalid local-storage request did not fail closed.");
+    }
+
 
     private static void ValidateProductionDecision()
     {

@@ -34,8 +34,7 @@ namespace CoopSpectator.Campaign
         /// <summary>Повертає повний шлях до файлу battle_roster.json (спільний для хост і дедик на одному ПК).</summary>
         public static string GetRosterFilePath()
         {
-            string docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-            string folder = Path.Combine(docs, "Mount and Blade II Bannerlord", CoopSpectatorSubFolder);
+            string folder = CoopAutomationRuntimeBridge.ResolveCoopFolderPath();
             return Path.Combine(folder, RosterFileName);
         }
 

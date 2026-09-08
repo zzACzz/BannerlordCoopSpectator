@@ -95,6 +95,72 @@ namespace CoopSpectator.Infrastructure.Automation
         public const string OwnedHostRelativePath = "state/dedicated-host.json";
         public const string ResultPublicationRelativePath = "state/result-publication.status.json";
 
+        public const string SpawnSmokeProfileVariable = "COOPSPECTATOR_AUTOMATION_SPAWN_SMOKE_PROFILE";
+        public const string SpawnSmokeProfile = "FieldDedicatedSpawnSmokeV1";
+        public const string LocalBridgeRelativePath = "state/bridge";
+        public const string LocalResultRelativePath = LocalBridgeRelativePath + "/battle_result.json";
+        public const string LocalResultProtectionScope = "RunLocal";
+
+        public static string LocalResultSentinelText(string runId)
+        {
+            if (!IsValidRunId(runId)) throw new InvalidOperationException("LocalStorageRunIdInvalid");
+            return "CoopSpectator local result publication sentinel\nRunId=" + runId + "\n";
+        }
+
+        // Lazy provider: field automation must never resolve the production Documents folder.
+        public static string ResolveCoopFolderPath(bool automationEnabled, string smokeProfile,
+            CoopAutomationRuntimeConfiguration configuration, Func<string> resolveDocuments)
+        {
+            if (!automationEnabled || string.IsNullOrEmpty(smokeProfile))
+                return Path.Combine(resolveDocuments(), "Mount and Blade II Bannerlord", "CoopSpectator");
+            if (smokeProfile != SpawnSmokeProfile)
+                throw new InvalidOperationException("LocalStorageProfileUnsupported");
+            if (configuration == null || !IsValidRunId(configuration.RunId) ||
+                configuration.ResultPolicy != SuppressResultPolicy ||
+                !IsSha256(configuration.RunTokenSha256) || !IsSha256(configuration.ExpectedModuleSha256))
+                throw new InvalidOperationException("LocalStorageConfigurationInvalid");
+            string expectedRoot = Path.GetFullPath(Path.Combine(
+                Path.GetTempPath(), "CoopSpectator", "Automation", configuration.RunId));
+            if (string.IsNullOrWhiteSpace(configuration.RunRoot) ||
+                !string.Equals(TrimDirectorySeparator(Path.GetFullPath(configuration.RunRoot)),
+                    TrimDirectorySeparator(expectedRoot), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("LocalStorageRunRootMismatch");
+            if (!TryResolveContainedPath(configuration.RunRoot, LocalBridgeRelativePath,
+                    out string folder, out string failure))
+                throw new InvalidOperationException(failure);
+            return folder;
+        }
+
+        public static bool TryResolveContainedPath(string root, string relative, out string path, out string failure)
+        {
+            path = null;
+            failure = "LocalPathEscapesRoot";
+            if (string.IsNullOrWhiteSpace(root) || !Path.IsPathRooted(root) ||
+                string.IsNullOrWhiteSpace(relative) || Path.IsPathRooted(relative) || relative.Contains(":"))
+                return false;
+            try
+            {
+                string fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                string candidate = Path.GetFullPath(Path.Combine(fullRoot, relative));
+                if (!candidate.StartsWith(fullRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                    return false;
+                for (string current = candidate; !string.IsNullOrEmpty(current); current = Path.GetDirectoryName(current))
+                {
+                    if ((File.Exists(current) || Directory.Exists(current)) &&
+                        (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+                    {
+                        failure = "LocalReparsePointRejected";
+                        return false;
+                    }
+                }
+                path = candidate;
+                failure = string.Empty;
+                return true;
+            }
+            catch { return false; }
+        }
+
+
         public static bool TryValidateRoleStatus(
             CoopAutomationRuntimeRoleStatus status,
             CoopAutomationRuntimeConfiguration configuration,

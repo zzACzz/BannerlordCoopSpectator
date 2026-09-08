@@ -84,6 +84,8 @@ namespace CoopSpectator.Infrastructure.Automation
         public bool InitialStateWasClean { get; set; }
         public bool MissionDisposed { get; set; }
         public bool ProtectedResultUnchanged { get; set; }
+        public string ProtectedResultScope { get; set; }
+        public string ProtectedResultRelativePath { get; set; }
         public string PhaseBeforeEnd { get; set; }
         public int ResultAttempts { get; set; }
         public int SuppressedResults { get; set; }
@@ -115,7 +117,7 @@ namespace CoopSpectator.Infrastructure.Automation
     }
     public static class CoopAutomationSpawnSmokeContract
     {
-        public const string Profile = "FieldDedicatedSpawnSmokeV1";
+        public const string Profile = CoopAutomationRuntimeContract.SpawnSmokeProfile;
         public const string FixtureId = "field-current-sanitized-v1";
         public const string Scene = "battle_terrain_029";
         public const string GameType = "CoopBattle";
@@ -140,32 +142,10 @@ namespace CoopSpectator.Infrastructure.Automation
 
         public static bool TryResolveContainedPath(string root, string relative, out string path, out string failure)
         {
-            path = null;
-            failure = "FixturePathEscapesRoot";
-            if (string.IsNullOrWhiteSpace(root) || !Path.IsPathRooted(root) ||
-                string.IsNullOrWhiteSpace(relative) || Path.IsPathRooted(relative) || relative.Contains(":"))
-                return false;
-            try
-            {
-                string fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                string candidate = Path.GetFullPath(Path.Combine(fullRoot, relative));
-                if (!candidate.StartsWith(fullRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
-                    return false;
-                // A lexical prefix is insufficient when any existing ancestor is a junction/symlink.
-                for (string current = candidate; !string.IsNullOrEmpty(current); current = Path.GetDirectoryName(current))
-                {
-                    if ((File.Exists(current) || Directory.Exists(current)) &&
-                        (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
-                    {
-                        failure = "FixtureReparsePointRejected";
-                        return false;
-                    }
-                }
-                path = candidate;
-                failure = string.Empty;
-                return true;
-            }
-            catch { return false; }
+            bool valid = CoopAutomationRuntimeContract.TryResolveContainedPath(root, relative, out path, out failure);
+            if (failure == "LocalPathEscapesRoot") failure = "FixturePathEscapesRoot";
+            if (failure == "LocalReparsePointRejected") failure = "FixtureReparsePointRejected";
+            return valid;
         }
 
         public static bool TryLoadFixture(string runRoot, string relativeRoot, string fixtureId,

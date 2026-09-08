@@ -443,7 +443,8 @@ internal static class Program
             CoopAutomationRuntimeBridge.RunRootVariable,
             CoopAutomationRuntimeBridge.RunTokenVariable,
             CoopAutomationRuntimeBridge.ExpectedModuleSha256Variable,
-            CoopAutomationRuntimeBridge.ResultPolicyVariable
+            CoopAutomationRuntimeBridge.ResultPolicyVariable,
+            CoopAutomationRuntimeContract.SpawnSmokeProfileVariable
         };
         var previousValues = variableNames.ToDictionary(
             name => name,
@@ -458,11 +459,14 @@ internal static class Program
         string token = "contract-result-token-" + Guid.NewGuid().ToString("N");
         string moduleHash = CoopAutomationRuntimeContract.ComputeFileSha256(
             Assembly.GetExecutingAssembly().Location);
-        string globalResultPath = CoopBattleResultBridgeFile.GetResultFilePath();
-        FileIdentity globalBefore = ReadFileIdentity(globalResultPath);
+        string localResultPath = Path.Combine(runRoot, "state", "bridge", "battle_result.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(localResultPath));
+        File.WriteAllText(localResultPath, CoopAutomationRuntimeContract.LocalResultSentinelText(runId), new System.Text.UTF8Encoding(false));
+        FileIdentity localBefore = ReadFileIdentity(localResultPath);
 
         try
         {
+            Environment.SetEnvironmentVariable(CoopAutomationRuntimeContract.SpawnSmokeProfileVariable, CoopAutomationRuntimeContract.SpawnSmokeProfile);
             Environment.SetEnvironmentVariable(CoopAutomationRuntimeBridge.TestAutomationVariable, "1");
             Environment.SetEnvironmentVariable(CoopAutomationRuntimeBridge.RunIdVariable, runId);
             Environment.SetEnvironmentVariable(CoopAutomationRuntimeBridge.RunRootVariable, runRoot);
@@ -472,6 +476,7 @@ internal static class Program
                 CoopAutomationRuntimeBridge.ResultPolicyVariable,
                 CoopAutomationRuntimeContract.SuppressResultPolicy);
 
+            Assert(CoopBattleResultBridgeFile.GetResultFilePath() == localResultPath, "Result path must be run-local.");
             foreach (string battleType in new[]
                      {
                          "Battle",
@@ -521,8 +526,8 @@ internal static class Program
                 publicationStatus.BattleId == "suppressed-LordsHall",
                 "The final run-scoped status must identify the exact run, suppression decision, and battle.");
             Assert(
-                FileIdentity.Equals(globalBefore, ReadFileIdentity(globalResultPath)),
-                "Suppressed results for every supported battle type must leave global battle_result.json unchanged.");
+                FileIdentity.Equals(localBefore, ReadFileIdentity(localResultPath)),
+                "Suppressed results for every supported battle type must leave the local result sentinel unchanged.");
 
             Environment.SetEnvironmentVariable(CoopAutomationRuntimeBridge.ResultPolicyVariable, "Unsupported");
             var invalidResult = new CoopBattleResultBridgeFile.BattleResultSnapshot
@@ -536,8 +541,8 @@ internal static class Program
                 !invalidSuppressed,
                 "An enabled invalid automation profile must reject publication instead of claiming suppression or falling back to production.");
             Assert(
-                FileIdentity.Equals(globalBefore, ReadFileIdentity(globalResultPath)),
-                "An invalid enabled automation profile must leave global battle_result.json unchanged.");
+                FileIdentity.Equals(localBefore, ReadFileIdentity(localResultPath)),
+                "An invalid enabled automation profile must leave the local result sentinel unchanged.");
         }
         finally
         {

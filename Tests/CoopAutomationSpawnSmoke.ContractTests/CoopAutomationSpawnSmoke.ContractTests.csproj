@@ -6,6 +6,11 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="RuntimeCompileStubs.cs" />
+    <Compile Include="..\..\Infrastructure\AtomicBridgeFileIO.cs" Link="AtomicBridgeFileIO.cs" />
+    <Compile Include="..\..\Infrastructure\CoopBattleEntryStatusBridgeFile.cs" Link="CoopBattleEntryStatusBridgeFile.cs" />
+    <Compile Include="..\..\Infrastructure\CoopBattleSelectionBridgeFile.cs" Link="CoopBattleSelectionBridgeFile.cs" />
+    <Compile Include="..\..\Infrastructure\CoopBattleSpawnBridgeFile.cs" Link="CoopBattleSpawnBridgeFile.cs" />
     <Compile Include="..\..\Infrastructure\Automation\CoopAutomationSpawnSmokeContract.cs" Link="CoopAutomationSpawnSmokeContract.cs" />
     <Compile Include="..\..\Infrastructure\Automation\CoopAutomationSpawnSmokeBridge.cs" Link="CoopAutomationSpawnSmokeBridge.cs" />
     <Compile Include="..\..\Infrastructure\Automation\CoopAutomationRuntimeContract.cs" Link="CoopAutomationRuntimeContract.cs" />

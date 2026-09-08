@@ -28,13 +28,7 @@ namespace CoopSpectator.Infrastructure
 
         public static string GetStateFilePath()
         {
-            string documents = Environment.GetFolderPath(
-                Environment.SpecialFolder.MyDocuments);
-            return Path.Combine(
-                documents,
-                "Mount and Blade II Bannerlord",
-                CoopSpectatorSubFolder,
-                StateFileName);
+            return Path.Combine(Automation.CoopAutomationRuntimeBridge.ResolveCoopFolderPath(), StateFileName);
         }
 
         public static string GetCatalogFilePath()

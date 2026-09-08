@@ -2887,8 +2887,8 @@ function Invoke-CoopDedicatedSpawnSmokeAttempt {
         return [ordered]@{ Outcome = 'EnvironmentBlocked'; Reason = "UDP port $Port is already owned before launch."; ArtifactPath = '' }
     }
 
-    $globalResultPath = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments)) 'Mount and Blade II Bannerlord\CoopSpectator\battle_result.json'
-    $globalResultBefore = Get-CoopFileFact -Path $globalResultPath
+    $localResultPath = Initialize-CoopSpawnSmokeLocalResultCore -RunRoot $runRoot -RunId $RunId
+    $localResultBefore = Get-CoopFileFact -Path $localResultPath
     $reportPath = Join-Path $runRoot 'artifacts\results\spawn-smoke-attempt.json'
     $runtimeOutcome = 'RunnerInternalError'
     $runtimeReason = 'Dedicated spawn smoke did not complete.'
@@ -3168,19 +3168,20 @@ function Invoke-CoopDedicatedSpawnSmokeAttempt {
 
     }
 
-    $globalResultAfter = Get-CoopFileFact -Path $globalResultPath
-    $globalResultUnchanged = ($globalResultBefore.Exists -eq $globalResultAfter.Exists) -and
-        (-not $globalResultBefore.Exists -or [string]::Equals(
-            [string]$globalResultBefore.Sha256,
-            [string]$globalResultAfter.Sha256,
+    $null = Get-CoopSpawnSmokeLocalResultPathCore -RunRoot $runRoot
+    $localResultAfter = Get-CoopFileFact -Path $localResultPath
+    $localResultUnchanged = ($localResultBefore.Exists -eq $localResultAfter.Exists) -and
+        (-not $localResultBefore.Exists -or [string]::Equals(
+            [string]$localResultBefore.Sha256,
+            [string]$localResultAfter.Sha256,
             [StringComparison]::Ordinal))
-    if (-not $globalResultUnchanged) {
+    if (-not $localResultUnchanged) {
         if ($runtimeOutcome -ne 'RunnerInternalError') {
             $runtimeOutcome = 'AssertionFailed'
-            $runtimeReason = 'The protected global battle_result.json changed during field spawn smoke.'
+            $runtimeReason = 'The run-local result sentinel changed during field spawn smoke.'
         }
         else {
-            $runtimeReason += ' The protected global battle_result.json also changed during field spawn smoke.'
+            $runtimeReason += ' The run-local result sentinel also changed during field spawn smoke.'
         }
     }
     $remainingOwnedProcesses = @($ownedRuntimeProcesses | Where-Object { Test-CoopLiveProcessIdentity -Identity $_ })
@@ -3205,7 +3206,9 @@ function Invoke-CoopDedicatedSpawnSmokeAttempt {
     }
 
     $report = [ordered]@{
-        Schema = 'coop-field-spawn-smoke-attempt-v1'
+        Schema = 'coop-field-spawn-smoke-attempt-v2'
+        ResultProtectionScope = 'RunLocal'
+        ProductionBattleResultAccess = 'NotAccessed'
         RunId = $RunId
         PrimaryOutcome = $primaryRuntimeOutcome
         PrimaryReason = $primaryRuntimeReason
@@ -3236,9 +3239,9 @@ function Invoke-CoopDedicatedSpawnSmokeAttempt {
         DedicatedBootstrapStatus = $dedicatedBootstrapStatus
         BootstrapAcknowledgementEvidence = $bootstrapCommandEvidence.ToArray()
         OwnedHostStatus = $ownedHostStatus
-        GlobalBattleResultBefore = $globalResultBefore
-        GlobalBattleResultAfter = $globalResultAfter
-        GlobalBattleResultUnchanged = $globalResultUnchanged
+        LocalBattleResultBefore = $localResultBefore
+        LocalBattleResultAfter = $localResultAfter
+        LocalBattleResultUnchanged = $localResultUnchanged
         Cleanup = $runtimeCleanupEvidence.ToArray()
         NativeLogInventory = $dedicatedNativeLogInventory
         DedicatedNativeLogInventory = $dedicatedNativeLogInventory

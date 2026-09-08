@@ -1,5 +1,7 @@
 # Invariants and Risks
 
+Local field isolation (2026-09-09): a requested smoke profile with invalid configuration or path MUST fail without falling back to Documents. Local result evidence requires an existing RunId-bound sentinel, real Suppress decisions and explicit RunLocal scope; missing files or legacy global claims cannot pass. Never reinterpret a local checksum as proof that the personal campaign file was measured. The previous OneDrive backup/restore staging wrapper is obsolete. No diagnostic flag or native scan was added; same-process reset and native regression remain unverified. [Contracts and scope](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#11-local-only-file-isolation-2026-09-09).
+
 Milestone 4A's native-agent observer is retained only under explicit default-off FieldDedicatedSpawnSmokeV1. Native reads remain potentially runtime-sensitive. Never retry start_mission, relax the pinned fixture/hero identities, bypass peer gates or claim same-process reset from two fresh processes. See [M4 admission, isolation, cleanup and verification boundaries](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md).
 
 Last source verification: **2026-09-02**

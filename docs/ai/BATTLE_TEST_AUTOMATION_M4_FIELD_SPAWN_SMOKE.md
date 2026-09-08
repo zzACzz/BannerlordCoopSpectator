@@ -1,10 +1,10 @@
-# Milestone 4A — Field dedicated spawn smoke: source and contracts
+# Milestone 4 — Field dedicated spawn smoke: source, contracts and local isolation
 
 Date: **2026-09-09** (Europe/Kyiv; validation IDs retain the approved 20260908 names).
-Status: **Milestone 4A source/contracts complete; not runtime verified.**
+Status: **Source/contracts and local file isolation verified; not runtime verified.**
 Approval: **"ок на Milestone 4A source/contracts"**.
-Source baseline: branch `codex/v0.1.1-refresh`, HEAD/local upstream `452df7e30d3d8d120488570857134078d6072ecc`, initially clean.
-Implementation is an uncommitted delta in `C:\Users\Admin\.codex\worktrees\1b21\BannerlordCoopSpectator3`.
+Original 4A source baseline: branch `codex/v0.1.1-refresh`, HEAD/local upstream `452df7e30d3d8d120488570857134078d6072ecc`, initially clean.
+The original 4A implementation was subsequently published as 7d75742c338f504499ec01dd8e3b2f189a1f7a03. Section 11 records the local-isolation follow-up's pre-publication validation in `C:\Users\Admin\.codex\worktrees\1b21\BannerlordCoopSpectator3`.
 
 This stage implements a zero-client L2 driver and rejection contracts. It does not establish a live L2 pass or complete Milestone 4. No campaign, multiplayer client, dedicated server, installed-module staging, Git staging, commit, push, or branch operation is performed in 4A.
 
@@ -40,7 +40,7 @@ Expected composition: 47 entries, 74 healthy humans, 2 sides, 3 parties, 4 heroe
 |---|---|
 | `Infrastructure/Automation/CoopAutomationSpawnSmokeContract.cs` | Fixed profile, bounded integrity/path admission, raw-fixture expectations, observation/terminal DTOs, once-only start/end claims |
 | `Infrastructure/Automation/CoopAutomationSpawnSmokeBridge.cs` | Default-off run binding; admitted roster bytes; run phase directory; mission identity; opening/end/result evidence; protected-result identity; explicit reset |
-| `Campaign/BattleRosterFile.cs`: `ReadRoster`, `ReadSnapshot` | Read admitted bytes when smoke is requested. No global fallback before admission. Existing writes and production Documents path remain unchanged. |
+| `Campaign/BattleRosterFile.cs`: `ReadRoster`, `ReadSnapshot` | Read admitted bytes when smoke is requested. No global fallback before admission. All roster path selection is now local under the field profile; disabled production behavior remains unchanged. |
 | `DedicatedServer/Automation/CoopAutomationDedicatedControlContract.cs` | Preserve command envelope; fixed smoke options/fixture identity; validate terminal observation and native readback |
 | `DedicatedServer/Automation/CoopAutomationDedicatedControlBridge.cs` | Admit before native commands; retain seven-step bootstrap; pump observer after start; reflect task-idle readiness; reset on shutdown |
 | `DedicatedServer/Automation/CoopAutomationDedicatedSpawnSmokeObserver.cs` | Dedicated main-thread progression, bounded polling, one native scan, one normal early abort, terminal evidence |
@@ -83,7 +83,7 @@ The test stays at the normal zero-client pre-battle boundary. It does not bypass
 
 After observation, normal `end_mission` is requested once when the native handler is idle. End callbacks capture the first phase before production code sets `BattleEnded`. The real result builder and `CoopBattleResultBridgeFile.WriteResult` must be attempted, with 47 entries and successful suppression. Disposal without this evidence is not a pass.
 
-The protected global result is hashed/read before launch, at admission, at observation/result publication, after disposal and after process cleanup. `Suppress` prevents publication before the global writer opens its path. Nonempty-result contracts and invalid-policy refusal cover this boundary. A pre-existing global file is preserved, not deleted.
+The field test now creates and protects a run-local result sentinel. Admission requires its exact RunId-derived bytes; observation, publication and cleanup require preservation plus the real suppressed result attempt. Personal Documents are not accessed or claimed measured. See section 11 for the replacement of the original 4A global-file checks and the required v2 evidence scope.
 
 ## 5. Two attempts and cleanup
 
@@ -93,7 +93,7 @@ Private `SpawnSmokeAttempt`/`ParentRunId` flags require the matching live parent
 
 Each child acquires existing canonical shared resources, requires clean local/upstream source identity, an explicit installed dedicated hash matching both dedicated module locations, no existing product process, and free required ports. It launches no campaign/client and does not require Steam. Exact provisional ownership precedes enrichment. Dedicated stdout/stderr and PID-correlated native logs are retained. Correlated crash/modal helpers invalidate success; cleanup targets only verified owned identities.
 
-Before child two, the parent requires successful terminal evidence, unchanged global result, no remaining owned process/required-port owner, no fatal helper, and verified runner/shared lock releases. Pair validation rejects reused run IDs, tokens, command IDs and identical process-generation identities.
+Before child two, the parent requires successful terminal evidence, unchanged run-local result sentinel with matching v2 facts, no remaining owned process/required-port owner, no fatal helper, and verified runner/shared lock releases. Pair validation rejects reused run IDs, tokens, command IDs and identical process-generation identities.
 
 **Evidence boundary:** two fresh server processes prove cross-run isolation only. They do not prove production static reset across two missions in one process. Pure reset contracts cover the new automation state. Same-process sequential-mission runtime proof remains a gap and is explicitly false in the reports.
 
@@ -160,7 +160,7 @@ A later explicitly approved stage must review/stage exact artifacts and execute 
 
 Native mission loading, zero-client `PreBattleHold`, real reciprocal mount observation, normal abort, real 47-entry result construction, disposal, two live clean attempts and runtime regressions remain unverified. No live L2/L3 or complete Milestone 4 claim is made.
 
-Rollback is a targeted reversal of this uncommitted 4A source/doc delta only after explicit approval. No installed-state rollback is needed. The original dirty checkout at `C:\dev\projects\BannerlordCoopSpectator3` and its unrelated changes were not edited.
+Rollback of the current local-isolation source/doc delta requires a targeted, separately approved reversal; the original 4A implementation is already published. No installed-state rollback is needed. The original dirty checkout at `C:\dev\projects\BannerlordCoopSpectator3` and its unrelated changes were not edited.
 
 
 ## 10. Final audit and documentation impact
@@ -169,4 +169,90 @@ The aggregate full inventory and final product builds passed. A subsequent runne
 
 Read/updated living documents: `README.md`, `BATTLE_TEST_AUTOMATION_SPEC.md` (revision 24), `BATTLE_TEST_AUTOMATION_M3_FIELD_FIXTURE.md`, `ARCHITECTURE.md`, `CODE_MAP.md`, `RUNTIME_FLOWS.md`, `INVARIANTS_AND_RISKS.md`, and `BUILD_TEST_DEBUG.md`. This M4 report is new. Existing M2 feasibility/control reports and historical audit evidence remain unchanged because this stage does not reinterpret their runtime results. The current overview's stale M3-pending/inventory statements and contradictory compile-only guidance were corrected.
 
-Final read-only audit passed: HEAD and branch remain at the stated baseline, no staged changes, 27 changed source/test/document files, no generated outputs in the delta, no CR bytes or LF/CRLF churn, and `git diff --check` clean. All three fixture hashes remain pinned as listed above. No staging, commit, push or branch write was performed.
+Historical 4A pre-publication audit passed: HEAD and branch remained at the then-stated baseline, no staged changes, 27 changed source/test/document files, no generated outputs in the delta, no CR bytes or LF/CRLF churn, and `git diff --check` clean. All three fixture hashes remain pinned as listed above. No staging, commit, push or branch write was performed.
+
+## 11. Local-only file isolation (2026-09-09)
+
+Status: **Source, contracts and compilation verified; native L2 remains pending.**
+Approval: the user's explicit "ок" after the local-isolation source/test/CompileOnly plan.
+Pre-publication validation baseline: clean published HEAD/upstream 7d75742c338f504499ec01dd8e3b2f189a1f7a03; this section records the subsequent local-isolation source/document delta before its separately approved publication.
+
+### 11.1 Why this correction was required
+
+The original 4A roster and phase isolation did not cover every shared file. Status publication and selection/spawn cleanup still used Windows MyDocuments, which resolves to the user's OneDrive folder. The smoke bridge and runner also read the personal battle_result.json as a preservation check. The user explicitly requested local test files instead.
+
+The preceding 4B preparation passed 24/24 contracts and both builds, but its first staging preflight stopped before installed/shared-file mutation. Later launch requests were rejected by automatic approval review. No native smoke attempt occurred. The previous temporary m4b-stage-20260909-01 transaction wrapper backs up/clears/restores Documents files and is **obsolete for the new local-only requirement; do not reuse it**. This source change does not bypass or resolve permission-review restrictions on installed DLL replacement or server launch.
+
+### 11.2 Local path ownership
+
+CoopAutomationRuntimeBridge.ResolveCoopFolderPath delegates to CoopAutomationRuntimeContract.ResolveCoopFolderPath. The runtime adapter supplies a lazy Documents provider. The provider is never invoked when automation is enabled and a nonempty smoke profile is requested.
+
+- Exact FieldDedicatedSpawnSmokeV1 plus a valid run ID/root, token hash, module hash and Suppress policy selects %TEMP%\CoopSpectator\Automation\<RunId>\state\bridge.
+- Unknown nonempty profiles, invalid configuration, an incorrect canonical run root, escaping relative paths and existing reparse ancestors fail closed. There is no production-folder fallback.
+- Disabled automation, including a stale profile variable, retains the original Documents path.
+- Existing automation modes with no smoke profile retain their established behavior. This correction does not relocate the campaign recorder or connection-feasibility scenario.
+- Phase status retains its existing run-owned state/phase path and active-fixture gate. Admitted roster reads retain immutable hash-pinned payload bytes.
+
+The following path factories now use the shared resolver: BattleRosterFile.GetRosterFilePath; CoopBattleResultBridgeFile.GetResultFilePath; GetCoopFolderPath in entry status, selection, spawn, phase, role-matrix progress, exact-agent trace, compatibility report and runtime bundle; CoopHeroCreationBridgeFile.GetDirectoryPath; CoopCampaignMapPrototypeBridgeFile.GetStateFilePath. Auxiliary routing prevents an enabled diagnostic or shared helper from selecting personal Documents during the field profile. No diagnostic feature was enabled and no physical agent/controller logic changed.
+
+This guarantee concerns the module's shared Documents bridges and the field runner's result guard. Native engine logging/configuration and other separately authorized automation scenarios are not redirected by this change.
+
+### 11.3 Result suppression evidence
+
+Before product launch, Initialize-CoopSpawnSmokeLocalResultCore creates state/bridge/battle_result.json with CreateNew semantics and these exact UTF-8, no-BOM bytes (LF line endings):
+
+~~~text
+CoopSpectator local result publication sentinel
+RunId=<RunId>
+~~~
+
+The final LF is required. The file is a control sentinel, not a campaign result. Existing files cannot be silently reused. The module independently computes the expected SHA-256 from RunId and rejects missing/changed bytes before binding the fixture. Its existing observation/result/disposal checks compare this identity; a missing file is not a passing baseline. The real WriteResult method must still report Suppress for the real nonempty result.
+
+Dedicated evidence requires ProtectedResultScope=RunLocal and ProtectedResultRelativePath=state/bridge/battle_result.json. Missing, legacy-global or escaping declarations are rejected by both C# and PowerShell. Attempt schema is now coop-field-spawn-smoke-attempt-v2, with ResultProtectionScope=RunLocal, ProductionBattleResultAccess=NotAccessed and LocalBattleResultBefore/After/Unchanged. The parent independently requires both file facts to exist at the exact child path with that child's expected sentinel hash.
+
+No personal result file is read, hashed, backed up, removed, restored or claimed byte-for-byte measured by this field runner. Local preservation plus suppression evidence must not be described as a global-file checksum measurement. Historical 4A and M2/M3 evidence retains its original meaning.
+
+### 11.4 Validation
+
+- m4-local-contracts-20260909-01: full 24-project inventory, 24 passed, zero failed; runner lock released and reacquired.
+- Runtime contracts: production fallback through a synthetic Documents provider, stale disabled profile, existing non-smoke behavior, forbidden provider for field mode, invalid/unknown configuration and root/path rejection.
+- Spawn-smoke contracts: actual local status write, selection write/read/consume/clear, spawn write/consume/clear, two separate local roots with first-root preservation, missing/incorrect/changed sentinel rejection, explicit evidence-scope negatives, and lifecycle reset.
+- Both Windows PowerShell and PowerShell 7 execute the real sentinel initializer, reject reuse and wrong roots, reject a real temporary NTFS junction, verify C#/PowerShell sentinel bytes, and reject altered/missing local facts.
+- Campaign-result guard: the real writer suppresses nonempty 47-entry results for Battle, Village, SiegeAssault, SallyOut, SiegeAmbush, Hideout, HideoutAmbush, SiegeOutside, Blockade, BlockadeSallyOut and LordsHall; invalid policy rejects publication. The pre/post sentinel is entirely local.
+- m4-local-compile-20260909-01: independent Release client and dedicated builds passed; zero errors; existing totals remain 77 client / 49 dedicated warnings; recursive installed client/legacy/dedicated inventories unchanged.
+- Client DLL SHA-256: CFC8627BECF67D39F31D1780B9CE6E1F0790F88B0006C0485D082D50872E7C41.
+- Dedicated DLL SHA-256: DC8E4CA3E0584DCD5CBD623F6FD36A5ADBFC1ED44EF48CB6F1B3F39E07CFE7E9.
+
+Commands, from the documented worktree:
+
+~~~powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Invoke-CoopTest.ps1 -Command Contracts -RunId m4-local-contracts-20260909-01 -All
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Invoke-CoopTest.ps1 -Command CompileOnly -RunId m4-local-compile-20260909-01 -GameRoot 'C:\Program Files (x86)\Steam\steamapps\common\Mount & Blade II Bannerlord' -DedicatedServerRoot 'C:\Program Files (x86)\Steam\steamapps\common\Mount & Blade II Dedicated Server'
+~~~
+
+Build outputs/packages remain under their selected local run roots. Individual existing contract programs also create and clean their own local temporary test roots. RuntimeCompileStubs.cs is test-only and is excluded from product builds. No test resolves the personal result path.
+
+### 11.5 Requirement and scenario audit
+
+| Approved requirement | Evidence | Status |
+|---|---|---|
+| One local field-profile path authority | Runtime contract/adapter and shared path factories | Satisfied |
+| No Documents fallback when field mode is requested | Lazy forbidden-provider and invalid-profile/root contracts | Satisfied |
+| Shared status/selection/spawn files remain local | Real native-free filesystem operations and two-root preservation | Satisfied |
+| Auxiliary Documents bridges use the same authority | All module MyDocuments call sites reduced to the lazy production provider; both product builds | Satisfied |
+| Result publication remains suppressed | Real nonempty writer across 11 battle types; local sentinel mutations | Satisfied |
+| Evidence does not claim a personal-file measurement | Required RunLocal scope/path and v2 local facts; legacy/missing negatives | Satisfied |
+| Ordinary behavior retained when field mode is off | Synthetic production-provider checks, source route audit, full contracts | Satisfied |
+| Full contracts and both non-deploying builds | Named runs and exact hashes above | Satisfied |
+| English living documentation updated | Eight approved documents and this audit | Satisfied |
+| No installation, native launch, Git write or permanent environment change | Source-only commands; installed inventory verification; final Git audit | Satisfied |
+| Live field materialization/abort/cleanup | Not authorized in this source stage | Not Verifiable — deferred |
+| Same-process sequential-mission static reset | Two filesystem roots do not establish native reset | Not Verifiable — existing gap |
+
+Ordinary field dedicated: source/contracts Passed; live Not Run. Campaign/client participation: Not Applicable to the intended zero-client smoke. Village, siege assault/deployment, sally-out, siege ambush/relief, lords hall, day/night hideouts, blockade variants and reconnect/sequential missions: relevant shared source/contracts Passed within the stated boundaries; live Not Run. No broad native regression or complete Milestone 4 claim is made.
+
+### 11.6 Documentation, Git and next boundary
+
+Read and updated: README.md, BATTLE_TEST_AUTOMATION_SPEC.md (revision 25), this M4 report, BUILD_TEST_DEBUG.md, RUNTIME_FLOWS.md, INVARIANTS_AND_RISKS.md, ARCHITECTURE.md and CODE_MAP.md. No new repository report was created. The M3 document and three pinned fixture files remain unchanged; historical control/staging reports retain their original evidence.
+
+At the pre-publication source audit, the old dirty checkout at C:\dev\projects\BannerlordCoopSpectator3 had not been edited. Source/tests contained 25 changed/new files and documentation contained eight; the delta had no generated product outputs or LF/CRLF churn. HEAD/upstream were 7d75742 and no Git staging/commit/push had occurred during that source stage. Publication is a separate approved operation. A later native run still requires separately approved staging and launch, using a revised procedure that handles only the installed module, with no personal Documents transaction.

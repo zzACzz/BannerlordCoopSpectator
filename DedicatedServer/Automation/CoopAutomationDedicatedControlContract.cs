@@ -349,6 +349,8 @@ namespace CoopSpectator.Infrastructure.Automation
                     evidence.FixtureId != request.FixtureId || evidence.PayloadSha256 != request.FixtureSha256 ||
                     evidence.OracleSha256 != request.OracleSha256 || evidence.StartMissionRequests != 1 ||
                     evidence.EndMissionRequests != 1 || !evidence.InitialStateWasClean || !evidence.MissionDisposed ||
+                    evidence.ProtectedResultScope != CoopAutomationRuntimeContract.LocalResultProtectionScope ||
+                    evidence.ProtectedResultRelativePath != CoopAutomationRuntimeContract.LocalResultRelativePath ||
                     !evidence.ProtectedResultUnchanged || evidence.PhaseBeforeEnd != CoopAutomationSpawnSmokeContract.Stage ||
                     evidence.ResultAttempts < 1 || evidence.ResultAttempts != evidence.SuppressedResults ||
                     evidence.ResultEntriesAtAttempt != 47)

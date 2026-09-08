@@ -42,6 +42,19 @@ namespace CoopSpectator.Infrastructure.Automation
         public static bool IsAutomationEnabled =>
             string.Equals(Environment.GetEnvironmentVariable(TestAutomationVariable), "1", StringComparison.Ordinal);
 
+        public static string ResolveCoopFolderPath()
+        {
+            string profile = Environment.GetEnvironmentVariable(CoopAutomationRuntimeContract.SpawnSmokeProfileVariable);
+            CoopAutomationRuntimeConfiguration configuration = null;
+            if (IsAutomationEnabled && !string.IsNullOrEmpty(profile) &&
+                !TryResolveConfiguration(out configuration, out string code, out string message))
+                throw new InvalidOperationException(code + ":" + message);
+            return CoopAutomationRuntimeContract.ResolveCoopFolderPath(
+                IsAutomationEnabled, profile, configuration,
+                () => Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments));
+        }
+
+
         public static bool IsFixtureRecordingRequested =>
             IsAutomationEnabled &&
             string.Equals(Environment.GetEnvironmentVariable(FixtureRecordVariable), "1", StringComparison.Ordinal);

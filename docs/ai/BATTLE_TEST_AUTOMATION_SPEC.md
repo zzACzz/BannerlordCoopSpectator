@@ -2,7 +2,7 @@
 
 Status: **Canonical implementation specification — implementation in progress**
 Specification date: **2026-09-09**
-Revision: **24 — Milestone 4A field spawn-smoke source/contracts complete; native L2 evidence pending**
+Revision: **25 — Field smoke local-only shared files and explicit local result evidence; native L2 pending**
 Live-evidence repository baseline: **`c6507e99d7bc71665e839b2adc90401921428a3d`** (`c6507e9`)
 Current published connection corrections: **`d1af692`**, **`3fdcda3`**
 Current exact-fixture live evidence: **`baf5c691eaf1f5beb17bd000a30945aba9003939`** (`baf5c69`), run **`m3b-live-capture-02`**
@@ -35,6 +35,7 @@ Companion audit: [BATTLE_TEST_AUTOMATION_AUDIT.md](BATTLE_TEST_AUTOMATION_AUDIT.
 | 22 | Controlled client-only staging and a clean published private field capture completed; one runner/C# literal drift found by the first diagnostic capture was corrected and guarded; corrected 23/23 contracts, both compile-only projects, exact payload integrity/qualification, result isolation, and cleanup passed, while oracle/privacy/replay gates remain open |
 | 23 | The private field payload was independently audited and retained outside Git; a cross-PowerShell deterministic sanitized derivative, linked provenance metadata, separate critical-value oracle, privacy/reference/composition/equipment checks, production-schema contract replay, 23/23 contracts, and both compile-only builds passed without an L2/L3 claim |
 | 24 | Default-off field-only run fixture admission, one-shot native materialization observer and early abort, strict result protection, two fresh process attempts, 24/24 contracts and final non-deploying compilation; live L2 and same-process reset unverified |
+| 25 | Field-profile shared paths now resolve only inside the local run; personal Documents/result checks removed from smoke; exact local sentinel and v2 report scope required; 24/24 contracts and both non-deploying builds passed |
 
 The companion audit remains the source-fact baseline. Revisions 2–23 refine implementation requirements and ordering without changing the audit's historical source findings. The narrow client launch/join slice, Milestone 2A non-runtime foundation, Milestone 2B runner-safety foundation, dedicated-control channel, Milestone 2B.3A safety closure, Milestone 3A exact campaign-roster recorder, Milestone 3B aggregate campaign-capture control surface, and Milestone 3C reviewed shareable fixture surface now exist. Their evidence boundaries are recorded in [BATTLE_TEST_AUTOMATION_CLIENT_JOIN_IMPLEMENTATION.md](BATTLE_TEST_AUTOMATION_CLIENT_JOIN_IMPLEMENTATION.md), [BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md](BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md), [BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md](BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md), [BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md](BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md), [BATTLE_TEST_AUTOMATION_M2B2C_RUNNER_CORRECTION.md](BATTLE_TEST_AUTOMATION_M2B2C_RUNNER_CORRECTION.md), [BATTLE_TEST_AUTOMATION_M2B2D_DEDICATED_CONTROL.md](BATTLE_TEST_AUTOMATION_M2B2D_DEDICATED_CONTROL.md), [BATTLE_TEST_AUTOMATION_M2B3_SAFETY_CLOSURE.md](BATTLE_TEST_AUTOMATION_M2B3_SAFETY_CLOSURE.md), and [BATTLE_TEST_AUTOMATION_M3_FIELD_FIXTURE.md](BATTLE_TEST_AUTOMATION_M3_FIELD_FIXTURE.md).
 
@@ -1273,6 +1274,9 @@ Exit criteria:
 
 ### Milestone 4 — Field dedicated spawn smoke
 
+**Local-isolation disposition (2026-09-09):** The user requires local test files, with no shared OneDrive/Documents transaction. Under the explicit field profile, every module Documents bridge MUST use the validated local run root (state/bridge; phase remains state/phase); invalid configuration/profile/path MUST fail without production fallback. The field runner MUST create an exact RunId-bound local result sentinel before native launch, require real result suppression and preserve its bytes, and declare RunLocal scope plus ProductionBattleResultAccess=NotAccessed in attempt-v2 evidence. Local hashes MUST NOT be presented as a measurement of the personal campaign result. Disabled/non-smoke paths retain their existing behavior. This replaces the original 4A global-file checksum guard only for this field profile. Source/contracts and CompileOnly passed in m4-local-contracts-20260909-01 (24/24) and m4-local-compile-20260909-01; live L2 is still pending. See [local-isolation audit](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#11-local-only-file-isolation-2026-09-09).
+
+
 **4A disposition (2026-09-09):** The default-off `FieldDedicatedSpawnSmokeV1` admission, native observer, one-shot mission start/normal early abort, result suppression proof, and public two-attempt `DedicatedSpawnSmoke` driver are implemented. `m4a-contracts-20260908-01` passed 24/24; final `m4a-compile-20260908-02` compiled both modules with installed inventories unchanged. No live server/campaign/client ran. Milestone 4 remains open pending native L2 verification. See [M4 source/contract report](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md).
 
 The approved two-attempt implementation uses fresh server processes, run roots, tokens, commands and evidence. This tests cross-run isolation; it does **not** prove production static reset between two missions in one process. The new lifecycle/bridge reset is contract-tested, while same-process runtime reset remains an explicit verification gap. The fixed sanitized fixture is not rewritten or relaxed if native hero/materialization validation fails.
@@ -1291,7 +1295,7 @@ Deliverables:
 Exit criteria:
 
 - the field slice satisfies common L2 requirements and only the SCN-001 L2 row;
-- no campaign-consumable result exists before, during, or after abort;
+- this smoke run produces no campaign-consumable result before, during, or after abort; the personal result file is not accessed or claimed measured;
 - the second attempt cannot consume stale files, phases, commands, or result guards from the first;
 - HTTP acceptance and elapsed delay are not pass evidence;
 - cleanup leaves no owned process or runtime lock;

@@ -1384,6 +1384,44 @@ function New-CoopSpawnSmokeRequestCore {
     return $request
 }
 
+function Get-CoopSpawnSmokeLocalResultPathCore {
+    param([Parameter(Mandatory = $true)][string]$RunRoot)
+    $path = [IO.Path]::GetFullPath((Join-Path $RunRoot 'state\bridge\battle_result.json'))
+    Assert-CoopNoReparsePathCore -Path $path
+    return $path
+}
+
+function Get-CoopSpawnSmokeSentinelTextCore {
+    param([Parameter(Mandatory = $true)][string]$RunId)
+    if ($RunId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$') { throw 'Invalid local sentinel RunId.' }
+    return 'CoopSpectator local result publication sentinel' + [char]10 + 'RunId=' + $RunId + [char]10
+}
+
+function Get-CoopSpawnSmokeSentinelSha256Core {
+    param([Parameter(Mandatory = $true)][string]$RunId)
+    $bytes = [Text.Encoding]::UTF8.GetBytes((Get-CoopSpawnSmokeSentinelTextCore -RunId $RunId))
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-', '') }
+    finally { $sha.Dispose() }
+}
+
+function Initialize-CoopSpawnSmokeLocalResultCore {
+    param([Parameter(Mandatory = $true)][string]$RunRoot, [Parameter(Mandatory = $true)][string]$RunId)
+    $expected = [IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetTempPath()) ('CoopSpectator\Automation\' + $RunId))).TrimEnd('\','/')
+    if ([IO.Path]::GetFullPath($RunRoot).TrimEnd('\','/') -cne $expected) { throw 'Local sentinel root does not match RunId.' }
+    $path = Get-CoopSpawnSmokeLocalResultPathCore -RunRoot $RunRoot
+    [IO.Directory]::CreateDirectory((Split-Path -Parent $path)) | Out-Null
+    $bytes = [Text.Encoding]::UTF8.GetBytes((Get-CoopSpawnSmokeSentinelTextCore -RunId $RunId))
+    $stream = [IO.File]::Open($path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    try { $stream.Write($bytes, 0, $bytes.Length); $stream.Flush($true) }
+    finally { $stream.Dispose() }
+    if ((Get-CoopFileSha256 -Path $path) -cne (Get-CoopSpawnSmokeSentinelSha256Core -RunId $RunId)) {
+        throw 'Local result sentinel integrity mismatch.'
+    }
+    return $path
+}
+
+
 function Assert-CoopSpawnSmokeEvidenceCore {
     param([Parameter(Mandatory = $true)]$Evidence, [Parameter(Mandatory = $true)][string]$RunRoot)
     $p = Get-CoopSpawnSmokeProfileCore
@@ -1392,6 +1430,8 @@ function Assert-CoopSpawnSmokeEvidenceCore {
         $Evidence.AuthoritativeSource -cne 'CoopMissionSpawnLogic.TryCaptureAutomationSpawnSmokeEvidence' -or
         $Evidence.StartMissionRequests -ne 1 -or $Evidence.EndMissionRequests -ne 1 -or
         -not $Evidence.InitialStateWasClean -or -not $Evidence.MissionDisposed -or -not $Evidence.ProtectedResultUnchanged -or
+        $Evidence.ProtectedResultScope -cne 'RunLocal' -or
+        $Evidence.ProtectedResultRelativePath -cne 'state/bridge/battle_result.json' -or
         $Evidence.PhaseBeforeEnd -cne 'PreBattleHold' -or $Evidence.ResultAttempts -lt 1 -or
         $Evidence.ResultAttempts -ne $Evidence.SuppressedResults -or $Evidence.ResultEntriesAtAttempt -ne 47) {
         throw 'Spawn smoke terminal/abort/result evidence is incomplete.'
@@ -1476,13 +1516,23 @@ function Assert-CoopSpawnSmokeAttemptArtifactsCore {
         $Manifest.SpawnSmokeAttempt -ne $ExpectedAttempt -or $Manifest.RepositoryDirty -or
         $Report.RunId -cne $ExpectedRunId -or $Report.ParentRunId -cne $ExpectedParentRunId -or
         $Report.Attempt -ne $ExpectedAttempt -or $Report.NonceSha256 -cne $Manifest.NonceSha256 -or
+        $Report.Schema -cne 'coop-field-spawn-smoke-attempt-v2' -or
+        $Report.ResultProtectionScope -cne 'RunLocal' -or $Report.ProductionBattleResultAccess -cne 'NotAccessed' -or
         $Report.Outcome -cne 'Pass' -or $Report.ResultPolicy -cne 'Suppress' -or
-        -not $Report.GlobalBattleResultUnchanged -or -not $Report.NoFatalHelpersConfirmed -or @($Report.RemainingOwnedProcesses).Count -ne 0 -or
+        -not $Report.LocalBattleResultUnchanged -or -not $Report.NoFatalHelpersConfirmed -or @($Report.RemainingOwnedProcesses).Count -ne 0 -or
         @($Report.RemainingRequiredPorts).Count -ne 0 -or
         $RunnerRelease.RunId -cne $ExpectedRunId -or -not $RunnerRelease.ReleasedAndReacquired -or
         $SharedRelease.RunId -cne $ExpectedRunId -or @($SharedRelease.Locks).Count -lt 5 -or
         @($SharedRelease.Locks | Where-Object { -not $_.ReleasedAndReacquired }).Count -ne 0) {
         throw 'Child smoke identity, terminal result, process/port cleanup, or lock release is invalid.'
+    }
+    $expectedRoot = Join-Path ([IO.Path]::GetTempPath()) ('CoopSpectator\Automation\' + $ExpectedRunId)
+    $expectedPath = Get-CoopSpawnSmokeLocalResultPathCore -RunRoot $expectedRoot
+    $expectedHash = Get-CoopSpawnSmokeSentinelSha256Core -RunId $ExpectedRunId
+    foreach ($fact in @($Report.LocalBattleResultBefore, $Report.LocalBattleResultAfter)) {
+        if ($null -eq $fact -or -not $fact.Exists -or $fact.Path -ine $expectedPath -or $fact.Sha256 -cne $expectedHash) {
+            throw 'Local result before/after evidence is missing, redirected, or changed.'
+        }
     }
 }
 

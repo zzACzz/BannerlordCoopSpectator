@@ -1,5 +1,7 @@
 # Build, Test, and Debug Guide
 
+Local field storage (2026-09-09): all module Documents bridges under FieldDedicatedSpawnSmokeV1 use the validated run root. The smoke runner creates an exact local result sentinel and reports attempt-v2 RunLocal evidence; it does not read or transact personal OneDrive files. Do not reuse the old m4b-stage-20260909-01 Documents backup wrapper. m4-local-contracts-20260909-01 passed 24/24; m4-local-compile-20260909-01 compiled both modules with installed inventories unchanged (77 client / 49 dedicated warnings, zero errors). Publication/staging/native launch remain separate approvals. [Details and exact hashes](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#11-local-only-file-isolation-2026-09-09).
+
 Milestone 4A uses the 24-project inventory and run-owned CompileOnly outputs. DedicatedSpawnSmoke is a live dedicated operation and was **not executed** in 4A. It requires an explicit installed dedicated hash and runs two isolated child contexts; no campaign/client is launched. See [M4 commands and artifacts](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#8-validation-evidence).
 
 Last source verification: **2026-08-28**

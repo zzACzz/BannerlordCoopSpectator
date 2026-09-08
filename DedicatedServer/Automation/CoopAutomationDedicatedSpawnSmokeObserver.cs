@@ -22,7 +22,9 @@ namespace CoopSpectator.Infrastructure.Automation
                 throw new InvalidOperationException("SpawnSmokeObserverAlreadyBound");
             _lifecycle = new CoopAutomationSmokeLifecycle();
             Evidence = new CoopAutomationDedicatedSpawnSmokeEvidence
-            { InitialStateWasClean = CoopAutomationSpawnSmokeBridge.InitialStateWasClean };
+            { InitialStateWasClean = CoopAutomationSpawnSmokeBridge.InitialStateWasClean,
+                ProtectedResultScope = CoopAutomationRuntimeContract.LocalResultProtectionScope,
+                ProtectedResultRelativePath = CoopAutomationRuntimeContract.LocalResultRelativePath };
             State = "WaitingForMissionCommandReady";
         }
 

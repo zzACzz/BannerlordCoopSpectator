@@ -1,5 +1,7 @@
 # Code Map
 
+Local-isolation source map (2026-09-09): CoopAutomationRuntimeContract owns profile/path constants, ResolveCoopFolderPath, TryResolveContainedPath and LocalResultSentinelText; CoopAutomationRuntimeBridge supplies process configuration and the lazy production provider. Shared path factories route through it. CoopAutomationSpawnSmokeBridge admits/checks the local sentinel; the dedicated observer/control contract emit/validate its scope. CoopAutomationRunner.Core.ps1 contains the matching local-result helpers and v2 validators; Invoke-CoopTest.ps1 uses them only for DedicatedSpawnSmoke. Runtime, spawn-smoke and campaign-result guard suites cover this boundary; RuntimeCompileStubs.cs belongs only to the spawn-smoke test project. [Exact scope and evidence](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#11-local-only-file-isolation-2026-09-09).
+
 Milestone 4A adds CoopAutomationSpawnSmokeContract, CoopAutomationSpawnSmokeBridge, CoopAutomationDedicatedSpawnSmokeObserver, the DedicatedSpawnSmoke command and CoopAutomationSpawnSmoke.ContractTests. The [M4 source map](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#2-ownership-and-source-map) lists exact integration methods. The canonical inventory has 24 projects.
 
 Last source verification: **2026-08-28**

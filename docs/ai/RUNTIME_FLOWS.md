@@ -1,5 +1,7 @@
 # Runtime Flows
 
+Local field-file flow (2026-09-09): explicit profile + validated configuration → local state/bridge path → runner CreateNew sentinel → server exact-byte admission → ordinary immutable roster/materialization/abort → suppressed result → local preservation evidence. State/selection/spawn and auxiliary bridges use the same path authority; phase keeps state/phase. Personal Documents are not resolved in this profile. Ordinary and non-smoke automation paths retain their prior behavior. Source/contracts and both builds passed; native L2 remains Not Run. [Full ownership and evidence boundary](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#11-local-only-file-isolation-2026-09-09).
+
 Milestone 4A adds a zero-client field test flow: admitted run-owned fixture → existing native bootstrap → task-idle intermission → one start_mission → native Continuing → normal PreBattleHold → one end_mission → suppressed real result attempt → disposal/cleanup. DedicatedSpawnSmoke runs two fresh child/server contexts. This is source/contract implemented and not runtime verified; [full boundaries](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md) include the same-process reset gap.
 
 Last source verification: **2026-08-28**

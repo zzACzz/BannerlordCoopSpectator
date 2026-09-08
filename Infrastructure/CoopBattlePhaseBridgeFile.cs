@@ -163,8 +163,7 @@ namespace CoopSpectator.Infrastructure
         {
             if (CoopAutomationSpawnSmokeBridge.IsRequested)
                 return CoopAutomationSpawnSmokeBridge.GetPhaseFolder();
-            string docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-            return Path.Combine(docs, "Mount and Blade II Bannerlord", CoopSpectatorSubFolder);
+            return Automation.CoopAutomationRuntimeBridge.ResolveCoopFolderPath();
         }
     }
 }
