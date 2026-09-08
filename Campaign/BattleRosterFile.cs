@@ -95,13 +95,15 @@ namespace CoopSpectator.Campaign
             string path = GetRosterFilePath();
             try
             {
-                if (!File.Exists(path))
+                if (!CoopAutomationSpawnSmokeBridge.IsRequested && !File.Exists(path))
                 {
                     ModLogger.Info("BattleRosterFile: no file at " + path + ", using empty roster.");
                     return new List<string>();
                 }
 
-                string json = File.ReadAllText(path);
+                string json = CoopAutomationSpawnSmokeBridge.IsRequested
+                    ? CoopAutomationSpawnSmokeBridge.ReadRosterJson()
+                    : File.ReadAllText(path);
                 var dto = JsonConvert.DeserializeObject<BattleRosterFileDto>(json);
                 if (dto == null)
                     return new List<string>();
@@ -134,10 +136,12 @@ namespace CoopSpectator.Campaign
             string path = GetRosterFilePath();
             try
             {
-                if (!File.Exists(path))
+                if (!CoopAutomationSpawnSmokeBridge.IsRequested && !File.Exists(path))
                     return null;
 
-                string json = File.ReadAllText(path);
+                string json = CoopAutomationSpawnSmokeBridge.IsRequested
+                    ? CoopAutomationSpawnSmokeBridge.ReadRosterJson()
+                    : File.ReadAllText(path);
                 var dto = JsonConvert.DeserializeObject<BattleRosterFileDto>(json);
                 BattleSnapshotMessage snapshot = dto?.Snapshot;
                 if (snapshot?.Sides == null || snapshot.Sides.Count == 0)

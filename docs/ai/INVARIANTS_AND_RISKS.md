@@ -1,5 +1,7 @@
 # Invariants and Risks
 
+Milestone 4A's native-agent observer is retained only under explicit default-off FieldDedicatedSpawnSmokeV1. Native reads remain potentially runtime-sensitive. Never retry start_mission, relax the pinned fixture/hero identities, bypass peer gates or claim same-process reset from two fresh processes. See [M4 admission, isolation, cleanup and verification boundaries](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md).
+
 Last source verification: **2026-09-02**
 Last automation-control source/contract verification: **2026-09-02** (`m2b3a-lockfix-pub-c-01`; exact clean published revision `c6507e9`; protocol 1.1 role health, cancellation, RecoveryV2, failure evidence, exact resource-id construction/cardinality, and per-resource lock collision/release; 22/22)
 Last exact-fixture verification: **2026-09-02** (`baf5c69`; corrected clean contracts 23/23; both compile-only projects passed; `m3b-live-capture-02` captured one exact private mixed field payload with hash/provenance/qualification, protected-result, and cleanup checks passing; content/privacy oracle and replay pending)

@@ -1,5 +1,7 @@
 # Milestone 3 Exact Field Fixture
 
+Milestone 3 remains complete and its three shareable fixture files are unchanged. Milestone 4A consumes their exact hashes through run-owned admission; [M4 field spawn smoke](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md) distinguishes source/contracts from pending native evidence.
+
 Status: **Milestone 3 complete: private capture, independent content/privacy review, deterministic sanitized derivative, independent oracle, and hash-gated contract replay are verified**
 Source verification date: **2026-09-02**
 Fixture contract schema: **1**

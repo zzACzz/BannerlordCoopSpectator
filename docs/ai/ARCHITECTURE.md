@@ -1,5 +1,7 @@
 # Architecture
 
+The default-off FieldDedicatedSpawnSmokeV1 profile binds an immutable run-owned field roster before the existing dedicated bootstrap opens CoopBattle / MultiplayerBattle. A dedicated-only observer reads native materialization once at PreBattleHold and requests normal early abort with result suppression. Physical spawn authority and disabled production paths are preserved. See [M4 field spawn smoke](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md); native proof remains pending.
+
 Last source verification: **2026-08-28**
 Last automation-control source verification: **2026-09-02**
 Last automation-control live verification: **2026-09-02**

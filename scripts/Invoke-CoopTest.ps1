@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Doctor', 'Contracts', 'CompileOnly', 'Feasibility', 'Record', 'Inspect', 'Recover', 'Cancel')]
+    [ValidateSet('Doctor', 'Contracts', 'CompileOnly', 'Feasibility', 'DedicatedSpawnSmoke', 'Record', 'Inspect', 'Recover', 'Cancel')]
     [string]$Command,
 
     [Parameter(Mandatory = $true)]
@@ -28,6 +28,12 @@ param(
 
     [ValidateRange(60, 1800)]
     [int]$RuntimeTimeoutSeconds = 420,
+
+    # Internal children are admitted only by the matching active parent and its attempt intent.
+    [ValidateRange(0, 2)]
+    [int]$SpawnSmokeAttempt = 0,
+
+    [string]$ParentRunId,
 
     [switch]$ApplyRecovery
 )
@@ -91,7 +97,7 @@ $releaseVerified = $false
 $ownedRuntimeProcesses = New-Object System.Collections.Generic.List[object]
 $runtimeCleanupEvidence = New-Object System.Collections.Generic.List[object]
 $runnerCapabilities = @(
-    'Doctor', 'Contracts', 'CompileOnly', 'Feasibility', 'Record', 'Inspect', 'Recover', 'Cancel',
+    'Doctor', 'Contracts', 'CompileOnly', 'Feasibility', 'DedicatedSpawnSmoke', 'Record', 'Inspect', 'Recover', 'Cancel',
     'AtomicManifest', 'LeaseHeartbeat', 'RoleHealthV1', 'CancellationV1', 'RecoveryV2', 'FailureEvidenceV1')
 $runnerState = 'Initializing'
 $runnerStateEnteredUtc = [DateTime]::UtcNow
@@ -348,6 +354,7 @@ function Get-CoopValidatedCancellationRequest {
 }
 
 function Assert-CoopRunNotCancelled {
+    if ($Command -eq 'DedicatedSpawnSmoke' -and $SpawnSmokeAttempt -gt 0) { Assert-CoopSpawnSmokeParent }
     $request = Get-CoopValidatedCancellationRequest
     $consoleRequested = Test-CoopConsoleCancellationRequestedCore
     if ($null -eq $request -and -not $consoleRequested) { return }
@@ -1128,6 +1135,9 @@ function Wait-CoopDedicatedBootstrapAccepted {
             throw 'Dedicated server exited before terminal bootstrap acknowledgement.'
         }
         $status = Read-CoopJsonShared -Path $StatusPath
+        if ($null -ne $status -and $status.RunId -ceq $RunId -and $status.RunTokenSha256 -ceq $nonceSha256) {
+            $script:spawnSmokeLastStatus = $status
+        }
         if ($null -ne $status) {
             $accepted = Confirm-CoopDedicatedBootstrapStatus `
                 -Status $status `
@@ -1137,7 +1147,8 @@ function Wait-CoopDedicatedBootstrapAccepted {
                 -ExpectedDedicatedModuleSha256 $ExpectedModuleSha256 `
                 -ExpectedProcessId ([int]$DedicatedIdentity.ProcessId) `
                 -ExpectedProcessStartUtc $expectedStartUtc `
-                -ExpectedExecutablePath ([string]$DedicatedIdentity.ExecutablePath)
+                -ExpectedExecutablePath ([string]$DedicatedIdentity.ExecutablePath) `
+                -RunRoot $runRoot
             if ($accepted) { return $status }
         }
         Update-CoopLease
@@ -2653,6 +2664,600 @@ function Invoke-CoopFeasibility {
     }
 }
 
+function Assert-CoopSpawnSmokeParent {
+    if (-not (Test-CoopRunId -Value $ParentRunId) -or $SpawnSmokeAttempt -notin @(1, 2) -or
+        $RunId -cne ($ParentRunId + '-0' + $SpawnSmokeAttempt)) { throw 'Invalid internal smoke attempt identity.' }
+    $parentRoot = Join-Path ([IO.Path]::GetDirectoryName($runRoot)) $ParentRunId
+    Assert-CoopNoReparsePathCore -Path $parentRoot
+    $parentManifest = Read-CoopJsonShared -Path (Join-Path $parentRoot 'manifest.json')
+    $parentLease = Read-CoopJsonShared -Path (Join-Path $parentRoot 'work\runner.lease.json')
+    $intent = Read-CoopJsonShared -Path (Join-Path $parentRoot ('commands\attempt-0' + $SpawnSmokeAttempt + '.json'))
+    if ($null -eq $parentManifest -or $null -eq $parentLease -or $null -eq $intent -or
+        $parentManifest.RequestedCommand -cne 'DedicatedSpawnSmoke' -or $parentManifest.RunId -cne $ParentRunId -or
+        $parentLease.RunId -cne $ParentRunId -or $parentLease.NonceSha256 -cne $parentManifest.NonceSha256 -or
+        $intent.ParentRunId -cne $ParentRunId -or $intent.RunId -cne $RunId -or
+        $intent.ParentNonceSha256 -cne $parentManifest.NonceSha256 -or
+        $parentLease.OwnerProcessId -ne $runnerParentProcessId -or $parentLease.Status -cne 'Active' -or
+        ([DateTime]::UtcNow - (ConvertTo-CoopUtcDateTime $parentLease.LastHeartbeatUtc)).TotalSeconds -gt 10) {
+        throw [OperationCanceledException]::new('The matching parent smoke runner is not active; aborting this attempt.')
+    }
+    $parentRole = @($parentManifest.Roles | Where-Object { $_.RoleType -ceq 'Runner' })[0]
+    if ($parentRole.ProcessId -ne $runnerParentProcessId -or
+        -not (Test-CoopLiveProcessIdentity -Identity $parentRole)) {
+        throw [OperationCanceledException]::new('Parent smoke runner process identity was lost.')
+    }
+}
+
+function Invoke-CoopDedicatedSpawnSmoke {
+    if ($SpawnSmokeAttempt -gt 0) {
+        Assert-CoopSpawnSmokeParent
+        return (Invoke-CoopDedicatedSpawnSmokeAttempt)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ParentRunId) -or $RunId.Length -gt 77 -or
+        -not (Test-CoopSha256Hex -Value $ExpectedDedicatedModuleSha256)) {
+        return [ordered]@{ Outcome = 'PreconditionsFailed'; Reason = 'Public smoke requires RunId <= 77 characters, no ParentRunId, and an explicit dedicated module SHA-256.'; ArtifactPath = '' }
+    }
+    $attemptIds = @(($RunId + '-01'), ($RunId + '-02'))
+    foreach ($id in $attemptIds) {
+        $path = Join-Path ([IO.Path]::GetDirectoryName($runRoot)) $id
+        Assert-CoopNoReparsePathCore -Path $path
+        if ([IO.Directory]::Exists($path) -or [IO.File]::Exists($path)) { throw 'Both child run roots must be fresh.' }
+    }
+    $reports = New-Object 'System.Collections.Generic.List[object]'
+    $childEvidence = New-Object 'System.Collections.Generic.List[object]'
+    $outcome = 'RunnerInternalError'
+    $reason = 'Two-attempt smoke did not complete.'
+    $reportPath = Join-Path $runRoot 'artifacts\results\dedicated-spawn-smoke.json'
+    try {
+        for ($attemptNumber = 1; $attemptNumber -le 2; $attemptNumber++) {
+            Assert-CoopRunNotCancelled
+            $childId = $attemptIds[$attemptNumber - 1]
+            $childRoot = Join-Path ([IO.Path]::GetDirectoryName($runRoot)) $childId
+            Write-CoopJsonAtomic -Path (Join-Path $runRoot ('commands\attempt-0' + $attemptNumber + '.json')) -Value ([ordered]@{
+                ParentRunId = $RunId; ParentNonceSha256 = $nonceSha256; RunId = $childId; Attempt = $attemptNumber
+            })
+            $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath,
+                '-Command', 'DedicatedSpawnSmoke', '-RunId', $childId, '-SpawnSmokeAttempt', [string]$attemptNumber,
+                '-ParentRunId', $RunId, '-GameRoot', $GameRoot, '-DedicatedServerRoot', $DedicatedServerRoot,
+                '-MachineProfileName', $MachineProfileName, '-Port', [string]$Port,
+                '-ExpectedDedicatedModuleSha256', $ExpectedDedicatedModuleSha256,
+                '-RuntimeTimeoutSeconds', [string]$RuntimeTimeoutSeconds)
+            if (-not [string]::IsNullOrWhiteSpace($ServerName)) { $arguments += @('-ServerName', $ServerName) }
+            $startInfo = New-Object Diagnostics.ProcessStartInfo
+            $startInfo.FileName = $runnerProcess.Path
+            $startInfo.Arguments = (@($arguments | ForEach-Object { ConvertTo-CoopCommandLineArgument -Value $_ }) -join ' ')
+            $startInfo.WorkingDirectory = $repositoryRoot
+            $startInfo.UseShellExecute = $false
+            $startInfo.CreateNoWindow = $true
+            $startInfo.RedirectStandardOutput = $true
+            $startInfo.RedirectStandardError = $true
+            $child = New-Object Diagnostics.Process
+            $child.StartInfo = $startInfo
+            $capture = $null
+            $childRecord = [ordered]@{ RunId = $childId; Attempt = $attemptNumber; Root = $childRoot; ProcessId = 0; Exited = $false; ExitCode = $null; CancellationForwarded = $false }
+            $childEvidence.Add($childRecord) | Out-Null
+            try {
+                if (-not $child.Start()) { throw 'Child smoke runner creation failed.' }
+                $childRecord.ProcessId = $child.Id
+                $childRecord.ProcessStartUtc = $child.StartTime.ToUniversalTime().ToString('O')
+                $childRecord.ExecutablePath = $startInfo.FileName
+                Write-CoopJsonAtomic -Path (Join-Path $runRoot ('artifacts\processes\attempt-0' + $attemptNumber + '.json')) -Value $childRecord
+                $captureArgs = @{
+                    Process = $child
+                    StandardOutputPath = (Join-Path $runRoot ('artifacts\logs\attempt-0' + $attemptNumber + '.stdout.txt'))
+                    StandardErrorPath = (Join-Path $runRoot ('artifacts\logs\attempt-0' + $attemptNumber + '.stderr.txt'))
+                }
+                $capture = New-CoopProcessTextCapture @captureArgs
+                # Bounds all startup, native bootstrap, observation and cleanup stages together.
+                $deadline = [DateTime]::UtcNow.AddSeconds($RuntimeTimeoutSeconds + 660)
+                while (-not $child.WaitForExit(250)) {
+                    Update-CoopLease
+                    Update-CoopProcessTextCapture -Capture $capture
+                    if ([DateTime]::UtcNow -ge $deadline) { throw 'Timed out waiting for the child smoke attempt.' }
+                }
+                $childRecord.Exited = $true
+                $childRecord.ExitCode = $child.ExitCode
+            }
+            finally {
+                if ($childRecord.ProcessId -gt 0 -and -not $child.HasExited) {
+                    # Request cooperative cleanup; never kill a runner while it owns product processes.
+                    $cleanupDeadline = [DateTime]::UtcNow.AddSeconds(60)
+                    while (-not $child.WaitForExit(250) -and [DateTime]::UtcNow -lt $cleanupDeadline) {
+                        $childManifest = Read-CoopJsonShared -Path (Join-Path $childRoot 'manifest.json')
+                        if (-not $childRecord.CancellationForwarded -and $null -ne $childManifest -and
+                            $childManifest.RunId -ceq $childId -and $childManifest.ParentRunId -ceq $RunId -and
+                            @($childManifest.Roles | Where-Object { $_.RoleType -ceq 'Runner' -and $_.ProcessId -eq $child.Id -and
+                                $_.ProcessStartUtc -ceq $childRecord.ProcessStartUtc }).Count -eq 1) {
+                            $cancel = [ordered]@{
+                                SchemaVersion = 1; ProtocolMajorVersion = 1; ProtocolMinorVersion = 1
+                                RunId = $childId; NonceSha256 = $childManifest.NonceSha256; RequestId = [Guid]::NewGuid().ToString('D')
+                                SourceRoleType = 'Runner'; SourceRoleInstanceId = 'runner-01'
+                                TargetRoleType = 'Runner'; TargetRoleInstanceId = 'runner-01'
+                                RequestedUtc = [DateTime]::UtcNow.ToString('O'); Reason = 'Parent smoke controller is stopping; clean up exact owned runtime.'
+                            }
+                            Write-CoopJsonAtomic -Path (Join-Path $childRoot 'commands\inbox\cancel.request.json') -Value $cancel
+                            $childRecord.CancellationForwarded = $true
+                        }
+                        Update-CoopLease -Status 'Cancelling'
+                        if ($null -ne $capture) { Update-CoopProcessTextCapture -Capture $capture }
+                    }
+                    $childRecord.Exited = $child.HasExited
+                    if ($child.HasExited) { $childRecord.ExitCode = $child.ExitCode }
+                }
+                if ($null -ne $capture -and $child.HasExited) { Complete-CoopProcessTextCapture -Capture $capture }
+                Write-CoopJsonAtomic -Path (Join-Path $runRoot ('artifacts\processes\attempt-0' + $attemptNumber + '.json')) -Value $childRecord
+                if ($childRecord.Exited) { $child.Dispose() }
+            }
+            if (-not $childRecord.Exited -or $childRecord.ExitCode -ne 0) {
+                $failedManifest = Read-CoopJsonShared -Path (Join-Path $childRoot 'manifest.json')
+                $failure = [InvalidOperationException]::new('Child smoke failed or still needs exact-run recovery: ' + $childRoot)
+                $childOutcome = [string](Get-CoopOptionalPropertyValue -InputObject $failedManifest -Name 'TerminalOutcome')
+                $failure.Data['CoopRuntimeOutcome'] = if ($null -ne $failedManifest -and
+                    $failedManifest.RunId -ceq $childId -and $failedManifest.ParentRunId -ceq $RunId -and
+                    $outcomeExitCodes.ContainsKey($childOutcome) -and $childOutcome -ne 'Pass') { $childOutcome } else { 'RunnerInternalError' }
+                throw $failure
+            }
+            $childManifest = Read-CoopJsonShared -Path (Join-Path $childRoot 'manifest.json')
+            $childReport = Read-CoopJsonShared -Path (Join-Path $childRoot 'artifacts\results\spawn-smoke-attempt.json')
+            $runnerRelease = Read-CoopJsonShared -Path (Join-Path $childRoot 'artifacts\processes\runner-lock-release.json')
+            $sharedRelease = Read-CoopJsonShared -Path (Join-Path $childRoot 'artifacts\processes\shared-runtime-lock-release.json')
+            Assert-CoopSpawnSmokeAttemptArtifactsCore -Report $childReport -Manifest $childManifest -RunnerRelease $runnerRelease -SharedRelease $sharedRelease -ExpectedRunId $childId -ExpectedParentRunId $RunId -ExpectedAttempt $attemptNumber
+            $confirmArgs = @{
+                Status = $childReport.DedicatedBootstrapStatus; Request = $childReport.BootstrapRequest
+                ExpectedRunId = $childId; ExpectedRunTokenSha256 = $childManifest.NonceSha256
+                ExpectedDedicatedModuleSha256 = $ExpectedDedicatedModuleSha256.ToUpperInvariant()
+                ExpectedProcessId = [int]$childReport.DedicatedIdentity.ProcessId
+                ExpectedProcessStartUtc = (ConvertTo-CoopUtcDateTime $childReport.DedicatedIdentity.ProcessStartUtc)
+                ExpectedExecutablePath = [string]$childReport.DedicatedIdentity.ExecutablePath
+                RunRoot = $childRoot
+            }
+            if (-not (Confirm-CoopDedicatedBootstrapStatus @confirmArgs)) { throw 'Child terminal evidence is incomplete.' }
+            $reports.Add($childReport) | Out-Null
+        }
+        Assert-CoopSpawnSmokePairCore -Reports $reports.ToArray()
+        $outcome = 'Pass'
+        $reason = 'Two fresh dedicated processes passed zero-client field spawn smoke and exact-run cleanup.'
+    }
+    catch {
+        $reason = $_.Exception.Message
+        $hint = [string]$_.Exception.Data['CoopRuntimeOutcome']
+        $outcome = if ($outcomeExitCodes.ContainsKey($hint) -and $hint -ne 'Pass') { $hint }
+            elseif ($_.Exception -is [OperationCanceledException]) { 'Cancelled' }
+            elseif ($reason -match 'Timed out') { 'Timeout' } else { 'AssertionFailed' }
+    }
+    $aggregate = [ordered]@{
+        Schema = 'coop-field-spawn-smoke-pair-v1'; RunId = $RunId; Outcome = $outcome; Reason = $reason
+        AttemptRunIds = $attemptIds; Attempts = $reports.ToArray(); ChildRunners = $childEvidence.ToArray()
+        ResultPolicy = 'Suppress'; L2PassClaimed = ($outcome -eq 'Pass'); L3PassClaimed = $false
+        SameProcessStaticResetProven = $false; CompletedUtc = [DateTime]::UtcNow.ToString('O')
+    }
+    Write-CoopJsonAtomic -Path $reportPath -Value $aggregate
+    return [ordered]@{ Outcome = $outcome; Reason = $reason; ArtifactPath = $reportPath }
+}
+
+function Invoke-CoopDedicatedSpawnSmokeAttempt {
+    $effectiveServerName = if ([string]::IsNullOrWhiteSpace($ServerName)) {
+        $candidate = 'AC_COOP_' + $RunId
+        if ($candidate.Length -gt 120) { $candidate.Substring(0, 120) } else { $candidate }
+    }
+    else { $ServerName.Trim() }
+    if ($effectiveServerName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') {
+        return [ordered]@{ Outcome = 'PreconditionsFailed'; Reason = 'The runtime server name must contain only ASCII letters, digits, dot, underscore, or hyphen.'; ArtifactPath = '' }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedClientModuleSha256) -and
+        -not (Test-CoopSha256Hex -Value $ExpectedClientModuleSha256)) {
+        return [ordered]@{ Outcome = 'PreconditionsFailed'; Reason = 'ExpectedClientModuleSha256 must be exactly 64 hexadecimal characters.'; ArtifactPath = '' }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedDedicatedModuleSha256) -and
+        -not (Test-CoopSha256Hex -Value $ExpectedDedicatedModuleSha256)) {
+        return [ordered]@{ Outcome = 'PreconditionsFailed'; Reason = 'ExpectedDedicatedModuleSha256 must be exactly 64 hexadecimal characters.'; ArtifactPath = '' }
+    }
+
+    if (-not (Test-CoopSha256Hex -Value $ExpectedDedicatedModuleSha256)) {
+        return [ordered]@{ Outcome = 'PreconditionsFailed'; Reason = 'DedicatedSpawnSmoke requires an explicit expected installed dedicated hash.'; ArtifactPath = '' }
+    }
+    if ($manifest.RepositoryDirty -or (Get-CoopGitValue -Arguments @('rev-parse', '@{upstream}')) -cne $manifest.RepositoryRevision) {
+        return [ordered]@{ Outcome = 'PreconditionsFailed'; Reason = 'Runtime smoke requires a clean checkout matching its local upstream ref.'; ArtifactPath = '' }
+    }
+    $expectedDedicatedHash = $ExpectedDedicatedModuleSha256.ToUpperInvariant()
+    $expectedClientHash = ''
+
+    $installedDedicatedLoadedPath = Join-Path $DedicatedServerRoot 'Modules\CoopSpectatorDedicated\bin\Win64_Shipping_Client\CoopSpectator.dll'
+    $installedDedicatedLoadedFact = Get-CoopFileFact -Path $installedDedicatedLoadedPath
+    if (-not $installedDedicatedFact.Exists -or
+        -not [string]::Equals([string]$installedDedicatedFact.Sha256, $expectedDedicatedHash, [StringComparison]::Ordinal) -or
+        -not $installedDedicatedLoadedFact.Exists -or
+        -not [string]::Equals([string]$installedDedicatedLoadedFact.Sha256, $expectedDedicatedHash, [StringComparison]::Ordinal)) {
+        return [ordered]@{ Outcome = 'EnvironmentBlocked'; Reason = 'Installed dedicated module hashes do not match the explicitly selected runtime identities.'; ArtifactPath = '' }
+    }
+
+    $productProcesses = @(Get-Process -Name @(
+        'Bannerlord',
+        'TaleWorlds.MountAndBlade.Launcher',
+        'DedicatedCustomServer.Starter',
+        'DedicatedCustomServer',
+        'TaleWorlds.CrashReporter') -ErrorAction SilentlyContinue)
+    if ($productProcesses.Count -gt 0) {
+        return [ordered]@{ Outcome = 'EnvironmentBlocked'; Reason = 'A Bannerlord, dedicated-server, launcher, or crash-reporter process is already running.'; ArtifactPath = '' }
+    }
+
+    $existingPortOwner = @(Get-NetUDPEndpoint -LocalPort $requiredPorts -ErrorAction SilentlyContinue)
+    if ($existingPortOwner.Count -gt 0) {
+        return [ordered]@{ Outcome = 'EnvironmentBlocked'; Reason = "UDP port $Port is already owned before launch."; ArtifactPath = '' }
+    }
+
+    $globalResultPath = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments)) 'Mount and Blade II Bannerlord\CoopSpectator\battle_result.json'
+    $globalResultBefore = Get-CoopFileFact -Path $globalResultPath
+    $reportPath = Join-Path $runRoot 'artifacts\results\spawn-smoke-attempt.json'
+    $runtimeOutcome = 'RunnerInternalError'
+    $runtimeReason = 'Dedicated spawn smoke did not complete.'
+    $primaryRuntimeOutcome = 'RunnerInternalError'
+    $primaryRuntimeReason = 'Dedicated spawn smoke did not complete.'
+    $runtimeSupersession = ''
+    $runtimeFailureCode = ''
+    $runtimeFailureEvidence = $null
+    $dedicatedRoleStatus = $null
+    $ownedHostStatus = $null
+    $dedicatedProcess = $null
+    $dedicatedIdentity = $null
+    $noFatalHelpersConfirmed = $false
+    $dedicatedTextCapture = $null
+    $dedicatedControlReadinessEvidence = $null
+    $dedicatedBootstrapStatus = $null
+    $bootstrapCommandEvidence = New-Object 'System.Collections.Generic.List[object]'
+    $script:spawnSmokeLastStatus = $null
+    $dedicatedBootstrapRequest = $null
+    $profile = Copy-CoopSpawnSmokeFixtureCore -RepositoryRoot $repositoryRoot -RunRoot $runRoot
+    $manifest.InputFixtures = @($profile)
+    Write-CoopJsonAtomic -Path $manifestPath -Value $manifest
+    $dedicatedNativeLogInventory = $null
+
+    try {
+        $dedicatedExecutable = Join-Path $DedicatedServerRoot 'bin\Win64_Shipping_Server\DedicatedCustomServer.Starter.exe'
+        $dedicatedLogRoot = Join-Path $runRoot 'artifacts\logs\dedicated'
+        [System.IO.Directory]::CreateDirectory($dedicatedLogRoot) | Out-Null
+        $dedicatedStartInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $dedicatedStartInfo.FileName = $dedicatedExecutable
+        $dedicatedStartInfo.WorkingDirectory = Split-Path -Parent $dedicatedExecutable
+        $dedicatedStartInfo.UseShellExecute = $false
+        $dedicatedStartInfo.CreateNoWindow = $true
+        $dedicatedStartInfo.RedirectStandardInput = $false
+        $dedicatedStartInfo.RedirectStandardOutput = $true
+        $dedicatedStartInfo.RedirectStandardError = $true
+        $dedicatedStartInfo.Arguments = '--multihome 0.0.0.0 --port ' + $Port +
+            ' _MODULES_*Native*SandBoxCore*Sandbox*Multiplayer*CoopSpectatorDedicated*_MODULES_' +
+            ' /LogOutputPath "' + $dedicatedLogRoot + '"'
+        $dedicatedStartInfo.EnvironmentVariables[$automationFlagName] = '1'
+        $dedicatedStartInfo.EnvironmentVariables[$automationRunIdVariableName] = $RunId
+        $dedicatedStartInfo.EnvironmentVariables[$automationRunRootVariableName] = $runRoot
+        $dedicatedStartInfo.EnvironmentVariables[$automationRunTokenVariableName] = $noncePlaintext
+        $dedicatedStartInfo.EnvironmentVariables[$automationExpectedModuleHashVariableName] = $expectedDedicatedHash
+        $dedicatedStartInfo.EnvironmentVariables[$automationResultPolicyVariableName] = 'Suppress'
+        $dedicatedStartInfo.EnvironmentVariables['BANNERLORD_GAME_ROOT'] = $GameRoot
+        $dedicatedStartInfo.EnvironmentVariables['COOPSPECTATOR_AUTOMATION_SPAWN_SMOKE_PROFILE'] = $profile.Profile
+
+        $dedicatedProcess = New-Object System.Diagnostics.Process
+        $dedicatedProcess.StartInfo = $dedicatedStartInfo
+        $dedicatedLaunchStartedUtc = [DateTime]::UtcNow
+        if (-not $dedicatedProcess.Start()) { throw 'Dedicated server process creation returned false.' }
+        $dedicatedLaunchObservedUtc = [DateTime]::UtcNow
+        $dedicatedIdentity = New-CoopProvisionalProcessIdentity `
+            -ProcessId $dedicatedProcess.Id `
+            -RoleType 'DedicatedServer' `
+            -RoleInstanceId 'dedicated-server-01' `
+            -ExpectedExecutablePath $dedicatedExecutable `
+            -ExpectedParentProcessId $PID `
+            -LaunchStartedUtc $dedicatedLaunchStartedUtc `
+            -LaunchObservedUtc $dedicatedLaunchObservedUtc
+        Add-CoopOwnedRuntimeProcess -Identity $dedicatedIdentity
+        try {
+            Add-CoopEvent -EventType 'DedicatedProcessProvisionallyOwned' -Message `
+                ("PID=" + $dedicatedProcess.Id + '; exact requested path and launch window recorded before identity enrichment.')
+        }
+        catch {
+            $wrapped = [System.InvalidOperationException]::new(
+                'Provisional process-ownership event publication failed: ' + $_.Exception.Message,
+                $_.Exception)
+            $wrapped.Data['CoopRuntimeOutcome'] = 'RunnerInternalError'
+            throw $wrapped
+        }
+        $dedicatedIdentity = Get-CoopProcessIdentity `
+            -ProcessId $dedicatedProcess.Id `
+            -RoleType 'DedicatedServer' `
+            -RoleInstanceId 'dedicated-server-01' `
+            -ExpectedExecutablePath $dedicatedExecutable `
+            -ObservedParentProcessId $PID `
+            -ProvisionalIdentity $dedicatedIdentity
+        Add-CoopOwnedRuntimeProcess -Identity $dedicatedIdentity
+        $dedicatedTextCapture = New-CoopProcessTextCapture `
+            -Process $dedicatedProcess `
+            -StandardOutputPath (Join-Path $dedicatedLogRoot 'stdout.txt') `
+            -StandardErrorPath (Join-Path $dedicatedLogRoot 'stderr.txt')
+        Add-CoopEvent -EventType 'DedicatedProcessStarted' -Message ("PID=" + $dedicatedProcess.Id + '; awaiting exact module identity.')
+
+        $roleDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Min(180, $RuntimeTimeoutSeconds))
+        $dedicatedRoleStatus = Wait-CoopRuntimeRoleReady `
+            -StatusPath (Join-Path $runRoot 'status\dedicated-server-01.json') `
+            -ExpectedRoleType 'DedicatedServer' `
+            -ExpectedRoleInstanceId 'dedicated-server-01' `
+            -ExpectedModuleSha256 $expectedDedicatedHash `
+            -DeadlineUtc $roleDeadline `
+            -ProcessTextCapture $dedicatedTextCapture
+
+        $controlReadyDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Min(180, $RuntimeTimeoutSeconds))
+        $dedicatedControlReadinessEvidence = Wait-CoopDedicatedControlReady `
+            -StatusPath (Join-Path $runRoot 'state\dedicated-control.ready.json') `
+            -RoleStatusPath (Join-Path $runRoot 'status\dedicated-server-01.json') `
+            -ExpectedModuleSha256 $expectedDedicatedHash `
+            -DedicatedIdentity $dedicatedIdentity `
+            -DedicatedProcess $dedicatedProcess `
+            -DeadlineUtc $controlReadyDeadline `
+            -ProcessTextCapture $dedicatedTextCapture
+        Add-CoopEvent -EventType 'DedicatedControlReady' -Message `
+            'The exact dedicated role published the InitialListedGameServerState.OnActivated acknowledgement.'
+
+        $bootstrapCreatedUtc = [DateTime]::UtcNow
+        $bootstrapDeadline = $bootstrapCreatedUtc.AddSeconds([Math]::Min(600, $RuntimeTimeoutSeconds))
+        $dedicatedStartUtc = [DateTime]::Parse(
+            [string]$dedicatedIdentity.ProcessStartUtc,
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+        $dedicatedBootstrapRequest = New-CoopDedicatedBootstrapRequest `
+            -RunId $RunId `
+            -RunTokenSha256 $nonceSha256 `
+            -ExpectedDedicatedModuleSha256 $expectedDedicatedHash `
+            -ExpectedProcessId ([int]$dedicatedIdentity.ProcessId) `
+            -ExpectedProcessStartUtc $dedicatedStartUtc `
+            -ExpectedExecutablePath ([string]$dedicatedIdentity.ExecutablePath) `
+            -CommandId ([Guid]::NewGuid()) `
+            -CreatedUtc $bootstrapCreatedUtc `
+            -ExpiresUtc $bootstrapDeadline `
+            -ServerName $effectiveServerName
+        $dedicatedBootstrapRequest = New-CoopSpawnSmokeRequestCore -BootstrapRequest $dedicatedBootstrapRequest
+        $dedicatedBootstrapRequestPath = Join-Path $runRoot 'commands\dedicated-bootstrap.request.json'
+        Write-CoopJsonAtomic -Path $dedicatedBootstrapRequestPath -Value $dedicatedBootstrapRequest
+        Add-CoopEvent -EventType 'DedicatedBootstrapRequested' -Message `
+            ('CommandId=' + [string]$dedicatedBootstrapRequest.CommandId + '; Profile=FieldDedicatedSpawnSmokeV1.')
+
+        $dedicatedBootstrapStatus = Wait-CoopDedicatedBootstrapAccepted `
+            -StatusPath (Join-Path $runRoot 'state\dedicated-bootstrap.status.json') `
+            -RoleStatusPath (Join-Path $runRoot 'status\dedicated-server-01.json') `
+            -Request $dedicatedBootstrapRequest `
+            -ExpectedModuleSha256 $expectedDedicatedHash `
+            -DedicatedIdentity $dedicatedIdentity `
+            -DedicatedProcess $dedicatedProcess `
+            -DeadlineUtc $bootstrapDeadline `
+            -ProcessTextCapture $dedicatedTextCapture
+        foreach ($acknowledgement in @($dedicatedBootstrapStatus.Acknowledgements)) {
+            $bootstrapCommandEvidence.Add($acknowledgement) | Out-Null
+            Add-CoopEvent -EventType 'DedicatedBootstrapStepAcknowledged' -Message `
+                ('Step=' + [string]$acknowledgement.Step + '; State=' + [string]$acknowledgement.State + '.')
+        }
+
+        $portDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Min(180, $RuntimeTimeoutSeconds))
+        $udpEndpoint = $null
+        while ([DateTime]::UtcNow -lt $portDeadline) {
+            $null = Assert-CoopRuntimeRoleHealth `
+                -StatusPath (Join-Path $runRoot 'status\dedicated-server-01.json') `
+                -ExpectedRoleType 'DedicatedServer' `
+                -ExpectedRoleInstanceId 'dedicated-server-01'
+            Update-CoopProcessTextCapture -Capture $dedicatedTextCapture
+            $matches = @(Get-NetUDPEndpoint -LocalPort $Port -ErrorAction SilentlyContinue)
+            if ($matches.Count -eq 1) {
+                $candidate = $matches[0]
+                if ([int]$candidate.OwningProcess -eq $dedicatedProcess.Id -or
+                    (Test-CoopProcessDescendsFrom -ProcessId ([int]$candidate.OwningProcess) -AncestorProcessId $dedicatedProcess.Id)) {
+                    $udpEndpoint = $candidate
+                    break
+                }
+                throw "UDP port $Port was acquired by a process outside the owned dedicated process tree."
+            }
+            if ($matches.Count -gt 1) { throw "UDP port $Port has ambiguous ownership." }
+            if ($dedicatedProcess.HasExited) { throw "Dedicated server exited before binding UDP port $Port." }
+            Update-CoopLease
+            Start-Sleep -Milliseconds 250
+        }
+        if ($null -eq $udpEndpoint) { throw "Timed out waiting for owned UDP port $Port." }
+
+        $portOwnerIdentity = Get-CoopProcessIdentity -ProcessId ([int]$udpEndpoint.OwningProcess) -RoleType 'DedicatedServer' -RoleInstanceId 'dedicated-port-owner-01'
+        Add-CoopOwnedRuntimeProcess -Identity $portOwnerIdentity
+        $ownedHostStatus = [ordered]@{
+            SchemaVersion = 1
+            ProtocolMajorVersion = $protocolMajorVersion
+            ProtocolMinorVersion = $protocolMinorVersion
+            RunId = $RunId
+            RunTokenSha256 = $nonceSha256
+            ServerName = $effectiveServerName
+            ServerPort = $Port
+            OwnerProcessId = [int]$portOwnerIdentity.ProcessId
+            OwnerProcessStartUtc = [string]$portOwnerIdentity.ProcessStartUtc
+            OwnerExecutablePath = [string]$portOwnerIdentity.ExecutablePath
+            Protocol = 'UDP'
+            ConfirmedUtc = [DateTime]::UtcNow.ToString('O')
+        }
+        Write-CoopJsonAtomic -Path (Join-Path $runRoot 'state\dedicated-host.json') -Value $ownedHostStatus
+
+        $runtimeOutcome = 'Pass'
+        $runtimeReason = 'Zero-client field materialization, early abort and protected-result suppression were confirmed by the exact dedicated role.'
+    }
+    catch {
+        $runtimeReason = $_.Exception.Message
+
+        $outcomeHint = [string]$_.Exception.Data['CoopRuntimeOutcome']
+        $runtimeFailureCode = [string]$_.Exception.Data['CoopFailureCode']
+        $runtimeOutcome = if ($outcomeExitCodes.ContainsKey($outcomeHint)) { $outcomeHint }
+        elseif ($_.Exception -is [OperationCanceledException]) { 'Cancelled' }
+        elseif ($runtimeReason -match 'Timed out') { 'Timeout' }
+        elseif ($runtimeReason -match 'exited|crash') { 'Crash' }
+        else { 'AssertionFailed' }
+    }
+    finally {
+        $primaryRuntimeOutcome = $runtimeOutcome
+        $primaryRuntimeReason = $runtimeReason
+        try {
+            $rootProcessIds = @($ownedRuntimeProcesses | Where-Object {
+                [string]$_.RoleType -eq 'DedicatedServer' -or [string]$_.RoleType -eq 'MultiplayerClient'
+            } | ForEach-Object { [int]$_.ProcessId } | Select-Object -Unique)
+            if ($rootProcessIds.Count -gt 0) {
+                $null = Add-CoopOwnedDescendants -RootProcessIds $rootProcessIds
+                $fatalPaths = @(
+                    (Join-Path $DedicatedServerRoot 'bin\CrashUploader.Publish\CrashUploader.Publish.exe'),
+                    (Join-Path $DedicatedServerRoot 'bin\Win64_Shipping_Server\Watchdog\Watchdog.exe'),
+                    (Join-Path $env:SystemRoot 'System32\WerFault.exe'))
+                $fatalHelpers = @(Get-CoopCorrelatedFailureProcessesFromSnapshot -Snapshot @(Get-CimInstance Win32_Process -OperationTimeoutSec 10 -ErrorAction Stop) -OwnedRootProcessIds $rootProcessIds -AllowedExecutablePaths $fatalPaths)
+                $noFatalHelpersConfirmed = $fatalHelpers.Count -eq 0
+                if (-not $noFatalHelpersConfirmed) {
+                    $runtimeOutcome = 'Crash'
+                    $runtimeReason = 'An exact path/PID-correlated crash or modal helper appeared during spawn smoke.'
+                    $runtimeFailureCode = 'CrashReporterDetected'
+                }
+            }
+        }
+        catch {
+            $runtimeOutcome = 'RunnerInternalError'
+            $runtimeReason = 'Owned descendant discovery failed before cleanup: ' + $_.Exception.Message
+            $runtimeSupersession = 'OwnedDescendantDiscoveryFailed'
+            try { Add-CoopEvent -EventType 'OwnedDescendantDiscoveryFailed' -Message $runtimeReason } catch { }
+        }
+        if ($runtimeOutcome -eq 'Crash' -or $runtimeOutcome -eq 'Timeout') {
+            try {
+                $runtimeFailureEvidence = Write-CoopRuntimeFailureEvidence `
+                    -Outcome $runtimeOutcome `
+                    -FailureCode $runtimeFailureCode `
+                    -FailureMessage $runtimeReason
+                if (@($runtimeFailureEvidence.Evidence.CorrelatedFailureProcesses).Count -gt 0) {
+                    $runtimeOutcome = 'Crash'
+                    $runtimeFailureCode = 'CrashReporterDetected'
+                    $runtimeReason = 'An exact path- and PID-correlated crash/modal helper was detected. ' + $runtimeReason
+                }
+            }
+            catch {
+                $runtimeOutcome = 'RunnerInternalError'
+                $runtimeReason = 'Structured failure-evidence publication failed: ' + $_.Exception.Message
+                $runtimeSupersession = 'FailureEvidencePublicationFailed'
+            }
+        }
+        try { Stop-CoopOwnedRuntimeProcesses }
+        catch {
+            $runtimeOutcome = 'RunnerInternalError'
+            $runtimeReason = 'Exact runtime cleanup failed: ' + $_.Exception.Message
+            $runtimeSupersession = 'RuntimeCleanupFailed'
+        }
+        if ($null -ne $dedicatedTextCapture) {
+            try { Complete-CoopProcessTextCapture -Capture $dedicatedTextCapture }
+            catch {
+                $runtimeOutcome = 'RunnerInternalError'
+                $runtimeReason = 'Dedicated stdout/stderr capture finalization failed: ' + $_.Exception.Message
+                $runtimeSupersession = 'DedicatedTextCaptureFailed'
+            }
+        }
+        if ($null -ne $dedicatedIdentity -and
+            -not [string]::IsNullOrWhiteSpace([string](Get-CoopOptionalPropertyValue -InputObject $dedicatedIdentity -Name 'ProcessStartUtc'))) {
+            try {
+                $dedicatedNativeLogInventory = Copy-CoopPidCorrelatedNativeLogs `
+                    -ProcessIdentity $dedicatedIdentity `
+                    -DestinationRoot (Join-Path $runRoot 'artifacts\logs\dedicated\native')
+            }
+            catch {
+                $runtimeOutcome = 'RunnerInternalError'
+                $runtimeReason = 'PID-correlated native log capture failed: ' + $_.Exception.Message
+                $runtimeSupersession = 'NativeLogCaptureFailed'
+            }
+        }
+
+    }
+
+    $globalResultAfter = Get-CoopFileFact -Path $globalResultPath
+    $globalResultUnchanged = ($globalResultBefore.Exists -eq $globalResultAfter.Exists) -and
+        (-not $globalResultBefore.Exists -or [string]::Equals(
+            [string]$globalResultBefore.Sha256,
+            [string]$globalResultAfter.Sha256,
+            [StringComparison]::Ordinal))
+    if (-not $globalResultUnchanged) {
+        if ($runtimeOutcome -ne 'RunnerInternalError') {
+            $runtimeOutcome = 'AssertionFailed'
+            $runtimeReason = 'The protected global battle_result.json changed during field spawn smoke.'
+        }
+        else {
+            $runtimeReason += ' The protected global battle_result.json also changed during field spawn smoke.'
+        }
+    }
+    $remainingOwnedProcesses = @($ownedRuntimeProcesses | Where-Object { Test-CoopLiveProcessIdentity -Identity $_ })
+    if ($remainingOwnedProcesses.Count -gt 0) {
+        if ($runtimeOutcome -ne 'RunnerInternalError') {
+            $runtimeOutcome = 'RunnerInternalError'
+            $runtimeReason = 'One or more exact owned runtime processes remained after cleanup.'
+            $runtimeSupersession = 'OwnedProcessesRemaining'
+        }
+        else {
+            $runtimeReason += ' One or more exact owned runtime processes also remained after cleanup.'
+        }
+    }
+    $remainingPorts = @(Get-NetUDPEndpoint -LocalPort $requiredPorts -ErrorAction SilentlyContinue)
+    if ($remainingPorts.Count -gt 0) {
+        $runtimeOutcome = 'EnvironmentBlocked'
+        $runtimeReason += ' Required UDP ports remain occupied after cleanup; no subsequent attempt is allowed.'
+    }
+    if ([string]::IsNullOrWhiteSpace($runtimeSupersession)) {
+        $primaryRuntimeOutcome = $runtimeOutcome
+        $primaryRuntimeReason = $runtimeReason
+    }
+
+    $report = [ordered]@{
+        Schema = 'coop-field-spawn-smoke-attempt-v1'
+        RunId = $RunId
+        PrimaryOutcome = $primaryRuntimeOutcome
+        PrimaryReason = $primaryRuntimeReason
+        Outcome = $runtimeOutcome
+        Reason = $runtimeReason
+        OutcomeSupersession = $runtimeSupersession
+        ServerName = $effectiveServerName
+        ServerPort = $Port
+        ServerBootstrapGameType = 'CoopBattle'
+        ServerBootstrapMap = 'battle_terrain_029'
+        StartGameIssuedBy = 'DedicatedModuleNativeCommandHandler'
+        CampaignStarted = $false
+        CampaignBattleFixtureOpened = ($null -ne $dedicatedBootstrapStatus)
+        L2OrL3PassClaimed = ($runtimeOutcome -eq 'Pass')
+        L3PassClaimed = $false
+        SameProcessStaticResetProven = $false
+        NonceSha256 = $nonceSha256
+        ParentRunId = $ParentRunId
+        Attempt = $SpawnSmokeAttempt
+        DedicatedIdentity = $dedicatedIdentity
+        BootstrapRequest = $dedicatedBootstrapRequest
+        LastObservedStatus = $script:spawnSmokeLastStatus
+        ResultPolicy = 'Suppress'
+        ExpectedClientModuleSha256 = $expectedClientHash
+        ExpectedDedicatedModuleSha256 = $expectedDedicatedHash
+        DedicatedRoleStatus = $dedicatedRoleStatus
+        DedicatedControlReadinessEvidence = $dedicatedControlReadinessEvidence
+        DedicatedBootstrapStatus = $dedicatedBootstrapStatus
+        BootstrapAcknowledgementEvidence = $bootstrapCommandEvidence.ToArray()
+        OwnedHostStatus = $ownedHostStatus
+        GlobalBattleResultBefore = $globalResultBefore
+        GlobalBattleResultAfter = $globalResultAfter
+        GlobalBattleResultUnchanged = $globalResultUnchanged
+        Cleanup = $runtimeCleanupEvidence.ToArray()
+        NativeLogInventory = $dedicatedNativeLogInventory
+        DedicatedNativeLogInventory = $dedicatedNativeLogInventory
+        RemainingOwnedProcesses = $remainingOwnedProcesses
+        RemainingRequiredPorts = $remainingPorts
+        NoFatalHelpersConfirmed = $noFatalHelpersConfirmed
+        FailureEvidence = $runtimeFailureEvidence
+        CompletedUtc = [DateTime]::UtcNow.ToString('O')
+    }
+    Write-CoopJsonAtomic -Path $reportPath -Value $report
+    return [ordered]@{
+        PrimaryOutcome = $primaryRuntimeOutcome
+        PrimaryReason = $primaryRuntimeReason
+        Outcome = $runtimeOutcome
+        Reason = $runtimeReason
+        ArtifactPath = $reportPath
+    }
+}
+
 function Assert-CoopFixtureCaptureLaunchArtifact {
     param(
         [Parameter(Mandatory = $true)]$LaunchArtifact,
@@ -3086,6 +3691,9 @@ function Invoke-CoopFixtureRecord {
 if (-not (Test-CoopRunId -Value $RunId)) {
     throw 'RunId must contain only ASCII letters, digits, dot, underscore, or hyphen, start with a letter/digit, and not exceed 80 characters.'
 }
+if ($Command -ne 'DedicatedSpawnSmoke' -and ($SpawnSmokeAttempt -gt 0 -or -not [string]::IsNullOrWhiteSpace($ParentRunId))) {
+    throw 'SpawnSmokeAttempt and ParentRunId are private to DedicatedSpawnSmoke.'
+}
 if ($Command -eq 'Inspect' -or $Command -eq 'Recover') {
     exit (Invoke-CoopExistingRunControl)
 }
@@ -3125,12 +3733,13 @@ try {
     $installedDedicatedFact = Get-CoopFileFact -Path (Join-Path $DedicatedServerRoot 'Modules\CoopSpectatorDedicated\bin\Win64_Shipping_Server\CoopSpectator.dll')
     $repositoryClientFact = Get-CoopFileFact -Path (Join-Path $repositoryRoot 'Module\CoopSpectator\bin\Win64_Shipping_Client\CoopSpectator.dll')
     $repositoryDedicatedFact = Get-CoopFileFact -Path (Join-Path $repositoryRoot 'Module\CoopSpectatorDedicated\bin\Win64_Shipping_Server\CoopSpectator.dll')
-    $selectedClientFact = if ($Command -eq 'Doctor' -or $Command -eq 'Feasibility' -or $Command -eq 'Record') { $installedClientFact } else { $repositoryClientFact }
-    $selectedDedicatedFact = if ($Command -eq 'Doctor' -or $Command -eq 'Feasibility' -or $Command -eq 'Record') { $installedDedicatedFact } else { $repositoryDedicatedFact }
+    $selectedClientFact = if ($Command -in @('Doctor', 'Feasibility', 'DedicatedSpawnSmoke', 'Record')) { $installedClientFact } else { $repositoryClientFact }
+    $selectedDedicatedFact = if ($Command -in @('Doctor', 'Feasibility', 'DedicatedSpawnSmoke', 'Record')) { $installedDedicatedFact } else { $repositoryDedicatedFact }
     $expectedArtifactSource = if ($Command -eq 'Doctor') { 'InstalledAndRepositoryDiagnostic' }
         elseif ($Command -eq 'CompileOnly') { 'RunOwnedCompileOnlyOutput' }
         elseif ($Command -eq 'Feasibility') { 'ExplicitInstalledRuntimeIdentity' }
         elseif ($Command -eq 'Record') { 'ExplicitInstalledCampaignCaptureIdentity' }
+        elseif ($Command -eq 'DedicatedSpawnSmoke') { 'ExplicitInstalledDedicatedSpawnSmokeIdentity' }
         else { 'RepositorySourceContracts' }
     $manifestPortOwnership = Get-CoopPortOwnership
 
@@ -3141,9 +3750,11 @@ try {
         RunId = $RunId
         CreatedUtc = $runCreatedUtc.ToString('O')
         RequestedCommand = $Command
-        RequestedLevel = if ($Command -eq 'Doctor') { 'L0' } elseif ($Command -eq 'Feasibility') { 'Feasibility' } elseif ($Command -eq 'Record') { 'CaptureOnly' } else { 'L1' }
-        ScenarioKind = if ($Command -eq 'Feasibility') { 'ConnectionOnlyRuntimeFoundation' } elseif ($Command -eq 'Record') { 'FieldBattleFixtureCapture' } else { 'NonRuntime' }
-        Stage = if ($Command -eq 'Feasibility') { 'Milestone2B' } elseif ($Command -eq 'Record') { 'Milestone3B' } else { 'Milestone2A' }
+        ParentRunId = $ParentRunId
+        SpawnSmokeAttempt = $SpawnSmokeAttempt
+        RequestedLevel = if ($Command -eq 'Doctor') { 'L0' } elseif ($Command -eq 'Feasibility') { 'Feasibility' } elseif ($Command -eq 'DedicatedSpawnSmoke') { 'L2' } elseif ($Command -eq 'Record') { 'CaptureOnly' } else { 'L1' }
+        ScenarioKind = if ($Command -eq 'Feasibility') { 'ConnectionOnlyRuntimeFoundation' } elseif ($Command -eq 'DedicatedSpawnSmoke') { 'FieldBattle' } elseif ($Command -eq 'Record') { 'FieldBattleFixtureCapture' } else { 'NonRuntime' }
+        Stage = if ($Command -eq 'Feasibility') { 'Milestone2B' } elseif ($Command -eq 'DedicatedSpawnSmoke') { 'PreBattleHold' } elseif ($Command -eq 'Record') { 'Milestone3B' } else { 'Milestone2A' }
         MachineProfileName = $MachineProfileName
         BuildProfile = 'Release'
         ExpectedArtifactSource = $expectedArtifactSource
@@ -3159,12 +3770,13 @@ try {
         DedicatedExecutableVersion = if ($manifestDedicatedExecutable.Exists) { $manifestDedicatedExecutable.ProductVersion } else { '' }
         EffectiveFeatureFlags = [ordered]@{
             CoopCompileOnly = ($Command -eq 'CompileOnly')
-            TestAutomation = ($Command -eq 'Feasibility') -or ($Command -eq 'Record') -or (Test-CoopEnvironmentFlag -Name 'COOPSPECTATOR_TEST_AUTOMATION')
+            TestAutomation = ($Command -eq 'DedicatedSpawnSmoke') -or ($Command -eq 'Feasibility') -or ($Command -eq 'Record') -or (Test-CoopEnvironmentFlag -Name 'COOPSPECTATOR_TEST_AUTOMATION')
+            SpawnSmoke = ($Command -eq 'DedicatedSpawnSmoke')
             FixtureRecord = ($Command -eq 'Record')
             VerboseDiagnostics = Test-CoopEnvironmentFlag -Name 'COOPSPECTATOR_VERBOSE_DIAGNOSTICS'
             CampaignMapPrototype = Test-CoopEnvironmentFlag -Name 'COOPSPECTATOR_CAMPAIGN_MAP_PROTOTYPE'
         }
-        ResultPolicy = if ($Command -eq 'Feasibility' -or $Command -eq 'Record') { 'Suppress' } else { 'NotApplicable' }
+        ResultPolicy = if ($Command -in @('Feasibility', 'Record', 'DedicatedSpawnSmoke')) { 'Suppress' } else { 'NotApplicable' }
         CompletionMode = if ($Command -eq 'Record') { 'FixtureRecorded' } else { 'NotApplicable' }
         Roles = @([ordered]@{
             RoleType = $runnerRoleType
@@ -3202,7 +3814,7 @@ try {
     }
     Write-CoopJsonAtomic -Path $manifestPath -Value $manifest
     Update-CoopLease
-    if ($Command -eq 'Feasibility' -or $Command -eq 'Record') {
+    if ($Command -eq 'Feasibility' -or $Command -eq 'Record' -or ($Command -eq 'DedicatedSpawnSmoke' -and $SpawnSmokeAttempt -gt 0)) {
         $sharedLockRoot = Join-Path ([System.IO.Path]::GetTempPath()) 'CoopSpectator\Automation\_locks'
         $sharedRuntimePorts = [int[]]@($Port, 7777)
         $expectedSharedRuntimeResourceCount = 4 + @($sharedRuntimePorts | Sort-Object -Unique).Count
@@ -3248,6 +3860,8 @@ try {
     }
     Add-CoopEvent -EventType 'RunStarted' -Message $(if ($Command -eq 'Feasibility') {
         'Feasibility started with exact runtime ownership and ResultPolicy=Suppress.'
+    } elseif ($Command -eq 'DedicatedSpawnSmoke') {
+        'Two-attempt zero-client field spawn smoke requested with ResultPolicy=Suppress.'
     } elseif ($Command -eq 'Record') {
         'Field fixture recording started with exact runtime ownership and ResultPolicy=Suppress.'
     } else {
@@ -3260,6 +3874,7 @@ try {
         'Contracts' { Invoke-CoopContracts }
         'CompileOnly' { Invoke-CoopCompileOnly }
         'Feasibility' { Invoke-CoopFeasibility }
+        'DedicatedSpawnSmoke' { Invoke-CoopDedicatedSpawnSmoke }
         'Record' { Invoke-CoopFixtureRecord }
     })
     $commandResult = Get-CoopSingularCommandResult -Results $commandResults -CommandName $Command

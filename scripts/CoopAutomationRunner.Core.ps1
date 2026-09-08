@@ -122,7 +122,8 @@ function Confirm-CoopDedicatedBootstrapStatus {
         [Parameter(Mandatory = $true)][string]$ExpectedDedicatedModuleSha256,
         [Parameter(Mandatory = $true)][int]$ExpectedProcessId,
         [Parameter(Mandatory = $true)][DateTime]$ExpectedProcessStartUtc,
-        [Parameter(Mandatory = $true)][string]$ExpectedExecutablePath
+        [Parameter(Mandatory = $true)][string]$ExpectedExecutablePath,
+        [string]$RunRoot
     )
 
     if ($null -eq $Status -or $null -eq $Request) { throw 'Dedicated bootstrap status validation context is missing.' }
@@ -166,7 +167,11 @@ function Confirm-CoopDedicatedBootstrapStatus {
     if (-not [bool](Get-CoopOptionalPropertyValue -InputObject $Status -Name 'IsTerminal')) {
         return $false
     }
-    if (-not [string]::Equals($state, 'BootstrapAccepted', [StringComparison]::Ordinal)) {
+    $smoke = [string](Get-CoopOptionalPropertyValue -InputObject $Request -Name 'BootstrapProfile') -ceq 'FieldDedicatedSpawnSmokeV1'
+    $expectedTerminal = if ($smoke) { 'SpawnSmokePassed' } else { 'BootstrapAccepted' }
+    $expectedGame = if ($smoke) { 'CoopBattle' } else { 'TeamDeathmatch' }
+    $expectedMap = if ($smoke) { 'battle_terrain_029' } else { 'mp_tdm_map_001' }
+    if (-not [string]::Equals($state, $expectedTerminal, [StringComparison]::Ordinal)) {
         throw 'Dedicated bootstrap terminal state is not BootstrapAccepted.'
     }
 
@@ -182,12 +187,16 @@ function Confirm-CoopDedicatedBootstrapStatus {
     }
     if (-not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $acknowledgements[0] -Name 'ObservedValue'), [string](Get-CoopOptionalPropertyValue -InputObject $Request -Name 'ServerName'), [StringComparison]::Ordinal) -or
         -not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $acknowledgements[1] -Name 'ObservedValue'), '16', [StringComparison]::Ordinal) -or
-        -not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $acknowledgements[2] -Name 'ObservedValue'), 'TeamDeathmatch', [StringComparison]::Ordinal) -or
-        -not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $acknowledgements[3] -Name 'ObservedValue'), 'mp_tdm_map_001', [StringComparison]::Ordinal) -or
-        -not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $acknowledgements[4] -Name 'ObservedValue'), 'mp_tdm_map_001', [StringComparison]::Ordinal) -or
+        -not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $acknowledgements[2] -Name 'ObservedValue'), $expectedGame, [StringComparison]::Ordinal) -or
+        -not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $acknowledgements[3] -Name 'ObservedValue'), $expectedMap, [StringComparison]::Ordinal) -or
+        -not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $acknowledgements[4] -Name 'ObservedValue'), $expectedMap, [StringComparison]::Ordinal) -or
         -not [string]::Equals([string](Get-CoopOptionalPropertyValue -InputObject $acknowledgements[5] -Name 'ObservedValue'), 'start_game', [StringComparison]::Ordinal) -or
-        [string](Get-CoopOptionalPropertyValue -InputObject $acknowledgements[6] -Name 'ObservedValue') -notmatch '^IsPlaying=true;GameType=TeamDeathmatch;Map=mp_tdm_map_001$') {
+        [string](Get-CoopOptionalPropertyValue -InputObject $acknowledgements[6] -Name 'ObservedValue') -cne ('IsPlaying=true;GameType=' + $expectedGame + ';Map=' + $expectedMap)) {
         throw 'Dedicated bootstrap acknowledgement values do not match the allowlisted request.'
+    }
+    if ($smoke) {
+        if ([string]::IsNullOrWhiteSpace($RunRoot)) { throw 'Spawn smoke requires its exact run root.' }
+        Assert-CoopSpawnSmokeEvidenceCore -Evidence $Status.SmokeEvidence -RunRoot $RunRoot
     }
     return $true
 }
@@ -1291,4 +1300,205 @@ function Get-CoopPidCorrelatedNativeLogDescriptors {
         [pscustomobject][ordered]@{ FileName = $names[1]; Required = $true; Kind = 'NativeErrors' },
         [pscustomobject][ordered]@{ FileName = $names[2]; Required = $false; Kind = 'Watchdog' }
     )
+}
+
+function Get-CoopSpawnSmokeProfileCore {
+    return [ordered]@{
+        Profile = 'FieldDedicatedSpawnSmokeV1'
+        FixtureId = 'field-current-sanitized-v1'
+        Scene = 'battle_terrain_029'
+        GameType = 'CoopBattle'
+        MissionShell = 'MultiplayerBattle'
+        CampaignId = 'fixture-campaign-001'
+        BattleId = 'fixture-battle-001'
+        BattleInstanceId = 'fixture-battle-instance-001'
+        Stage = 'PreBattleHold'
+        FixtureRelativeRoot = 'payloads/field-current'
+        PayloadFile = 'battle_roster.sanitized.json'
+        PayloadLength = 259744
+        PayloadSha256 = 'B47D7AF7FA057C36CA8EF759A6D597C00007158A22E3A556AC57A1299579D49D'
+        MetadataSha256 = '06169055E66E4DC0719AF3A8CB5A5E082CAF487DD18B1E4D18317B5C80973950'
+        OracleSha256 = 'D9F593D17BEA35A8D8717867C6F7AE79BC721C2FA3A9FFD90F474A001FD023DA'
+    }
+}
+
+function Assert-CoopNoReparsePathCore {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    for ($current = [IO.Path]::GetFullPath($Path); -not [string]::IsNullOrEmpty($current); $current = [IO.Path]::GetDirectoryName($current)) {
+        if (([IO.File]::Exists($current) -or [IO.Directory]::Exists($current)) -and
+            (([IO.File]::GetAttributes($current) -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+            throw "FixtureReparsePointRejected: $current"
+        }
+    }
+}
+
+function Copy-CoopSpawnSmokeFixtureCore {
+    param([string]$RepositoryRoot, [string]$RunRoot)
+    $profile = Get-CoopSpawnSmokeProfileCore
+    $sourceRoot = Join-Path $RepositoryRoot 'Tests\Fixtures\Automation\field-current'
+    $targetRoot = Join-Path $RunRoot 'payloads\field-current'
+    Assert-CoopNoReparsePathCore -Path $sourceRoot
+    Assert-CoopNoReparsePathCore -Path $targetRoot
+    if ([IO.Directory]::Exists($targetRoot)) { throw 'Fixture target must be fresh.' }
+    $files = [ordered]@{
+        'battle_roster.sanitized.json' = $profile.PayloadSha256
+        'fixture.sanitized.metadata.json' = $profile.MetadataSha256
+        'fixture.oracle.json' = $profile.OracleSha256
+    }
+    $bytesByName = @{}
+    foreach ($name in $files.Keys) {
+        $source = Join-Path $sourceRoot $name
+        Assert-CoopNoReparsePathCore -Path $source
+        $info = [IO.FileInfo]::new($source)
+        if (-not $info.Exists -or $info.Length -le 0 -or $info.Length -gt 1048576) { throw 'Fixture file missing or oversized.' }
+        $bytes = [IO.File]::ReadAllBytes($source)
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try { $hash = [BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-', '') } finally { $sha.Dispose() }
+        if ($hash -cne $files[$name] -or ($name -eq $profile.PayloadFile -and $bytes.Length -ne $profile.PayloadLength)) {
+            throw "Fixture integrity mismatch: $name"
+        }
+        $bytesByName[$name] = $bytes
+    }
+    [IO.Directory]::CreateDirectory($targetRoot) | Out-Null
+    foreach ($name in $files.Keys) {
+        $stream = [IO.File]::Open((Join-Path $targetRoot $name), [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        try { $stream.Write($bytesByName[$name], 0, $bytesByName[$name].Length) } finally { $stream.Dispose() }
+    }
+    return $profile
+}
+
+function New-CoopSpawnSmokeRequestCore {
+    param([Parameter(Mandatory = $true)]$BootstrapRequest)
+    $p = Get-CoopSpawnSmokeProfileCore
+    $request = [ordered]@{}
+    foreach ($key in $BootstrapRequest.Keys) { $request[$key] = $BootstrapRequest[$key] }
+    $request.BootstrapProfile = $p.Profile
+    $request.GameType = $p.GameType
+    $request.Map = $p.Scene
+    foreach ($name in @('FixtureId', 'FixtureRelativeRoot', 'CampaignId', 'BattleId', 'BattleInstanceId', 'Stage')) {
+        $request[$name] = $p[$name]
+    }
+    $request.FixtureLength = $p.PayloadLength
+    $request.FixtureSha256 = $p.PayloadSha256
+    $request.OracleSha256 = $p.OracleSha256
+    return $request
+}
+
+function Assert-CoopSpawnSmokeEvidenceCore {
+    param([Parameter(Mandatory = $true)]$Evidence, [Parameter(Mandatory = $true)][string]$RunRoot)
+    $p = Get-CoopSpawnSmokeProfileCore
+    if ($Evidence.Profile -cne $p.Profile -or $Evidence.FixtureId -cne $p.FixtureId -or
+        $Evidence.PayloadSha256 -cne $p.PayloadSha256 -or $Evidence.OracleSha256 -cne $p.OracleSha256 -or
+        $Evidence.AuthoritativeSource -cne 'CoopMissionSpawnLogic.TryCaptureAutomationSpawnSmokeEvidence' -or
+        $Evidence.StartMissionRequests -ne 1 -or $Evidence.EndMissionRequests -ne 1 -or
+        -not $Evidence.InitialStateWasClean -or -not $Evidence.MissionDisposed -or -not $Evidence.ProtectedResultUnchanged -or
+        $Evidence.PhaseBeforeEnd -cne 'PreBattleHold' -or $Evidence.ResultAttempts -lt 1 -or
+        $Evidence.ResultAttempts -ne $Evidence.SuppressedResults -or $Evidence.ResultEntriesAtAttempt -ne 47) {
+        throw 'Spawn smoke terminal/abort/result evidence is incomplete.'
+    }
+    $o = $Evidence.Observation
+    if ($null -eq $o -or $o.CampaignId -cne $p.CampaignId -or $o.BattleId -cne $p.BattleId -or
+        $o.BattleInstanceId -cne $p.BattleInstanceId -or $o.Stage -cne $p.Stage -or
+        $o.Scene -cne $p.Scene -or $o.MissionShell -cne $p.MissionShell -or
+        $o.ScenarioKind -cne 'FieldBattle' -or $o.CampaignBattleType -cne 'FieldBattle' -or $o.IsSiegeBattle -or
+        $o.Phase -cne 'PreBattleHold' -or $o.ConnectedClientCount -ne 0 -or -not $o.NativeMaterializationComplete -or
+        @($o.Violations).Count -ne 0 -or @($o.Agents).Count -ne 74 -or $o.ActiveMountCount -ne 21 -or
+        $o.ResultEntryCount -ne 47 -or -not $o.ResultGuardWasClear) { throw 'Spawn smoke mission observation is invalid.' }
+    foreach ($controller in @('MissionMultiplayerCoopBattle','CoopMissionSpawnLogic','CoopMissionNetworkBridge',
+        'MissionLobbyComponent','MissionAgentSpawnLogic','BannerBearerLogic')) {
+        if (-not (@($o.Controllers) -ccontains $controller)) { throw "Missing native controller: $controller" }
+    }
+    $fixturePath = Join-Path $RunRoot 'payloads\field-current\battle_roster.sanitized.json'
+    Assert-CoopNoReparsePathCore -Path $fixturePath
+    if ((Get-CoopFileSha256 -Path $fixturePath) -cne $p.PayloadSha256) { throw 'Retained fixture hash changed.' }
+    foreach ($companion in @(
+        [pscustomobject]@{ Name='fixture.sanitized.metadata.json'; Hash=$p.MetadataSha256 },
+        [pscustomobject]@{ Name='fixture.oracle.json'; Hash=$p.OracleSha256 }
+    )) {
+        $companionPath = Join-Path ([IO.Path]::GetDirectoryName($fixturePath)) $companion.Name
+        Assert-CoopNoReparsePathCore -Path $companionPath
+        if ((Get-CoopFileSha256 -Path $companionPath) -cne $companion.Hash) { throw 'Retained fixture companion hash changed.' }
+    }
+    $snapshot = ([IO.File]::ReadAllText($fixturePath) | ConvertFrom-Json).Snapshot
+    $entries = @{}
+    foreach ($side in $snapshot.Sides) { foreach ($entry in $side.Troops) { $entries[$entry.EntryId] = $entry } }
+    $indices = @{}; $mounts = @{}; $counts = @{}; $teams = @{}; $orientations = @{}
+    $heroCount = 0
+    foreach ($agent in $o.Agents) {
+        $entry = $entries[[string]$agent.EntryId]
+        if ($null -eq $entry -or $indices.ContainsKey([int]$agent.AgentIndex) -or $agent.AgentIndex -lt 0 -or
+            -not $agent.Active -or -not $agent.NativeOriginAndLedgerMatch -or -not $agent.ExactContractValid -or
+            -not $agent.PreSpawnEquipmentInjected) { throw 'Native agent identity or generation mismatch.' }
+        $indices[[int]$agent.AgentIndex] = $true
+        if (-not $counts.ContainsKey($agent.EntryId)) { $counts[$agent.EntryId] = 0 }
+        $counts[$agent.EntryId]++
+        if ($agent.SideId -cne $entry.SideId -or @('Attacker','Defender') -cnotcontains $agent.Side -or
+            $agent.TeamIndex -lt 0 -or -not $agent.FormationTeamMatches -or $agent.Formation -cne $entry.CampaignFormationClass) {
+            throw 'Side/team/formation mismatch.'
+        }
+        if (($teams.ContainsKey($agent.SideId) -and $teams[$agent.SideId] -ne $agent.TeamIndex) -or
+            ($orientations.ContainsKey($agent.SideId) -and $orientations[$agent.SideId] -cne $agent.Side)) { throw 'Side orientation mismatch.' }
+        $teams[$agent.SideId] = $agent.TeamIndex; $orientations[$agent.SideId] = $agent.Side
+        if ($agent.OriginalCharacterId -cne $entry.OriginalCharacterId -or $agent.IsHero -ne $entry.IsHero -or
+            [string]$agent.HeroId -cne [string]$entry.HeroId -or [string]::IsNullOrEmpty($agent.NativeCharacterId) -or
+            $agent.NativeCharacterId -cne $agent.ContractNativeCharacterId) { throw 'Character/hero mismatch.' }
+        if ($agent.IsHero) { $heroCount++ }
+        foreach ($slot in @('Item0','Item1','Item2','Item3','Head','Body','Leg','Gloves','Cape','Horse','HorseHarness')) {
+            $actual = Get-CoopOptionalPropertyValue -InputObject $agent.Equipment -Name $slot
+            $item = Get-CoopOptionalPropertyValue -InputObject $entry -Name ('Combat' + $slot + 'Id')
+            $modifier = Get-CoopOptionalPropertyValue -InputObject $entry -Name ('Combat' + $slot + 'ModifierId')
+            $amount = Get-CoopOptionalPropertyValue -InputObject $entry -Name ('Combat' + $slot + 'Amount')
+            if ($null -eq $actual -or [string]$actual.ItemId -cne [string]$item -or
+                [string]$actual.ModifierId -cne [string]$modifier -or ($null -ne $amount -and $actual.Amount -ne $amount)) {
+                throw "Equipment mismatch: $($agent.EntryId)/$slot"
+            }
+        }
+        if ($agent.Mounted -ne $entry.IsMounted) { throw 'Mount policy mismatch.' }
+        if ($agent.Mounted) {
+            if ($agent.MountAgentIndex -lt 0 -or -not $agent.ReciprocalMountLink -or $mounts.ContainsKey([int]$agent.MountAgentIndex) -or
+                $agent.MountHorseId -cne $entry.CombatHorseId -or $agent.MountHarnessId -cne $entry.CombatHorseHarnessId) { throw 'Mount link mismatch.' }
+            $mounts[[int]$agent.MountAgentIndex] = $true
+        } elseif ($agent.MountAgentIndex -ne -1) { throw 'Unexpected mount.' }
+    }
+    if ($counts.Count -ne 47 -or $heroCount -ne 4 -or $mounts.Count -ne 21 -or $teams.Count -ne 2 -or
+        @($teams.Values | Sort-Object -Unique).Count -ne 2 -or @($orientations.Values | Sort-Object -Unique).Count -ne 2) {
+        throw 'Army composition mismatch.'
+    }
+    foreach ($id in $entries.Keys) {
+        if ($counts[$id] -ne ([int]$entries[$id].Count - [int]$entries[$id].WoundedCount)) { throw "Entry multiplicity mismatch: $id" }
+    }
+}
+function Assert-CoopSpawnSmokeAttemptArtifactsCore {
+    param($Report, $Manifest, $RunnerRelease, $SharedRelease, [string]$ExpectedRunId, [string]$ExpectedParentRunId, [int]$ExpectedAttempt)
+    if ($null -eq $Report -or $null -eq $Manifest -or $null -eq $RunnerRelease -or $null -eq $SharedRelease -or
+        $Manifest.RequestedCommand -cne 'DedicatedSpawnSmoke' -or $Manifest.TerminalOutcome -cne 'Pass' -or
+        $Manifest.RunId -cne $ExpectedRunId -or $Manifest.ParentRunId -cne $ExpectedParentRunId -or
+        $Manifest.SpawnSmokeAttempt -ne $ExpectedAttempt -or $Manifest.RepositoryDirty -or
+        $Report.RunId -cne $ExpectedRunId -or $Report.ParentRunId -cne $ExpectedParentRunId -or
+        $Report.Attempt -ne $ExpectedAttempt -or $Report.NonceSha256 -cne $Manifest.NonceSha256 -or
+        $Report.Outcome -cne 'Pass' -or $Report.ResultPolicy -cne 'Suppress' -or
+        -not $Report.GlobalBattleResultUnchanged -or -not $Report.NoFatalHelpersConfirmed -or @($Report.RemainingOwnedProcesses).Count -ne 0 -or
+        @($Report.RemainingRequiredPorts).Count -ne 0 -or
+        $RunnerRelease.RunId -cne $ExpectedRunId -or -not $RunnerRelease.ReleasedAndReacquired -or
+        $SharedRelease.RunId -cne $ExpectedRunId -or @($SharedRelease.Locks).Count -lt 5 -or
+        @($SharedRelease.Locks | Where-Object { -not $_.ReleasedAndReacquired }).Count -ne 0) {
+        throw 'Child smoke identity, terminal result, process/port cleanup, or lock release is invalid.'
+    }
+}
+
+function Assert-CoopSpawnSmokePairCore {
+    param([Parameter(Mandatory = $true)][object[]]$Reports)
+    if ($Reports.Count -ne 2) { throw 'Exactly two successful smoke attempts are required.' }
+    $a = $Reports[0]; $b = $Reports[1]
+    if ($a.RunId -ceq $b.RunId -or $a.NonceSha256 -ceq $b.NonceSha256 -or
+        $a.BootstrapRequest.CommandId -ceq $b.BootstrapRequest.CommandId -or
+        ($a.DedicatedIdentity.ProcessId -eq $b.DedicatedIdentity.ProcessId -and
+         $a.DedicatedIdentity.ProcessStartUtc -ceq $b.DedicatedIdentity.ProcessStartUtc) -or
+        $a.Outcome -cne 'Pass' -or $b.Outcome -cne 'Pass' -or
+        -not $a.DedicatedBootstrapStatus.SmokeEvidence.InitialStateWasClean -or
+        -not $b.DedicatedBootstrapStatus.SmokeEvidence.InitialStateWasClean -or
+        @($a.RemainingOwnedProcesses).Count -ne 0 -or @($b.RemainingOwnedProcesses).Count -ne 0 -or
+        @($a.RemainingRequiredPorts).Count -ne 0 -or @($b.RemainingRequiredPorts).Count -ne 0) {
+        throw 'Cross-run smoke isolation is invalid or cleanup is incomplete.'
+    }
 }

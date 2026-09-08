@@ -1,8 +1,8 @@
 # Battle Test Automation Specification
 
 Status: **Canonical implementation specification — implementation in progress**
-Specification date: **2026-09-02**
-Revision: **23 — Milestone 3 independent review, deterministic sanitized derivative, independent oracle, and hash-gated contract replay complete**
+Specification date: **2026-09-09**
+Revision: **24 — Milestone 4A field spawn-smoke source/contracts complete; native L2 evidence pending**
 Live-evidence repository baseline: **`c6507e99d7bc71665e839b2adc90401921428a3d`** (`c6507e9`)
 Current published connection corrections: **`d1af692`**, **`3fdcda3`**
 Current exact-fixture live evidence: **`baf5c691eaf1f5beb17bd000a30945aba9003939`** (`baf5c69`), run **`m3b-live-capture-02`**
@@ -34,6 +34,7 @@ Companion audit: [BATTLE_TEST_AUTOMATION_AUDIT.md](BATTLE_TEST_AUTOMATION_AUDIT.
 | 21 | Exact installed-1.4.8 singleplayer launch path verified; aggregate `Record`, run-owned campaign launch/cleanup, fixture wait/validation, private-artifact boundaries, and redacted reproduction descriptor implemented; 23/23 plus both compile-only projects passed, with clean publication/staging/live capture pending |
 | 22 | Controlled client-only staging and a clean published private field capture completed; one runner/C# literal drift found by the first diagnostic capture was corrected and guarded; corrected 23/23 contracts, both compile-only projects, exact payload integrity/qualification, result isolation, and cleanup passed, while oracle/privacy/replay gates remain open |
 | 23 | The private field payload was independently audited and retained outside Git; a cross-PowerShell deterministic sanitized derivative, linked provenance metadata, separate critical-value oracle, privacy/reference/composition/equipment checks, production-schema contract replay, 23/23 contracts, and both compile-only builds passed without an L2/L3 claim |
+| 24 | Default-off field-only run fixture admission, one-shot native materialization observer and early abort, strict result protection, two fresh process attempts, 24/24 contracts and final non-deploying compilation; live L2 and same-process reset unverified |
 
 The companion audit remains the source-fact baseline. Revisions 2–23 refine implementation requirements and ordering without changing the audit's historical source findings. The narrow client launch/join slice, Milestone 2A non-runtime foundation, Milestone 2B runner-safety foundation, dedicated-control channel, Milestone 2B.3A safety closure, Milestone 3A exact campaign-roster recorder, Milestone 3B aggregate campaign-capture control surface, and Milestone 3C reviewed shareable fixture surface now exist. Their evidence boundaries are recorded in [BATTLE_TEST_AUTOMATION_CLIENT_JOIN_IMPLEMENTATION.md](BATTLE_TEST_AUTOMATION_CLIENT_JOIN_IMPLEMENTATION.md), [BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md](BATTLE_TEST_AUTOMATION_M2A_IMPLEMENTATION.md), [BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md](BATTLE_TEST_AUTOMATION_M2B1_RUNTIME_FOUNDATION.md), [BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md](BATTLE_TEST_AUTOMATION_M2B2_FEASIBILITY.md), [BATTLE_TEST_AUTOMATION_M2B2C_RUNNER_CORRECTION.md](BATTLE_TEST_AUTOMATION_M2B2C_RUNNER_CORRECTION.md), [BATTLE_TEST_AUTOMATION_M2B2D_DEDICATED_CONTROL.md](BATTLE_TEST_AUTOMATION_M2B2D_DEDICATED_CONTROL.md), [BATTLE_TEST_AUTOMATION_M2B3_SAFETY_CLOSURE.md](BATTLE_TEST_AUTOMATION_M2B3_SAFETY_CLOSURE.md), and [BATTLE_TEST_AUTOMATION_M3_FIELD_FIXTURE.md](BATTLE_TEST_AUTOMATION_M3_FIELD_FIXTURE.md).
 
@@ -1271,6 +1272,10 @@ Exit criteria:
 - no parallel authoritative scenario model exists.
 
 ### Milestone 4 — Field dedicated spawn smoke
+
+**4A disposition (2026-09-09):** The default-off `FieldDedicatedSpawnSmokeV1` admission, native observer, one-shot mission start/normal early abort, result suppression proof, and public two-attempt `DedicatedSpawnSmoke` driver are implemented. `m4a-contracts-20260908-01` passed 24/24; final `m4a-compile-20260908-02` compiled both modules with installed inventories unchanged. No live server/campaign/client ran. Milestone 4 remains open pending native L2 verification. See [M4 source/contract report](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md).
+
+The approved two-attempt implementation uses fresh server processes, run roots, tokens, commands and evidence. This tests cross-run isolation; it does **not** prove production static reset between two missions in one process. The new lifecycle/bridge reset is contract-tested, while same-process runtime reset remains an explicit verification gap. The fixed sanitized fixture is not rewritten or relaxed if native hero/materialization validation fails.
 
 Priority: **P0**
 

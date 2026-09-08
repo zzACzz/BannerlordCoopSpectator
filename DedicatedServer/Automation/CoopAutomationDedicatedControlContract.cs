@@ -50,6 +50,15 @@ namespace CoopSpectator.Infrastructure.Automation
         public int MaxNumberOfPlayers { get; set; }
         public string GameType { get; set; }
         public string Map { get; set; }
+        public string FixtureId { get; set; }
+        public string FixtureRelativeRoot { get; set; }
+        public int FixtureLength { get; set; }
+        public string FixtureSha256 { get; set; }
+        public string OracleSha256 { get; set; }
+        public string CampaignId { get; set; }
+        public string BattleId { get; set; }
+        public string BattleInstanceId { get; set; }
+        public string Stage { get; set; }
     }
 
     public sealed class CoopAutomationDedicatedBootstrapAcknowledgement
@@ -81,6 +90,7 @@ namespace CoopSpectator.Infrastructure.Automation
         public string ExecutablePath { get; set; }
         public string State { get; set; }
         public bool IsTerminal { get; set; }
+        public CoopAutomationDedicatedSpawnSmokeEvidence SmokeEvidence { get; set; }
         public DateTime UpdatedUtc { get; set; }
         public List<CoopAutomationDedicatedBootstrapAcknowledgement> Acknowledgements { get; set; } =
             new List<CoopAutomationDedicatedBootstrapAcknowledgement>();
@@ -186,6 +196,25 @@ namespace CoopSpectator.Infrastructure.Automation
             if (!string.Equals(NormalizePath(request.ExpectedExecutablePath), NormalizePath(actualExecutablePath), StringComparison.OrdinalIgnoreCase))
                 return Fail("ExecutablePathMismatch", "The dedicated bootstrap executable path does not match the current process.", out failureCode, out failureMessage);
 
+            if (string.Equals(request.BootstrapProfile, CoopAutomationSpawnSmokeContract.Profile, StringComparison.Ordinal))
+            {
+                if (!IsSafeServerName(request.ServerName) || request.MaxNumberOfPlayers != 16 ||
+                    request.GameType != CoopAutomationSpawnSmokeContract.GameType || request.Map != CoopAutomationSpawnSmokeContract.Scene)
+                    return Fail("SpawnSmokeOptionsMismatch", "The field smoke profile has fixed game/map options.", out failureCode, out failureMessage);
+                if (request.FixtureId != CoopAutomationSpawnSmokeContract.FixtureId ||
+                    request.FixtureRelativeRoot != CoopAutomationSpawnSmokeContract.FixtureRelativeRoot ||
+                    request.FixtureLength != CoopAutomationSpawnSmokeContract.PayloadLength ||
+                    request.FixtureSha256 != CoopAutomationSpawnSmokeContract.PayloadSha256 ||
+                    request.OracleSha256 != CoopAutomationSpawnSmokeContract.OracleSha256 ||
+                    request.CampaignId != CoopAutomationSpawnSmokeContract.CampaignId ||
+                    request.BattleId != CoopAutomationSpawnSmokeContract.BattleId ||
+                    request.BattleInstanceId != CoopAutomationSpawnSmokeContract.BattleInstanceId ||
+                    request.Stage != CoopAutomationSpawnSmokeContract.Stage ||
+                    configuration.ResultPolicy != CoopAutomationRuntimeContract.SuppressResultPolicy)
+                    return Fail("SpawnSmokeFixtureContractMismatch", "The request does not select the reviewed field fixture and suppress policy.", out failureCode, out failureMessage);
+                return true;
+            }
+
             if (!string.Equals(request.BootstrapProfile, ConnectionFeasibilityProfile, StringComparison.Ordinal))
                 return Fail("BootstrapProfileUnsupported", "The requested dedicated bootstrap profile is unsupported.", out failureCode, out failureMessage);
             if (!IsSafeServerName(request.ServerName))
@@ -289,7 +318,9 @@ namespace CoopSpectator.Infrastructure.Automation
             {
                 return Fail("StatusRuntimeIdentityMismatch", "The dedicated bootstrap status runtime identity is invalid.", out failureCode, out failureMessage);
             }
-            if (!status.IsTerminal || !string.Equals(status.State, BootstrapAcceptedState, StringComparison.Ordinal))
+            bool smoke = request.BootstrapProfile == CoopAutomationSpawnSmokeContract.Profile;
+            string expectedTerminal = smoke ? "SpawnSmokePassed" : BootstrapAcceptedState;
+            if (!status.IsTerminal || !string.Equals(status.State, expectedTerminal, StringComparison.Ordinal))
                 return Fail("StatusNotAccepted", "The dedicated bootstrap status is not a successful terminal acknowledgement.", out failureCode, out failureMessage);
             if (status.Acknowledgements == null || status.Acknowledgements.Count != RequiredAcknowledgementCount)
                 return Fail("AcknowledgementCountInvalid", "The dedicated bootstrap acknowledgement history is incomplete.", out failureCode, out failureMessage);
@@ -304,12 +335,36 @@ namespace CoopSpectator.Infrastructure.Automation
                     return Fail("AcknowledgementSequenceInvalid", "The dedicated bootstrap acknowledgement history is reordered or incomplete.", out failureCode, out failureMessage);
                 }
             }
+            if (smoke)
+            {
+                string[] expectedValues = { request.ServerName, "16", CoopAutomationSpawnSmokeContract.GameType,
+                    CoopAutomationSpawnSmokeContract.Scene, CoopAutomationSpawnSmokeContract.Scene, "start_game",
+                    "IsPlaying=true;GameType=CoopBattle;Map=battle_terrain_029" };
+                for (int i = 0; i < expectedValues.Length; i++)
+                    if (status.Acknowledgements[i].ObservedValue != expectedValues[i])
+                        return Fail("SpawnSmokeAcknowledgementValueInvalid", "Native option readback differs from the fixed profile.", out failureCode, out failureMessage);
+                var evidence = status.SmokeEvidence;
+                if (evidence == null || evidence.AuthoritativeSource != "CoopMissionSpawnLogic.TryCaptureAutomationSpawnSmokeEvidence" ||
+                    evidence.Profile != CoopAutomationSpawnSmokeContract.Profile ||
+                    evidence.FixtureId != request.FixtureId || evidence.PayloadSha256 != request.FixtureSha256 ||
+                    evidence.OracleSha256 != request.OracleSha256 || evidence.StartMissionRequests != 1 ||
+                    evidence.EndMissionRequests != 1 || !evidence.InitialStateWasClean || !evidence.MissionDisposed ||
+                    !evidence.ProtectedResultUnchanged || evidence.PhaseBeforeEnd != CoopAutomationSpawnSmokeContract.Stage ||
+                    evidence.ResultAttempts < 1 || evidence.ResultAttempts != evidence.SuppressedResults ||
+                    evidence.ResultEntriesAtAttempt != 47)
+                    return Fail("SpawnSmokeTerminalEvidenceInvalid", "Spawn, early-abort and suppression proof is incomplete.", out failureCode, out failureMessage);
+                if (!CoopAutomationSpawnSmokeContract.TryLoadFixture(configuration.RunRoot, request.FixtureRelativeRoot,
+                    request.FixtureId, out CoopAutomationSmokeFixture fixture, out failureCode) ||
+                    !CoopAutomationSpawnSmokeContract.TryValidateObservation(fixture, evidence.Observation, out failureCode))
+                { failureMessage = "The terminal field observation failed independent validation."; return false; }
+            }
             return true;
         }
 
         public static bool IsTerminalState(string state)
         {
-            return string.Equals(state, BootstrapAcceptedState, StringComparison.Ordinal) ||
+            return string.Equals(state, "SpawnSmokePassed", StringComparison.Ordinal) ||
+                   string.Equals(state, BootstrapAcceptedState, StringComparison.Ordinal) ||
                    string.Equals(state, FailedState, StringComparison.Ordinal);
         }
 

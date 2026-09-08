@@ -480,6 +480,10 @@ internal static class Program
                          "SallyOut",
                          "SiegeAmbush",
                          "Hideout",
+                         "HideoutAmbush",
+                         "SiegeOutside",
+                         "Blockade",
+                         "BlockadeSallyOut",
                          "LordsHall"
                      })
             {
@@ -489,6 +493,10 @@ internal static class Program
                     BattleType = battleType,
                     Source = "ContractTest"
                 };
+                // Exercise a nonempty result; suppression must precede all campaign publication.
+                for (int i = 1; i <= 47; i++)
+                    result.Entries.Add(new CoopBattleResultBridgeFile.BattleResultEntrySnapshot
+                    { EntryId = "fixture-entry-" + i.ToString("D3") });
                 Assert(
                     CoopBattleResultBridgeFile.WriteResult(result, out bool suppressed) && suppressed,
                     "A valid automation Suppress policy must absorb the " + battleType +

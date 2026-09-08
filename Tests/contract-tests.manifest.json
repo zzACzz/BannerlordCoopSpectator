@@ -1,6 +1,7 @@
 {
   "SchemaVersion": 1,
   "Projects": [
+    { "Name": "CoopAutomationSpawnSmoke.ContractTests", "Path": "Tests/CoopAutomationSpawnSmoke.ContractTests/CoopAutomationSpawnSmoke.ContractTests.csproj" },
     { "Name": "CampaignlessConversationMissionSafety.ContractTests", "Path": "Tests/CampaignlessConversationMissionSafety.ContractTests/CampaignlessConversationMissionSafety.ContractTests.csproj" },
     { "Name": "CoopAutomationFixture.ContractTests", "Path": "Tests/CoopAutomationFixture.ContractTests/CoopAutomationFixture.ContractTests.csproj" },
     { "Name": "CoopAutomationJoin.ContractTests", "Path": "Tests/CoopAutomationJoin.ContractTests/CoopAutomationJoin.ContractTests.csproj" },

@@ -1,5 +1,7 @@
 # Build, Test, and Debug Guide
 
+Milestone 4A uses the 24-project inventory and run-owned CompileOnly outputs. DedicatedSpawnSmoke is a live dedicated operation and was **not executed** in 4A. It requires an explicit installed dedicated hash and runs two isolated child contexts; no campaign/client is launched. See [M4 commands and artifacts](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#8-validation-evidence).
+
 Last source verification: **2026-08-28**
 Last automation-control source verification: **2026-09-02** (`m2b3a-lockfix-pub-c-01`; exact clean published revision `c6507e9`; per-resource construction/collision contracts passed in both PowerShell hosts; 22/22)
 Last automation-control live verification: **2026-09-02** (`m2b3a-live-r2-01`; exact client/dedicated loaded identities, live schema-2 role health, formal `Connected`, six independently acquired/released resources, graceful exact cleanup, free ports, protected-state preservation, and no crash/hang artifact confirmed)
@@ -38,7 +40,7 @@ Therefore:
 4. Treat a build as an external deployment operation, not a read-only validation step.
 5. Restart a running dedicated process after deployment before trusting runtime results.
 
-The repository does not currently define a documented, verified property that disables all client and dedicated deploy targets. `BuildDedicatedServerModule=false` prevents the chained dedicated build, but it does not disable client deployment.
+`CoopCompileOnly=true`, together with an explicit run-owned `CoopCompileOutputRoot`, disables all three client/dedicated deployment targets and redirects build/package outputs. This is verified by recursive installed inventories, most recently in `m4a-compile-20260908-02`. `BuildDedicatedServerModule=false` alone only prevents the chained dedicated build and does not disable client deployment.
 
 ### Known write-surface matrix
 
@@ -187,7 +189,7 @@ Get-ChildItem .\Tests -Recurse -Filter *.csproj |
   }
 ```
 
-The 20 current projects cover:
+The original 20-project Milestone 2A inventory covered the categories below. The current canonical manifest contains 24 projects, including subsequent runtime, runner, fixture and spawn-smoke contracts; `m4a-contracts-20260908-01` passed all 24:
 
 - campaignless conversation safety;
 - battle power/HUD math;

@@ -7,11 +7,12 @@
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="..\..\Infrastructure\Automation\CoopAutomationSpawnSmokeContract.cs" Link="CoopAutomationSpawnSmokeContract.cs" />
-    <Compile Include="..\..\Network\Messages\BattleStartMessage.cs" Link="BattleStartMessage.cs" />
-    <Compile Include="..\..\Infrastructure\Automation\CoopAutomationProtocolFileIO.cs" Link="CoopAutomationProtocolFileIO.cs" />
+    <Compile Include="..\..\Infrastructure\Automation\CoopAutomationSpawnSmokeBridge.cs" Link="CoopAutomationSpawnSmokeBridge.cs" />
     <Compile Include="..\..\Infrastructure\Automation\CoopAutomationRuntimeContract.cs" Link="CoopAutomationRuntimeContract.cs" />
     <Compile Include="..\..\Infrastructure\Automation\CoopAutomationRuntimeBridge.cs" Link="CoopAutomationRuntimeBridge.cs" />
+    <Compile Include="..\..\Infrastructure\Automation\CoopAutomationProtocolFileIO.cs" Link="CoopAutomationProtocolFileIO.cs" />
     <Compile Include="..\..\DedicatedServer\Automation\CoopAutomationDedicatedControlContract.cs" Link="CoopAutomationDedicatedControlContract.cs" />
+    <Compile Include="..\..\Network\Messages\BattleStartMessage.cs" Link="BattleStartMessage.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />

@@ -316,6 +316,50 @@ internal static class Program
                     out failureMessage),
                 "The exact dedicated bootstrap request must be accepted: " + failureCode + ": " + failureMessage);
 
+            var smokeRequest = Newtonsoft.Json.JsonConvert.DeserializeObject<CoopAutomationDedicatedBootstrapRequest>(
+                Newtonsoft.Json.JsonConvert.SerializeObject(request));
+            smokeRequest.BootstrapProfile = CoopAutomationSpawnSmokeContract.Profile;
+            smokeRequest.GameType = CoopAutomationSpawnSmokeContract.GameType;
+            smokeRequest.Map = CoopAutomationSpawnSmokeContract.Scene;
+            smokeRequest.FixtureId = CoopAutomationSpawnSmokeContract.FixtureId;
+            smokeRequest.FixtureRelativeRoot = CoopAutomationSpawnSmokeContract.FixtureRelativeRoot;
+            smokeRequest.FixtureLength = CoopAutomationSpawnSmokeContract.PayloadLength;
+            smokeRequest.FixtureSha256 = CoopAutomationSpawnSmokeContract.PayloadSha256;
+            smokeRequest.OracleSha256 = CoopAutomationSpawnSmokeContract.OracleSha256;
+            smokeRequest.CampaignId = CoopAutomationSpawnSmokeContract.CampaignId;
+            smokeRequest.BattleId = CoopAutomationSpawnSmokeContract.BattleId;
+            smokeRequest.BattleInstanceId = CoopAutomationSpawnSmokeContract.BattleInstanceId;
+            smokeRequest.Stage = CoopAutomationSpawnSmokeContract.Stage;
+            Assert(CoopAutomationDedicatedControlContract.TryValidateRequest(
+                smokeRequest, configuration, moduleHash, process.Id, processStartUtc, executablePath, nowUtc,
+                out failureCode, out failureMessage), "Pinned smoke request rejected: " + failureCode);
+            foreach (Action<CoopAutomationDedicatedBootstrapRequest> mutate in new Action<CoopAutomationDedicatedBootstrapRequest>[]
+            {
+                r => r.BootstrapProfile = "Unknown",
+                r => r.FixtureId = "field-current",
+                r => r.FixtureRelativeRoot = "../field-current",
+                r => r.FixtureLength--,
+                r => r.FixtureSha256 = new string('0', 64),
+                r => r.OracleSha256 = new string('0', 64),
+                r => r.CampaignId = "other-campaign",
+                r => r.BattleId = "other-battle",
+                r => r.BattleInstanceId = "stale-instance",
+                r => r.Map = "mp_tdm_map_001",
+                r => r.GameType = "Siege",
+                r => r.Stage = "BattleActive",
+                r => r.RunTokenSha256 = new string('0', 64),
+                r => r.RunId = "stale-run",
+                r => r.ExpiresUtc = nowUtc.AddSeconds(-1),
+                r => r.Sequence = 2
+            })
+            {
+                var invalidSmoke = Newtonsoft.Json.JsonConvert.DeserializeObject<CoopAutomationDedicatedBootstrapRequest>(
+                    Newtonsoft.Json.JsonConvert.SerializeObject(smokeRequest));
+                mutate(invalidSmoke);
+                Assert(!CoopAutomationDedicatedControlContract.TryValidateRequest(
+                    invalidSmoke, configuration, moduleHash, process.Id, processStartUtc, executablePath, nowUtc,
+                    out failureCode, out _), "Invalid smoke request accepted.");
+            }
             request.Sequence = 2;
             Assert(
                 !CoopAutomationDedicatedControlContract.TryValidateRequest(

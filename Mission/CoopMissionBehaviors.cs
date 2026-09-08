@@ -249,6 +249,7 @@ namespace CoopSpectator.MissionBehaviors
 
         public override void OnMissionResultReady(MissionResult missionResult)
         {
+            CoopSpectator.Infrastructure.Automation.CoopAutomationSpawnSmokeBridge.ObserveEnding(Mission, CoopBattlePhaseRuntimeState.GetPhase().ToString());
             base.OnMissionResultReady(missionResult);
             ModLogger.Info("CoopMissionClientLogic: mission result ready — returning to lobby.");
         }
@@ -6925,6 +6926,7 @@ namespace CoopSpectator.MissionBehaviors
 
         public override void OnMissionResultReady(MissionResult missionResult)
         {
+            CoopSpectator.Infrastructure.Automation.CoopAutomationSpawnSmokeBridge.ObserveEnding(Mission, CoopBattlePhaseRuntimeState.GetPhase().ToString());
             CoopBattlePhaseRuntimeState.SetPhase(CoopBattlePhase.BattleEnded, "CoopMissionSpawnLogic.OnMissionResultReady", Mission, allowRegression: true);
             ExactCampaignArmyBootstrap.TryStopNativeReinforcementSpawnersAtBattleEnd(
                 Mission,
@@ -6973,6 +6975,7 @@ namespace CoopSpectator.MissionBehaviors
 
         protected override void OnEndMission()
         {
+            CoopSpectator.Infrastructure.Automation.CoopAutomationSpawnSmokeBridge.ObserveEnding(Mission, CoopBattlePhaseRuntimeState.GetPhase().ToString());
             CoopBattlePhaseRuntimeState.SetPhase(CoopBattlePhase.BattleEnded, "CoopMissionSpawnLogic.OnEndMission", Mission, allowRegression: true);
             ResetAiWieldStateDiagnostics(null, "CoopMissionSpawnLogic.OnEndMission");
             TryWriteBattleResultSnapshot(Mission, "server behavior end-mission");
@@ -7578,6 +7581,7 @@ namespace CoopSpectator.MissionBehaviors
                 return false;
 
             _lastServerRuntimeInitializedMission = mission;
+            CoopSpectator.Infrastructure.Automation.CoopAutomationSpawnSmokeBridge.ObserveInitialized(mission);
             _lastServerRuntimeInitializationSource = source ?? "unknown";
             ResetAiWieldStateDiagnostics(mission, source + " server-runtime-init");
             _lastDiagnosticSpawnMission = null;
@@ -16817,6 +16821,8 @@ namespace CoopSpectator.MissionBehaviors
 
         private static void TryConsumeBattlePhaseRequests(Mission mission)
         {
+            if (CoopSpectator.Infrastructure.Automation.CoopAutomationSpawnSmokeBridge.IsRequested)
+                return;
             if (mission == null || !GameNetwork.IsServer)
                 return;
 
@@ -26772,6 +26778,91 @@ namespace CoopSpectator.MissionBehaviors
             return string.Empty;
         }
 
+        // Read once by the explicitly admitted M4 observer on the dedicated main thread.
+        // This does not refresh mappings, repair equipment, spawn agents, or change a phase.
+        internal static CoopSpectator.Infrastructure.Automation.CoopAutomationSmokeObservation
+            TryCaptureAutomationSpawnSmokeEvidence(Mission mission)
+        {
+            if (!CoopSpectator.Infrastructure.Automation.CoopAutomationSpawnSmokeBridge.MatchesMission(mission) ||
+                mission == null || !GameNetwork.IsServer || !GameNetwork.IsDedicatedServer ||
+                mission.CurrentState != Mission.State.Continuing)
+                return null;
+
+            var snapshot = BattleSnapshotRuntimeState.GetCurrent();
+            var evidence = new CoopSpectator.Infrastructure.Automation.CoopAutomationSmokeObservation
+            {
+                CampaignId = snapshot?.CampaignId,
+                BattleId = snapshot?.BattleId,
+                BattleInstanceId = snapshot?.BattleInstanceId,
+                Stage = CoopSpectator.Infrastructure.Automation.CoopAutomationSpawnSmokeContract.Stage,
+                Scene = mission.SceneName,
+                MissionShell = CoopSpectator.Infrastructure.Automation.CoopAutomationSpawnSmokeBridge.OpenedShell,
+                ScenarioKind = snapshot?.ScenarioContext?.ScenarioKind,
+                CampaignBattleType = snapshot?.ScenarioContext?.CampaignBattleType,
+                IsSiegeBattle = snapshot?.ScenarioContext?.IsSiegeBattle ?? true,
+                Phase = CoopBattlePhaseRuntimeState.GetPhase().ToString(),
+                NativeMaterializationComplete = ExactCampaignArmyBootstrap.IsInitialSpawnMaterializationComplete(mission, out _),
+                ConnectedClientCount = GameNetwork.NetworkPeers?.Count(p => p != null && !p.IsServerPeer && p.IsConnectionActive) ?? 0,
+                ResultEntryCount = _materializedBattleResultEntriesByEntryId.Count,
+                ResultGuardWasClear = !_hasWrittenBattleResultSnapshotForMission,
+                Controllers = mission.MissionBehaviors.Where(b => b != null).Select(b => b.GetType().Name).ToList()
+            };
+            foreach (Agent agent in mission.AllAgents)
+            {
+                if (agent == null || !agent.IsActive()) continue;
+                if (agent.IsMount) { evidence.ActiveMountCount++; continue; }
+                if (!agent.IsHuman) { evidence.Violations.Add("UnexpectedActiveNonHuman:" + agent.Index); continue; }
+                var origin = agent.Origin as ExactCampaignSnapshotAgentOrigin;
+                string entryId = origin?.EntryId ?? string.Empty;
+                RosterEntryState entry = BattleSnapshotRuntimeState.GetEntryState(entryId);
+                ExactTransferContractRuntimeCache.TryGetContract(entryId, out ExactTransferSpawnContract contract);
+                ExactTransferContractRuntimeCache.TryGetValidation(entryId, out ExactTransferValidationResult validation);
+                Agent mount = agent.MountAgent;
+                var observed = new CoopSpectator.Infrastructure.Automation.CoopAutomationSmokeAgent
+                {
+                    AgentIndex = agent.Index,
+                    EntryId = entryId,
+                    SideId = entry?.SideId,
+                    Side = agent.Team?.Side.ToString(),
+                    TeamIndex = agent.Team?.TeamIndex ?? -1,
+                    Formation = agent.Formation?.FormationIndex.ToString(),
+                    FormationTeamMatches = agent.Formation != null && ReferenceEquals(agent.Formation.Team, agent.Team),
+                    OriginalCharacterId = entry?.OriginalCharacterId,
+                    HeroId = contract?.Identity?.CampaignHeroStringId,
+                    IsHero = contract?.Identity?.IsHero ?? false,
+                    NativeCharacterId = agent.Character?.StringId,
+                    ContractNativeCharacterId = contract?.Identity?.NativeMultiplayerCharacterId,
+                    NativeOriginAndLedgerMatch = origin != null && agent.Team != null && origin.Side == agent.Team.Side &&
+                        ReferenceEquals(origin.Troop, agent.Character) &&
+                        _authoritativeMaterializedAgentEntryLedgerByAgentIndex.TryGetValue(agent.Index, out string ledgerEntry) &&
+                        ledgerEntry == entryId &&
+                        _materializedAgentInstanceByIndex.TryGetValue(agent.Index, out Agent trackedAgent) &&
+                        ReferenceEquals(trackedAgent, agent),
+                    ExactContractValid = contract != null && validation?.IsValid == true,
+                    PreSpawnEquipmentInjected = CoopSpectator.Patches.ExactCampaignPreSpawnLoadoutPatch.WasEquipmentInjectedForEntry(entryId),
+                    Active = true,
+                    Mounted = mount != null,
+                    MountAgentIndex = mount?.Index ?? -1,
+                    ReciprocalMountLink = mount != null && mount.IsActive() && mount.IsMount &&
+                        ReferenceEquals(mount.RiderAgent, agent) && ReferenceEquals(mount.Mission, mission),
+                    MountHorseId = mount?.SpawnEquipment?[EquipmentIndex.Horse].Item?.StringId,
+                    MountHarnessId = mount?.SpawnEquipment?[EquipmentIndex.HorseHarness].Item?.StringId
+                };
+                foreach (string name in CoopSpectator.Infrastructure.Automation.CoopAutomationSpawnSmokeContract.Slots)
+                {
+                    EquipmentIndex slot = (EquipmentIndex)Enum.Parse(typeof(EquipmentIndex), name);
+                    EquipmentElement element = agent.SpawnEquipment[slot];
+                    observed.Equipment[name] = new CoopSpectator.Infrastructure.Automation.CoopAutomationSmokeSlot
+                    {
+                        ItemId = element.Item?.StringId ?? string.Empty,
+                        ModifierId = element.ItemModifier?.StringId ?? string.Empty,
+                        Amount = (int)slot < 4 ? (int?)agent.Equipment[slot].Amount : null
+                    };
+                }
+                evidence.Agents.Add(observed);
+            }
+            return evidence;
+        }
         private static void TryWriteBattleResultSnapshot(Mission mission, string source)
         {
             if (mission == null || !GameNetwork.IsServer)
@@ -26785,7 +26876,11 @@ namespace CoopSpectator.MissionBehaviors
             if (snapshot == null)
                 return;
 
-            if (!CoopBattleResultBridgeFile.WriteResult(snapshot, out bool resultPublicationSuppressed))
+            bool resultWriteSucceeded = CoopBattleResultBridgeFile.WriteResult(snapshot, out bool resultPublicationSuppressed);
+            CoopSpectator.Infrastructure.Automation.CoopAutomationSpawnSmokeBridge.ObserveResultAttempt(
+                mission, snapshot.BattleId, snapshot.Entries?.Count ?? 0,
+                CoopBattlePhaseRuntimeState.GetPhase().ToString(), resultWriteSucceeded, resultPublicationSuppressed);
+            if (!resultWriteSucceeded)
                 return;
 
             _hasWrittenBattleResultSnapshotForMission = true;

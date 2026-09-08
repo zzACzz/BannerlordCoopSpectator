@@ -1,5 +1,7 @@
 # Runtime Flows
 
+Milestone 4A adds a zero-client field test flow: admitted run-owned fixture → existing native bootstrap → task-idle intermission → one start_mission → native Continuing → normal PreBattleHold → one end_mission → suppressed real result attempt → disposal/cleanup. DedicatedSpawnSmoke runs two fresh child/server contexts. This is source/contract implemented and not runtime verified; [full boundaries](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md) include the same-process reset gap.
+
 Last source verification: **2026-08-28**
 Last automation-control source verification: **2026-09-02**
 Last automation-control live verification: **2026-09-02**

@@ -272,6 +272,8 @@ namespace CoopSpectator.Infrastructure.Automation
                 _activeRequest = null;
                 _status = null;
                 _phase = 0;
+                CoopAutomationDedicatedSpawnSmokeObserver.Reset();
+                CoopAutomationSpawnSmokeBridge.Reset();
             }
         }
 
@@ -390,6 +392,21 @@ namespace CoopSpectator.Infrastructure.Automation
                 return;
             }
 
+            bool smoke = request.BootstrapProfile == CoopAutomationSpawnSmokeContract.Profile;
+            if (smoke)
+            {
+                if (!CoopAutomationSpawnSmokeBridge.TryActivate(_configuration, request.BootstrapProfile,
+                    request.FixtureId, request.FixtureRelativeRoot, out failureCode))
+                {
+                    WriteRejectedStatus(request, failureCode, "Field fixture/profile admission failed before native commands.");
+                    return;
+                }
+            }
+            else if (CoopAutomationSpawnSmokeBridge.IsRequested)
+            {
+                WriteRejectedStatus(request, "SpawnSmokeProfileMismatch", "The process profile and requested bootstrap disagree.");
+                return;
+            }
             _activeRequest = request;
             _status = CreateStatus(request);
             _status.State = CoopAutomationDedicatedControlContract.AcceptedState;
@@ -458,6 +475,14 @@ namespace CoopSpectator.Infrastructure.Automation
                         "IsPlaying=true;GameType=" + _activeRequest.GameType + ";Map=" + _activeRequest.Map,
                         "IsPlaying=true;GameType=" + MultiplayerOptions.OptionType.GameType.GetStrValue() +
                         ";Map=" + MultiplayerOptions.OptionType.Map.GetStrValue());
+                    if (_activeRequest.BootstrapProfile == CoopAutomationSpawnSmokeContract.Profile)
+                    {
+                        CoopAutomationDedicatedSpawnSmokeObserver.Begin();
+                        _phase = 7;
+                        _status.State = CoopAutomationDedicatedSpawnSmokeObserver.State;
+                        WriteBootstrapStatus();
+                        return;
+                    }
                     _status.State = CoopAutomationDedicatedControlContract.BootstrapAcceptedState;
                     _status.IsTerminal = true;
                     _terminal = true;
@@ -465,6 +490,20 @@ namespace CoopSpectator.Infrastructure.Automation
                     ModLogger.Info(
                         "CoopAutomationDedicatedControlBridge: exact dedicated bootstrap accepted for command " +
                         _activeRequest.CommandId + ".");
+                    return;
+                case 7:
+                    string previousState = _status.State;
+                    CoopAutomationDedicatedSpawnSmokeObserver.Tick();
+                    _status.State = CoopAutomationDedicatedSpawnSmokeObserver.State;
+                    _status.SmokeEvidence = CoopAutomationDedicatedSpawnSmokeObserver.Evidence;
+                    _status.IsTerminal = CoopAutomationDedicatedSpawnSmokeObserver.IsTerminal;
+                    if (_status.IsTerminal)
+                    {
+                        _terminal = true;
+                        _status.FailureCode = CoopAutomationDedicatedSpawnSmokeObserver.Failure;
+                        _status.FailureMessage = _status.FailureCode;
+                    }
+                    if (previousState != _status.State || _status.IsTerminal) WriteBootstrapStatus();
                     return;
                 default:
                     throw new InvalidOperationException("The dedicated bootstrap state machine entered an invalid phase.");
@@ -568,6 +607,19 @@ namespace CoopSpectator.Infrastructure.Automation
             if (isPlayingProperty == null || isPlayingProperty.PropertyType != typeof(bool))
                 throw new InvalidOperationException("IListedServer.IsPlaying is unavailable.");
             return (bool)isPlayingProperty.GetValue(listedServer, null);
+        }
+
+        internal static bool TryObserveNativeCommandReadiness(bool opening)
+        {
+            object manager = GetIntermissionManager();
+            MethodInfo idle = manager.GetType().GetMethod("IsNewTaskAssignable", BindingFlags.Instance | BindingFlags.NonPublic);
+            if (idle == null || idle.ReturnType != typeof(bool) || idle.GetParameters().Length != 0)
+                throw new InvalidOperationException("NativeCommandReadinessContractUnavailable");
+            if (!(bool)idle.Invoke(manager, null)) return false;
+            if (!opening) return Mission.Current != null && !Mission.Current.MissionEnded;
+            object active = TaleWorlds.Core.GameStateManager.Current?.ActiveState;
+            return active != null && active.GetType().GetInterfaces().Any(
+                type => type.FullName == "TaleWorlds.MountAndBlade.IIntermissionState");
         }
 
         private static object GetIntermissionManager()

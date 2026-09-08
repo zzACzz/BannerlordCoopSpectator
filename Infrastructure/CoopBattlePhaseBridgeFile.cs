@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using CoopSpectator.Infrastructure.Automation;
 
 namespace CoopSpectator.Infrastructure
 {
@@ -101,6 +102,8 @@ namespace CoopSpectator.Infrastructure
 
         public static bool WriteStartBattleRequest(string source)
         {
+            if (CoopAutomationSpawnSmokeBridge.IsRequested)
+                return false;
             try
             {
                 Directory.CreateDirectory(GetCoopFolderPath());
@@ -122,6 +125,8 @@ namespace CoopSpectator.Infrastructure
         public static bool ConsumeStartBattleRequest(out string source)
         {
             source = null;
+            if (CoopAutomationSpawnSmokeBridge.IsRequested)
+                return false;
             try
             {
                 string path = GetStartBattleRequestFilePath();
@@ -156,6 +161,8 @@ namespace CoopSpectator.Infrastructure
 
         private static string GetCoopFolderPath()
         {
+            if (CoopAutomationSpawnSmokeBridge.IsRequested)
+                return CoopAutomationSpawnSmokeBridge.GetPhaseFolder();
             string docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
             return Path.Combine(docs, "Mount and Blade II Bannerlord", CoopSpectatorSubFolder);
         }

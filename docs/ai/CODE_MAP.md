@@ -1,5 +1,7 @@
 # Code Map
 
+Milestone 4A adds CoopAutomationSpawnSmokeContract, CoopAutomationSpawnSmokeBridge, CoopAutomationDedicatedSpawnSmokeObserver, the DedicatedSpawnSmoke command and CoopAutomationSpawnSmoke.ContractTests. The [M4 source map](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#2-ownership-and-source-map) lists exact integration methods. The canonical inventory has 24 projects.
+
 Last source verification: **2026-08-28**
 Last automation-control source verification: **2026-09-02**
 

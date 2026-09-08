@@ -40,6 +40,7 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
             string missionShell = !string.IsNullOrWhiteSpace(preOpenContract.LiveMissionShell)
                 ? preOpenContract.LiveMissionShell
                 : defaultMissionShell;
+            CoopSpectator.Infrastructure.Automation.CoopAutomationSpawnSmokeBridge.ObserveOpening(scene, missionShell);
             SiegeAssaultMissionOpenBridge.Capture(
                 preOpenContract,
                 "MissionMultiplayerCoopBattleMode.StartMultiplayerGame");
