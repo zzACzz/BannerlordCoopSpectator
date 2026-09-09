@@ -75,6 +75,23 @@ internal static class Program
             coreSource.Contains("'NoProgress'", StringComparison.Ordinal),
             "The aggregate runner must classify missing liveness and missing progress separately.");
         Assert(
+            source.Contains("Get-CoopSpawnSmokeParentAdmissionCore", StringComparison.Ordinal) &&
+            source.Contains("spawn-smoke-parent-rejection.json", StringComparison.Ordinal) &&
+            source.Contains("ParentAdmissionReadGraceExpired", StringComparison.Ordinal) &&
+            source.Contains("$failure.Data['CoopFailureCode']", StringComparison.Ordinal) &&
+            coreSource.Contains("function Get-CoopSpawnSmokeParentAdmissionCore", StringComparison.Ordinal) &&
+            coreSource.Contains("function Get-CoopSpawnSmokeParentReadFallbackCore", StringComparison.Ordinal),
+            "Spawn-smoke child admission must classify and retain the exact rejected parent-liveness fact.");
+        Assert(
+            coreSource.Contains("MaximumDrainMillisecondsPerStream", StringComparison.Ordinal) &&
+            coreSource.Contains("$streamDrainStopwatch.ElapsedMilliseconds", StringComparison.Ordinal) &&
+            source.Contains("-MaximumDrainMillisecondsPerStream 100", StringComparison.Ordinal),
+            "Parent child-output capture must be time-sliced so lease heartbeats cannot be starved by a large output burst.");
+        Assert(
+            source.Contains("$Command -ne 'DedicatedSpawnSmoke'", StringComparison.Ordinal) &&
+            source.Contains("SpawnSmokeAttempt and ParentRunId are private to DedicatedSpawnSmoke", StringComparison.Ordinal),
+            "Private parent/child admission must remain unreachable from every other runner command and battle path.");
+        Assert(
             source.Contains("Get-CoopSharedRuntimeResourceIdsCore", StringComparison.Ordinal) &&
             source.Contains("Enter-CoopSharedRuntimeLocksCore", StringComparison.Ordinal) &&
             source.Contains("expectedSharedRuntimeResourceCount", StringComparison.Ordinal) &&
@@ -957,6 +974,114 @@ Assert-True ($nativeLogDescriptors[0].Required -and $nativeLogDescriptors[1].Req
     -not $nativeLogDescriptors[2].Required -and $nativeLogDescriptors[2].Kind -eq 'Watchdog') `
     'Engine-native logs must remain required while a non-produced watchdog log is optional and explicit.'
 
+$parentAdmissionNow = [DateTime]::UtcNow
+$parentRunId = 'parent-contract'
+$childRunId = 'parent-contract-01'
+$parentNonce = ('B' * 64)
+$parentManifest = [pscustomobject][ordered]@{
+    RequestedCommand = 'DedicatedSpawnSmoke'
+    RunId = $parentRunId
+    NonceSha256 = $parentNonce
+}
+$parentLease = [pscustomobject][ordered]@{
+    RunId = $parentRunId
+    NonceSha256 = $parentNonce
+    OwnerProcessId = $PID
+    Status = 'Active'
+    LastHeartbeatUtc = $parentAdmissionNow.ToString('O')
+}
+$parentIntent = [pscustomobject][ordered]@{
+    ParentRunId = $parentRunId
+    ParentNonceSha256 = $parentNonce
+    RunId = $childRunId
+    Attempt = 1
+}
+
+function Copy-ParentAdmissionFixture([object]$Value) {
+    return ($Value | ConvertTo-Json -Depth 20 | ConvertFrom-Json)
+}
+
+function Get-ParentAdmissionResult([object]$Manifest, [object]$Lease, [object]$Intent) {
+    return (Get-CoopSpawnSmokeParentAdmissionCore `
+        -ParentManifest $Manifest `
+        -ParentLease $Lease `
+        -AttemptIntent $Intent `
+        -ExpectedParentRunId $parentRunId `
+        -ExpectedChildRunId $childRunId `
+        -ExpectedAttempt 1 `
+        -ExpectedParentProcessId $PID `
+        -NowUtc $parentAdmissionNow `
+        -HeartbeatDeadlineSeconds 10)
+}
+
+$acceptedParent = Get-ParentAdmissionResult $parentManifest $parentLease $parentIntent
+Assert-True ($acceptedParent.Accepted -and [string]::IsNullOrWhiteSpace($acceptedParent.FailureCode)) `
+    'A complete exact and fresh parent admission must pass.'
+
+foreach ($unreadableCase in @(
+    [pscustomobject]@{ Code = 'ParentManifestUnreadable'; Manifest = $null; Lease = $parentLease; Intent = $parentIntent },
+    [pscustomobject]@{ Code = 'ParentLeaseUnreadable'; Manifest = $parentManifest; Lease = $null; Intent = $parentIntent },
+    [pscustomobject]@{ Code = 'ParentAttemptIntentUnreadable'; Manifest = $parentManifest; Lease = $parentLease; Intent = $null })) {
+    $result = Get-ParentAdmissionResult $unreadableCase.Manifest $unreadableCase.Lease $unreadableCase.Intent
+    Assert-True (-not $result.Accepted -and $result.RetryableReadFailure -and $result.FailureCode -eq $unreadableCase.Code) `
+        ('Unreadable shared state must remain distinct: ' + $unreadableCase.Code)
+}
+
+$unreadableLeaseAdmission = Get-ParentAdmissionResult $parentManifest $null $parentIntent
+$allowedReadFallback = Get-CoopSpawnSmokeParentReadFallbackCore `
+    -Admission $unreadableLeaseAdmission `
+    -LastAcceptedUtc $parentAdmissionNow.AddSeconds(-5) `
+    -CachedParentProcessIdentityMatched $true `
+    -NowUtc $parentAdmissionNow `
+    -HeartbeatDeadlineSeconds 10
+Assert-True ($allowedReadFallback.Allowed -and [string]::IsNullOrWhiteSpace($allowedReadFallback.FailureCode)) `
+    'A retryable read failure may use the last exact admission only inside the bounded heartbeat window while process identity still matches.'
+
+$expiredReadFallback = Get-CoopSpawnSmokeParentReadFallbackCore `
+    -Admission $unreadableLeaseAdmission `
+    -LastAcceptedUtc $parentAdmissionNow.AddSeconds(-11) `
+    -CachedParentProcessIdentityMatched $true `
+    -NowUtc $parentAdmissionNow `
+    -HeartbeatDeadlineSeconds 10
+Assert-True (-not $expiredReadFallback.Allowed -and $expiredReadFallback.FailureCode -eq 'ParentAdmissionReadGraceExpired') `
+    'A retryable read failure must not outlive the bounded parent heartbeat window.'
+
+$lostIdentityReadFallback = Get-CoopSpawnSmokeParentReadFallbackCore `
+    -Admission $unreadableLeaseAdmission `
+    -LastAcceptedUtc $parentAdmissionNow.AddSeconds(-5) `
+    -CachedParentProcessIdentityMatched $false `
+    -NowUtc $parentAdmissionNow `
+    -HeartbeatDeadlineSeconds 10
+Assert-True (-not $lostIdentityReadFallback.Allowed -and $lostIdentityReadFallback.FailureCode -eq 'ParentProcessIdentityLost') `
+    'A retryable read failure must not mask loss of the exact cached parent process identity.'
+
+$parentAdmissionMutations = @(
+    [pscustomobject]@{ Code = 'ParentCommandMismatch'; Apply = { param($m, $l, $i) $m.RequestedCommand = 'Feasibility' } },
+    [pscustomobject]@{ Code = 'ParentManifestRunIdMismatch'; Apply = { param($m, $l, $i) $m.RunId = 'wrong-parent' } },
+    [pscustomobject]@{ Code = 'ParentManifestNonceInvalid'; Apply = { param($m, $l, $i) $m.NonceSha256 = 'invalid' } },
+    [pscustomobject]@{ Code = 'ParentLeaseRunIdMismatch'; Apply = { param($m, $l, $i) $l.RunId = 'wrong-parent' } },
+    [pscustomobject]@{ Code = 'ParentLeaseNonceMismatch'; Apply = { param($m, $l, $i) $l.NonceSha256 = ('C' * 64) } },
+    [pscustomobject]@{ Code = 'ParentIntentRunIdMismatch'; Apply = { param($m, $l, $i) $i.ParentRunId = 'wrong-parent' } },
+    [pscustomobject]@{ Code = 'ParentIntentChildRunIdMismatch'; Apply = { param($m, $l, $i) $i.RunId = 'wrong-child' } },
+    [pscustomobject]@{ Code = 'ParentIntentAttemptMismatch'; Apply = { param($m, $l, $i) $i.Attempt = 2 } },
+    [pscustomobject]@{ Code = 'ParentIntentAttemptMismatch'; Apply = { param($m, $l, $i) $i.Attempt = 'invalid' } },
+    [pscustomobject]@{ Code = 'ParentIntentNonceMismatch'; Apply = { param($m, $l, $i) $i.ParentNonceSha256 = ('C' * 64) } },
+    [pscustomobject]@{ Code = 'ParentLeaseProcessIdMismatch'; Apply = { param($m, $l, $i) $l.OwnerProcessId = $PID + 1 } },
+    [pscustomobject]@{ Code = 'ParentLeaseProcessIdMismatch'; Apply = { param($m, $l, $i) $l.OwnerProcessId = 'invalid' } },
+    [pscustomobject]@{ Code = 'ParentLeaseNotActive'; Apply = { param($m, $l, $i) $l.Status = 'Completed' } },
+    [pscustomobject]@{ Code = 'ParentHeartbeatInvalid'; Apply = { param($m, $l, $i) $l.LastHeartbeatUtc = $parentAdmissionNow.AddMinutes(2).ToString('O') } },
+    [pscustomobject]@{ Code = 'ParentHeartbeatStale'; Apply = { param($m, $l, $i) $l.LastHeartbeatUtc = $parentAdmissionNow.AddSeconds(-11).ToString('O') } })
+foreach ($mutation in $parentAdmissionMutations) {
+    $mutatedManifest = Copy-ParentAdmissionFixture $parentManifest
+    $mutatedLease = Copy-ParentAdmissionFixture $parentLease
+    $mutatedIntent = Copy-ParentAdmissionFixture $parentIntent
+    $applyMutation = $mutation.Apply
+    $null = & $applyMutation $mutatedManifest $mutatedLease $mutatedIntent
+    $result = Get-ParentAdmissionResult $mutatedManifest $mutatedLease $mutatedIntent
+    Assert-True (-not $result.Accepted -and -not $result.RetryableReadFailure -and $result.FailureCode -eq $mutation.Code) `
+        ('Exact parent admission mismatch must fail distinctly: ' + $mutation.Code)
+}
+
 $captureRoot = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) ('capture-fixture-' + $PID)
 [System.IO.Directory]::CreateDirectory($captureRoot) | Out-Null
 $childScriptPath = Join-Path $captureRoot 'Emit-NativeEvidence.ps1'
@@ -1027,6 +1152,55 @@ try {
 }
 catch { $missingEvidenceRejected = $true }
 Assert-True $missingEvidenceRejected 'A completed process with incomplete native evidence must be rejected.'
+
+$burstScriptPath = Join-Path $captureRoot 'Emit-OutputBurst.ps1'
+$burstScript = @'
+for ($index = 0; $index -lt 4000; $index++) {
+    [Console]::Out.WriteLine(('stdout-burst-{0:D5}' -f $index))
+    [Console]::Error.WriteLine(('stderr-burst-{0:D5}' -f $index))
+}
+[Console]::Out.Flush()
+[Console]::Error.Flush()
+'@
+[System.IO.File]::WriteAllText($burstScriptPath, $burstScript, (New-Object System.Text.UTF8Encoding($false)))
+$burstStartInfo = New-Object System.Diagnostics.ProcessStartInfo
+$burstStartInfo.FileName = (Get-Process -Id $PID).Path
+$burstStartInfo.UseShellExecute = $false
+$burstStartInfo.CreateNoWindow = $true
+$burstStartInfo.RedirectStandardInput = $false
+$burstStartInfo.RedirectStandardOutput = $true
+$burstStartInfo.RedirectStandardError = $true
+$burstStartInfo.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $burstScriptPath + '"'
+$burstProcess = New-Object System.Diagnostics.Process
+$burstProcess.StartInfo = $burstStartInfo
+Assert-True ($burstProcess.Start()) 'Synthetic high-output process must start.'
+$burstCapture = New-CoopProcessTextCapture `
+    -Process $burstProcess `
+    -StandardOutputPath (Join-Path $captureRoot 'burst.stdout.txt') `
+    -StandardErrorPath (Join-Path $captureRoot 'burst.stderr.txt') `
+    -MaximumTailLines 256
+Start-Sleep -Milliseconds 250
+$burstDrainStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+Update-CoopProcessTextCapture `
+    -Capture $burstCapture `
+    -MaximumLinesPerStream 65536 `
+    -MaximumDrainMillisecondsPerStream 50
+$burstDrainStopwatch.Stop()
+Assert-True ($burstDrainStopwatch.Elapsed.TotalSeconds -lt 2) `
+    'One high-output capture poll must remain time-bounded so the caller can renew its lease.'
+$burstDeadline = [DateTime]::UtcNow.AddSeconds(15)
+while (-not $burstProcess.WaitForExit(25) -and [DateTime]::UtcNow -lt $burstDeadline) {
+    Update-CoopProcessTextCapture `
+        -Capture $burstCapture `
+        -MaximumLinesPerStream 65536 `
+        -MaximumDrainMillisecondsPerStream 50
+}
+Assert-True $burstProcess.HasExited 'The time-sliced capture must continue draining both streams without deadlocking the child.'
+Complete-CoopProcessTextCapture -Capture $burstCapture -DrainTimeoutMilliseconds 10000
+$burstStdoutLines = [System.IO.File]::ReadAllLines((Join-Path $captureRoot 'burst.stdout.txt'))
+$burstStderrLines = [System.IO.File]::ReadAllLines((Join-Path $captureRoot 'burst.stderr.txt'))
+Assert-True ($burstStdoutLines.Count -eq 4000 -and $burstStderrLines.Count -eq 4000) `
+    'Time-sliced capture must retain every stdout and stderr line.'
 
 $terminalClientStatus = [pscustomobject][ordered]@{
     State = 'Failed'

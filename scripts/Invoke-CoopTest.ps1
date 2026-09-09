@@ -119,6 +119,9 @@ $runnerState = 'Initializing'
 $runnerStateEnteredUtc = [DateTime]::UtcNow
 $runnerLastProgressUtc = $runnerStateEnteredUtc
 $runnerStateRevision = 1L
+$spawnSmokeParentHeartbeatDeadlineSeconds = 10
+$script:spawnSmokeParentLastAcceptedUtc = $null
+$script:spawnSmokeParentCachedRole = $null
 $automationFlagName = 'COOPSPECTATOR_TEST_AUTOMATION'
 $automationRunIdVariableName = 'COOPSPECTATOR_AUTOMATION_RUN_ID'
 $automationRunRootVariableName = 'COOPSPECTATOR_AUTOMATION_RUN_ROOT'
@@ -2696,20 +2699,115 @@ function Assert-CoopSpawnSmokeParent {
     $parentManifest = Read-CoopJsonShared -Path (Join-Path $parentRoot 'manifest.json')
     $parentLease = Read-CoopJsonShared -Path (Join-Path $parentRoot 'work\runner.lease.json')
     $intent = Read-CoopJsonShared -Path (Join-Path $parentRoot ('commands\attempt-0' + $SpawnSmokeAttempt + '.json'))
-    if ($null -eq $parentManifest -or $null -eq $parentLease -or $null -eq $intent -or
-        $parentManifest.RequestedCommand -cne 'DedicatedSpawnSmoke' -or $parentManifest.RunId -cne $ParentRunId -or
-        $parentLease.RunId -cne $ParentRunId -or $parentLease.NonceSha256 -cne $parentManifest.NonceSha256 -or
-        $intent.ParentRunId -cne $ParentRunId -or $intent.RunId -cne $RunId -or
-        $intent.ParentNonceSha256 -cne $parentManifest.NonceSha256 -or
-        $parentLease.OwnerProcessId -ne $runnerParentProcessId -or $parentLease.Status -cne 'Active' -or
-        ([DateTime]::UtcNow - (ConvertTo-CoopUtcDateTime $parentLease.LastHeartbeatUtc)).TotalSeconds -gt 10) {
-        throw [OperationCanceledException]::new('The matching parent smoke runner is not active; aborting this attempt.')
+    $nowUtc = [DateTime]::UtcNow
+    $admission = Get-CoopSpawnSmokeParentAdmissionCore `
+        -ParentManifest $parentManifest `
+        -ParentLease $parentLease `
+        -AttemptIntent $intent `
+        -ExpectedParentRunId $ParentRunId `
+        -ExpectedChildRunId $RunId `
+        -ExpectedAttempt $SpawnSmokeAttempt `
+        -ExpectedParentProcessId $runnerParentProcessId `
+        -NowUtc $nowUtc `
+        -HeartbeatDeadlineSeconds $spawnSmokeParentHeartbeatDeadlineSeconds
+
+    $effectiveFailureCode = [string]$admission.FailureCode
+    $effectiveFailureMessage = [string]$admission.FailureMessage
+    $parentProcessIdentityMatched = $null
+    $readFallback = $null
+    if ($admission.Accepted) {
+        $parentRoles = @(
+            @(Get-CoopOptionalPropertyValue -InputObject $parentManifest -Name 'Roles') |
+                Where-Object { [string](Get-CoopOptionalPropertyValue -InputObject $_ -Name 'RoleType') -ceq 'Runner' })
+        if ($parentRoles.Count -ne 1 -or $null -eq $parentRoles[0]) {
+            $effectiveFailureCode = 'ParentRunnerRoleMismatch'
+            $effectiveFailureMessage = 'The parent manifest did not contain exactly one Runner role.'
+        }
+        $parentRoleProcessId = 0
+        $parentRoleProcessIdParsed = $parentRoles.Count -eq 1 -and $null -ne $parentRoles[0] -and [int]::TryParse(
+            [string](Get-CoopOptionalPropertyValue -InputObject $parentRoles[0] -Name 'ProcessId'),
+            [ref]$parentRoleProcessId)
+        if ($parentRoles.Count -eq 1 -and $null -ne $parentRoles[0] -and
+            (-not $parentRoleProcessIdParsed -or $parentRoleProcessId -ne $runnerParentProcessId)) {
+            $effectiveFailureCode = 'ParentRunnerProcessIdMismatch'
+            $effectiveFailureMessage = 'The parent Runner role PID did not match the child process parent.'
+        }
+        elseif ($parentRoles.Count -eq 1 -and $null -ne $parentRoles[0]) {
+            try { $parentProcessIdentityMatched = Test-CoopLiveProcessIdentity -Identity $parentRoles[0] }
+            catch { $parentProcessIdentityMatched = $false }
+            if ($parentProcessIdentityMatched) {
+                $script:spawnSmokeParentCachedRole = $parentRoles[0]
+                $script:spawnSmokeParentLastAcceptedUtc = $nowUtc
+                return
+            }
+            $effectiveFailureCode = 'ParentProcessIdentityLost'
+            $effectiveFailureMessage = 'The exact parent Runner process identity was not live.'
+        }
     }
-    $parentRole = @($parentManifest.Roles | Where-Object { $_.RoleType -ceq 'Runner' })[0]
-    if ($parentRole.ProcessId -ne $runnerParentProcessId -or
-        -not (Test-CoopLiveProcessIdentity -Identity $parentRole)) {
-        throw [OperationCanceledException]::new('Parent smoke runner process identity was lost.')
+    elseif ($admission.RetryableReadFailure -and
+        $null -ne $script:spawnSmokeParentCachedRole -and
+        $null -ne $script:spawnSmokeParentLastAcceptedUtc) {
+        try { $parentProcessIdentityMatched = Test-CoopLiveProcessIdentity -Identity $script:spawnSmokeParentCachedRole }
+        catch { $parentProcessIdentityMatched = $false }
+        $readFallback = Get-CoopSpawnSmokeParentReadFallbackCore `
+            -Admission $admission `
+            -LastAcceptedUtc $script:spawnSmokeParentLastAcceptedUtc `
+            -CachedParentProcessIdentityMatched $parentProcessIdentityMatched `
+            -NowUtc $nowUtc `
+            -HeartbeatDeadlineSeconds $spawnSmokeParentHeartbeatDeadlineSeconds
+        if ($readFallback.Allowed) {
+            return
+        }
+        if ($readFallback.FailureCode -ceq 'ParentProcessIdentityLost') {
+            $effectiveFailureCode = 'ParentProcessIdentityLost'
+            $effectiveFailureMessage = 'The exact cached parent Runner process identity was not live.'
+        }
+        else {
+            $effectiveFailureCode = 'ParentAdmissionReadGraceExpired'
+            $effectiveFailureMessage = 'Parent admission files remained unreadable beyond the last verified heartbeat window.'
+        }
     }
+
+    if ($null -eq $parentProcessIdentityMatched -and $null -ne $script:spawnSmokeParentCachedRole) {
+        try { $parentProcessIdentityMatched = Test-CoopLiveProcessIdentity -Identity $script:spawnSmokeParentCachedRole }
+        catch { $parentProcessIdentityMatched = $false }
+    }
+
+    $rejectionPath = Join-Path $runRoot 'artifacts\identity\spawn-smoke-parent-rejection.json'
+    $rejection = [ordered]@{
+        Schema = 'coop-spawn-smoke-parent-rejection-v1'
+        RunId = $RunId
+        ParentRunId = $ParentRunId
+        Attempt = $SpawnSmokeAttempt
+        EffectiveFailureCode = $effectiveFailureCode
+        EffectiveFailureMessage = $effectiveFailureMessage
+        ParentProcessIdentityMatched = $parentProcessIdentityMatched
+        LastAcceptedUtc = if ($null -ne $script:spawnSmokeParentLastAcceptedUtc) {
+            ([DateTime]$script:spawnSmokeParentLastAcceptedUtc).ToUniversalTime().ToString('O')
+        }
+        else { $null }
+        Admission = $admission
+        ReadFallback = $readFallback
+        RecordedUtc = [DateTime]::UtcNow.ToString('O')
+    }
+    $evidenceWriteFailure = ''
+    try { Write-CoopJsonAtomic -Path $rejectionPath -Value $rejection }
+    catch { $evidenceWriteFailure = $_.Exception.Message }
+    try {
+        Add-CoopEvent -EventType 'SpawnSmokeParentRejected' -Message (
+            $effectiveFailureCode + ': ' + $effectiveFailureMessage)
+    }
+    catch { }
+
+    $message = $effectiveFailureCode + ': ' + $effectiveFailureMessage
+    if (-not [string]::IsNullOrWhiteSpace($evidenceWriteFailure)) {
+        $message += ' Rejection evidence write also failed: ' + $evidenceWriteFailure
+    }
+    $failure = [OperationCanceledException]::new($message)
+    $failure.Data['CoopRuntimeOutcome'] = 'Cancelled'
+    $failure.Data['CoopFailureCode'] = $effectiveFailureCode
+    $failure.Data['CoopSpawnSmokeParentRejection'] = $rejection
+    throw $failure
 }
 
 function Invoke-CoopDedicatedSpawnSmoke {
@@ -2776,7 +2874,7 @@ function Invoke-CoopDedicatedSpawnSmoke {
                 $deadline = [DateTime]::UtcNow.AddSeconds($RuntimeTimeoutSeconds + 660)
                 while (-not $child.WaitForExit(250)) {
                     Update-CoopLease
-                    Update-CoopProcessTextCapture -Capture $capture
+                    Update-CoopProcessTextCapture -Capture $capture -MaximumDrainMillisecondsPerStream 100
                     if ([DateTime]::UtcNow -ge $deadline) { throw 'Timed out waiting for the child smoke attempt.' }
                 }
                 $childRecord.Exited = $true
@@ -3840,7 +3938,13 @@ try {
             Identity = 'Environment and installed-module identity evidence; retained with the run.'
             Work = 'Run-owned temporary outputs and package cache; explicitly cleaned only by exact-root future cleanup.'
         }
-        StateDeadlinesSeconds = [ordered]@{ Lease = $leaseLifetimeMinutes * 60 }
+        StateDeadlinesSeconds = [ordered]@{
+            Lease = $leaseLifetimeMinutes * 60
+            SpawnSmokeParentHeartbeat = if ($Command -eq 'DedicatedSpawnSmoke' -and $SpawnSmokeAttempt -gt 0) {
+                $spawnSmokeParentHeartbeatDeadlineSeconds
+            }
+            else { 0 }
+        }
         ReproductionDescriptorPath = ''
         PrimaryOutcome = ''
         PrimaryReason = ''

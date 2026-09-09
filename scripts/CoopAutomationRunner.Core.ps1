@@ -407,6 +407,249 @@ function Get-CoopRoleHealthClassificationCore {
     return 'Healthy'
 }
 
+function Get-CoopSpawnSmokeParentAdmissionCore {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]$ParentManifest,
+        [AllowNull()]$ParentLease,
+        [AllowNull()]$AttemptIntent,
+        [Parameter(Mandatory = $true)][string]$ExpectedParentRunId,
+        [Parameter(Mandatory = $true)][string]$ExpectedChildRunId,
+        [ValidateRange(1, 2)][int]$ExpectedAttempt,
+        [ValidateRange(1, [int]::MaxValue)][int]$ExpectedParentProcessId,
+        [Parameter(Mandatory = $true)][DateTime]$NowUtc,
+        [ValidateRange(1, 3600)][int]$HeartbeatDeadlineSeconds = 10
+    )
+
+    $observedUtc = $NowUtc.ToUniversalTime()
+    $manifestReadable = $null -ne $ParentManifest
+    $leaseReadable = $null -ne $ParentLease
+    $intentReadable = $null -ne $AttemptIntent
+    $manifestCommandMatches = $manifestReadable -and
+        [string]::Equals(
+            [string](Get-CoopOptionalPropertyValue -InputObject $ParentManifest -Name 'RequestedCommand'),
+            'DedicatedSpawnSmoke',
+            [StringComparison]::Ordinal)
+    $manifestRunIdMatches = $manifestReadable -and
+        [string]::Equals(
+            [string](Get-CoopOptionalPropertyValue -InputObject $ParentManifest -Name 'RunId'),
+            $ExpectedParentRunId,
+            [StringComparison]::Ordinal)
+    $manifestNonce = if ($manifestReadable) {
+        [string](Get-CoopOptionalPropertyValue -InputObject $ParentManifest -Name 'NonceSha256')
+    }
+    else { '' }
+    $manifestNonceValid = $manifestReadable -and $manifestNonce -match '^[A-Fa-f0-9]{64}$'
+    $leaseRunIdMatches = $leaseReadable -and
+        [string]::Equals(
+            [string](Get-CoopOptionalPropertyValue -InputObject $ParentLease -Name 'RunId'),
+            $ExpectedParentRunId,
+            [StringComparison]::Ordinal)
+    $leaseNonceMatches = $leaseReadable -and $manifestReadable -and
+        [string]::Equals(
+            [string](Get-CoopOptionalPropertyValue -InputObject $ParentLease -Name 'NonceSha256'),
+            $manifestNonce,
+            [StringComparison]::Ordinal)
+    $intentParentRunIdMatches = $intentReadable -and
+        [string]::Equals(
+            [string](Get-CoopOptionalPropertyValue -InputObject $AttemptIntent -Name 'ParentRunId'),
+            $ExpectedParentRunId,
+            [StringComparison]::Ordinal)
+    $intentChildRunIdMatches = $intentReadable -and
+        [string]::Equals(
+            [string](Get-CoopOptionalPropertyValue -InputObject $AttemptIntent -Name 'RunId'),
+            $ExpectedChildRunId,
+            [StringComparison]::Ordinal)
+    $intentAttempt = 0
+    $intentAttemptParsed = $intentReadable -and [int]::TryParse(
+        [string](Get-CoopOptionalPropertyValue -InputObject $AttemptIntent -Name 'Attempt'),
+        [ref]$intentAttempt)
+    $intentAttemptMatches = $intentAttemptParsed -and $intentAttempt -eq $ExpectedAttempt
+    $intentNonceMatches = $intentReadable -and $manifestReadable -and
+        [string]::Equals(
+            [string](Get-CoopOptionalPropertyValue -InputObject $AttemptIntent -Name 'ParentNonceSha256'),
+            $manifestNonce,
+            [StringComparison]::Ordinal)
+    $leaseOwnerProcessId = 0
+    $leaseOwnerProcessIdParsed = $leaseReadable -and [int]::TryParse(
+        [string](Get-CoopOptionalPropertyValue -InputObject $ParentLease -Name 'OwnerProcessId'),
+        [ref]$leaseOwnerProcessId)
+    $leaseOwnerProcessIdMatches = $leaseOwnerProcessIdParsed -and
+        $leaseOwnerProcessId -eq $ExpectedParentProcessId
+    $leaseStatusActive = $leaseReadable -and
+        [string]::Equals(
+            [string](Get-CoopOptionalPropertyValue -InputObject $ParentLease -Name 'Status'),
+            'Active',
+            [StringComparison]::Ordinal)
+
+    $heartbeatUtc = $null
+    if ($leaseReadable) {
+        $heartbeatUtc = ConvertTo-CoopUtcDateTime -Value (
+            Get-CoopOptionalPropertyValue -InputObject $ParentLease -Name 'LastHeartbeatUtc')
+    }
+    $heartbeatTimelineValid = $null -ne $heartbeatUtc -and $heartbeatUtc -le $observedUtc.AddMinutes(1)
+    $heartbeatAgeMilliseconds = if ($null -ne $heartbeatUtc) {
+        [long][Math]::Round(($observedUtc - $heartbeatUtc).TotalMilliseconds)
+    }
+    else { $null }
+    $heartbeatFresh = $heartbeatTimelineValid -and
+        $observedUtc - $heartbeatUtc -le [TimeSpan]::FromSeconds($HeartbeatDeadlineSeconds)
+
+    $failureCode = ''
+    $failureMessage = ''
+    if (-not $manifestReadable) {
+        $failureCode = 'ParentManifestUnreadable'
+        $failureMessage = 'The parent manifest was unavailable during admission.'
+    }
+    elseif (-not $leaseReadable) {
+        $failureCode = 'ParentLeaseUnreadable'
+        $failureMessage = 'The parent lease was unavailable during admission.'
+    }
+    elseif (-not $intentReadable) {
+        $failureCode = 'ParentAttemptIntentUnreadable'
+        $failureMessage = 'The parent attempt intent was unavailable during admission.'
+    }
+    elseif (-not $manifestCommandMatches) {
+        $failureCode = 'ParentCommandMismatch'
+        $failureMessage = 'The parent manifest command did not match DedicatedSpawnSmoke.'
+    }
+    elseif (-not $manifestRunIdMatches) {
+        $failureCode = 'ParentManifestRunIdMismatch'
+        $failureMessage = 'The parent manifest RunId did not match the requested parent.'
+    }
+    elseif (-not $manifestNonceValid) {
+        $failureCode = 'ParentManifestNonceInvalid'
+        $failureMessage = 'The parent manifest nonce was not an exact SHA-256 value.'
+    }
+    elseif (-not $leaseRunIdMatches) {
+        $failureCode = 'ParentLeaseRunIdMismatch'
+        $failureMessage = 'The parent lease RunId did not match the requested parent.'
+    }
+    elseif (-not $leaseNonceMatches) {
+        $failureCode = 'ParentLeaseNonceMismatch'
+        $failureMessage = 'The parent lease nonce did not match the parent manifest.'
+    }
+    elseif (-not $intentParentRunIdMatches) {
+        $failureCode = 'ParentIntentRunIdMismatch'
+        $failureMessage = 'The attempt intent did not match the requested parent RunId.'
+    }
+    elseif (-not $intentChildRunIdMatches) {
+        $failureCode = 'ParentIntentChildRunIdMismatch'
+        $failureMessage = 'The attempt intent did not match the child RunId.'
+    }
+    elseif (-not $intentAttemptMatches) {
+        $failureCode = 'ParentIntentAttemptMismatch'
+        $failureMessage = 'The attempt intent did not match the child attempt number.'
+    }
+    elseif (-not $intentNonceMatches) {
+        $failureCode = 'ParentIntentNonceMismatch'
+        $failureMessage = 'The attempt intent nonce did not match the parent manifest.'
+    }
+    elseif (-not $leaseOwnerProcessIdMatches) {
+        $failureCode = 'ParentLeaseProcessIdMismatch'
+        $failureMessage = 'The parent lease owner PID did not match the child process parent.'
+    }
+    elseif (-not $leaseStatusActive) {
+        $failureCode = 'ParentLeaseNotActive'
+        $failureMessage = 'The parent lease was not Active.'
+    }
+    elseif (-not $heartbeatTimelineValid) {
+        $failureCode = 'ParentHeartbeatInvalid'
+        $failureMessage = 'The parent lease heartbeat was missing or outside the valid timeline.'
+    }
+    elseif (-not $heartbeatFresh) {
+        $failureCode = 'ParentHeartbeatStale'
+        $failureMessage = 'The parent lease heartbeat exceeded the admission deadline.'
+    }
+
+    return [pscustomobject][ordered]@{
+        Schema = 'coop-spawn-smoke-parent-admission-v1'
+        Accepted = [string]::IsNullOrWhiteSpace($failureCode)
+        RetryableReadFailure = $failureCode -in @(
+            'ParentManifestUnreadable',
+            'ParentLeaseUnreadable',
+            'ParentAttemptIntentUnreadable')
+        FailureCode = $failureCode
+        FailureMessage = $failureMessage
+        ObservedUtc = $observedUtc.ToString('O')
+        HeartbeatUtc = if ($null -ne $heartbeatUtc) { $heartbeatUtc.ToString('O') } else { $null }
+        HeartbeatAgeMilliseconds = $heartbeatAgeMilliseconds
+        HeartbeatDeadlineSeconds = $HeartbeatDeadlineSeconds
+        Facts = [pscustomobject][ordered]@{
+            ParentManifestReadable = $manifestReadable
+            ParentLeaseReadable = $leaseReadable
+            ParentAttemptIntentReadable = $intentReadable
+            ParentCommandMatches = $manifestCommandMatches
+            ParentManifestRunIdMatches = $manifestRunIdMatches
+            ParentManifestNonceValid = $manifestNonceValid
+            ParentLeaseRunIdMatches = $leaseRunIdMatches
+            ParentLeaseNonceMatches = $leaseNonceMatches
+            ParentIntentRunIdMatches = $intentParentRunIdMatches
+            ParentIntentChildRunIdMatches = $intentChildRunIdMatches
+            ParentIntentAttemptParsed = $intentAttemptParsed
+            ParentIntentAttemptMatches = $intentAttemptMatches
+            ParentIntentNonceMatches = $intentNonceMatches
+            ParentLeaseProcessIdParsed = $leaseOwnerProcessIdParsed
+            ParentLeaseProcessIdMatches = $leaseOwnerProcessIdMatches
+            ParentLeaseStatusActive = $leaseStatusActive
+            ParentHeartbeatTimelineValid = $heartbeatTimelineValid
+            ParentHeartbeatFresh = $heartbeatFresh
+        }
+    }
+}
+
+function Get-CoopSpawnSmokeParentReadFallbackCore {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Admission,
+        [AllowNull()]$LastAcceptedUtc,
+        [Parameter(Mandatory = $true)][bool]$CachedParentProcessIdentityMatched,
+        [Parameter(Mandatory = $true)][DateTime]$NowUtc,
+        [ValidateRange(1, 3600)][int]$HeartbeatDeadlineSeconds = 10
+    )
+
+    if (-not [string]::Equals(
+            [string](Get-CoopOptionalPropertyValue -InputObject $Admission -Name 'Schema'),
+            'coop-spawn-smoke-parent-admission-v1',
+            [StringComparison]::Ordinal)) {
+        throw 'Parent read fallback requires an exact parent-admission-v1 result.'
+    }
+
+    $observedUtc = $NowUtc.ToUniversalTime()
+    $acceptedUtc = ConvertTo-CoopUtcDateTime -Value $LastAcceptedUtc
+    $acceptedTimelineValid = $null -ne $acceptedUtc -and $acceptedUtc -le $observedUtc.AddMinutes(1)
+    $acceptedAgeMilliseconds = if ($null -ne $acceptedUtc) {
+        [long][Math]::Round(($observedUtc - $acceptedUtc).TotalMilliseconds)
+    }
+    else { $null }
+    $insideWindow = $acceptedTimelineValid -and
+        $observedUtc - $acceptedUtc -le [TimeSpan]::FromSeconds($HeartbeatDeadlineSeconds)
+    $retryableReadFailure = [bool](
+        Get-CoopOptionalPropertyValue -InputObject $Admission -Name 'RetryableReadFailure')
+    $allowed = $retryableReadFailure -and $CachedParentProcessIdentityMatched -and $insideWindow
+
+    $failureCode = ''
+    if (-not $allowed) {
+        if (-not $retryableReadFailure) { $failureCode = 'ParentAdmissionNotRetryable' }
+        elseif (-not $CachedParentProcessIdentityMatched) { $failureCode = 'ParentProcessIdentityLost' }
+        else { $failureCode = 'ParentAdmissionReadGraceExpired' }
+    }
+
+    return [pscustomobject][ordered]@{
+        Schema = 'coop-spawn-smoke-parent-read-fallback-v1'
+        Allowed = $allowed
+        FailureCode = $failureCode
+        AdmissionFailureCode = [string](
+            Get-CoopOptionalPropertyValue -InputObject $Admission -Name 'FailureCode')
+        CachedParentProcessIdentityMatched = $CachedParentProcessIdentityMatched
+        LastAcceptedUtc = if ($null -ne $acceptedUtc) { $acceptedUtc.ToString('O') } else { $null }
+        LastAcceptedTimelineValid = $acceptedTimelineValid
+        LastAcceptedAgeMilliseconds = $acceptedAgeMilliseconds
+        HeartbeatDeadlineSeconds = $HeartbeatDeadlineSeconds
+        ObservedUtc = $observedUtc.ToString('O')
+    }
+}
+
 function Get-CoopFileSha256 {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -1202,11 +1445,13 @@ function Update-CoopProcessTextCapture {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]$Capture,
-        [ValidateRange(1, 65536)][int]$MaximumLinesPerStream = 8192
+        [ValidateRange(1, 65536)][int]$MaximumLinesPerStream = 8192,
+        [ValidateRange(10, 5000)][int]$MaximumDrainMillisecondsPerStream = 100
     )
 
     if ([bool]$Capture.Disposed) { return }
     foreach ($streamName in @('Output', 'Error')) {
+        $streamDrainStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
         $completedProperty = $streamName + 'Completed'
         $taskProperty = $streamName + 'Task'
         $writerProperty = $streamName + 'Writer'
@@ -1238,6 +1483,7 @@ function Update-CoopProcessTextCapture {
                 $Capture.Tail.RemoveAt(0)
             }
             $Capture.$taskProperty = $reader.ReadLineAsync()
+            if ($streamDrainStopwatch.ElapsedMilliseconds -ge $MaximumDrainMillisecondsPerStream) { break }
         }
     }
 }

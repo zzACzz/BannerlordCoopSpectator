@@ -1,7 +1,7 @@
 # Milestone 4 — Field dedicated spawn smoke: source, contracts, local isolation and live findings
 
 Date: **2026-09-09** (Europe/Kyiv; validation IDs retain the approved 20260908 names).
-Status: **Corrected binary reached a clean native rerun, but the first child cancelled at the parent/child liveness gate before readiness; automatic cleanup and full restoration passed. Milestone 4 remains open.**
+Status: **The parent/child liveness boundary is now fact-classified and output capture is time-sliced at source/L1; 24/24 contracts and both builds pass. A clean published native rerun remains required and Milestone 4 remains open.**
 Original 4A approval: **"ок на Milestone 4A source/contracts"**. The separately approved local-only 4B live validation and restoration are recorded in section 12.
 Original 4A source baseline: branch `codex/v0.1.1-refresh`, HEAD/local upstream `452df7e30d3d8d120488570857134078d6072ecc`, initially clean.
 The original 4A implementation was subsequently published as 7d75742c338f504499ec01dd8e3b2f189a1f7a03. Section 11 records the local-isolation follow-up's pre-publication validation in `C:\Users\Admin\.codex\worktrees\1b21\BannerlordCoopSpectator3`.
@@ -516,3 +516,49 @@ The outer transaction restored both dedicated DLLs to 3,587,584 bytes and SHA-25
 | L2 and Milestone 4 completion | Not Satisfied |
 
 Before another native attempt, separately approve a narrow source/contract stage for the parent/child liveness contract. It must preserve orphan detection and exact PID/nonce/run binding, record each failed admission fact, test delayed child startup and parent-heartbeat scheduling under Windows PowerShell 5.1 and PowerShell 7, and use a measured/configured freshness rule rather than removing the guard or adding an arbitrary sleep. Review other consumers of the shared lease primitive, but do not change battle adapters or the verified ListedServer readiness correction. No further staging, rerun, code fix, Git operation, or L2 claim belongs to this live-audit stage.
+
+## 15. Parent-liveness source and contract correction (2026-09-09)
+
+### 15.1 Scope and cross-battle audit
+
+The correction is limited to the aggregate runner's process orchestration. `Assert-CoopSpawnSmokeParent` is reachable only when `Command=DedicatedSpawnSmoke` and `SpawnSmokeAttempt` is 1 or 2. Every other command rejects `SpawnSmokeAttempt` and `ParentRunId`; no land, village, siege, hideout, lord's-hall or other battle adapter invokes this admission function. No C# product-runtime file or native readiness observer changed.
+
+The output-capture primitive is shared by Feasibility, Record, client launch/join and dedicated smoke flows. Its previous default allowed one poll to synchronously write as many as 8,192 lines per stream with auto-flush. A sufficiently large output burst could therefore monopolize a caller between lease updates. The retained live artifacts do not prove that this caused `m4r27-live-01-01`; the source correction removes that scheduling hazard without relabelling the old failure.
+
+### 15.2 Implemented contract
+
+`Get-CoopSpawnSmokeParentAdmissionCore` returns schema `coop-spawn-smoke-parent-admission-v1` with a distinct first failure code and a complete fact map for:
+
+- parent manifest, lease and attempt-intent readability;
+- exact command, parent and child RunIds, attempt number and nonce relations;
+- exact lease owner PID and `Active` status;
+- parsed heartbeat timeline, measured age and the configured ten-second deadline.
+
+`Assert-CoopSpawnSmokeParent` additionally requires exactly one matching Runner role and a live exact process identity. After the first fully accepted observation, a transient unreadable manifest/lease/intent snapshot may use the cached exact role only while both conditions remain true: the cached process identity is still live and the last full acceptance is no older than the existing ten-second heartbeat deadline. Immutable mismatch, stale/invalid heartbeat, non-Active status and process loss still cancel immediately. The controller neither raises the deadline nor adds a sleep.
+
+The bounded unreadable-state decision is implemented by the pure `Get-CoopSpawnSmokeParentReadFallbackCore` classifier. It returns schema `coop-spawn-smoke-parent-read-fallback-v1`, whether fallback is allowed, the admission failure code, exact cached-process observation, last accepted timestamp/age, deadline and one of the distinct rejection codes `ParentAdmissionNotRetryable`, `ParentProcessIdentityLost`, or `ParentAdmissionReadGraceExpired`.
+
+On rejection only, the child attempts one atomic `artifacts/identity/spawn-smoke-parent-rejection.json` write with schema `coop-spawn-smoke-parent-rejection-v1`, the effective failure code, fact map, measured heartbeat values, cached acceptance timestamp, process-identity observation and the structured read-fallback result when that path was evaluated. The same code is attached to the cancellation exception. No success-path diagnostic file or continuous logging was added.
+
+`Update-CoopProcessTextCapture` now limits each stdout and stderr drain to 100 ms per poll in addition to its line-count bound. The public smoke parent requests that bound explicitly. Completion still repeatedly drains to EOF and retains every line; the change time-slices work rather than discarding output.
+
+### 15.3 Contract and build evidence
+
+The focused `CoopAutomationRunner.ContractTests` harness passed under Windows PowerShell 5.1 (`5.1.26100.9444`) and PowerShell 7 (`7.6.5`). It verifies accepted exact admission, all three retryable unreadable snapshots, allowed fallback at five seconds with a matching exact process, expired fallback at eleven seconds, immediate rejection after exact-process loss, every immutable/status/timeline failure code, a stale heartbeat, and a synthetic process emitting 4,000 stdout plus 4,000 stderr lines. A single 50 ms-per-stream poll remained bounded, the producer did not deadlock, and all 8,000 lines were retained at completion.
+
+The first post-hardening aggregate rerun used a long RunId and failed one unrelated contract launch because the generated Windows executable path was too long. That run is rejected as final evidence and caused no code change. Final short-path run `m4pl-c3-01` passed all 24 projects after the direct fallback-decision cases were added. `contracts.json` SHA-256 is `4865EB701D1621DBEBF442C3D23A6D9FB091141616476D650D1EDFFC5E35CB3A`.
+
+`m4pl-b3-01` passed both non-deploying Release builds:
+
+| Output | Version | Length | SHA-256 | Warnings / errors |
+|---|---:|---:|---|---:|
+| Client | 0.3.2 | 4,734,976 | `5FC9028AAD2BB2318E29A03018F761B6A5D136E2E5171110E768D3BB55D3821F` | 77 / 0 |
+| Dedicated | 0.3.2 | 3,646,976 | `0F7FA25AED9C6C7F2D4B3C250D73991B26EAA29189C5703FE753CB12C0D85382` | 49 / 0 |
+
+No product process launched. Installed before/after inventories are byte-identical with SHA-256 `35D7049344D13EDCBFEAE2D3E389880AD7EBFA8464EE60AA8A8B83B96AEFBC86`.
+
+### 15.4 Evidence boundary and next action
+
+This satisfies the parent-liveness source/L1 correction gate only. It does not reproduce the exact `m4r27-live-01-01` rejecting read, publish a clean revision, stage a DLL, launch the dedicated server, exercise ListedServer readiness, open a mission, materialize agents, abort the mission, run the second child, or claim L2/L3.
+
+The next separately approved sequence is: source/documentation commit and push, clean published contracts/build provenance, a new exact full-backup two-DLL staging transaction, one bounded two-attempt zero-client `DedicatedSpawnSmoke` rerun, and unconditional full restoration. If rejection recurs, the new failure-only artifact must identify the exact fact instead of returning the former combined message.
