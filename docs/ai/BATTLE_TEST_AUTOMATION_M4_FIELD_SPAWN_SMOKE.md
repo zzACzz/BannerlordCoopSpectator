@@ -1,7 +1,7 @@
 # Milestone 4 — Field dedicated spawn smoke: source, contracts, local isolation and live findings
 
 Date: **2026-09-09** (Europe/Kyiv; validation IDs retain the approved 20260908 names).
-Status: **The parent/child liveness boundary is now fact-classified and output capture is time-sliced at source/L1; 24/24 contracts and both builds pass. A clean published native rerun remains required and Milestone 4 remains open.**
+Status: **The clean published liveness-corrected rerun reached `MissionOpening`, then the dedicated process failed with native `0xc0000005` and the shared failure-evidence finalizer stalled with high memory. Full restoration passed; attempt 2 was Not Run, no L2 pass is claimed, and Milestone 4 remains open.**
 Original 4A approval: **"ок на Milestone 4A source/contracts"**. The separately approved local-only 4B live validation and restoration are recorded in section 12.
 Original 4A source baseline: branch `codex/v0.1.1-refresh`, HEAD/local upstream `452df7e30d3d8d120488570857134078d6072ecc`, initially clean.
 The original 4A implementation was subsequently published as 7d75742c338f504499ec01dd8e3b2f189a1f7a03. Section 11 records the local-isolation follow-up's pre-publication validation in `C:\Users\Admin\.codex\worktrees\1b21\BannerlordCoopSpectator3`.
@@ -562,3 +562,76 @@ No product process launched. Installed before/after inventories are byte-identic
 This satisfies the parent-liveness source/L1 correction gate only. It does not reproduce the exact `m4r27-live-01-01` rejecting read, publish a clean revision, stage a DLL, launch the dedicated server, exercise ListedServer readiness, open a mission, materialize agents, abort the mission, run the second child, or claim L2/L3.
 
 The next separately approved sequence is: source/documentation commit and push, clean published contracts/build provenance, a new exact full-backup two-DLL staging transaction, one bounded two-attempt zero-client `DedicatedSpawnSmoke` rerun, and unconditional full restoration. If rejection recurs, the new failure-only artifact must identify the exact fact instead of returning the former combined message.
+
+## 16. Clean published liveness-corrected rerun: native mission-opening crash and failure-evidence stall (2026-09-09)
+
+### 16.1 Clean provenance and controlled staging
+
+The rerun used clean local/upstream revision `6d38780af05975b76c27af914ad4e0d66b057ae4`. Fresh `m4pl-p1-c1` passed all 24 contract projects; `contracts.json` SHA-256 is `06219FC8F253F2984F655DB173499CFE194E277E266B1FA3B9E8494FEC205A2C`. Fresh `m4pl-p1-b1` passed both non-deploying Release builds with no product process and byte-identical installed inventories, whose before/after JSON SHA-256 is `35D7049344D13EDCBFEAE2D3E389880AD7EBFA8464EE60AA8A8B83B96AEFBC86`.
+
+| Output | Version | Length | SHA-256 | Warnings / errors |
+|---|---:|---:|---|---:|
+| Client | 0.3.2 | 4,734,976 | `00D103754F70C529491002ADF840C56847E0C68B6BB5BE57DF768114E3160BDF` | 77 / 0 |
+| Dedicated | 0.3.2 | 3,646,976 | `0F7FA25AED9C6C7F2D4B3C250D73991B26EAA29189C5703FE753CB12C0D85382` | 49 / 0 |
+
+The new one-use transaction helper under `m4pl-p1-s1` has SHA-256 `2B4D0E75BBF01768D29737705AE6FF0E0B9AD3FD316C5FED26C062B0444F67D1`. It passed path/hash/current-target rejection, junction rejection, injected first-file-failure restoration, and complete two-file replace/restore checks in Windows PowerShell 5.1 and PowerShell 7. It retained a full 218-file dedicated pre-image and replaced only `CoopSpectator.dll` in the dedicated module's `Win64_Shipping_Server` and `Win64_Shipping_Client` directories. The installed original SHA-256 for both targets was `2E1494BCAEE1DCE440B4373BBA99A4F724B9C32519AACD486DE8F041C0CA1414`. The helper is pinned to this revision and these RunIds; it is evidence, not a reusable deployment command.
+
+### 16.2 Parent-liveness closure and reached runtime boundary
+
+Parent `m4pl-p1-l1` launched child `m4pl-p1-l1-01`, which loaded the exact staged dedicated SHA-256. No `spawn-smoke-parent-rejection.json` exists: the corrected parent/child liveness path remained admitted through native startup, closing the prior `m4r27` blocker.
+
+Dedicated PID 15968 reached control readiness at `2026-09-09T13:07:11.2275887Z`, processed command `fa26b550-ae97-439c-ac7e-d639affc1b07`, produced all seven start-game acknowledgements, and confirmed `StartGameConfirmed=true`. It issued exactly one start-mission request and advanced to `MissionOpening` at `2026-09-09T13:07:16.7520177Z`. It produced no agent observation and no end-mission request. This proves startup, readiness and one-shot mission-opening progression, but not `MissionCurrent`, materialization, `PreBattleHold`, abort, result suppression completion, L2, or L3.
+
+### 16.3 Exact native failure boundary
+
+Windows Application Error event 1000 (record 151395, `2026-09-09T13:07:29.7967601Z`) and Windows Error Reporting event 1001 (record 151396, `2026-09-09T13:07:36.8847143Z`) correlate the terminated `DedicatedCustomServer.Starter.exe` to APPCRASH exception code `0xc0000005`. The Application Error fault module is `unknown`; WER reports bucket module `StackHash_3ede` and report ID `5be077f2-7cc0-4665-b48b-e6c20cf9d312`.
+
+The archived 153,934-byte `Report.wer` has SHA-256 `EE9BD5E5BA75A85A85006066806C608F534C489B9B2A09C72817837B45173B7D` and records the staged `CoopSpectator.dll` among loaded modules, but the archive contains no dump. Therefore the evidence proves a native access-violation-class process failure during the mission-opening interval; it does not identify the faulting native module, stack, instruction, or root cause. WinDbg cannot resolve those missing facts without a dump.
+
+### 16.4 Secondary live failure-evidence stall and exact manual cleanup
+
+The child emitted `FailureEvidenceCaptureStarted` at `2026-09-09T13:07:24.4183216Z` but never emitted `FailureEvidenceCaptureCompleted` and created neither `crash.json` nor `hang.json`. At `2026-09-09T13:14:37.1859321Z`, exact child Runner PID 23808 had consumed 431.8 CPU seconds, 5.81 GiB working set and 6.0 GiB private memory. This reproduces the earlier live failure-finalization stall/high-memory symptom that bounded synthetic tests did not reproduce.
+
+The public `Cancel` operation returned `EnvironmentBlocked` because the child lease heartbeat was stale; this is correct fail-closed behavior and prevented an uncertain-owner kill. After verifying the exact manifest, PID, start time, executable path, executable SHA-256 and parent PID, `Stop-CoopExactProcessIdentityCore` stopped only that Runner using force after the graceful path was unavailable. No product or failure-helper process remained at that point. The parent then returned `RunnerInternalError` with exit 40 because child exit code `-1` had no complete terminal artifact. Child 2 `m4pl-p1-l1-02` was Not Run, and `L2PassClaimed=false`.
+
+The current evidence does not isolate the exact instruction inside `Write-CoopRuntimeFailureEvidence`. The next source investigation must start at the shared lowest-level failure writer and audit all callers/battle types before any fix. A leading risk is retention or serialization of a full heavyweight live `CimInstance` snapshot, but this remains a hypothesis until isolated offline or synthetically.
+
+### 16.5 Unconditional restoration and independent postflight
+
+The transaction returned `Restored=true`; its report SHA-256 is `BD87C14ECD55654E7133919CEAC362CDC70A10AB8EA427870AD03F365F40D6FF`. Independent postflight found 218 expected dedicated files with zero differences, 32 expected client files with zero differences, and the absent legacy location still absent. Both restored dedicated DLL locations have original SHA-256 `2E1494BCAEE1DCE440B4373BBA99A4F724B9C32519AACD486DE8F041C0CA1414`. No product process, exact Runner, or required-port owner remained. All six shared resource locks plus the parent and child Runner locks opened exclusively, 8/8. The protected 217,264-byte result remained SHA-256 `D5EF79D59FA97EF4C95BB7AB31803AE1F475EB24498F4469B83CD3B7AD955AD3`. The repository remained clean and matched upstream before this documentation update.
+
+The private non-shareable manual audit is retained outside Git at `m4pl-p1-s1/manual-live-audit.json`, schema `m4pl-p1-manual-live-audit-v1`, SHA-256 `D27D890C35A412BBF94DD2BBCD6FD7D20A445FB471572560CB153AA7E2DB7B71`. Key retained artifact hashes are:
+
+| Artifact | SHA-256 |
+|---|---|
+| Parent manifest | `3D9C14425634E19A6EB9B2247C577EF8C4AF91B15A74E147AB6C6DEE859C4439` |
+| Pair report | `42BA1E0C54B87AFFCC4ECF750A8C95C70E4B33B7C2A6506046F2C9018AFF0DE4` |
+| Child manifest | `562818CD4AF3A4E062C67BA0CAF60F6B56C9C3CB369C1344C5A293DD4856EB69` |
+| Child events | `1134F843437CA468FFAD10A21AB71B019A93231EF8D4CC6F2A192C9F65B097C0` |
+| Dedicated role status | `E927BFD6BFF4874DC6315EE7437C5989ED1114394785689680B8B11174D48271` |
+| Control readiness | `DE1CBD08E267985F010FD957851F54F98F3814E0461819B633A615F8F9BC35CF` |
+| Processed bootstrap request | `A63F397C505FE99320B6DFA95E54533367BC80D138ADA762C733698B288AC4A2` |
+| Bootstrap status | `FF3A36AACCA2A10EA342B5E2421F1CD0D37DA97B3B55E82DF8B98746D286A7E0` |
+
+### 16.6 Requirement disposition and next correction order
+
+| Requirement / acceptance boundary | Status |
+|---|---|
+| Clean published source, fresh 24/24 contracts, and both builds | Satisfied |
+| New exact helper, self-tests, full backup, and two-DLL-only staging | Satisfied |
+| Parent/child liveness through dedicated startup | Satisfied; prior blocker closed |
+| Correct dedicated binary, control readiness and seven acknowledgements | Satisfied |
+| One-shot start mission and `MissionOpening` | Satisfied |
+| Native failure classification | Partial — APPCRASH `0xc0000005`; module/stack/root cause unknown |
+| Bounded failure evidence and automatic child cleanup | Not Satisfied — live stall/high memory; exact manual Runner stop required |
+| Full installed/resource restoration | Satisfied and independently rechecked |
+| `MissionCurrent`, agent materialization, `PreBattleHold`, abort and result suppression completion | Not Reached |
+| Second fresh successful attempt | Not Run |
+| L2 and Milestone 4 completion | Not Satisfied |
+
+The next separately approved source/contracts task must proceed in this order:
+
+1. Make shared failure-evidence finalization bounded. Do not retain or serialize a full heavyweight live `CimInstance` snapshot; establish the exact low-level cause offline/synthetically, audit Feasibility and every other shared caller/battle path, keep watchdog evidence non-fatal, preserve exact WER/CrashUploader correlation, continue lease/cancellation service, cap resource use, and guarantee terminal artifacts plus exact cleanup even if an optional evidence collector fails.
+2. After that correction passes focused dual-shell contracts, 24/24, both CompileOnly builds, publication and controlled staging, rerun once with dump capture enabled or demonstrably available. Use the dump and symbols to locate the native `0xc0000005` during `MissionOpening`. Do not change battle adapters or retry blindly before failure finalization is safe.
+
+No source fix, battle-adapter change, further native attempt, or L2 claim is part of this documentation stage.
