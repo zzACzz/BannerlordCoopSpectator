@@ -1,11 +1,15 @@
 # Build, Test, and Debug Guide
 
+Latest local field validation (2026-09-09): clean ebf9cd3 passed m4b-local-contracts-20260909-01 (24/24) and m4b-local-compile-20260909-01 (both projects). m4b-local-live-20260909-01 then returned Timeout before mission; child failure handling stalled and required exact manual cleanup. The local-only transaction restored both original dedicated DLLs and verified complete dedicated/client inventories plus free ports and locks. The child manifest/lease remain deliberately unfinished evidence; do not reuse its run ID or infer automatic cleanup success. [Exact hashes, retained helper and artifact paths](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#12-first-clean-local-only-live-attempt-2026-09-09).
+
+Latest M4 correction verification (2026-09-09): the exact ListedServer readiness interface, centralized fatal reporter policy, non-fatal watchdog ownership, one-second support cleanup, Windows PowerShell 5.1 hash initialization, and failure-only phase markers are implemented. Bounded diagnostics passed in both supported shells but did not reproduce the prior live stall or high memory. m4b-readiness-runner-contracts-20260909-01 passed 24/24; m4b-readiness-runner-compile-20260909-01 built both projects with 77/49 warnings, zero errors, no product launch, and byte-identical installed inventories. A fresh staged native L2 run remains separate. [Correction evidence and limits](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#13-bounded-failure-diagnostic-and-sourcecontract-correction-2026-09-09).
+
 Local field storage (2026-09-09): all module Documents bridges under FieldDedicatedSpawnSmokeV1 use the validated run root. The smoke runner creates an exact local result sentinel and reports attempt-v2 RunLocal evidence; it does not read or transact personal OneDrive files. Do not reuse the old m4b-stage-20260909-01 Documents backup wrapper. m4-local-contracts-20260909-01 passed 24/24; m4-local-compile-20260909-01 compiled both modules with installed inventories unchanged (77 client / 49 dedicated warnings, zero errors). Publication/staging/native launch remain separate approvals. [Details and exact hashes](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#11-local-only-file-isolation-2026-09-09).
 
 Milestone 4A uses the 24-project inventory and run-owned CompileOnly outputs. DedicatedSpawnSmoke is a live dedicated operation and was **not executed** in 4A. It requires an explicit installed dedicated hash and runs two isolated child contexts; no campaign/client is launched. See [M4 commands and artifacts](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#8-validation-evidence).
 
 Last source verification: **2026-08-28**
-Last automation-control source verification: **2026-09-02** (`m2b3a-lockfix-pub-c-01`; exact clean published revision `c6507e9`; per-resource construction/collision contracts passed in both PowerShell hosts; 22/22)
+Last automation-control source verification: **2026-09-09** (`m4b-readiness-runner-contracts-20260909-01`; fatal-helper and role-specific cleanup policy passed in Windows PowerShell 5.1/PowerShell 7.6.5 and the full 24/24 inventory)
 Last automation-control live verification: **2026-09-02** (`m2b3a-live-r2-01`; exact client/dedicated loaded identities, live schema-2 role health, formal `Connected`, six independently acquired/released resources, graceful exact cleanup, free ports, protected-state preservation, and no crash/hang artifact confirmed)
 Last exact-fixture verification: **2026-09-02** (`m3b-live-capture-02`, exact private source retained outside Git; deterministic derivative SHA-256 `B47D7AF7...579D49D`; independent oracle and hash-gated contract replay passed; final `m3c-sanitized-contracts-02`, 23/23; `m3c-sanitized-compile-01`, client and dedicated passed with installed inventories unchanged)
 
@@ -435,6 +439,31 @@ Post-stage doctor `m2b3a-poststage-doctor-01` reported only the expected stale i
 Artifact audit prevented a false RUN-008 closure: `shared-runtime-locks.json` contained one record whose resource id was all six intended ids joined by spaces. Lowest-level reproduction in both PowerShell 5.1 and 7.6.4 showed that the inline `@('prefix:' + value, ...)` argument expression collapses to one string, while the lock primitive itself correctly handles a prebuilt array. The correction moves construction into `Get-CoopSharedRuntimeResourceIdsCore`, uses independent `String.Concat` additions, validates expected/acquired cardinality before product launch, and contract-tests each independent collision plus requested/default-port deduplication. Focused tests and dirty-source aggregate `m2b3a-lockfix-c-01` passed. Clean published aggregate `m2b3a-lockfix-pub-c-01` then passed 22/22 from exact revision `c6507e9`; no DLL changed, so restaging was not required.
 
 Repeat run `m2b3a-live-r2-01` returned `Pass` from exact clean local/upstream revision `c6507e9`. Its shared-lock artifact contains the expected bridge root, game installation, dedicated installation, machine profile, UDP `7210`, and UDP `7777` as six distinct ids backed by six distinct lock paths. Release evidence contains the same six ids, every `ReleasedAndReacquired=true`, and no failure. The run also repeated seven bootstrap acknowledgements, native platform login, terminal `Connected`, live role health, graceful cleanup without force, zero remaining owned processes, free ports, unchanged installed hashes and protected result, six retained native log files with no fatal signal, and no `crash.json` or `hang.json`. RUN-008 and the Milestone 2B runtime-safety gate are closed. This run opened no campaign, mission, or battle and provides no L2/L3 pass evidence.
+
+### Milestone 4 readiness and failure-path correction
+
+The first clean local field attempt is preserved as historical failure evidence in the M4 report. Before any second native attempt, a bounded synthetic diagnostic exercised the shared failure writer and exact cleanup under PowerShell 7.6.5 and Windows PowerShell 5.1. Failure-evidence calls completed below 0.4 seconds and peak private memory stayed below 200 MiB. Cleanup of a non-responsive helper took about 17.9 seconds because the generic 15-second graceful wait was applied to support roles. The exact earlier stall and greater-than-4.6-GiB observation were not reproduced.
+
+The corrected runner now treats exact client/dedicated `CrashUploader.exe` and system `WerFault.exe` as fatal reporters. A correlated `Watchdog.exe` remains owned and is cleaned, but does not alone classify a run as `Crash`. `RuntimeSupport` and `RuntimeFailureSupport` receive a one-second grace before exact forced termination; primary campaign/dedicated/client roles retain 15 seconds. Failure-only events bracket evidence capture and runtime cleanup. Windows PowerShell 5.1 explicitly imports the exact built-in `Microsoft.PowerShell.Utility` manifest if `Get-FileHash` is initially unavailable. These shared policies apply to Feasibility, DedicatedSpawnSmoke, and later runtime consumers.
+
+The field readiness observer now names `TaleWorlds.MountAndBlade.ListedServer.IIntermissionState`, while retaining the native `IsNewTaskAssignable` test and one-shot command. This code remains reachable only through the explicit default-off `FieldDedicatedSpawnSmokeV1` profile.
+
+Canonical non-runtime verification commands:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-CoopTest.ps1 `
+  -Command Contracts `
+  -RunId m4b-readiness-runner-contracts-20260909-01 `
+  -All
+
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-CoopTest.ps1 `
+  -Command CompileOnly `
+  -RunId m4b-readiness-runner-compile-20260909-01 `
+  -GameRoot 'C:\Program Files (x86)\Steam\steamapps\common\Mount & Blade II Bannerlord' `
+  -DedicatedServerRoot 'C:\Program Files (x86)\Steam\steamapps\common\Mount & Blade II Dedicated Server'
+```
+
+The first command passed the canonical 24/24 inventory. The second produced version 0.3.2 client SHA-256 `25D1234F72C0B85EED7AE4C5E4CFC0AA903FEDA2D08520446560293F58E9FB18` and dedicated SHA-256 `0F7FA25AED9C6C7F2D4B3C250D73991B26EAA29189C5703FE753CB12C0D85382`; installed before/after inventories are byte-identical with JSON SHA-256 `35D7049344D13EDCBFEAE2D3E389880AD7EBFA8464EE60AA8A8B83B96AEFBC86`. No product process ran. These dirty-working-tree outputs are verification artifacts and must not be staged as runtime binaries. See the M4 report before approving publication, clean build, controlled staging, or a native rerun.
 
 ### Milestone 3A exact field-fixture source and contracts
 

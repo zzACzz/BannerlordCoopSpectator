@@ -1,8 +1,8 @@
-# Milestone 4 — Field dedicated spawn smoke: source, contracts and local isolation
+# Milestone 4 — Field dedicated spawn smoke: source, contracts, local isolation and live findings
 
 Date: **2026-09-09** (Europe/Kyiv; validation IDs retain the approved 20260908 names).
-Status: **Source/contracts and local file isolation verified; not runtime verified.**
-Approval: **"ок на Milestone 4A source/contracts"**.
+Status: **Readiness and shared failure handling corrected and contract-verified after the first clean live failure; a fresh native L2 rerun remains pending. Milestone 4 remains open.**
+Original 4A approval: **"ок на Milestone 4A source/contracts"**. The separately approved local-only 4B live validation and restoration are recorded in section 12.
 Original 4A source baseline: branch `codex/v0.1.1-refresh`, HEAD/local upstream `452df7e30d3d8d120488570857134078d6072ecc`, initially clean.
 The original 4A implementation was subsequently published as 7d75742c338f504499ec01dd8e3b2f189a1f7a03. Section 11 records the local-isolation follow-up's pre-publication validation in `C:\Users\Admin\.codex\worktrees\1b21\BannerlordCoopSpectator3`.
 
@@ -256,3 +256,164 @@ Ordinary field dedicated: source/contracts Passed; live Not Run. Campaign/client
 Read and updated: README.md, BATTLE_TEST_AUTOMATION_SPEC.md (revision 25), this M4 report, BUILD_TEST_DEBUG.md, RUNTIME_FLOWS.md, INVARIANTS_AND_RISKS.md, ARCHITECTURE.md and CODE_MAP.md. No new repository report was created. The M3 document and three pinned fixture files remain unchanged; historical control/staging reports retain their original evidence.
 
 At the pre-publication source audit, the old dirty checkout at C:\dev\projects\BannerlordCoopSpectator3 had not been edited. Source/tests contained 25 changed/new files and documentation contained eight; the delta had no generated product outputs or LF/CRLF churn. HEAD/upstream were 7d75742 and no Git staging/commit/push had occurred during that source stage. Publication is a separate approved operation. A later native run still requires separately approved staging and launch, using a revised procedure that handles only the installed module, with no personal Documents transaction.
+
+
+## 12. First clean local-only live attempt (2026-09-09)
+
+### 12.1 Disposition and provenance
+
+**Milestone 4 remains open.** The first native field attempt reached seven successful bootstrap acknowledgements but never opened the mission. The public parent returned Timeout (exit 31). The child stalled while handling failure and did not finalize its manifest or attempt report. Exact manual cleanup was required; the approved outer transaction then restored the complete installed baseline successfully. No product source fix or second native attempt was made in this stage.
+
+All validation used clean local/upstream revision ebf9cd3d44186d6e3ef835f7acfe34589b1a1506 in C:\Users\Admin\.codex\worktrees\1b21\BannerlordCoopSpectator3. The separate checkout at C:\dev\projects\BannerlordCoopSpectator3 and its unrelated changes were not edited. Run artifacts are below C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation:
+
+| Purpose | Run directory | Result |
+|---|---|---|
+| Fresh full contracts | m4b-local-contracts-20260909-01 | 24/24 Passed, zero failed |
+| Fresh client/dedicated CompileOnly | m4b-local-compile-20260909-01 | Both Passed; 77 client / 49 dedicated warnings, zero errors; no installed changes during compilation |
+| Local backup/staging/restore transaction | m4b-local-stage-20260909-01 | Self-test Passed; exactly two DLLs temporarily replaced; restoration Passed |
+| Public two-attempt driver | m4b-local-live-20260909-01 | Timeout, exit 31; L2PassClaimed=false and L3PassClaimed=false |
+| First child | m4b-local-live-20260909-01-01 | Failed before mission; child terminal outcome/report unavailable after runner stall |
+| Second child | m4b-local-live-20260909-01-02 | Not Run; directory was not created |
+
+Fresh client DLL SHA-256: 0CC1B70847E3CF5D6841B9163D7A4F71971BBD56B5A95F5981ED3D7B1C84FEEC. Fresh dedicated DLL SHA-256: DC8E4CA3E0584DCD5CBD623F6FD36A5ADBFC1ED44EF48CB6F1B3F39E07CFE7E9.
+
+The stage-local work/Invoke-M4BLocalTransaction.ps1 helper (SHA-256 34171C879FC4A1C56860662E1D45EFF1313F3DDB39C0BEED84AF66E4FC38CB9A) passed path/source-hash/current-target rejection, real junction rejection, restoration after the first replacement fails, and full two-file replacement/restoration checks. It backed up all 218 dedicated files (358,279,173 bytes), verified existing dependency compatibility, and replaced only CoopSpectator.dll in the module's Win64_Shipping_Server and Win64_Shipping_Client bins. The public driver used RuntimeTimeoutSeconds=420, UDP 7210, the exact staged dedicated hash and two fresh child contexts. This helper is a retained transaction artifact, not a reusable deployment command: it pins this revision and these run IDs. The obsolete Documents transaction remains forbidden.
+
+### 12.2 Observed native boundary and confirmed source mismatch
+
+Server PID 57388 loaded the exact fresh dedicated DLL from Modules\CoopSpectatorDedicated\bin\Win64_Shipping_Client\CoopSpectator.dll. It published native control readiness at 2026-09-08T23:53:03.1855699Z. Bootstrap command b0b501ef-d4bd-4dc0-9141-a4a0698bae98 acknowledged ServerName, MaxNumberOfPlayers, GameType, Map, UsableMap, StartGameRequested and StartGameConfirmed. The final acknowledgement at 23:53:04.2441707Z confirmed IsPlaying=true;GameType=CoopBattle;Map=battle_terrain_029.
+
+Progress then remained WaitingForMissionCommandReady. The role kept publishing heartbeats, including after its request expired; this is not evidence that the game engine itself hung. At 2026-09-09T00:00:03.2043112Z the bootstrap status became Failed / RequestExpired. No start_mission acknowledgement, mission opening, native agent observation, early abort, or real result publication attempt was reached.
+
+Read-only inspection of the exact installed TaleWorlds.MountAndBlade.ListedServer.dll with ilspycmd 9.1.0.7988 established:
+
+- Assembly SHA-256: C7D27584FCE431B2D3734EB88C8DF52EF3B1BC8C5729F7FCE690CC277DA577E3.
+- The native marker interface is TaleWorlds.MountAndBlade.ListedServer.IIntermissionState.
+- ServerSideIntermissionManager.StartMissionAux checks the active state against that interface.
+- DedicatedServer/Automation/CoopAutomationDedicatedControlBridge.cs, TryObserveNativeCommandReadiness, instead compares interface FullName with TaleWorlds.MountAndBlade.IIntermissionState. The missing ListedServer namespace is a confirmed source defect: the native interface cannot satisfy this literal.
+- Native IsNewTaskAssignable checks that _currentTask is null. This guard remains necessary; the correction must not bypass it or repeat the mission command.
+
+The live status does not expose the private idle and active-state subconditions separately. The interface mismatch is confirmed by the exact binary and source; no direct measurement of the private field, successful mission transition, or claim that this is the only defect is made. Pure contracts and successful compilation did not detect the reflection-string mismatch. No external workaround, tool update, native patch, fixture rewrite, or diagnostic flag was introduced.
+
+### 12.3 Failure handling did not complete automatically
+
+The child's last lease heartbeat was 2026-09-08T23:56:04.1803190Z. Its owned descendant inventory was updated through 23:56:06.5334753Z; artifact progress then stopped while CPU time and working memory continued growing (one observation exceeded 4.6 GB). Its manifest still has no terminal outcome and its lease retains Status=Active. These files were preserved as failed-run evidence rather than rewritten to imply graceful completion.
+
+The timing is consistent with the runner's 180-second no-progress deadline after the final bootstrap progress. The exact stalled instruction is not established: there is no managed stack or completed failure artifact. The relevant source boundary is Invoke-CoopDedicatedSpawnSmokeAttempt's failure handling, Get-CoopCorrelatedFailureProcessesFromSnapshot, and Write-CoopRuntimeFailureEvidence before Stop-CoopOwnedRuntimeProcesses. The parent's independent deadline expired, forwarded cancellation, and eventually reported Timeout. Do not substitute a guessed child Timeout/Crash classification for the missing terminal record.
+
+A separate source risk also remains: both the field driver's fatal-helper check and the common failure-evidence writer treat a correlated Watchdog.exe process as a crash signal. This run's watchdog existed during normal startup. Correlation proves ownership, not a crash; no passing or failing native-crash conclusion is inferred from its presence alone. This common failure path also serves connection feasibility and must be reviewed beyond the field scenario before correction.
+
+### 12.4 Exact cleanup, restoration and retained evidence
+
+Authorized manual cleanup used the existing Stop-CoopExactProcessIdentityCore checks, including PID, start time, executable path and SHA-256. It forcibly stopped owned watchdog PID 54348. By the following checks, server PID 57388 and its console helper PID 51080 were absent; neither required a separate forced-stop call. After verifying that product processes and required ports were clear, it forcibly stopped the hung child PowerShell PID 7108. The parent runner and outer restoration process were left running to finish their own handling.
+
+The outer transaction completed restoration at 2026-09-09T00:10:56.2942998Z:
+
+- Both original dedicated DLLs again have SHA-256 2E1494BCAEE1DCE440B4373BBA99A4F724B9C32519AACD486DE8F041C0CA1414 and length 3,587,584 bytes.
+- Complete dedicated (218 files), client (32 files), and legacy inventories match their pre-images; all difference arrays are empty.
+- No owned product/runner process or dedicated-install process remains; UDP 7210 and 7777 are free.
+- All six shared resource locks were released and reacquired. Independent post-restore probes also exclusively opened/released both runner locks: eight probes passed. Stale child lease metadata is not a live lock and was retained.
+- The local sentinel is still the exact RunId-bound 84-byte file, SHA-256 6BF1BAB4BED0FD136E2F5CDBA8FE9D64A8F49476FEAC9873481ADD9C4BB1817A. This proves local preservation only; the real result suppression decision was not reached.
+- No personal Documents result was accessed by the module/runner transaction, and no campaign or client was launched.
+
+Authoritative artifacts in m4b-local-stage-20260909-01 are transaction.json, staged-inventory.json, self-test.json, native-readiness-audit.json, manual-exact-cleanup.json, stage-lock-release.json, restore-lock-release.json and post-restore-audit.json. Complete backups remain in backup/module. Three exact-PID native logs were separately retained under native-logs with source/copy SHA-256 verification because the child never completed normal log collection. The native error log contains loader messages; their effect was not established by this attempt. Absence of a finished crash.json/hang.json does not prove absence of a crash or hang.
+
+The parent report is m4b-local-live-20260909-01/artifacts/results/dedicated-spawn-smoke.json. Its two declared AttemptRunIds describe the intended pair; ChildRunners contains only attempt 1, and Attempts is empty. Do not count the second declared ID as an executed run.
+
+### 12.5 Requirement and scenario audit
+
+| Approved requirement / acceptance boundary | Evidence | Status |
+|---|---|---|
+| Fresh clean full contracts and both non-deploying builds | Named runs and exact hashes above | Satisfied |
+| Local helper failure/rollback checks and complete pre-image | Four self-test groups, 218-file backup | Satisfied |
+| Exact two-DLL temporary staging and loaded identity | Staged inventory and server role status | Satisfied |
+| No personal Documents transaction or campaign/client launch | Local helper, field path authority and run inventory | Satisfied within the module/runner boundary; no personal-file checksum claim |
+| Native field mission/materialization/early abort/result suppression | Mission never opened | Not Satisfied |
+| Second independent successful attempt | First attempt failed; second directory absent | Not Satisfied |
+| Fully automatic failure evidence and cleanup | Child runner stalled; manual exact cleanup required | Not Satisfied |
+| Failure rollback and final installed/resource preservation | Transaction and post-restore audit | Satisfied |
+| English living documentation and evidence retention | Six approved documents; local failed artifacts retained | Satisfied |
+| Same-process sequential-mission reset | No mission opened; fresh processes would not prove it | Not Verifiable — existing gap |
+
+Ordinary field dedicated L2: Failed before mission, not a completed battle-stability test. Campaign and multiplayer client: Not Applicable to this zero-client attempt. Village, siege assault/deployment, sally-out, siege ambush, relief, lords hall, day/night hideouts, blockade variants, reconnect and same-process sequential missions: native Not Run. The readiness method is called only by CoopAutomationDedicatedSpawnSmokeObserver.Tick after explicit FieldDedicatedSpawnSmokeV1 admission; those ordinary production scenarios do not use it. Shared result/isolation contracts passed in the fresh full suite, which does not establish broad native regression.
+
+### 12.6 Documentation and next boundary
+
+Updated existing documents: this report, BATTLE_TEST_AUTOMATION_SPEC.md (revision 26), README.md, BUILD_TEST_DEBUG.md, RUNTIME_FLOWS.md and INVARIANTS_AND_RISKS.md. No new repository document or product source change was made. ARCHITECTURE.md and CODE_MAP.md remain unchanged because ownership and implementation locations did not change. Historical M2/M3 reports and all three pinned fixture files retain their original meaning and bytes.
+
+No Git staging, commit, push or branch operation belongs to this stage. These six documentation edits are an uncommitted failed-validation report, not a production fix.
+
+Before another native attempt, separately approve a source/contract stage to correct the exact readiness contract and reproduce/bound the failure-handling stall, including watchdog classification and cleanup despite diagnostic failure. Review common connection-feasibility consumers as well as field smoke. Preserve the native idle guard, one-shot commands, exact process identity, result suppression and pinned fixture. Native restaging/rerun must follow verified failure-path behavior; Milestone 4 is not complete.
+
+## 13. Bounded failure diagnostic and source/contract correction (2026-09-09)
+
+### 13.1 Disposition and evidence boundary
+
+The separately approved correction stage is complete at source, contract, and non-deploying compilation level. **Milestone 4 remains open.** No Bannerlord game, dedicated server, multiplayer client, campaign, or mission was launched. No installed module, local sentinel, pinned fixture, environment configuration, Git index, branch, commit, or remote was changed.
+
+The correction is based on repository HEAD ebf9cd3d44186d6e3ef835f7acfe34589b1a1506 plus the retained uncommitted documentation audit and the source/test changes described below. Because this is a dirty working-tree build, the resulting assemblies are verification artifacts, not staging candidates until a separate publication and clean-build gate is approved.
+
+The bounded diagnostic root is:
+
+`C:\Users\Admin\AppData\Local\Temp\CoopSpectator\Automation\m4-failure-diagnostic-20260909-01`
+
+Its aggregate `artifacts/summary.json` has SHA-256 `04353B3A7EF42A513B89920886D2A744E5D6195EFBA95B2ACE0DD4B8E1E6EC2C` and outcome `PassWithFindings`.
+
+### 13.2 Bounded failure-path diagnostic
+
+The temporary diagnostic exercised the current failure-evidence and exact-cleanup functions against synthetic owned processes under a 45-second worker deadline and a 512-MiB private-memory guard. It did not modify repository or installed files and was removed from the product implementation surface.
+
+| Shell | Failure writer without correlation | Failure writer with owned watchdog correlation | Exact helper cleanup | Maximum private memory | Result |
+|---|---:|---:|---:|---:|---|
+| PowerShell 7.6.5 | 298.23 ms | 340.26 ms | 17,859.15 ms | 105.16 MiB | Pass |
+| Windows PowerShell 5.1.26100.9444 | 363.58 ms | 379.55 ms | 17,866.78 ms | 197.63 MiB | Pass |
+
+Confirmed findings:
+
+- the previous policy classified a normal owned `Watchdog.exe` descendant as a fatal crash helper; ownership alone is not crash evidence;
+- `Write-CoopRuntimeFailureEvidence` completed below 0.4 seconds in both supported shells, without runaway memory;
+- the former 15-second graceful-close wait dominated cleanup of a non-responsive support helper;
+- Windows PowerShell 5.1 under the unrestricted `-ExecutionPolicy Bypass` diagnostic host required an explicit exact-manifest import of `Microsoft.PowerShell.Utility` before `Get-FileHash` was available.
+
+The exact instruction behind the earlier live child-runner stall was **not reproduced**. The earlier observation above 4.6 GiB therefore remains unattributed; this stage does not claim that the original stall or memory behavior was reproduced or conclusively fixed. Diagnostic phase markers improve attribution if a later live failure recurs.
+
+Post-diagnostic checks found every created PID absent, UDP 7210/7777 free, and all eight runtime locks releasable. The installed dedicated server and dedicated client-bin DLLs remained `2E1494BCAEE1DCE440B4373BBA99A4F724B9C32519AACD486DE8F041C0CA1414`; the installed game client DLL remained `2A1E17E4FEC5330345D28387AF1C4E2D412D07F221EBE7EE02705FAAC250FFB4`; the local sentinel remained `6BF1BAB4BED0FD136E2F5CDBA8FE9D64A8F49476FEAC9873481ADD9C4BB1817A`.
+
+### 13.3 Implemented correction
+
+- `DedicatedServer/Automation/CoopAutomationDedicatedControlBridge.cs`: `TryObserveNativeCommandReadiness` now matches `TaleWorlds.MountAndBlade.ListedServer.IIntermissionState`, the exact interface established from the installed assembly. The `IsNewTaskAssignable` idle guard, field-only admission, and one-shot `start_mission` ownership are unchanged; no retry or broader battle-path hook was added.
+- `scripts/CoopAutomationRunner.Core.ps1`: one centralized fatal-helper allowlist now contains only the exact client/dedicated `CrashUploader.exe` paths and system `WerFault.exe`. `Watchdog.exe` remains discoverable and cleanup-owned but cannot alone promote `Timeout` to `Crash`. Support roles receive a one-second graceful-close budget; primary product roles retain 15 seconds.
+- `scripts/Invoke-CoopTest.ps1`: both Feasibility and DedicatedSpawnSmoke use the centralized fatal classification, exact per-role cleanup grace, and failure-only `FailureEvidenceCaptureStarted`, `FailureEvidenceCaptureCompleted`, `RuntimeCleanupStarted`, and `RuntimeCleanupCompleted` events. The supported Windows PowerShell 5.1 path explicitly initializes `Get-FileHash` from the exact built-in utility-module manifest when command discovery initially fails.
+- `Tests/CoopAutomationSpawnSmoke.ContractTests`: source contracts require the exact ListedServer interface and retain the idle guard.
+- `Tests/CoopAutomationRunner.ContractTests`: both supported shells verify the fatal-helper set, watchdog exclusion, one-second support cleanup, 15-second primary cleanup, hash-command initialization, and failure-phase markers.
+
+The readiness change is reachable only through the explicit `FieldDedicatedSpawnSmokeV1` observer, so it does not alter village, siege assault/deployment, sally-out, siege ambush/relief, lords hall, hideout, blockade, reconnect, client, or campaign flows. The runner classification and cleanup policy is shared with connection Feasibility and future runtime scenarios; the full contract inventory is the cross-scenario source regression boundary. Native behavior for every scenario remains Not Run in this stage.
+
+### 13.4 Verification
+
+| Verification | Result |
+|---|---|
+| Both edited PowerShell scripts parsed | Pass; zero parser errors |
+| Focused spawn-smoke contracts | Pass in Windows PowerShell 5.1 and PowerShell 7.6.5; 95 assertions per shell |
+| Focused runner contracts | Pass in Windows PowerShell 5.1 and PowerShell 7.6.5 |
+| `m4b-readiness-runner-contracts-20260909-01` | Pass; full canonical inventory 24/24, zero failed; `contracts.json` SHA-256 `2AF5DE3B99F39E07487940DAC39F466A1B2C0B507FD5D1A2F509B7A7E19295E6` |
+| `m4b-readiness-runner-compile-20260909-01` | Pass; client and dedicated exit 0, 77/49 warning baseline, zero errors, no product process, installed inventories unchanged |
+| Compile-only client output | Version 0.3.2; SHA-256 `25D1234F72C0B85EED7AE4C5E4CFC0AA903FEDA2D08520446560293F58E9FB18` |
+| Compile-only dedicated output | Version 0.3.2; SHA-256 `0F7FA25AED9C6C7F2D4B3C250D73991B26EAA29189C5703FE753CB12C0D85382` |
+| Installed before/after inventories | Byte-identical; both inventory JSON files SHA-256 `35D7049344D13EDCBFEAE2D3E389880AD7EBFA8464EE60AA8A8B83B96AEFBC86` |
+
+### 13.5 Requirement and next boundary
+
+| Requirement / acceptance boundary | Status |
+|---|---|
+| Exact native readiness contract with idle and one-shot guards | Satisfied at source/L1 |
+| Watchdog ownership separated from fatal crash classification | Satisfied at source/L1 across shared runner consumers |
+| Bounded support cleanup without weakening primary-role cleanup | Satisfied at source/L1 |
+| Failure-path attribution markers and PowerShell 5.1 hash bootstrap | Satisfied at source/L1 |
+| Full contracts and both non-deploying builds | Satisfied |
+| Reproduction and exact attribution of the prior live stall/high memory | Not Reproduced; remains an observation to monitor |
+| Automatic evidence and cleanup during an actual native failure | Not Verifiable — no live process ran |
+| Mission opening, materialization, normal early abort, result suppression and second attempt | Not Run |
+| Native L2 and Milestone 4 completion | Not Satisfied — fresh staged live evidence required |
+
+The next operation is a separately approved publication/clean-build and installed-module staging transaction followed by one bounded local-only `DedicatedSpawnSmoke` rerun. It must retain the pinned fixture, local-only path authority, exact installed hash, process/port/lock ownership, result suppression, two fresh attempts, and outer restoration guarantees. If failure recurs, the new phase markers must identify whether the stall is before, inside, or after evidence capture or cleanup. No manual action inside the game is expected for the zero-client smoke.
