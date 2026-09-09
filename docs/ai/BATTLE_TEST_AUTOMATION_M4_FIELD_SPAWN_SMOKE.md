@@ -1,7 +1,7 @@
 # Milestone 4 — Field dedicated spawn smoke: source, contracts, local isolation and live findings
 
 Date: **2026-09-09** (Europe/Kyiv; validation IDs retain the approved 20260908 names).
-Status: **The shared failure-evidence process snapshot is now isolated, lightweight, time/memory/output bounded and contract-verified at source/L1. The clean live run still ends at native `0xc0000005` after `MissionOpening`; no post-correction native rerun, dump or L2 pass exists, and Milestone 4 remains open.**
+Status: **The shared failure-evidence process snapshot is isolated and bounded at source/L1. Preflight then recovered the correlated full dump omitted from the prior archive and localized the mission-opening failure to a null `MissionMultiplayerGameModeBaseClient` dependency inside `MissionScoreboardComponent.AfterStart`. No unchanged native rerun was performed; the cross-mode source fix and L2 remain open.**
 Original 4A approval: **"ок на Milestone 4A source/contracts"**. The separately approved local-only 4B live validation and restoration are recorded in section 12.
 Original 4A source baseline: branch `codex/v0.1.1-refresh`, HEAD/local upstream `452df7e30d3d8d120488570857134078d6072ecc`, initially clean.
 The original 4A implementation was subsequently published as 7d75742c338f504499ec01dd8e3b2f189a1f7a03. Section 11 records the local-isolation follow-up's pre-publication validation in `C:\Users\Admin\.codex\worktrees\1b21\BannerlordCoopSpectator3`.
@@ -707,3 +707,71 @@ The compile report SHA-256 is `73994167DA9C96B14915399A6A5CF8E37D909D12B65141B9E
 | Native `0xc0000005` root cause, dump, materialization and L2 | Not Satisfied |
 
 This closes the approved failure-evidence source/contracts substage only. The next separately approved stage must start from clean published `c100cb8`, perform fresh 24/24 and both CompileOnly builds, configure or independently prove dump capture before launch, use a new one-use full-backup two-DLL staging transaction, run one bounded zero-client DedicatedSpawnSmoke attempt, and restore unconditionally. The native rerun must test the corrected finalizer and capture a dump for the `MissionOpening` access violation; it must not change battle adapters or retry blindly if dump capture is unavailable.
+
+## 18. Recovered full dump and exact managed failure diagnosis (2026-09-09)
+
+### 18.1 Preflight recovery and no-rerun decision
+
+The approved live/dump stage began from clean branch `codex/v0.1.1-refresh`; local HEAD and upstream both resolved to `143203a1fdadf0f18a7da84f309f35b1409f6713`. No Bannerlord, dedicated-server, launcher, crash-reporter, uploader, WER or watchdog process was running, and drive C had 257.50 GiB free.
+
+Microsoft's [Collecting User-Mode Dumps](https://learn.microsoft.com/en-us/windows/win32/wer/collecting-user-mode-dumps) documentation requires `LocalDumps` configuration under `HKEY_LOCAL_MACHINE`, defines `DumpType=2` as a full dump, permits per-executable overrides, and states that the dump is written before process termination. Preflight found an existing exact key at `HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\DedicatedCustomServer.Starter.exe` with `DumpFolder=C:\dumps`, `DumpType=2`, and `DumpCount=5`.
+
+The folder contained the previously omitted dump for exact dedicated PID 15968:
+
+| Fact | Value |
+|---|---|
+| Path | `C:\dumps\DedicatedCustomServer.Starter.exe.15968.dmp` |
+| Length | 1,157,623,635 bytes |
+| Created UTC | `2026-09-09T13:07:36.8896970Z` |
+| Last write UTC | `2026-09-09T13:07:40.5061247Z` |
+| SHA-256 | `E5348288E6FE61AAE7442AB32504E61E46E76DC2FA1526F46F56A6CF0E5CF124` |
+| Header | Valid `MDMP` |
+
+The PID and timestamp match the prior `m4pl-p1-l1-01` WER event and dedicated role. The actual full dump independently proves that the existing capture mechanism worked during the crash; the previous statement that no dump existed was true only for the archived run/report surface, not for the machine-wide dump folder.
+
+Because the required dump already existed and localized the failure, replaying the same unchanged source and binaries would intentionally reproduce a known crash without exercising a correction. The no-blind-rerun gate therefore cancelled the remaining prelaunch sequence. No contracts/builds were repeated, no module was staged, no game process was launched, and no registry or dump-folder content was changed. The published `m4fe-c3` 24/24 and `m4fe-b2` CompileOnly evidence still matches the unchanged technical revision `c100cb8`; `143203a` changed documentation only.
+
+### 18.2 Lowest-level managed diagnosis
+
+WinDbg was not installed. `dotnet-dump` version `9.0.661903` successfully loaded the full dump and provided the required managed boundary:
+
+- `dumpexceptions` found one meaningful application exception: `System.NullReferenceException` at object `000001af85ee86d0`;
+- `clrthreads` placed it on debugger thread 4 / OS thread `0x20f0`;
+- `printexception` placed the fault at `DynamicClass.TaleWorlds.MountAndBlade.MissionScoreboardComponent.AfterStart_Patch2(...) + 0x135`, followed by `Mission.AfterStart`, `MissionState.FinishMissionLoading`, and `MissionState.TickLoading`;
+- dynamic IL shows the Harmony wrapper calling the CoopSpectator prefix, the original scoreboard body, and then the postfix. The failure occurs inside the original-body sequence before the postfix;
+- `dumpobj 000001af849c86f0` shows non-null Mission (`000001af8498f198`), mission lobby (`000001af84993cf8`), mission network (`000001af849bcaf0`) and scoreboard data (`000001af849c86d8`), but `_mpGameModeBase=0000000000000000`.
+
+The exact installed `TaleWorlds.MountAndBlade.dll` is 2,577,920 bytes with SHA-256 `C40E283E72AA90E6ED3BD64D6B8081AC7005DA76437CB3D463A12A2A9148C4EE`. `ilspycmd` confirms that `MissionScoreboardComponent.AfterStart` resolves `_mpGameModeBase` using `Mission.GetMissionBehavior<MissionMultiplayerGameModeBaseClient>()` and, when `GameNetwork.IsServerOrRecorder` is true, dereferences `_mpGameModeBase.RoundComponent` without checking `_mpGameModeBase` itself. The dump field state and exact method therefore identify the root cause: the dedicated field mission includes `MissionScoreboardComponent` without the required `MissionMultiplayerGameModeBaseClient` behavior.
+
+This is a managed null dereference, not an unidentified native instruction. Windows still reported process-level APPCRASH `0xc0000005`, but that code is now only the outer termination classification.
+
+### 18.3 Cross-mode and lifecycle audit
+
+| Construction path | Scoreboard/client dependency disposition |
+|---|---|
+| `MissionMultiplayerCoopBattleMode` battle-map server | Confirmed defect: retains `MissionScoreboardComponent`, does not add a `MissionMultiplayerGameModeBaseClient`, and `ValidateServerStackSanity` explicitly removes `MissionMultiplayerCoopBattleClient` as client-only. Field, land, village and sally-out support appended to this list share the risk. |
+| Coop hideout day/night | Already protected: each dedicated wrapper inserts `MissionMultiplayerCoopBattleClient` when no base-client behavior exists, explicitly for scoreboard lifecycle compatibility. |
+| Coop siege assault/deployment | Already protected: the server list contains `MissionMultiplayerCoopSiegeAssaultWithDeploymentClient` before the scoreboard. |
+| CoopTdm | Supplies `MissionMultiplayerCoopTdmClient` on the server; dedicated mode also omits its scoreboard. |
+| Coop hero creator / campaign-map prototype | Each server list supplies its matching `MissionMultiplayerGameModeBaseClient` derivative before the scoreboard. |
+| TdmClone minimal dedicated path | No scoreboard, so this exact dependency is not exercised. |
+| TdmClone full server path | Latent same defect: it adds a scoreboard but no `MissionMultiplayerGameModeBaseClient`. |
+| Sequential/reconnect orchestration | No independent behavior factory; it inherits the selected scenario's construction-path disposition. |
+
+The exact engine class also dereferences `_mpGameModeBase.RoundComponent` in `OnRemoveBehavior` and `OnClearScene`. A narrow patch that only suppresses the observed `AfterStart` line would leave later lifecycle failures and may break `MissionCustomGameServerComponent` compatibility. The correction must enforce a coherent behavior-stack dependency or safely remove the entire scoreboard contract; it must not merely swallow this exception.
+
+### 18.4 Disposition and next boundary
+
+| Requirement / acceptance boundary | Status |
+|---|---|
+| Exact full dump correlated to prior crash | Satisfied |
+| WER capture mechanism independently proven | Satisfied by actual prior full dump |
+| Managed exception, thread, method and null field | Satisfied |
+| Cross-mode scoreboard dependency audit | Satisfied at source level |
+| New registry/staging/product mutation | Not Performed |
+| Redundant unchanged native rerun | Not Run by design |
+| Failure-finalizer correction exercised in a live crash | Still Not Run |
+| Scoreboard dependency correction | Not Implemented |
+| Mission materialization and L2 | Not Satisfied |
+
+The next separately approved stage is a source/contracts correction. It must enforce the `MissionScoreboardComponent` → `MissionMultiplayerGameModeBaseClient` dependency before mission start, cover both the confirmed CoopBattle battle-map path and the latent full TdmClone server path, preserve the already-safe hideout/siege/other-mode ordering, and test `AfterStart`, clear/remove lifecycle expectations without adding default-on hot-path diagnostics. Only a clean-published correction may proceed through fresh 24/24, both CompileOnly builds, controlled staging and one bounded live attempt. The existing dump configuration must remain a preflight fact, not be rewritten unnecessarily.
