@@ -106,10 +106,18 @@ internal static class Program
             source.Contains("Write-CoopRuntimeFailureEvidence", StringComparison.Ordinal) &&
             source.Contains("artifacts\\crashes\\' + $fileName", StringComparison.Ordinal) &&
             source.Contains("DumpAttemptState", StringComparison.Ordinal) &&
+            source.Contains("ProcessSnapshotCapture", StringComparison.Ordinal) &&
+            source.Contains("$primaryRuntimeOutcome -eq 'Crash'", StringComparison.Ordinal) &&
+            source.Contains("function Get-CoopBoundedRuntimeProcessSnapshot", StringComparison.Ordinal) &&
+            source.Contains("-RoleType 'RuntimeFailureSupport'", StringComparison.Ordinal) &&
+            source.Contains("-ExpectedParentProcessId $PID", StringComparison.Ordinal) &&
             coreSource.Contains("Get-CoopCorrelatedFailureProcessesFromSnapshot", StringComparison.Ordinal) &&
+            coreSource.Contains("function Get-CoopBoundedProcessSnapshotCore", StringComparison.Ordinal) &&
+            coreSource.Contains("coop-lightweight-process-snapshot-v1", StringComparison.Ordinal) &&
+            coreSource.Contains("MemoryLimitExceeded", StringComparison.Ordinal) &&
             source.Contains("Get-CoopFatalHelperExecutablePathsCore", StringComparison.Ordinal) &&
             coreSource.Contains("function Get-CoopFatalHelperExecutablePathsCore", StringComparison.Ordinal),
-            "FailureEvidenceV1 must retain structured crash/hang evidence and exact process correlation.");
+            "FailureEvidenceV1 must retain structured crash/hang evidence, exact process correlation, and a bounded out-of-process lightweight snapshot.");
         Assert(
             source.Contains("Initialize-CoopFileHashCommand", StringComparison.Ordinal) &&
             source.Contains("Microsoft.PowerShell.Utility.psd1", StringComparison.Ordinal),
@@ -130,8 +138,10 @@ internal static class Program
             source.Contains("Get-CoopDescendantProcessRecordsFromSnapshot", StringComparison.Ordinal),
             "Aggregate runner must use the tested in-memory process-tree traversal.");
         Assert(
-            source.Contains("Get-CimInstance -ClassName Win32_Process -OperationTimeoutSec 10", StringComparison.Ordinal),
-            "Aggregate runner process snapshots must use a bounded CIM operation timeout.");
+            !source.Contains("@(Get-CimInstance -ClassName Win32_Process -OperationTimeoutSec 10", StringComparison.Ordinal) &&
+            !source.Contains("-Snapshot @(Get-CimInstance Win32_Process", StringComparison.Ordinal) &&
+            source.Contains("Get-CoopBoundedProcessSnapshotCore", StringComparison.Ordinal),
+            "Aggregate runner full process snapshots must run only through the bounded isolated collector.");
         int provisionalRegistration = source.IndexOf("$dedicatedIdentity = New-CoopProvisionalProcessIdentity", StringComparison.Ordinal);
         int provisionalInventoryWrite = source.IndexOf("Add-CoopOwnedRuntimeProcess -Identity $dedicatedIdentity", provisionalRegistration, StringComparison.Ordinal);
         int verifiedIdentityResolution = source.IndexOf("$dedicatedIdentity = Get-CoopProcessIdentity", provisionalInventoryWrite, StringComparison.Ordinal);
@@ -1474,6 +1484,90 @@ $failureMatches = @(Get-CoopCorrelatedFailureProcessesFromSnapshot `
 Assert-True ($failureMatches.Count -eq 2) 'Only exact path plus owned-tree/command-line PID failure helpers may correlate.'
 Assert-True (-not ($failureMatches.ProcessId -contains 102)) 'An unrelated same-name/path helper must never correlate by name alone.'
 
+$snapshotShellPath = (Get-Process -Id $PID).Path
+$script:collectorStartedPid = 0
+$collectorStartedAction = {
+    param([int]$CollectorProcessId, [DateTime]$LaunchStartedUtc, [DateTime]$LaunchObservedUtc, [string]$ShellExecutablePath)
+    Assert-True ($CollectorProcessId -gt 0) 'Collector callback must receive a positive PID.'
+    Assert-True ($LaunchObservedUtc -ge $LaunchStartedUtc) 'Collector callback must receive an ordered launch window.'
+    Assert-True ([System.IO.Path]::GetFullPath($ShellExecutablePath) -eq [System.IO.Path]::GetFullPath($snapshotShellPath)) `
+        'Collector callback must receive the exact shell path.'
+    $script:collectorStartedPid = $CollectorProcessId
+}
+$syntheticSnapshotScript = @'
+$records = @(
+    [pscustomobject][ordered]@{ ProcessId = 200; ParentProcessId = 0; ExecutablePath = 'C:\contract-root.exe'; CommandLine = 'root'; CreationDate = $null },
+    [pscustomobject][ordered]@{ ProcessId = 201; ParentProcessId = 200; ExecutablePath = 'C:\contract-child.exe'; CommandLine = 'child'; CreationDate = $null }
+)
+[Console]::Out.Write(([pscustomobject][ordered]@{ Schema = 'coop-lightweight-process-snapshot-v1'; Records = $records } | ConvertTo-Json -Depth 4 -Compress))
+'@
+$syntheticSnapshot = Get-CoopBoundedProcessSnapshotCore `
+    -ShellExecutablePath $snapshotShellPath `
+    -DeadlineMilliseconds 5000 `
+    -PrivateMemoryLimitBytes 268435456 `
+    -CollectorScriptText $syntheticSnapshotScript `
+    -CollectorStartedAction $collectorStartedAction
+Assert-True `
+    ($syntheticSnapshot.State -eq 'Captured' -and
+        $syntheticSnapshot.RecordCount -eq 2 -and
+        $syntheticSnapshot.Records[1].ParentProcessId -eq 200 -and
+        $script:collectorStartedPid -eq $syntheticSnapshot.CollectorProcessId -and
+        $syntheticSnapshot.DurationMilliseconds -lt 5000) `
+    'The isolated process-snapshot collector must return only its validated lightweight payload inside the deadline.'
+Assert-True `
+    (@($syntheticSnapshot.Records | Where-Object { $_ -is [Microsoft.Management.Infrastructure.CimInstance] }).Count -eq 0) `
+    'Raw CimInstance objects must never cross the isolated process-snapshot boundary.'
+Assert-True `
+    ($null -eq (Get-Process -Id $syntheticSnapshot.CollectorProcessId -ErrorAction SilentlyContinue)) `
+    'A successful isolated process-snapshot collector must not remain live.'
+
+$timedOutSnapshot = Get-CoopBoundedProcessSnapshotCore `
+    -ShellExecutablePath $snapshotShellPath `
+    -DeadlineMilliseconds 300 `
+    -PrivateMemoryLimitBytes 268435456 `
+    -CollectorScriptText 'Start-Sleep -Seconds 10'
+Assert-True `
+    ($timedOutSnapshot.State -eq 'TimedOut' -and
+        $timedOutSnapshot.ForcedStopUsed -and
+        $timedOutSnapshot.DurationMilliseconds -lt 5000 -and
+        $null -eq (Get-Process -Id $timedOutSnapshot.CollectorProcessId -ErrorAction SilentlyContinue)) `
+    'A stalled process-snapshot collector must be terminated exactly and return a bounded timeout state.'
+
+$memorySnapshot = Get-CoopBoundedProcessSnapshotCore `
+    -ShellExecutablePath $snapshotShellPath `
+    -DeadlineMilliseconds 5000 `
+    -PrivateMemoryLimitBytes 33554432 `
+    -CollectorScriptText '$buffer = New-Object byte[] 67108864; Start-Sleep -Seconds 10'
+Assert-True `
+    ($memorySnapshot.State -eq 'MemoryLimitExceeded' -and
+        $memorySnapshot.ForcedStopUsed -and
+        $memorySnapshot.PeakPrivateMemoryBytes -gt $memorySnapshot.PrivateMemoryLimitBytes -and
+        $memorySnapshot.DurationMilliseconds -lt 5000 -and
+        $null -eq (Get-Process -Id $memorySnapshot.CollectorProcessId -ErrorAction SilentlyContinue)) `
+    'A high-memory process-snapshot collector must be terminated before it can grow without bound.'
+
+$failedSnapshot = Get-CoopBoundedProcessSnapshotCore `
+    -ShellExecutablePath $snapshotShellPath `
+    -DeadlineMilliseconds 5000 `
+    -PrivateMemoryLimitBytes 268435456 `
+    -CollectorScriptText "throw 'Synthetic collector failure.'"
+Assert-True `
+    ($failedSnapshot.State -eq 'CollectorFailed' -and
+        -not [string]::IsNullOrWhiteSpace($failedSnapshot.Failure) -and
+        $null -eq (Get-Process -Id $failedSnapshot.CollectorProcessId -ErrorAction SilentlyContinue)) `
+    'A failed optional collector must return structured evidence without leaking its process or throwing into cleanup.'
+
+$liveLightweightSnapshot = Get-CoopBoundedProcessSnapshotCore `
+    -ShellExecutablePath $snapshotShellPath `
+    -DeadlineMilliseconds 10000 `
+    -PrivateMemoryLimitBytes 268435456
+Assert-True `
+    ($liveLightweightSnapshot.State -eq 'Captured' -and
+        $liveLightweightSnapshot.RecordCount -gt 0 -and
+        @($liveLightweightSnapshot.Records | Where-Object { $_ -is [Microsoft.Management.Infrastructure.CimInstance] }).Count -eq 0 -and
+        $null -eq (Get-Process -Id $liveLightweightSnapshot.CollectorProcessId -ErrorAction SilentlyContinue)) `
+    'The production collector must return a bounded lightweight live snapshot in both supported PowerShell hosts.'
+
 $cleanupStartInfo = New-Object System.Diagnostics.ProcessStartInfo
 $cleanupStartInfo.FileName = (Get-Process -Id $PID).Path
 $cleanupStartInfo.UseShellExecute = $false
@@ -1505,6 +1599,69 @@ catch {
         ([object]::ReferenceEquals($_.Exception.Data['CoopClientJoinStatus'], $terminalClientStatus)) `
         'PowerShell must preserve the exact terminal client status object through Exception.Data.'
 }
+
+$runnerTokens = $null
+$runnerErrors = $null
+$runnerAst = [System.Management.Automation.Language.Parser]::ParseFile(
+    $runnerScriptPath,
+    [ref]$runnerTokens,
+    [ref]$runnerErrors)
+Assert-True ($runnerErrors.Count -eq 0) 'The aggregate runner must parse before isolated failure-writer execution.'
+$failureWriterAst = @($runnerAst.FindAll(
+    {
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq 'Write-CoopRuntimeFailureEvidence'
+    },
+    $true))
+Assert-True ($failureWriterAst.Count -eq 1) 'The aggregate runner must define exactly one runtime failure-evidence writer.'
+Invoke-Expression $failureWriterAst[0].Extent.Text
+
+$failureEvidenceRoot = Join-Path $lockFixtureRoot 'failure-evidence'
+$script:runRoot = $failureEvidenceRoot
+$script:RunId = 'failure-evidence-contract'
+$script:GameRoot = 'C:\contract-game'
+$script:DedicatedServerRoot = 'C:\contract-dedicated'
+$script:eventsPath = Join-Path $failureEvidenceRoot 'events\events.jsonl'
+$script:ownedRuntimeProcesses = New-Object 'System.Collections.Generic.List[object]'
+$script:failedProcessSnapshotCapture = [pscustomobject][ordered]@{
+    Schema = 'coop-bounded-process-snapshot-v1'
+    State = 'TimedOut'
+    Failure = 'Synthetic bounded collector timeout.'
+    DurationMilliseconds = 300L
+    DeadlineMilliseconds = 300
+    PrivateMemoryLimitBytes = 268435456L
+    PeakPrivateMemoryBytes = 67108864L
+    CollectorProcessId = 12345
+    ForcedStopUsed = $true
+    RecordCount = 0
+    Records = @()
+}
+function Get-CoopBoundedRuntimeProcessSnapshot { return $script:failedProcessSnapshotCapture }
+function Read-CoopJsonShared { param([string]$Path); return $null }
+function Write-CoopJsonAtomic {
+    param([string]$Path, $Value)
+    [System.IO.Directory]::CreateDirectory((Split-Path -Parent $Path)) | Out-Null
+    [System.IO.File]::WriteAllText(
+        $Path,
+        (($Value | ConvertTo-Json -Depth 30) + [Environment]::NewLine),
+        (New-Object System.Text.UTF8Encoding($false)))
+}
+$failureWriterResult = Write-CoopRuntimeFailureEvidence `
+    -Outcome 'Crash' `
+    -FailureCode 'SyntheticCrash' `
+    -FailureMessage 'Synthetic primary crash.' `
+    -ProcessSnapshotCapture $script:failedProcessSnapshotCapture
+$publishedFailureEvidence = Get-Content -LiteralPath $failureWriterResult.Path -Raw | ConvertFrom-Json
+Assert-True `
+    ([System.IO.File]::Exists($failureWriterResult.Path) -and
+        $publishedFailureEvidence.Outcome -eq 'Crash' -and
+        $publishedFailureEvidence.FailureCode -eq 'SyntheticCrash' -and
+        $publishedFailureEvidence.ProcessSnapshot.State -eq 'TimedOut' -and
+        $publishedFailureEvidence.ProcessSnapshot.ForcedStopUsed -and
+        $publishedFailureEvidence.ProcessSnapshotFailure -match 'Synthetic bounded collector timeout' -and
+        $null -eq $publishedFailureEvidence.ProcessSnapshot.PSObject.Properties['Records']) `
+    'A failed optional process collector must still publish terminal crash evidence without serializing its record set.'
 
 Write-Output ('PASS ' + $PSVersionTable.PSVersion.ToString())
 """;

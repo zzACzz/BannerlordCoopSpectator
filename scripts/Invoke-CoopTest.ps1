@@ -675,10 +675,41 @@ function Add-CoopOwnedRuntimeProcess {
     }
 }
 
+function Get-CoopBoundedRuntimeProcessSnapshot {
+    param(
+        [ValidateRange(250, 30000)][int]$DeadlineMilliseconds = 5000,
+        [ValidateRange(33554432, 1073741824)][long]$PrivateMemoryLimitBytes = 268435456
+    )
+
+    $collectorStartedAction = {
+        param(
+            [int]$CollectorProcessId,
+            [DateTime]$LaunchStartedUtc,
+            [DateTime]$LaunchObservedUtc,
+            [string]$ShellExecutablePath
+        )
+        $collectorIdentity = New-CoopProvisionalProcessIdentity `
+            -ProcessId $CollectorProcessId `
+            -RoleType 'RuntimeFailureSupport' `
+            -RoleInstanceId ('process-snapshot-collector-' + $CollectorProcessId) `
+            -ExpectedExecutablePath $ShellExecutablePath `
+            -ExpectedParentProcessId $PID `
+            -LaunchStartedUtc $LaunchStartedUtc `
+            -LaunchObservedUtc $LaunchObservedUtc
+        Add-CoopOwnedRuntimeProcess -Identity $collectorIdentity
+    }
+    return Get-CoopBoundedProcessSnapshotCore `
+        -ShellExecutablePath $runnerProcess.Path `
+        -DeadlineMilliseconds $DeadlineMilliseconds `
+        -PrivateMemoryLimitBytes $PrivateMemoryLimitBytes `
+        -CollectorStartedAction $collectorStartedAction
+}
+
 function Add-CoopOwnedDescendants {
     param(
         [Parameter(Mandatory = $true)][int[]]$RootProcessIds,
-        [ValidateRange(1, 120)][int]$DeadlineSeconds = 30
+        [ValidateRange(1, 120)][int]$DeadlineSeconds = 30,
+        [AllowNull()]$ProcessSnapshotCapture = $null
     )
 
     $snapshotPath = Join-Path $runRoot 'artifacts\processes\runtime-process-tree-snapshot.json'
@@ -689,7 +720,15 @@ function Add-CoopOwnedDescendants {
     $registered = New-Object System.Collections.Generic.List[object]
     $failures = New-Object System.Collections.Generic.List[object]
     try {
-        $snapshot = @(Get-CimInstance -ClassName Win32_Process -OperationTimeoutSec 10 -ErrorAction Stop)
+        if ($null -eq $ProcessSnapshotCapture) {
+            $ProcessSnapshotCapture = Get-CoopBoundedRuntimeProcessSnapshot `
+                -DeadlineMilliseconds ([Math]::Min(5000, $DeadlineSeconds * 1000)) `
+                -PrivateMemoryLimitBytes 268435456
+        }
+        if (-not [string]::Equals([string]$ProcessSnapshotCapture.State, 'Captured', [StringComparison]::Ordinal)) {
+            throw ('Bounded process snapshot failed with state ' + [string]$ProcessSnapshotCapture.State + ': ' + [string]$ProcessSnapshotCapture.Failure)
+        }
+        $snapshot = @($ProcessSnapshotCapture.Records)
         $descendants = @(Get-CoopDescendantProcessRecordsFromSnapshot `
             -Snapshot $snapshot `
             -RootProcessIds $RootProcessIds `
@@ -754,6 +793,11 @@ function Add-CoopOwnedDescendants {
         CompletedUtc = $completedUtc.ToString('O')
         DurationMilliseconds = [long]($completedUtc - $startedUtc).TotalMilliseconds
         DeadlineSeconds = $DeadlineSeconds
+        SnapshotCaptureState = if ($null -eq $ProcessSnapshotCapture) { 'NotAttempted' } else { [string]$ProcessSnapshotCapture.State }
+        SnapshotCaptureDurationMilliseconds = if ($null -eq $ProcessSnapshotCapture) { 0L } else { [long]$ProcessSnapshotCapture.DurationMilliseconds }
+        SnapshotCapturePeakPrivateMemoryBytes = if ($null -eq $ProcessSnapshotCapture) { 0L } else { [long]$ProcessSnapshotCapture.PeakPrivateMemoryBytes }
+        SnapshotCollectorProcessId = if ($null -eq $ProcessSnapshotCapture) { 0 } else { [int]$ProcessSnapshotCapture.CollectorProcessId }
+        SnapshotCollectorForcedStopUsed = if ($null -eq $ProcessSnapshotCapture) { $false } else { [bool]$ProcessSnapshotCapture.ForcedStopUsed }
         SnapshotProcessCount = $snapshot.Count
         DescendantCandidateCount = $descendants.Count
         RegisteredDescendantCount = $registered.Count
@@ -915,7 +959,8 @@ function Write-CoopRuntimeFailureEvidence {
     param(
         [Parameter(Mandatory = $true)][ValidateSet('Crash', 'Timeout')][string]$Outcome,
         [Parameter(Mandatory = $true)][string]$FailureCode,
-        [Parameter(Mandatory = $true)][string]$FailureMessage
+        [Parameter(Mandatory = $true)][string]$FailureMessage,
+        [AllowNull()]$ProcessSnapshotCapture = $null
     )
 
     $rootProcessIds = @($ownedRuntimeProcesses | Where-Object {
@@ -925,7 +970,15 @@ function Write-CoopRuntimeFailureEvidence {
     $correlatedFailureProcesses = @()
     $snapshotFailure = ''
     try {
-        $snapshot = @(Get-CimInstance -ClassName Win32_Process -OperationTimeoutSec 10 -ErrorAction Stop)
+        if ($null -eq $ProcessSnapshotCapture) {
+            $ProcessSnapshotCapture = Get-CoopBoundedRuntimeProcessSnapshot `
+                -DeadlineMilliseconds 5000 `
+                -PrivateMemoryLimitBytes 268435456
+        }
+        if (-not [string]::Equals([string]$ProcessSnapshotCapture.State, 'Captured', [StringComparison]::Ordinal)) {
+            throw ('Bounded process snapshot failed with state ' + [string]$ProcessSnapshotCapture.State + ': ' + [string]$ProcessSnapshotCapture.Failure)
+        }
+        $snapshot = @($ProcessSnapshotCapture.Records)
         $allowedPaths = @(Get-CoopFatalHelperExecutablePathsCore `
             -GameRoot $GameRoot `
             -DedicatedServerRoot $DedicatedServerRoot `
@@ -994,6 +1047,18 @@ function Write-CoopRuntimeFailureEvidence {
         CorrelatedFailureProcesses = $correlatedFailureProcesses
         CorrelationOwnershipFailures = $correlationOwnershipFailures.ToArray()
         ProcessSnapshotFailure = $snapshotFailure
+        ProcessSnapshot = [ordered]@{
+            Schema = if ($null -eq $ProcessSnapshotCapture) { '' } else { [string]$ProcessSnapshotCapture.Schema }
+            State = if ($null -eq $ProcessSnapshotCapture) { 'NotAttempted' } else { [string]$ProcessSnapshotCapture.State }
+            Failure = if ($null -eq $ProcessSnapshotCapture) { $snapshotFailure } else { [string]$ProcessSnapshotCapture.Failure }
+            DurationMilliseconds = if ($null -eq $ProcessSnapshotCapture) { 0L } else { [long]$ProcessSnapshotCapture.DurationMilliseconds }
+            DeadlineMilliseconds = if ($null -eq $ProcessSnapshotCapture) { 0 } else { [int]$ProcessSnapshotCapture.DeadlineMilliseconds }
+            PrivateMemoryLimitBytes = if ($null -eq $ProcessSnapshotCapture) { 0L } else { [long]$ProcessSnapshotCapture.PrivateMemoryLimitBytes }
+            PeakPrivateMemoryBytes = if ($null -eq $ProcessSnapshotCapture) { 0L } else { [long]$ProcessSnapshotCapture.PeakPrivateMemoryBytes }
+            CollectorProcessId = if ($null -eq $ProcessSnapshotCapture) { 0 } else { [int]$ProcessSnapshotCapture.CollectorProcessId }
+            ForcedStopUsed = if ($null -eq $ProcessSnapshotCapture) { $false } else { [bool]$ProcessSnapshotCapture.ForcedStopUsed }
+            RecordCount = if ($null -eq $ProcessSnapshotCapture) { 0 } else { [int]$ProcessSnapshotCapture.RecordCount }
+        }
         DumpAttemptState = 'NotAttemptedNoConfiguredDumpCollector'
         CapturedUtc = [DateTime]::UtcNow.ToString('O')
     }
@@ -2513,6 +2578,8 @@ function Invoke-CoopFeasibility {
     finally {
         $primaryRuntimeOutcome = $runtimeOutcome
         $primaryRuntimeReason = $runtimeReason
+        $primaryRuntimeFailureCode = $runtimeFailureCode
+        $runtimeProcessSnapshotCapture = $null
         if ($null -eq $clientJoinStatus) {
             try {
                 $terminalClientStatus = Read-CoopJsonShared -Path (Join-Path $runRoot 'state\client-join.status.json')
@@ -2536,7 +2603,14 @@ function Invoke-CoopFeasibility {
             $rootProcessIds = @($ownedRuntimeProcesses | Where-Object {
                 [string]$_.RoleType -eq 'DedicatedServer' -or [string]$_.RoleType -eq 'MultiplayerClient'
             } | ForEach-Object { [int]$_.ProcessId } | Select-Object -Unique)
-            if ($rootProcessIds.Count -gt 0) { $null = Add-CoopOwnedDescendants -RootProcessIds $rootProcessIds }
+            if ($rootProcessIds.Count -gt 0) {
+                $runtimeProcessSnapshotCapture = Get-CoopBoundedRuntimeProcessSnapshot `
+                    -DeadlineMilliseconds 5000 `
+                    -PrivateMemoryLimitBytes 268435456
+                $null = Add-CoopOwnedDescendants `
+                    -RootProcessIds $rootProcessIds `
+                    -ProcessSnapshotCapture $runtimeProcessSnapshotCapture
+            }
         }
         catch {
             $runtimeOutcome = 'RunnerInternalError'
@@ -2544,13 +2618,19 @@ function Invoke-CoopFeasibility {
             $runtimeSupersession = 'OwnedDescendantDiscoveryFailed'
             try { Add-CoopEvent -EventType 'OwnedDescendantDiscoveryFailed' -Message $runtimeReason } catch { }
         }
-        if ($runtimeOutcome -eq 'Crash' -or $runtimeOutcome -eq 'Timeout') {
+        $failureEvidenceOutcome = if ($runtimeOutcome -eq 'Crash' -or $runtimeOutcome -eq 'Timeout') { $runtimeOutcome }
+            elseif ($primaryRuntimeOutcome -eq 'Crash' -or $primaryRuntimeOutcome -eq 'Timeout') { $primaryRuntimeOutcome }
+            else { '' }
+        if (-not [string]::IsNullOrEmpty($failureEvidenceOutcome)) {
+            $failureEvidenceCode = if ($runtimeOutcome -eq 'Crash' -or $runtimeOutcome -eq 'Timeout') { $runtimeFailureCode } else { $primaryRuntimeFailureCode }
+            $failureEvidenceMessage = if ($runtimeOutcome -eq 'Crash' -or $runtimeOutcome -eq 'Timeout') { $runtimeReason } else { $primaryRuntimeReason }
             try { Add-CoopEvent -EventType 'FailureEvidenceCaptureStarted' -Message 'Structured runtime failure-evidence capture started.' } catch { }
             try {
                 $runtimeFailureEvidence = Write-CoopRuntimeFailureEvidence `
-                    -Outcome $runtimeOutcome `
-                    -FailureCode $runtimeFailureCode `
-                    -FailureMessage $runtimeReason
+                    -Outcome $failureEvidenceOutcome `
+                    -FailureCode $failureEvidenceCode `
+                    -FailureMessage $failureEvidenceMessage `
+                    -ProcessSnapshotCapture $runtimeProcessSnapshotCapture
                 if (@($runtimeFailureEvidence.Evidence.CorrelatedFailureProcesses).Count -gt 0) {
                     $runtimeOutcome = 'Crash'
                     $runtimeFailureCode = 'CrashReporterDetected'
@@ -3217,17 +3297,27 @@ function Invoke-CoopDedicatedSpawnSmokeAttempt {
     finally {
         $primaryRuntimeOutcome = $runtimeOutcome
         $primaryRuntimeReason = $runtimeReason
+        $primaryRuntimeFailureCode = $runtimeFailureCode
+        $runtimeProcessSnapshotCapture = $null
         try {
             $rootProcessIds = @($ownedRuntimeProcesses | Where-Object {
                 [string]$_.RoleType -eq 'DedicatedServer' -or [string]$_.RoleType -eq 'MultiplayerClient'
             } | ForEach-Object { [int]$_.ProcessId } | Select-Object -Unique)
             if ($rootProcessIds.Count -gt 0) {
-                $null = Add-CoopOwnedDescendants -RootProcessIds $rootProcessIds
+                $runtimeProcessSnapshotCapture = Get-CoopBoundedRuntimeProcessSnapshot `
+                    -DeadlineMilliseconds 5000 `
+                    -PrivateMemoryLimitBytes 268435456
+                $null = Add-CoopOwnedDescendants `
+                    -RootProcessIds $rootProcessIds `
+                    -ProcessSnapshotCapture $runtimeProcessSnapshotCapture
                 $fatalPaths = @(Get-CoopFatalHelperExecutablePathsCore `
                     -GameRoot $GameRoot `
                     -DedicatedServerRoot $DedicatedServerRoot `
                     -SystemRoot $env:SystemRoot)
-                $fatalHelpers = @(Get-CoopCorrelatedFailureProcessesFromSnapshot -Snapshot @(Get-CimInstance Win32_Process -OperationTimeoutSec 10 -ErrorAction Stop) -OwnedRootProcessIds $rootProcessIds -AllowedExecutablePaths $fatalPaths)
+                $fatalHelpers = @(Get-CoopCorrelatedFailureProcessesFromSnapshot `
+                    -Snapshot @($runtimeProcessSnapshotCapture.Records) `
+                    -OwnedRootProcessIds $rootProcessIds `
+                    -AllowedExecutablePaths $fatalPaths)
                 $noFatalHelpersConfirmed = $fatalHelpers.Count -eq 0
                 if (-not $noFatalHelpersConfirmed) {
                     $runtimeOutcome = 'Crash'
@@ -3242,13 +3332,19 @@ function Invoke-CoopDedicatedSpawnSmokeAttempt {
             $runtimeSupersession = 'OwnedDescendantDiscoveryFailed'
             try { Add-CoopEvent -EventType 'OwnedDescendantDiscoveryFailed' -Message $runtimeReason } catch { }
         }
-        if ($runtimeOutcome -eq 'Crash' -or $runtimeOutcome -eq 'Timeout') {
+        $failureEvidenceOutcome = if ($runtimeOutcome -eq 'Crash' -or $runtimeOutcome -eq 'Timeout') { $runtimeOutcome }
+            elseif ($primaryRuntimeOutcome -eq 'Crash' -or $primaryRuntimeOutcome -eq 'Timeout') { $primaryRuntimeOutcome }
+            else { '' }
+        if (-not [string]::IsNullOrEmpty($failureEvidenceOutcome)) {
+            $failureEvidenceCode = if ($runtimeOutcome -eq 'Crash' -or $runtimeOutcome -eq 'Timeout') { $runtimeFailureCode } else { $primaryRuntimeFailureCode }
+            $failureEvidenceMessage = if ($runtimeOutcome -eq 'Crash' -or $runtimeOutcome -eq 'Timeout') { $runtimeReason } else { $primaryRuntimeReason }
             try { Add-CoopEvent -EventType 'FailureEvidenceCaptureStarted' -Message 'Structured runtime failure-evidence capture started.' } catch { }
             try {
                 $runtimeFailureEvidence = Write-CoopRuntimeFailureEvidence `
-                    -Outcome $runtimeOutcome `
-                    -FailureCode $runtimeFailureCode `
-                    -FailureMessage $runtimeReason
+                    -Outcome $failureEvidenceOutcome `
+                    -FailureCode $failureEvidenceCode `
+                    -FailureMessage $failureEvidenceMessage `
+                    -ProcessSnapshotCapture $runtimeProcessSnapshotCapture
                 if (@($runtimeFailureEvidence.Evidence.CorrelatedFailureProcesses).Count -gt 0) {
                     $runtimeOutcome = 'Crash'
                     $runtimeFailureCode = 'CrashReporterDetected'

@@ -265,6 +265,187 @@ function Get-CoopDescendantProcessRecordsFromSnapshot {
     return $descendants.ToArray()
 }
 
+function Get-CoopBoundedProcessSnapshotCore {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$ShellExecutablePath,
+        [ValidateRange(250, 30000)][int]$DeadlineMilliseconds = 5000,
+        [ValidateRange(33554432, 1073741824)][long]$PrivateMemoryLimitBytes = 268435456,
+        [ValidateRange(4096, 16777216)][int]$OutputLimitBytes = 4194304,
+        [AllowEmptyString()][string]$CollectorScriptText = '',
+        [AllowNull()][scriptblock]$CollectorStartedAction = $null
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ShellExecutablePath)) {
+        throw 'ShellExecutablePath is required.'
+    }
+    $shellPath = [System.IO.Path]::GetFullPath($ShellExecutablePath)
+    if (-not [System.IO.File]::Exists($shellPath)) {
+        throw "Process-snapshot shell does not exist: $shellPath"
+    }
+    if ([string]::IsNullOrWhiteSpace($CollectorScriptText)) {
+        $CollectorScriptText = @'
+$ErrorActionPreference = 'Stop'
+$records = @(Get-CimInstance -ClassName Win32_Process -Property ProcessId,ParentProcessId,ExecutablePath,CommandLine,CreationDate -OperationTimeoutSec 2 -ErrorAction Stop | ForEach-Object {
+    [pscustomobject][ordered]@{
+        ProcessId = [int]$_.ProcessId
+        ParentProcessId = [int]$_.ParentProcessId
+        ExecutablePath = [string]$_.ExecutablePath
+        CommandLine = [string]$_.CommandLine
+        CreationDate = if ($null -eq $_.CreationDate) { $null } else { ([DateTime]$_.CreationDate).ToUniversalTime().ToString('O') }
+    }
+})
+$payload = [pscustomobject][ordered]@{
+    Schema = 'coop-lightweight-process-snapshot-v1'
+    Records = $records
+}
+[Console]::Out.Write(($payload | ConvertTo-Json -Depth 4 -Compress))
+'@
+    }
+
+    $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($CollectorScriptText))
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $shellPath
+    $startInfo.Arguments = '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ' + $encodedCommand
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+
+    $startedUtc = [DateTime]::UtcNow
+    $stopwatch = [Diagnostics.Stopwatch]::StartNew()
+    $collector = $null
+    $stdoutTask = $null
+    $stderrTask = $null
+    $state = 'CollectorFailed'
+    $failure = ''
+    $records = @()
+    $peakPrivateMemoryBytes = 0L
+    $collectorProcessId = 0
+    $forcedStopUsed = $false
+    try {
+        $collector = [Diagnostics.Process]::Start($startInfo)
+        if ($null -eq $collector) { throw 'Process-snapshot collector did not return a process handle.' }
+        $collectorProcessId = $collector.Id
+        if ($null -ne $CollectorStartedAction) {
+            & $CollectorStartedAction `
+                $collectorProcessId `
+                $startedUtc `
+                ([DateTime]::UtcNow) `
+                $shellPath
+        }
+        $stdoutTask = $collector.StandardOutput.ReadToEndAsync()
+        $stderrTask = $collector.StandardError.ReadToEndAsync()
+
+        while (-not $collector.WaitForExit(50)) {
+            try {
+                $collector.Refresh()
+                $privateBytes = [long]$collector.PrivateMemorySize64
+                if ($privateBytes -gt $peakPrivateMemoryBytes) { $peakPrivateMemoryBytes = $privateBytes }
+                if ($privateBytes -gt $PrivateMemoryLimitBytes) {
+                    $state = 'MemoryLimitExceeded'
+                    $failure = "Process-snapshot collector exceeded its $PrivateMemoryLimitBytes-byte private-memory limit."
+                    break
+                }
+            }
+            catch {
+                $state = 'CollectorFailed'
+                $failure = 'Process-snapshot collector memory observation failed: ' + $_.Exception.Message
+                break
+            }
+            if ($stopwatch.ElapsedMilliseconds -ge $DeadlineMilliseconds) {
+                $state = 'TimedOut'
+                $failure = "Process-snapshot collector exceeded its $DeadlineMilliseconds-millisecond deadline."
+                break
+            }
+        }
+
+        if (-not $collector.HasExited) {
+            $forcedStopUsed = $true
+            try { $collector.Kill() }
+            catch { $failure += ' Exact collector termination failed: ' + $_.Exception.Message }
+            $null = $collector.WaitForExit(2000)
+        }
+        else {
+            try {
+                $collector.Refresh()
+                $privateBytes = [long]$collector.PrivateMemorySize64
+                if ($privateBytes -gt $peakPrivateMemoryBytes) { $peakPrivateMemoryBytes = $privateBytes }
+            }
+            catch { }
+        }
+
+        if (($null -ne $stdoutTask -and -not $stdoutTask.Wait(2000)) -or
+            ($null -ne $stderrTask -and -not $stderrTask.Wait(2000))) {
+            throw 'Process-snapshot collector output did not close within 2000 milliseconds after process exit.'
+        }
+        $stdout = if ($null -ne $stdoutTask) { $stdoutTask.Result } else { '' }
+        $stderr = if ($null -ne $stderrTask) { $stderrTask.Result } else { '' }
+        if ($state -eq 'TimedOut' -or $state -eq 'MemoryLimitExceeded') {
+            # The bounded failure state already contains the authoritative reason.
+        }
+        elseif ($collector.ExitCode -ne 0) {
+            $state = 'CollectorFailed'
+            $failure = "Process-snapshot collector exited with code $($collector.ExitCode). " + $stderr.Trim()
+        }
+        elseif ([Text.Encoding]::UTF8.GetByteCount($stdout) -gt $OutputLimitBytes) {
+            $state = 'OutputLimitExceeded'
+            $failure = "Process-snapshot collector exceeded its $OutputLimitBytes-byte output limit."
+        }
+        else {
+            $payload = $stdout | ConvertFrom-Json -ErrorAction Stop
+            if ($null -eq $payload -or
+                -not [string]::Equals([string]$payload.Schema, 'coop-lightweight-process-snapshot-v1', [StringComparison]::Ordinal)) {
+                throw 'Process-snapshot collector returned an unsupported payload.'
+            }
+            $records = @($payload.Records)
+            if ($records.Count -gt 4096) { throw 'Process-snapshot collector returned more than 4096 records.' }
+            foreach ($record in $records) {
+                if ($null -eq $record.PSObject.Properties['ProcessId'] -or
+                    $null -eq $record.PSObject.Properties['ParentProcessId']) {
+                    throw 'A lightweight process-snapshot record is missing its process identity fields.'
+                }
+            }
+            $state = 'Captured'
+        }
+    }
+    catch {
+        $state = 'CollectorFailed'
+        $failure = $_.Exception.Message
+        if ($null -ne $collector) {
+            try {
+                if (-not $collector.HasExited) {
+                    $forcedStopUsed = $true
+                    $collector.Kill()
+                    $null = $collector.WaitForExit(2000)
+                }
+            }
+            catch { $failure += ' Exact collector termination failed: ' + $_.Exception.Message }
+        }
+    }
+    finally {
+        $stopwatch.Stop()
+        if ($null -ne $collector) { $collector.Dispose() }
+    }
+
+    return [pscustomobject][ordered]@{
+        Schema = 'coop-bounded-process-snapshot-v1'
+        State = $state
+        Failure = $failure.Trim()
+        StartedUtc = $startedUtc.ToString('O')
+        CompletedUtc = [DateTime]::UtcNow.ToString('O')
+        DurationMilliseconds = [long]$stopwatch.ElapsedMilliseconds
+        DeadlineMilliseconds = $DeadlineMilliseconds
+        PrivateMemoryLimitBytes = $PrivateMemoryLimitBytes
+        PeakPrivateMemoryBytes = $peakPrivateMemoryBytes
+        OutputLimitBytes = $OutputLimitBytes
+        CollectorProcessId = $collectorProcessId
+        ForcedStopUsed = $forcedStopUsed
+        RecordCount = $records.Count
+        Records = $records
+    }
+}
+
 function Get-CoopOptionalPropertyValue {
     [CmdletBinding()]
     param(
