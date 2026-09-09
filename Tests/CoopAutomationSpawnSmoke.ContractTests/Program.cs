@@ -24,8 +24,34 @@ internal static class Program
         if (!value) throw new Exception(message);
     }
 
+    private static void ValidateNativeCommandReadinessSource()
+    {
+        string path = Path.Combine(
+            Repository(),
+            "DedicatedServer",
+            "Automation",
+            "CoopAutomationDedicatedControlBridge.cs");
+        Check(File.Exists(path), "Dedicated control bridge source is missing.");
+        string source = File.ReadAllText(path);
+        Check(
+            source.Contains(
+                "\"TaleWorlds.MountAndBlade.ListedServer.IIntermissionState\"",
+                StringComparison.Ordinal),
+            "The dedicated bridge must use the exact installed ListedServer intermission interface.");
+        Check(
+            !source.Contains(
+                "\"TaleWorlds.MountAndBlade.IIntermissionState\"",
+                StringComparison.Ordinal),
+            "The obsolete non-ListedServer intermission interface must not return.");
+        Check(
+            source.Contains("IsNewTaskAssignable", StringComparison.Ordinal) &&
+            source.Contains("IntermissionStateInterfaceName", StringComparison.Ordinal),
+            "Native readiness must retain the idle-task guard and exact interface contract.");
+    }
+
     private static int Main()
     {
+        ValidateNativeCommandReadinessSource();
         string runId = "m4-contract-" + Guid.NewGuid().ToString("N");
         string root = Path.Combine(Path.GetTempPath(), "CoopSpectator", "Automation", runId);
         string fixtureRoot = Path.Combine(root, "payloads", "field-current");

@@ -564,6 +564,47 @@ function Exit-CoopSharedRuntimeLocksCore {
     return $probes.ToArray()
 }
 
+function Get-CoopFatalHelperExecutablePathsCore {
+    [CmdletBinding()]
+    param(
+        [AllowEmptyString()][string]$GameRoot,
+        [AllowEmptyString()][string]$DedicatedServerRoot,
+        [Parameter(Mandatory = $true)][string]$SystemRoot
+    )
+
+    if ([string]::IsNullOrWhiteSpace($SystemRoot)) { throw 'SystemRoot is required.' }
+    $paths = New-Object 'System.Collections.Generic.List[string]'
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($path in @(
+        $(if (-not [string]::IsNullOrWhiteSpace($GameRoot)) {
+            Join-Path $GameRoot 'bin\CrashUploader.Publish\CrashUploader.Publish.exe'
+        }),
+        $(if (-not [string]::IsNullOrWhiteSpace($DedicatedServerRoot)) {
+            Join-Path $DedicatedServerRoot 'bin\CrashUploader.Publish\CrashUploader.Publish.exe'
+        }),
+        (Join-Path $SystemRoot 'System32\WerFault.exe'))) {
+        if ([string]::IsNullOrWhiteSpace([string]$path)) { continue }
+        $fullPath = [System.IO.Path]::GetFullPath([string]$path)
+        if ($seen.Add($fullPath)) { $paths.Add($fullPath) | Out-Null }
+    }
+    return $paths.ToArray()
+}
+
+function Get-CoopRuntimeCleanupGraceSecondsCore {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$RoleType,
+        [ValidateRange(1, 60)][int]$DefaultGraceSeconds = 15,
+        [ValidateRange(1, 60)][int]$SupportGraceSeconds = 1
+    )
+
+    if ([string]::Equals($RoleType, 'RuntimeSupport', [StringComparison]::Ordinal) -or
+        [string]::Equals($RoleType, 'RuntimeFailureSupport', [StringComparison]::Ordinal)) {
+        return $SupportGraceSeconds
+    }
+    return $DefaultGraceSeconds
+}
+
 function Get-CoopCorrelatedFailureProcessesFromSnapshot {
     [CmdletBinding()]
     param(

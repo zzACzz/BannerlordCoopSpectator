@@ -41,6 +41,22 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+function Initialize-CoopFileHashCommand {
+    $command = Get-Command -Name 'Get-FileHash' -ErrorAction SilentlyContinue
+    if ($null -eq $command -and $PSVersionTable.PSVersion.Major -le 5) {
+        $utilityManifestPath = Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1'
+        if ([System.IO.File]::Exists($utilityManifestPath)) {
+            Import-Module -Name $utilityManifestPath -Force -ErrorAction Stop
+        }
+        $command = Get-Command -Name 'Get-FileHash' -ErrorAction SilentlyContinue
+    }
+    if ($null -eq $command) {
+        throw 'The required Get-FileHash command is unavailable in this PowerShell host.'
+    }
+}
+
+Initialize-CoopFileHashCommand
+
 $runnerCorePath = Join-Path $PSScriptRoot 'CoopAutomationRunner.Core.ps1'
 if (-not [System.IO.File]::Exists($runnerCorePath)) {
     throw "Runner core helper is missing: $runnerCorePath"
@@ -788,7 +804,8 @@ function Stop-CoopOwnedRuntimeProcesses {
         else { 3 }
     })
     foreach ($identity in $ordered) {
-        Stop-CoopExactProcessIdentity -Identity $identity
+        $graceSeconds = Get-CoopRuntimeCleanupGraceSecondsCore -RoleType ([string]$identity.RoleType)
+        Stop-CoopExactProcessIdentity -Identity $identity -GraceSeconds $graceSeconds
     }
     Write-CoopJsonAtomic -Path (Join-Path $runRoot 'artifacts\processes\runtime-cleanup.json') -Value ([ordered]@{
         Schema = 'coop-runtime-cleanup-v1'
@@ -906,12 +923,10 @@ function Write-CoopRuntimeFailureEvidence {
     $snapshotFailure = ''
     try {
         $snapshot = @(Get-CimInstance -ClassName Win32_Process -OperationTimeoutSec 10 -ErrorAction Stop)
-        $allowedPaths = @(
-            (Join-Path $GameRoot 'bin\CrashUploader.Publish\CrashUploader.Publish.exe'),
-            (Join-Path $GameRoot 'bin\Win64_Shipping_Client\Watchdog\Watchdog.exe'),
-            (Join-Path $DedicatedServerRoot 'bin\CrashUploader.Publish\CrashUploader.Publish.exe'),
-            (Join-Path $DedicatedServerRoot 'bin\Win64_Shipping_Server\Watchdog\Watchdog.exe'),
-            (Join-Path $env:SystemRoot 'System32\WerFault.exe'))
+        $allowedPaths = @(Get-CoopFatalHelperExecutablePathsCore `
+            -GameRoot $GameRoot `
+            -DedicatedServerRoot $DedicatedServerRoot `
+            -SystemRoot $env:SystemRoot)
         if ($rootProcessIds.Count -gt 0) {
             $correlatedFailureProcesses = @(Get-CoopCorrelatedFailureProcessesFromSnapshot `
                 -Snapshot $snapshot `
@@ -2527,6 +2542,7 @@ function Invoke-CoopFeasibility {
             try { Add-CoopEvent -EventType 'OwnedDescendantDiscoveryFailed' -Message $runtimeReason } catch { }
         }
         if ($runtimeOutcome -eq 'Crash' -or $runtimeOutcome -eq 'Timeout') {
+            try { Add-CoopEvent -EventType 'FailureEvidenceCaptureStarted' -Message 'Structured runtime failure-evidence capture started.' } catch { }
             try {
                 $runtimeFailureEvidence = Write-CoopRuntimeFailureEvidence `
                     -Outcome $runtimeOutcome `
@@ -2543,12 +2559,20 @@ function Invoke-CoopFeasibility {
                 $runtimeReason = 'Structured failure-evidence publication failed: ' + $_.Exception.Message
                 $runtimeSupersession = 'FailureEvidencePublicationFailed'
             }
+            try { Add-CoopEvent -EventType 'FailureEvidenceCaptureCompleted' -Message 'Structured runtime failure-evidence capture completed.' } catch { }
+        }
+        $failureCleanupDiagnostic = $primaryRuntimeOutcome -eq 'Crash' -or $primaryRuntimeOutcome -eq 'Timeout'
+        if ($failureCleanupDiagnostic) {
+            try { Add-CoopEvent -EventType 'RuntimeCleanupStarted' -Message 'Exact runtime cleanup started after a runtime failure.' } catch { }
         }
         try { Stop-CoopOwnedRuntimeProcesses }
         catch {
             $runtimeOutcome = 'RunnerInternalError'
             $runtimeReason = 'Exact runtime cleanup failed: ' + $_.Exception.Message
             $runtimeSupersession = 'RuntimeCleanupFailed'
+        }
+        if ($failureCleanupDiagnostic) {
+            try { Add-CoopEvent -EventType 'RuntimeCleanupCompleted' -Message 'Exact runtime cleanup completed after a runtime failure.' } catch { }
         }
         if ($null -ne $dedicatedTextCapture) {
             try { Complete-CoopProcessTextCapture -Capture $dedicatedTextCapture }
@@ -3101,10 +3125,10 @@ function Invoke-CoopDedicatedSpawnSmokeAttempt {
             } | ForEach-Object { [int]$_.ProcessId } | Select-Object -Unique)
             if ($rootProcessIds.Count -gt 0) {
                 $null = Add-CoopOwnedDescendants -RootProcessIds $rootProcessIds
-                $fatalPaths = @(
-                    (Join-Path $DedicatedServerRoot 'bin\CrashUploader.Publish\CrashUploader.Publish.exe'),
-                    (Join-Path $DedicatedServerRoot 'bin\Win64_Shipping_Server\Watchdog\Watchdog.exe'),
-                    (Join-Path $env:SystemRoot 'System32\WerFault.exe'))
+                $fatalPaths = @(Get-CoopFatalHelperExecutablePathsCore `
+                    -GameRoot $GameRoot `
+                    -DedicatedServerRoot $DedicatedServerRoot `
+                    -SystemRoot $env:SystemRoot)
                 $fatalHelpers = @(Get-CoopCorrelatedFailureProcessesFromSnapshot -Snapshot @(Get-CimInstance Win32_Process -OperationTimeoutSec 10 -ErrorAction Stop) -OwnedRootProcessIds $rootProcessIds -AllowedExecutablePaths $fatalPaths)
                 $noFatalHelpersConfirmed = $fatalHelpers.Count -eq 0
                 if (-not $noFatalHelpersConfirmed) {
@@ -3121,6 +3145,7 @@ function Invoke-CoopDedicatedSpawnSmokeAttempt {
             try { Add-CoopEvent -EventType 'OwnedDescendantDiscoveryFailed' -Message $runtimeReason } catch { }
         }
         if ($runtimeOutcome -eq 'Crash' -or $runtimeOutcome -eq 'Timeout') {
+            try { Add-CoopEvent -EventType 'FailureEvidenceCaptureStarted' -Message 'Structured runtime failure-evidence capture started.' } catch { }
             try {
                 $runtimeFailureEvidence = Write-CoopRuntimeFailureEvidence `
                     -Outcome $runtimeOutcome `
@@ -3137,12 +3162,20 @@ function Invoke-CoopDedicatedSpawnSmokeAttempt {
                 $runtimeReason = 'Structured failure-evidence publication failed: ' + $_.Exception.Message
                 $runtimeSupersession = 'FailureEvidencePublicationFailed'
             }
+            try { Add-CoopEvent -EventType 'FailureEvidenceCaptureCompleted' -Message 'Structured runtime failure-evidence capture completed.' } catch { }
+        }
+        $failureCleanupDiagnostic = $primaryRuntimeOutcome -eq 'Crash' -or $primaryRuntimeOutcome -eq 'Timeout'
+        if ($failureCleanupDiagnostic) {
+            try { Add-CoopEvent -EventType 'RuntimeCleanupStarted' -Message 'Exact runtime cleanup started after a runtime failure.' } catch { }
         }
         try { Stop-CoopOwnedRuntimeProcesses }
         catch {
             $runtimeOutcome = 'RunnerInternalError'
             $runtimeReason = 'Exact runtime cleanup failed: ' + $_.Exception.Message
             $runtimeSupersession = 'RuntimeCleanupFailed'
+        }
+        if ($failureCleanupDiagnostic) {
+            try { Add-CoopEvent -EventType 'RuntimeCleanupCompleted' -Message 'Exact runtime cleanup completed after a runtime failure.' } catch { }
         }
         if ($null -ne $dedicatedTextCapture) {
             try { Complete-CoopProcessTextCapture -Capture $dedicatedTextCapture }

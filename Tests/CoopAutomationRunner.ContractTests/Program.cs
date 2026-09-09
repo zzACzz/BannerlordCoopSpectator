@@ -89,8 +89,23 @@ internal static class Program
             source.Contains("Write-CoopRuntimeFailureEvidence", StringComparison.Ordinal) &&
             source.Contains("artifacts\\crashes\\' + $fileName", StringComparison.Ordinal) &&
             source.Contains("DumpAttemptState", StringComparison.Ordinal) &&
-            coreSource.Contains("Get-CoopCorrelatedFailureProcessesFromSnapshot", StringComparison.Ordinal),
+            coreSource.Contains("Get-CoopCorrelatedFailureProcessesFromSnapshot", StringComparison.Ordinal) &&
+            source.Contains("Get-CoopFatalHelperExecutablePathsCore", StringComparison.Ordinal) &&
+            coreSource.Contains("function Get-CoopFatalHelperExecutablePathsCore", StringComparison.Ordinal),
             "FailureEvidenceV1 must retain structured crash/hang evidence and exact process correlation.");
+        Assert(
+            source.Contains("Initialize-CoopFileHashCommand", StringComparison.Ordinal) &&
+            source.Contains("Microsoft.PowerShell.Utility.psd1", StringComparison.Ordinal),
+            "The aggregate runner must explicitly recover Get-FileHash in Windows PowerShell 5.1.");
+        Assert(
+            source.Contains("FailureEvidenceCaptureStarted", StringComparison.Ordinal) &&
+            source.Contains("FailureEvidenceCaptureCompleted", StringComparison.Ordinal) &&
+            source.Contains("RuntimeCleanupStarted", StringComparison.Ordinal) &&
+            source.Contains("RuntimeCleanupCompleted", StringComparison.Ordinal),
+            "Runtime failure finalization must publish phase markers outside the success path.");
+        Assert(
+            source.Contains("Get-CoopRuntimeCleanupGraceSecondsCore", StringComparison.Ordinal),
+            "Runtime cleanup must use the tested role-specific grace policy.");
         Assert(
             source.Contains("$dedicatedBootstrapRequest = New-CoopDedicatedBootstrapRequest", StringComparison.Ordinal),
             "Aggregate runner must use the tested structured dedicated-bootstrap request builder.");
@@ -1250,6 +1265,26 @@ Assert-True `
     ($lockRelease.Count -eq 6 -and
         @($lockRelease | Where-Object { -not $_.ReleasedAndReacquired }).Count -eq 0) `
     'Every shared runtime lock must be verified released.'
+
+$fatalHelperPaths = @(Get-CoopFatalHelperExecutablePathsCore `
+    -GameRoot 'C:\contract-game' `
+    -DedicatedServerRoot 'C:\contract-dedicated' `
+    -SystemRoot $env:SystemRoot)
+Assert-True ($fatalHelperPaths.Count -eq 3) 'Fatal helper policy must contain two CrashUploader paths and one WerFault path.'
+Assert-True (@($fatalHelperPaths | Where-Object { $_ -match 'Watchdog' }).Count -eq 0) `
+    'A normal Watchdog descendant must never be classified as a fatal helper.'
+Assert-True (@($fatalHelperPaths | Where-Object { $_ -match 'CrashUploader\.Publish\.exe$' }).Count -eq 2) `
+    'Both client and dedicated CrashUploader executables must remain fatal helpers.'
+Assert-True (@($fatalHelperPaths | Where-Object { $_ -match 'WerFault\.exe$' }).Count -eq 1) `
+    'The exact Windows WerFault executable must remain a fatal helper.'
+Assert-True ((Get-CoopRuntimeCleanupGraceSecondsCore -RoleType 'RuntimeSupport') -eq 1) `
+    'Normal runtime support processes must use the short cleanup grace period.'
+Assert-True ((Get-CoopRuntimeCleanupGraceSecondsCore -RoleType 'RuntimeFailureSupport') -eq 1) `
+    'Failure support processes must use the short cleanup grace period.'
+Assert-True ((Get-CoopRuntimeCleanupGraceSecondsCore -RoleType 'DedicatedServer') -eq 15) `
+    'Primary dedicated processes must retain the full cleanup grace period.'
+Assert-True ((Get-CoopRuntimeCleanupGraceSecondsCore -RoleType 'CampaignHost') -eq 15) `
+    'Primary campaign processes must retain the full cleanup grace period.'
 
 $allowedCrashPath = [System.IO.Path]::GetFullPath((Join-Path $lockFixtureRoot 'CrashUploader.Publish.exe'))
 $otherPath = [System.IO.Path]::GetFullPath((Join-Path $lockFixtureRoot 'other.exe'))

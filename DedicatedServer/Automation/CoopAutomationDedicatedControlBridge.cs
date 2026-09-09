@@ -16,6 +16,8 @@ namespace CoopSpectator.Infrastructure.Automation
             "TaleWorlds.MountAndBlade.ListedServer.InitialListedGameServerState";
         private const string IntermissionManagerTypeName =
             "TaleWorlds.MountAndBlade.ListedServer.ServerSideIntermissionManager";
+        private const string IntermissionStateInterfaceName =
+            "TaleWorlds.MountAndBlade.ListedServer.IIntermissionState";
         private static readonly TimeSpan RequestPollInterval = TimeSpan.FromMilliseconds(100);
         private static readonly TimeSpan BindRetryInterval = TimeSpan.FromMilliseconds(250);
         private static readonly object SubscriptionLock = new object();
@@ -619,7 +621,7 @@ namespace CoopSpectator.Infrastructure.Automation
             if (!opening) return Mission.Current != null && !Mission.Current.MissionEnded;
             object active = TaleWorlds.Core.GameStateManager.Current?.ActiveState;
             return active != null && active.GetType().GetInterfaces().Any(
-                type => type.FullName == "TaleWorlds.MountAndBlade.IIntermissionState");
+                type => string.Equals(type.FullName, IntermissionStateInterfaceName, StringComparison.Ordinal));
         }
 
         private static object GetIntermissionManager()
