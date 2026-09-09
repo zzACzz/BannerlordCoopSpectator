@@ -139,6 +139,52 @@ namespace CoopSpectator.GameMode
             return false;
         }
 
+        public static bool EnsureServerScoreboardGameModeDependency(
+            List<MissionBehavior> list,
+            MultiplayerGameType gameType)
+        {
+            if (list == null)
+                throw new ArgumentNullException(nameof(list));
+
+            int scoreboardIndex = list.FindIndex(behavior =>
+                IsBehaviorTypeOrBaseType(behavior, "MissionScoreboardComponent"));
+            bool hasScoreboard = scoreboardIndex >= 0;
+            bool hasGameModeClient = list.Any(behavior =>
+                behavior is MissionMultiplayerGameModeBaseClient);
+
+            CoopScoreboardBehaviorDependencyAction action =
+                CoopScoreboardBehaviorDependencyContract.Resolve(
+                    isServerOrRecorder: true,
+                    hasScoreboard: hasScoreboard,
+                    hasGameModeClient: hasGameModeClient);
+            if (action == CoopScoreboardBehaviorDependencyAction.InsertServerBridge)
+            {
+                list.Insert(
+                    scoreboardIndex,
+                    new MissionMultiplayerScoreboardServerBridge(gameType));
+                hasGameModeClient = true;
+            }
+
+            AssertServerScoreboardGameModeDependency(
+                hasScoreboard,
+                hasGameModeClient);
+            return action == CoopScoreboardBehaviorDependencyAction.InsertServerBridge;
+        }
+
+        private static void AssertServerScoreboardGameModeDependency(
+            bool hasScoreboard,
+            bool hasGameModeClient)
+        {
+            if (!CoopScoreboardBehaviorDependencyContract.IsSatisfied(
+                    isServerOrRecorder: true,
+                    hasScoreboard: hasScoreboard,
+                    hasGameModeClient: hasGameModeClient))
+            {
+                throw new InvalidOperationException(
+                    "A server MissionScoreboardComponent requires MissionMultiplayerGameModeBaseClient for its complete lifecycle.");
+            }
+        }
+
         public static MissionBehavior TryCreateBehavior(string fullTypeName)
         {
             if (string.IsNullOrEmpty(fullTypeName)) return null;
@@ -871,4 +917,3 @@ namespace CoopSpectator.GameMode
         }
     }
 }
-

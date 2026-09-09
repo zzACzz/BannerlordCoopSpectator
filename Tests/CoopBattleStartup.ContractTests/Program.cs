@@ -12,6 +12,8 @@ internal static class Program
     {
         try
         {
+            ValidateServerScoreboardDependencyDecision();
+            ValidateServerScoreboardDependencySourceWiring();
             ValidateExactReliefUniqueSettlementResolution();
             ValidateExactReliefResolutionIsSideOrderIndependent();
             ValidateExactReliefAttachedPartyMatchesArmyLeader();
@@ -97,6 +99,138 @@ internal static class Program
             Console.Error.WriteLine(ex.Message);
             return 1;
         }
+    }
+
+    private static void ValidateServerScoreboardDependencyDecision()
+    {
+        Assert(
+            CoopScoreboardBehaviorDependencyContract.Resolve(
+                isServerOrRecorder: true,
+                hasScoreboard: true,
+                hasGameModeClient: false) ==
+            CoopScoreboardBehaviorDependencyAction.InsertServerBridge,
+            "A server scoreboard without a game-mode client must require the server bridge.");
+        Assert(
+            CoopScoreboardBehaviorDependencyContract.IsSatisfied(
+                isServerOrRecorder: true,
+                hasScoreboard: true,
+                hasGameModeClient: true),
+            "A server scoreboard with a game-mode client must satisfy the dependency.");
+        Assert(
+            CoopScoreboardBehaviorDependencyContract.IsSatisfied(
+                isServerOrRecorder: true,
+                hasScoreboard: false,
+                hasGameModeClient: false),
+            "A server stack without a scoreboard must not require the bridge.");
+        Assert(
+            CoopScoreboardBehaviorDependencyContract.IsSatisfied(
+                isServerOrRecorder: false,
+                hasScoreboard: true,
+                hasGameModeClient: false),
+            "A non-server scoreboard must remain outside the server dependency contract.");
+    }
+
+    private static void ValidateServerScoreboardDependencySourceWiring()
+    {
+        string repositoryRoot = FindRepositoryRoot();
+        string bridgeSource = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "GameMode",
+            "MissionMultiplayerScoreboardServerBridge.cs"));
+        string helperSource = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "GameMode",
+            "MissionBehaviorHelpers.cs"));
+        string coopBattleSource = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "GameMode",
+            "MissionMultiplayerCoopBattleMode.cs"));
+        string tdmCloneSource = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "GameMode",
+            "MissionMultiplayerTdmCloneMode.cs"));
+        string hideoutDaySource = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "GameMode",
+            "MissionMultiplayerCoopHideoutDayMode.cs"));
+        string hideoutNightSource = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "GameMode",
+            "MissionMultiplayerCoopHideoutNightMode.cs"));
+        string siegeSource = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "GameMode",
+            "MissionMultiplayerCoopSiegeAssaultWithDeploymentMode.cs"));
+        string suppressionPatchSource = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "Patches",
+            "BattleShellSuppressionPatch.cs"));
+
+        Assert(
+            bridgeSource.Contains(
+                "MissionMultiplayerGameModeBaseClient",
+                StringComparison.Ordinal) &&
+            bridgeSource.Contains(
+                "private readonly MultiplayerGameType _gameType;",
+                StringComparison.Ordinal) &&
+            !bridgeSource.Contains("override void AfterStart", StringComparison.Ordinal) &&
+            !bridgeSource.Contains("ModLogger", StringComparison.Ordinal),
+            "The server bridge must be a minimal game-mode client dependency without lifecycle interception or diagnostics.");
+        int helperInsertIndex = helperSource.IndexOf("list.Insert(", StringComparison.Ordinal);
+        int helperScoreboardIndex = helperSource.IndexOf(
+            "scoreboardIndex,",
+            helperInsertIndex,
+            StringComparison.Ordinal);
+        int helperBridgeIndex = helperSource.IndexOf(
+            "new MissionMultiplayerScoreboardServerBridge(gameType)",
+            helperScoreboardIndex,
+            StringComparison.Ordinal);
+        Assert(
+            helperInsertIndex >= 0 &&
+            helperScoreboardIndex > helperInsertIndex &&
+            helperBridgeIndex > helperScoreboardIndex &&
+            helperSource.Contains(
+                "behavior is MissionMultiplayerGameModeBaseClient",
+                StringComparison.Ordinal) &&
+            helperSource.Contains(
+                "AssertServerScoreboardGameModeDependency",
+                StringComparison.Ordinal),
+            "The shared helper must insert one bridge before the scoreboard and assert the resulting invariant.");
+        Assert(
+            coopBattleSource.Contains(
+                "ensureServerScoreboardDependency: true",
+                StringComparison.Ordinal) &&
+            coopBattleSource.Contains(
+                "ensureServerScoreboardDependency: false",
+                StringComparison.Ordinal) &&
+            coopBattleSource.Contains(
+                "MissionBehaviorHelpers.EnsureServerScoreboardGameModeDependency",
+                StringComparison.Ordinal),
+            "Direct CoopBattle must enforce the dependency while reusable hideout construction remains available for its existing bridge.");
+        Assert(
+            tdmCloneSource.Contains(
+                "MissionBehaviorHelpers.EnsureServerScoreboardGameModeDependency",
+                StringComparison.Ordinal) &&
+            tdmCloneSource.Contains(
+                "MultiplayerGameType.TeamDeathmatch",
+                StringComparison.Ordinal),
+            "The full TdmClone server stack must enforce the same scoreboard dependency.");
+        Assert(
+            hideoutDaySource.Contains(
+                "list.Insert(0, new MissionMultiplayerCoopBattleClient());",
+                StringComparison.Ordinal) &&
+            hideoutNightSource.Contains(
+                "list.Insert(0, new MissionMultiplayerCoopBattleClient());",
+                StringComparison.Ordinal) &&
+            siegeSource.Contains(
+                "new MissionMultiplayerCoopSiegeAssaultWithDeploymentClient()",
+                StringComparison.Ordinal),
+            "Already-safe hideout and siege stacks must retain their established game-mode client dependencies.");
+        Assert(
+            suppressionPatchSource.Contains(
+                "private static void MissionScoreboardComponent_AfterStart_Prefix",
+                StringComparison.Ordinal),
+            "The scoreboard observation patch must remain non-suppressing; the engine lifecycle must execute normally.");
     }
 
     private static void ValidateExactReliefUniqueSettlementResolution()

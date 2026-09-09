@@ -246,6 +246,12 @@ namespace CoopSpectator.GameMode
             {
                 ModLogger.Info("[TdmCloneStack] server stack sanity: scoreboard not required because MissionCustomGameServerComponent is absent.");
             }
+            if (MissionBehaviorHelpers.EnsureServerScoreboardGameModeDependency(
+                    list,
+                    MultiplayerGameType.TeamDeathmatch))
+            {
+                changed = true;
+            }
             if (changed)
                 ModLogger.Info("[TdmCloneStack] server stack sanity: list was corrected; final count=" + list.Count);
         }
@@ -386,6 +392,5 @@ namespace CoopSpectator.GameMode
         }
     }
 }
-
 
 

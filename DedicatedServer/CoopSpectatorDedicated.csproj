@@ -51,6 +51,7 @@
     <Compile Include="..\GameMode\MissionMultiplayerCoopSiegeAssaultWithDeploymentClient.cs" Link="GameMode\MissionMultiplayerCoopSiegeAssaultWithDeploymentClient.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopBattle.cs" Link="GameMode\MissionMultiplayerCoopBattle.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopBattleClient.cs" Link="GameMode\MissionMultiplayerCoopBattleClient.cs" />
+    <Compile Include="..\GameMode\MissionMultiplayerScoreboardServerBridge.cs" Link="GameMode\MissionMultiplayerScoreboardServerBridge.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopTdmMode.cs" Link="GameMode\MissionMultiplayerCoopTdmMode.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopTdm.cs" Link="GameMode\MissionMultiplayerCoopTdm.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopTdmClient.cs" Link="GameMode\MissionMultiplayerCoopTdmClient.cs" />
@@ -177,6 +178,7 @@
     <Compile Include="..\Infrastructure\CoopCampaignMapPrototypeBridgeFile.cs" Link="Infrastructure\CoopCampaignMapPrototypeBridgeFile.cs" />
     <Compile Include="..\Infrastructure\CoopMountedHeroMountLinkContract.cs" Link="Infrastructure\CoopMountedHeroMountLinkContract.cs" />
     <Compile Include="..\Infrastructure\CoopClientBootstrapResetContract.cs" Link="Infrastructure\CoopClientBootstrapResetContract.cs" />
+    <Compile Include="..\Infrastructure\CoopScoreboardBehaviorDependencyContract.cs" Link="Infrastructure\CoopScoreboardBehaviorDependencyContract.cs" />
     <Compile Include="..\Infrastructure\CoopClientWeaponRuntimeSafetyContract.cs" Link="Infrastructure\CoopClientWeaponRuntimeSafetyContract.cs" />
     <Compile Include="..\Infrastructure\CoopHeroBattleProgressionContract.cs" Link="Infrastructure\CoopHeroBattleProgressionContract.cs" />
     <Compile Include="..\Infrastructure\CoopMissionEquipmentAmmoPerkContract.cs" Link="Infrastructure\CoopMissionEquipmentAmmoPerkContract.cs" />

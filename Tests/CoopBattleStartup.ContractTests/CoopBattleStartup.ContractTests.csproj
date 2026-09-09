@@ -6,6 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="..\..\Infrastructure\CoopScoreboardBehaviorDependencyContract.cs" Link="CoopScoreboardBehaviorDependencyContract.cs" />
     <Compile Include="..\..\Infrastructure\CoopClientBootstrapResetContract.cs" Link="CoopClientBootstrapResetContract.cs" />
     <Compile Include="..\..\Infrastructure\CoopMaterializedAgentEntrySnapshotContract.cs" Link="CoopMaterializedAgentEntrySnapshotContract.cs" />
     <Compile Include="..\..\Infrastructure\CoopUnitSelectionSearchContract.cs" Link="CoopUnitSelectionSearchContract.cs" />

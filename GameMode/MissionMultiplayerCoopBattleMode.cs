@@ -136,6 +136,15 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
 
         private static IEnumerable<MissionBehavior> CreateBehaviorsForMission(Mission mission)
         {
+            return CreateBehaviorsForMission(
+                mission,
+                ensureServerScoreboardDependency: true);
+        }
+
+        private static IEnumerable<MissionBehavior> CreateBehaviorsForMission(
+            Mission mission,
+            bool ensureServerScoreboardDependency)
+        {
             bool isServer = GameNetwork.IsServer;
             bool isDedicated = IsDedicatedServerProcess();
             string resolvedRuntimeScene = ResolveRuntimeSceneName(mission);
@@ -144,7 +153,12 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 : BuildClientMissionBehaviorsForCoopBattle(mission, isDedicated);
 
             if (isServer)
-                ValidateServerStackSanity(list);
+                ValidateServerStackSanity(
+                    list,
+                    ensureServerScoreboardDependency,
+                    IsBattleMapSceneName(resolvedRuntimeScene)
+                        ? MultiplayerGameType.Battle
+                        : MultiplayerGameType.TeamDeathmatch);
             else
                 ValidateClientStackSanity(list);
 
@@ -165,7 +179,9 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
 
         internal static IEnumerable<MissionBehavior> CreateBehaviorsForOfficialOpenNewBridge(Mission mission)
         {
-            return CreateBehaviorsForMission(mission);
+            return CreateBehaviorsForMission(
+                mission,
+                ensureServerScoreboardDependency: false);
         }
 
         private static List<MissionBehavior> BuildServerMissionBehaviorsForCoopBattle(Mission mission, bool isDedicated)
@@ -743,7 +759,10 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
             return scenarioContext;
         }
 
-        private static void ValidateServerStackSanity(List<MissionBehavior> list)
+        private static void ValidateServerStackSanity(
+            List<MissionBehavior> list,
+            bool ensureScoreboardDependency,
+            MultiplayerGameType scoreboardGameType)
         {
             if (list == null)
                 return;
@@ -793,6 +812,13 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
                 {
                     ModLogger.Error("CoopBattle server validation: MissionScoreboardComponent missing and could not be created. MissionCustomGameServerComponent.AfterStart may crash.", null);
                 }
+            }
+
+            if (ensureScoreboardDependency)
+            {
+                MissionBehaviorHelpers.EnsureServerScoreboardGameModeDependency(
+                    list,
+                    scoreboardGameType);
             }
         }
 
