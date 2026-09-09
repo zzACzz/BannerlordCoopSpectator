@@ -1,7 +1,7 @@
 # Milestone 4 — Field dedicated spawn smoke: source, contracts, local isolation and live findings
 
 Date: **2026-09-09** (Europe/Kyiv; validation IDs retain the approved 20260908 names).
-Status: **The shared failure-evidence process snapshot is isolated and bounded at source/L1. Preflight then recovered the correlated full dump omitted from the prior archive and localized the mission-opening failure to a null `MissionMultiplayerGameModeBaseClient` dependency inside `MissionScoreboardComponent.AfterStart`. No unchanged native rerun was performed; the cross-mode source fix and L2 remain open.**
+Status: **The shared failure-evidence process snapshot is isolated and bounded at source/L1. The recovered full dump localized the mission-opening failure to a null `MissionMultiplayerGameModeBaseClient` dependency inside `MissionScoreboardComponent.AfterStart`; published correction `a6fe74f` now enforces that dependency for direct CoopBattle and full TdmClone and passes source/L1 verification. Controlled staging, native lifecycle confirmation and L2 remain open.**
 Original 4A approval: **"ок на Milestone 4A source/contracts"**. The separately approved local-only 4B live validation and restoration are recorded in section 12.
 Original 4A source baseline: branch `codex/v0.1.1-refresh`, HEAD/local upstream `452df7e30d3d8d120488570857134078d6072ecc`, initially clean.
 The original 4A implementation was subsequently published as 7d75742c338f504499ec01dd8e3b2f189a1f7a03. Section 11 records the local-isolation follow-up's pre-publication validation in `C:\Users\Admin\.codex\worktrees\1b21\BannerlordCoopSpectator3`.
@@ -775,3 +775,65 @@ The exact engine class also dereferences `_mpGameModeBase.RoundComponent` in `On
 | Mission materialization and L2 | Not Satisfied |
 
 The next separately approved stage is a source/contracts correction. It must enforce the `MissionScoreboardComponent` → `MissionMultiplayerGameModeBaseClient` dependency before mission start, cover both the confirmed CoopBattle battle-map path and the latent full TdmClone server path, preserve the already-safe hideout/siege/other-mode ordering, and test `AfterStart`, clear/remove lifecycle expectations without adding default-on hot-path diagnostics. Only a clean-published correction may proceed through fresh 24/24, both CompileOnly builds, controlled staging and one bounded live attempt. The existing dump configuration must remain a preflight fact, not be rewritten unnecessarily.
+
+## 19. Scoreboard server dependency source and contract closure (2026-09-09)
+
+### 19.1 Scope and implementation
+
+The user approved the cross-mode source/contracts correction after the full-dump diagnosis. Published technical revision `a6fe74fec0e596b5466faf477b9713bea0b95e72` (`a6fe74f`) implements the smallest coherent behavior-stack correction:
+
+- `CoopScoreboardBehaviorDependencyContract` is a pure decision: only a server/recorder stack that has a scoreboard and lacks any `MissionMultiplayerGameModeBaseClient` requires insertion;
+- `MissionMultiplayerScoreboardServerBridge` derives from the exact required engine base, carries only the selected `MultiplayerGameType`, returns neutral gold/tactical/countdown values, and adds no client visuals, hot-path diagnostics, `AfterStart`, `OnClearScene`, or `OnRemoveBehavior` interception;
+- `MissionBehaviorHelpers.EnsureServerScoreboardGameModeDependency` finds the first scoreboard, detects any existing base-client dependency, inserts exactly one bridge immediately before the scoreboard when required, and asserts the resulting invariant;
+- direct `MissionMultiplayerCoopBattleMode` construction enables the helper with Battle or TeamDeathmatch identity according to the resolved scene;
+- reusable CoopBattle construction used by the day/night hideout wrappers deliberately defers the helper, so those already-safe wrappers retain their established `MissionMultiplayerCoopBattleClient` and do not receive a duplicate bridge;
+- full `MissionMultiplayerTdmCloneMode` server construction enables the same helper with TeamDeathmatch identity. Its minimal dedicated path remains unchanged because it has no scoreboard;
+- the existing Harmony scoreboard prefix remains a `void` observation hook. The original engine lifecycle is not suppressed or exception-masked.
+
+### 19.2 Cross-mode disposition
+
+| Construction path | Post-correction disposition |
+|---|---|
+| Direct CoopBattle battle-map server, including field/land/village/sally-out support | One minimal server bridge is inserted before the scoreboard. |
+| CoopBattle non-battle direct server path with a scoreboard | The same invariant is enforced with TeamDeathmatch identity. |
+| Hideout day/night wrappers | Existing `MissionMultiplayerCoopBattleClient` insertion is retained; generic insertion is deferred and no duplicate is introduced. |
+| Siege assault/deployment | Existing siege base-client behavior remains before the scoreboard; unchanged. |
+| CoopTdm, hero creator, campaign-map prototype | Existing matching base-client behavior or scoreboard omission remains unchanged. |
+| TdmClone minimal dedicated path | No scoreboard and therefore no bridge; unchanged. |
+| TdmClone full server path | One minimal server bridge is inserted before the scoreboard. |
+| Sequential/reconnect orchestration | Inherits the corrected selected-scenario construction path; no independent factory changed. |
+
+This satisfies all three known engine lifecycle callers: `AfterStart`, `OnClearScene`, and `OnRemoveBehavior` can resolve a non-null `MissionMultiplayerGameModeBaseClient`. Source/L1 evidence does not prove their execution inside a real dedicated process.
+
+### 19.3 Verification evidence
+
+| Verification | Result |
+|---|---|
+| Focused `CoopBattleStartup.ContractTests` | Passed |
+| `m4sd-c1` full manifest | Passed 24/24; zero failed projects |
+| `m4sd-c1` `contracts.json` | 121,776 bytes; SHA-256 `22C5CA7630C3453DBF203F46538044EFA1BD6326E6EF43DA238AC18961E2A557` |
+| `m4sd-b1` client CompileOnly | Passed; 77 existing warnings, zero errors; DLL 4,736,512 bytes, SHA-256 `A517CED31447A855D680945E979581080331AA7CA2F5C60E29DDA7D76C80C371` |
+| `m4sd-b1` dedicated CompileOnly | Passed; 49 existing warnings, zero errors; DLL 3,649,024 bytes, SHA-256 `74B03C00987F46AD76A6F21BAF807672FC699A402C3BE5EE5D52CB6CEC2BD4B7` |
+| `m4sd-b1` `compile-only.json` | 10,614 bytes; SHA-256 `38B93F6A8FCB97540D9BABC5C5F42876F166AB740DB2D5B384C0BE3A4973662D` |
+| Installed inventories | Byte-for-byte unchanged; no product process launched |
+| Installed dedicated DLLs | Both remain SHA-256 `2E1494BCAEE1DCE440B4373BBA99A4F724B9C32519AACD486DE8F041C0CA1414` |
+| Installed client DLL | Remains SHA-256 `2A1E17E4FEC5330345D28387AF1C4E2D412D07F221EBE7EE02705FAAC250FFB4` |
+| Source hygiene | Eight technical files only; `git diff --check` passed; all are LF-only |
+| Compiled-DLL inspection | The bridge, pure contract, ordered helper insertion and both mode call sites are present in the dedicated CompileOnly DLL |
+
+### 19.4 Evidence boundary and next action
+
+| Requirement / acceptance boundary | Status |
+|---|---|
+| Scoreboard/base-client dependency contract | Satisfied at source/L1 |
+| Confirmed CoopBattle construction-path correction | Satisfied at source/L1 |
+| Latent full TdmClone correction | Satisfied at source/L1 |
+| Already-safe mode preservation | Satisfied by source contracts; native regression Not Run |
+| New default-on hot-path diagnostics | None |
+| Engine lifecycle suppression or exception swallowing | None |
+| Installed module staging | Not Performed |
+| Native `AfterStart`/clear/remove lifecycle | Not Run |
+| Failure-finalizer correction exercised by a live failure | Still Not Run |
+| Mission materialization, early abort and L2 | Not Satisfied |
+
+The next stage must start from the clean published technical and documentation revisions, re-run the required clean gates if source identity changes, create a new one-use full-backup staging transaction, stage only the exact candidate binaries, prove existing dump capture without rewriting its working configuration, and execute one bounded zero-client live attempt. Restoration remains unconditional. A second attempt is allowed only according to the existing two-attempt contract and only if the first attempt reaches a valid evidence boundary. This live stage requires a separate approved plan.
