@@ -1,7 +1,7 @@
 # Milestone 4 — Field dedicated spawn smoke: source, contracts, local isolation and live findings
 
 Date: **2026-09-09** (Europe/Kyiv; validation IDs retain the approved 20260908 names).
-Status: **Readiness and shared failure handling corrected and contract-verified after the first clean live failure; a fresh native L2 rerun remains pending. Milestone 4 remains open.**
+Status: **Corrected binary reached a clean native rerun, but the first child cancelled at the parent/child liveness gate before readiness; automatic cleanup and full restoration passed. Milestone 4 remains open.**
 Original 4A approval: **"ок на Milestone 4A source/contracts"**. The separately approved local-only 4B live validation and restoration are recorded in section 12.
 Original 4A source baseline: branch `codex/v0.1.1-refresh`, HEAD/local upstream `452df7e30d3d8d120488570857134078d6072ecc`, initially clean.
 The original 4A implementation was subsequently published as 7d75742c338f504499ec01dd8e3b2f189a1f7a03. Section 11 records the local-isolation follow-up's pre-publication validation in `C:\Users\Admin\.codex\worktrees\1b21\BannerlordCoopSpectator3`.
@@ -417,3 +417,102 @@ The readiness change is reachable only through the explicit `FieldDedicatedSpawn
 | Native L2 and Milestone 4 completion | Not Satisfied — fresh staged live evidence required |
 
 The next operation is a separately approved publication/clean-build and installed-module staging transaction followed by one bounded local-only `DedicatedSpawnSmoke` rerun. It must retain the pinned fixture, local-only path authority, exact installed hash, process/port/lock ownership, result suppression, two fresh attempts, and outer restoration guarantees. If failure recurs, the new phase markers must identify whether the stall is before, inside, or after evidence capture or cleanup. No manual action inside the game is expected for the zero-client smoke.
+
+## 14. Clean M4 L2 rerun: parent-liveness cancellation (2026-09-09)
+
+### 14.1 Disposition and clean provenance
+
+**Milestone 4 remains open.** Clean published revision `c3ec15a42d80d47ffbc5aeb6c49cbd115ff1dbda` reached a native dedicated launch with the corrected server binary, but the first child cancelled before module/control readiness when its repeated parent-liveness admission reported that the matching parent was not active. The second child was Not Run. No mission opened, no materialization or early abort occurred, and no L2/L3 pass was claimed.
+
+The source worktree was clean and exactly matched upstream before staging. The separate checkout at `C:\dev\projects\BannerlordCoopSpectator3` was not used or edited. Steam was started as a platform prerequisite; no credential, UI, campaign, or multiplayer-client action was performed.
+
+| Purpose | Run directory | Result |
+|---|---|---|
+| Fresh clean full contracts | `m4r27-c-01` | 24/24 Passed; `contracts.json` SHA-256 `441FA814FDB44DDEB27E7D74F3A4F614376F220CA4A8528DD2AC96934D4E605B` |
+| Fresh clean CompileOnly | `m4r27-b-01` | Client/dedicated Passed; installed inventories unchanged; no product process |
+| Transaction and complete backup | `m4r27-stage-01` | Four self-test groups passed in PowerShell 7 and Windows PowerShell 5.1; staging and restoration completed |
+| Public two-attempt driver | `m4r27-live-01` | Cancelled, exit 50; first child failed, second Not Run; L2PassClaimed=false |
+| First child | `m4r27-live-01-01` | Cancelled, exit 50; automatic cleanup complete |
+| Second child | `m4r27-live-01-02` | Not Run; directory absent |
+
+The compile-only client output is version 0.3.2, 4,734,976 bytes, SHA-256 `90EDDB7670CEEA5797F3D6764EBDE637D38C3EFFDC0801A0E94AC80FEF0AB528`. The staged dedicated output is version 0.3.2, 3,646,976 bytes, SHA-256 `0F7FA25AED9C6C7F2D4B3C250D73991B26EAA29189C5703FE753CB12C0D85382`. The compile-only installed before/after inventory artifacts are byte-identical with SHA-256 `35D7049344D13EDCBFEAE2D3E389880AD7EBFA8464EE60AA8A8B83B96AEFBC86`.
+
+### 14.2 New exact transaction
+
+The new temporary helper is `m4r27-stage-01/work/Invoke-M4R27LocalTransaction.ps1`, SHA-256 `31269271CDECD0966BC157B699097179479C303AFB5E422AEE263F35E75BBD51`. It is pinned to revision `c3ec15a`, the exact contracts/build artifacts, installed original DLL SHA-256 `2E1494BCAEE1DCE440B4373BBA99A4F724B9C32519AACD486DE8F041C0CA1414`, and live RunId `m4r27-live-01`. It does not invoke or reuse either older M4 staging helper.
+
+Both supported PowerShell hosts passed the exact helper's four local self-test groups: path/source/current-target rejection, real junction rejection, injected first-file failure restoration, and full two-file replacement/restoration comparison. The transaction then:
+
+- acquired six independent shared-resource locks;
+- captured complete 218-file dedicated, 32-file client, and empty legacy inventories;
+- retained a complete verified 218-file backup under `backup/module`;
+- changed only `CoopSpectator.dll` in the dedicated `Win64_Shipping_Server` and `Win64_Shipping_Client` bins;
+- passed the staged-path diff check before launch;
+- invoked the public runner with the exact staged hash and a 420-second runtime budget;
+- restored in `finally` after the nonzero live result.
+
+Transaction report `m4r27-stage-01/transaction.json` has SHA-256 `B63A7B6D283F702288D92EC57583F438210C67FAF8D1342E48289315E6411457`, `Restored=true`, and an empty `RestorationFailure`.
+
+### 14.3 Observed cancellation boundary
+
+Parent runner PID 13724 created child Windows PowerShell PID 21800. The child's manifest records parent PID 13724, exact parent RunId, and a matching intent/nonce. Its initial parent admission succeeded: the child completed initialization, copied the pinned fixture, created the run-local result sentinel, acquired shared locks, and started exact dedicated PID 22132.
+
+PID 22132 loaded the expected staged module from the dedicated client bin and published schema-2 role state with the same SHA-256 `0F7FA25...5382`. Before it reached terminal `ModuleReady` or authoritative control readiness, a later `Update-CoopLease` call re-ran `Assert-CoopSpawnSmokeParent` and threw `OperationCanceledException`: `The matching parent smoke runner is not active; aborting this attempt.`
+
+The parent itself remained alive until the child exited and then finalized normally. The rejected gate in `Assert-CoopSpawnSmokeParent` combines all of the following into one non-instrumented condition:
+
+- readable parent manifest, lease, and attempt intent;
+- exact command, RunId, nonce, child identity, and parent owner PID;
+- lease status exactly `Active`;
+- parent lease heartbeat no older than 10 seconds.
+
+The immutable manifest/intent/PID values are matching in the retained artifacts, and the same admission had already succeeded. The lease is finalized as `Completed` only after the child exit. However, no artifact captured the individual values at the rejecting read. The exact trigger therefore cannot be distinguished between a heartbeat older than the hard 10-second window and a transient null/incomplete shared read. Startup timing is consistent with the heartbeat window, but that is an inference, not a direct measurement. Do not claim a specific scheduling stall, file-system race, or parent death.
+
+This gate is specific to the two-process `DedicatedSpawnSmoke` controller. Connection Feasibility does not use `Assert-CoopSpawnSmokeParent`; no campaign, client, village, siege, hideout, or other battle adapter was reached. The corrected ListedServer readiness code was loaded but its behavior was not exercised past this earlier orchestration gate.
+
+### 14.4 Automatic cleanup and corrected helper semantics
+
+Unlike the preceding live attempt, the child completed its terminal report, manifest, lease, native-log capture, exact cleanup, and both lock-release reports without manual recovery:
+
+- `spawn-smoke-attempt.json` outcome is `Cancelled`; primary and terminal reasons match;
+- exact dedicated PID 22132 was identity-validated and forcibly stopped after the retained primary-role graceful budget;
+- no owned process or required port remained;
+- `NoFatalHelpersConfirmed=true`; the captured watchdog log did not promote cancellation to `Crash`;
+- required `rgl_log_22132.txt` and `rgl_log_errors_22132.txt` plus optional `watchdog_log_22132.txt` were captured with exact hashes;
+- the 71-byte run-local result remained SHA-256 `09148A1537500D29F253BE2669A7F240CFD8C4B8ACFC6F43EFF11AB748F3CC80`;
+- personal Documents and the production result were not accessed.
+
+This verifies automatic cleanup for this early `Cancelled` path and the non-fatal watchdog policy. It does **not** exercise the new Crash/Timeout-only failure-evidence phase markers, reproduce the old failure-writer stall, or prove cleanup after a real mission failure.
+
+The parent pair report SHA-256 is `2057402C1D1BC69DAB3B306A7E87E9CECA19A5128472017FF5E554143A645705`; the child attempt report SHA-256 is `8C464E10F35028D6FDB709CF3A9A35E616EFCFE922ED100F793B68B0D06CBFAB`.
+
+### 14.5 Restoration and independent postflight
+
+The outer transaction restored both dedicated DLLs to 3,587,584 bytes and SHA-256 `2E1494BCAEE1DCE440B4373BBA99A4F724B9C32519AACD486DE8F041C0CA1414`. Independent recursive comparison confirmed:
+
+- dedicated inventory: 218 before, 218 after, zero path/hash/length differences;
+- game client inventory: 32 before, 32 after, zero differences;
+- legacy inventory: empty before and after;
+- installed game client DLL unchanged at 4,703,744 bytes and SHA-256 `2A1E17E4FEC5330345D28387AF1C4E2D412D07F221EBE7EE02705FAAC250FFB4`;
+- zero Bannerlord, dedicated, watchdog, crash-uploader, or Windows error-reporting process;
+- UDP/TCP 7210 and 7777 free;
+- six shared locks and both parent/child runner locks opened exclusively in eight independent probes;
+- repository still clean with local HEAD and upstream both `c3ec15a`.
+
+### 14.6 Requirement audit and next boundary
+
+| Requirement / acceptance boundary | Status |
+|---|---|
+| Clean published source, fresh 24/24 contracts, and both builds | Satisfied |
+| New exact helper, self-tests, full backup, and two-DLL-only staging | Satisfied |
+| Corrected dedicated binary loaded | Satisfied |
+| Parent/child orchestration remains live through startup | Not Satisfied — combined liveness gate cancelled attempt 1 |
+| Automatic cleanup for observed cancellation | Satisfied; no manual recovery |
+| Watchdog ownership remains non-fatal | Satisfied for observed cancellation evidence |
+| Full installed/resource restoration | Satisfied and independently rechecked |
+| Corrected native readiness, mission/materialization/abort/result suppression | Not Reached |
+| Second fresh successful attempt | Not Run |
+| Crash/Timeout failure phase markers in a live failure | Not Exercised |
+| L2 and Milestone 4 completion | Not Satisfied |
+
+Before another native attempt, separately approve a narrow source/contract stage for the parent/child liveness contract. It must preserve orphan detection and exact PID/nonce/run binding, record each failed admission fact, test delayed child startup and parent-heartbeat scheduling under Windows PowerShell 5.1 and PowerShell 7, and use a measured/configured freshness rule rather than removing the guard or adding an arbitrary sleep. Review other consumers of the shared lease primitive, but do not change battle adapters or the verified ListedServer readiness correction. No further staging, rerun, code fix, Git operation, or L2 claim belongs to this live-audit stage.
