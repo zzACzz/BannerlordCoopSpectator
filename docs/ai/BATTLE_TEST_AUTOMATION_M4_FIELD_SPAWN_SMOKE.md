@@ -1,7 +1,7 @@
 # Milestone 4 — Field dedicated spawn smoke: source, contracts, local isolation and live findings
 
 Date: **2026-09-09** (Europe/Kyiv; validation IDs retain the approved 20260908 names).
-Status: **The clean published liveness-corrected rerun reached `MissionOpening`, then the dedicated process failed with native `0xc0000005` and the shared failure-evidence finalizer stalled with high memory. Full restoration passed; attempt 2 was Not Run, no L2 pass is claimed, and Milestone 4 remains open.**
+Status: **The shared failure-evidence process snapshot is now isolated, lightweight, time/memory/output bounded and contract-verified at source/L1. The clean live run still ends at native `0xc0000005` after `MissionOpening`; no post-correction native rerun, dump or L2 pass exists, and Milestone 4 remains open.**
 Original 4A approval: **"ок на Milestone 4A source/contracts"**. The separately approved local-only 4B live validation and restoration are recorded in section 12.
 Original 4A source baseline: branch `codex/v0.1.1-refresh`, HEAD/local upstream `452df7e30d3d8d120488570857134078d6072ecc`, initially clean.
 The original 4A implementation was subsequently published as 7d75742c338f504499ec01dd8e3b2f189a1f7a03. Section 11 records the local-isolation follow-up's pre-publication validation in `C:\Users\Admin\.codex\worktrees\1b21\BannerlordCoopSpectator3`.
@@ -635,3 +635,75 @@ The next separately approved source/contracts task must proceed in this order:
 2. After that correction passes focused dual-shell contracts, 24/24, both CompileOnly builds, publication and controlled staging, rerun once with dump capture enabled or demonstrably available. Use the dump and symbols to locate the native `0xc0000005` during `MissionOpening`. Do not change battle adapters or retry blindly before failure finalization is safe.
 
 No source fix, battle-adapter change, further native attempt, or L2 claim is part of this documentation stage.
+
+## 17. Bounded failure-evidence source and contract closure (2026-09-09)
+
+### 17.1 Scope and cross-scenario audit
+
+The live stall began after `FailureEvidenceCaptureStarted` inside the shared `Write-CoopRuntimeFailureEvidence` path. The retained run root contains only about 294 KiB, and its role/status/event JSON files are small; payload serialization volume does not explain the observed 6.0-GiB private-memory growth. The exact internal CIM instruction cannot be proven without a dump of the stalled Runner, so this stage does not relabel the prior observation with an unproven root cause.
+
+Source audit found three synchronous full `Win32_Process` snapshots in finalization: `Add-CoopOwnedDescendants`, `Write-CoopRuntimeFailureEvidence`, and the dedicated-smoke fatal-helper check. `Add-CoopOwnedDescendants` is shared by Feasibility, DedicatedSpawnSmoke and Record campaign cleanup. The failure writer is shared by Feasibility and DedicatedSpawnSmoke. No field, village, siege assault, sally-out, siege-ambush, relief, lords-hall, hideout, sequential-battle or reconnect adapter calls these functions directly; their exposure is through the shared runner command path. No product C#, battle adapter, fixture, readiness, mission or result-suppression code changed.
+
+### 17.2 Implemented bounded collector
+
+Published revision `c100cb8` adds `Get-CoopBoundedProcessSnapshotCore`. Full CIM acquisition now occurs only in a short-lived child of the same supported PowerShell host. Before JSON crosses the process boundary, each record is projected to only `ProcessId`, `ParentProcessId`, `ExecutablePath`, `CommandLine`, and `CreationDate`; no raw `CimInstance` reaches the Runner.
+
+The Runner enforces all four limits independently:
+
+| Boundary | Limit / behavior |
+|---|---|
+| Total collection deadline | 5,000 ms in production |
+| Collector private memory | 268,435,456 bytes (256 MiB) |
+| Captured stdout payload | 4,194,304 bytes (4 MiB) |
+| Lightweight records | 4,096 |
+
+States are `Captured`, `TimedOut`, `MemoryLimitExceeded`, `OutputLimitExceeded`, or `CollectorFailed`. A non-Captured state contains a bounded failure description and never exposes a partial record set as authoritative evidence. The parent polls private memory at 50-ms intervals and terminates the exact process handle on timeout, memory excess, parse failure or callback failure.
+
+`Get-CoopBoundedRuntimeProcessSnapshot` registers a provisional `RuntimeFailureSupport` identity immediately after process creation and before waiting. The inventory records the exact PID, expected shell path, Runner parent PID and launch window. Therefore a Runner interruption does not erase recovery ownership of an in-flight collector. Normal and forced collector exits use the existing one-second support cleanup policy.
+
+### 17.3 Failure publication and cleanup semantics
+
+Feasibility and DedicatedSpawnSmoke now acquire one bounded snapshot and reuse its lightweight records for descendant discovery, exact fatal-helper correlation and crash/hang publication. This removes the former repeated full in-process snapshots while preserving the pure tree/correlation rules. Exact CrashUploader and WerFault paths plus owned-tree/command-line PID correlation remain required; Watchdog remains excluded from fatal helpers.
+
+If snapshot collection fails, `Write-CoopRuntimeFailureEvidence` still publishes the primary Crash/Timeout artifact. `ProcessSnapshot` records schema, state, failure, elapsed time, limits, observed peak memory, collector PID, forced-stop use and record count; the records themselves are not serialized. If descendant discovery separately changes the final Runner classification, the original primary Crash/Timeout remains eligible for failure-evidence publication. `FailureEvidenceCaptureCompleted` and subsequent exact cleanup are therefore no longer held behind an unbounded in-process CIM operation. Disk/atomic-write failure remains a distinct `FailureEvidencePublicationFailed` runner error; this stage cannot promise an artifact when its destination itself is unwritable.
+
+### 17.4 Verification evidence
+
+The focused `CoopAutomationRunner.ContractTests` harness passed in Windows PowerShell 5.1 (`5.1.26100.9444`) and PowerShell 7 (`7.6.5`). It directly verifies:
+
+- a valid lightweight payload and collector-start callback;
+- absence of raw `CimInstance` records across the boundary;
+- a 300-ms synthetic stall timeout and exact collector termination;
+- a 32-MiB synthetic memory ceiling and exact collector termination;
+- structured non-throwing collector failure;
+- the production live lightweight snapshot in both shells;
+- no surviving collector PID after every case;
+- publication of `crash.json` with the primary failure and bounded snapshot metadata when the optional collector reports `TimedOut`, without serializing `Records`.
+
+Final aggregate run `m4fe-c3` passed all 24 projects. Its `contracts.json` is 121,776 bytes with SHA-256 `67C32070A89CDFF6144C96D59B12787254B2FCEC2E6484902FC9B80C8EEC96A9`.
+
+Final non-deploying run `m4fe-b2` passed both Release builds:
+
+| Output | Version | Length | SHA-256 | Warnings / errors |
+|---|---:|---:|---|---:|
+| Client | 0.3.2 | 4,734,976 | `30BD9070639CBEA336F6AA916407496B5752E384ABAE4EA6C248272D11A4040C` | 77 / 0 |
+| Dedicated | 0.3.2 | 3,646,976 | `0F7FA25AED9C6C7F2D4B3C250D73991B26EAA29189C5703FE753CB12C0D85382` | 49 / 0 |
+
+The compile report SHA-256 is `73994167DA9C96B14915399A6A5CF8E37D909D12B65141B9E7BB27349A7A7E05`. `ProductProcessLaunched=false`. Installed before/after inventories are byte-identical with SHA-256 `B817EEA278FFFC398A61E0FD92C65EB07314E0A7474D11FC417492C39B8B1E6B`. Independent postflight found no Bannerlord/dedicated/crash-helper/watchdog process and no snapshot collector. PowerShell parsing, repository hygiene, LF policy and `git diff --check` passed.
+
+### 17.5 Disposition and next boundary
+
+| Requirement / acceptance boundary | Status |
+|---|---|
+| Full snapshots isolated from the Runner | Satisfied at source/L1 |
+| Lightweight record projection; no raw CIM serialization | Satisfied at source/L1 |
+| Time, memory, output and record bounds | Satisfied by dual-shell synthetic contracts |
+| Exact collector ownership and termination | Satisfied by source and dual-shell contracts |
+| WER/CrashUploader correlation and non-fatal Watchdog policy | Preserved and contract-verified |
+| Terminal crash artifact when optional collection fails | Satisfied by dynamic dual-shell contract |
+| Full 24-project regression and both CompileOnly builds | Satisfied |
+| Installed module preservation and no product launch | Satisfied |
+| Real live Crash/Timeout finalization and automatic cleanup | Not Run after correction |
+| Native `0xc0000005` root cause, dump, materialization and L2 | Not Satisfied |
+
+This closes the approved failure-evidence source/contracts substage only. The next separately approved stage must start from clean published `c100cb8`, perform fresh 24/24 and both CompileOnly builds, configure or independently prove dump capture before launch, use a new one-use full-backup two-DLL staging transaction, run one bounded zero-client DedicatedSpawnSmoke attempt, and restore unconditionally. The native rerun must test the corrected finalizer and capture a dump for the `MissionOpening` access violation; it must not change battle adapters or retry blindly if dump capture is unavailable.
