@@ -242,7 +242,15 @@ Treat `bin/`, `obj/`, `.buildcheck/`, `.codex_tmp*/`, `dist/`, `work/`, ZIP pack
 
 ## Documentation maintenance contract
 
-Update the relevant `docs/ai/` file in the same approved change whenever any of these change:
+Use separate evidence, implementation, and documentation cadences:
+
+- Retain raw logs, hashes, dumps, screenshots, and run-scoped diagnostic reports outside Git as soon as they are produced. Do not treat these private artifacts as canonical documentation.
+- Commit and push each completed atomic implementation together with its focused tests after validation. Do not create commits for incomplete mechanical steps unless the user explicitly approves a checkpoint commit.
+- Update canonical `docs/ai/` living documents once when the approved substage or milestone closes, not after every intermediate edit or diagnostic observation.
+- Use a separate documentation-only commit after the substage's implementation commits and final validation unless the user explicitly approves another grouping.
+- Document an observation immediately when it reveals a data-safety risk, native crash or hang, incomplete restoration, manual emergency intervention, changed architecture/contract, or evidence that materially changes the approved next action. This exception does not authorize an implementation change.
+
+At substage closure, update the relevant `docs/ai/` file whenever any of these changed:
 
 - component ownership or mission behavior composition;
 - battle snapshot schema, network message flow, or file bridge format;
