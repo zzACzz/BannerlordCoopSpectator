@@ -588,6 +588,68 @@ function Get-CoopRoleHealthClassificationCore {
     return 'Healthy'
 }
 
+function New-CoopRoleHealthFailureEvidenceCore {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]$Status,
+        [AllowNull()]$ReadEvidence,
+        [Parameter(Mandatory = $true)][DateTime]$DecisionUtc,
+        [Parameter(Mandatory = $true)][string]$Rejection,
+        [Parameter(Mandatory = $true)][string]$ExpectedRunId,
+        [Parameter(Mandatory = $true)][string]$ExpectedTokenSha256,
+        [Parameter(Mandatory = $true)][string]$ExpectedRoleType,
+        [Parameter(Mandatory = $true)][string]$ExpectedRoleInstanceId,
+        [int]$HeartbeatDeadlineSeconds,
+        [int]$ProgressDeadlineSeconds
+    )
+
+    # Failure-only, fixed field set. No raw status, token, exception or provider object escapes.
+    # Each string is at most 256 UTF-16 units; the whole projection remains below 64 KiB of JSON.
+    $boundedScalar = {
+        param($Value)
+        if ($null -eq $Value) { return $null }
+        if ($Value -is [DateTime]) { return $Value.ToUniversalTime().ToString('O') }
+        if ($Value -is [string]) {
+            $length = [Math]::Min(256, $Value.Length)
+            if ($length -gt 0 -and [char]::IsHighSurrogate($Value[$length - 1])) { $length-- }
+            return [string]::new($Value.Substring(0, $length).ToCharArray())
+        }
+        if ($Value -is [bool] -or $Value -is [byte] -or $Value -is [int16] -or
+            $Value -is [int] -or $Value -is [long] -or $Value -is [decimal]) { return $Value }
+        if ($Value -is [double] -and -not [double]::IsNaN($Value) -and -not [double]::IsInfinity($Value)) { return $Value }
+        return '[UnsupportedValueType]'
+    }
+    $read = [ordered]@{}
+    foreach ($name in @('StartedUtc', 'CompletedUtc', 'Outcome', 'Phase', 'ExceptionType', 'HResult')) {
+        $read[$name] = & $boundedScalar (Get-CoopOptionalPropertyValue -InputObject $ReadEvidence -Name $name)
+    }
+    $observed = [ordered]@{}
+    foreach ($name in @('SchemaVersion', 'ProtocolMajorVersion', 'ProtocolMinorVersion', 'RunId',
+        'RoleType', 'RoleInstanceId', 'State', 'StateRevision', 'UpdatedUtc', 'HeartbeatUtc',
+        'LastProgressUtc', 'StateEnteredUtc', 'AuthoritativeSource')) {
+        $observed[$name] = & $boundedScalar (Get-CoopOptionalPropertyValue -InputObject $Status -Name $name)
+    }
+    $heartbeat = ConvertTo-CoopUtcDateTime -Value $observed.HeartbeatUtc
+    $progress = ConvertTo-CoopUtcDateTime -Value $observed.LastProgressUtc
+    $token = Get-CoopOptionalPropertyValue -InputObject $Status -Name 'RunTokenSha256'
+    return [pscustomobject][ordered]@{
+        Schema = 'coop-role-health-failure-v1'
+        DecisionUtc = $DecisionUtc.ToUniversalTime().ToString('O')
+        Rejection = & $boundedScalar $Rejection
+        ExpectedRunId = & $boundedScalar $ExpectedRunId
+        ExpectedRoleType = & $boundedScalar $ExpectedRoleType
+        ExpectedRoleInstanceId = & $boundedScalar $ExpectedRoleInstanceId
+        TokenMatches = ($token -is [string] -and [string]::Equals($token, $ExpectedTokenSha256, [StringComparison]::OrdinalIgnoreCase))
+        HeartbeatDeadlineSeconds = $HeartbeatDeadlineSeconds
+        ProgressDeadlineSeconds = $ProgressDeadlineSeconds
+        HeartbeatAgeSeconds = if ($null -eq $heartbeat) { $null } else { ($DecisionUtc.ToUniversalTime() - $heartbeat).TotalSeconds }
+        ProgressAgeSeconds = if ($null -eq $progress) { $null } else { ($DecisionUtc.ToUniversalTime() - $progress).TotalSeconds }
+        StatusPresent = ($null -ne $Status)
+        Read = [pscustomobject]$read
+        ObservedStatus = [pscustomobject]$observed
+    }
+}
+
 function Get-CoopSpawnSmokeParentAdmissionCore {
     [CmdletBinding()]
     param(

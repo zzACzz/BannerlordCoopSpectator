@@ -249,6 +249,16 @@ internal static class Program
             coreSource.Contains("'NoHeartbeat'", StringComparison.Ordinal) &&
             coreSource.Contains("'NoProgress'", StringComparison.Ordinal),
             "The aggregate runner must classify missing liveness and missing progress separately.");
+        foreach (string consumer in new[] { "Invoke-CoopFeasibility", "Invoke-CoopDedicatedSpawnSmokeAttempt" })
+        {
+            int start = source.IndexOf("function " + consumer + " {", StringComparison.Ordinal);
+            int end = source.IndexOf("\nfunction ", start + 1, StringComparison.Ordinal);
+            string body = source.Substring(start, (end < 0 ? source.Length : end) - start);
+            Assert(body.Contains("$roleHealthFailure = $null", StringComparison.Ordinal) &&
+                body.Contains("$roleHealthFailure = $_.Exception.Data['CoopRoleHealthFailure']", StringComparison.Ordinal) &&
+                body.Contains("-RoleHealthFailure $roleHealthFailure", StringComparison.Ordinal),
+                consumer + " must retain the rejected observation in run-local failure evidence.");
+        }
         Assert(
             source.Contains("Get-CoopSpawnSmokeParentAdmissionCore", StringComparison.Ordinal) &&
             source.Contains("spawn-smoke-parent-rejection.json", StringComparison.Ordinal) &&
@@ -739,8 +749,8 @@ function Get-ContractFileHash([string]$Path) {
     finally { $algorithm.Dispose(); $stream.Dispose() }
 }
 $definitions = @{
-    'scripts\Invoke-CoopTest.ps1' = @('Write-CoopRuntimeFailureEvidence', 'Read-CoopJsonShared', 'Write-CoopJsonAtomic')
-    'scripts\CoopAutomationRunner.Core.ps1' = @('ConvertTo-CoopUtcDateTime', 'Get-CoopFatalHelperExecutablePathsCore')
+    'scripts\Invoke-CoopTest.ps1' = @('Write-CoopRuntimeFailureEvidence', 'Read-CoopJsonShared', 'Write-CoopJsonAtomic', 'Assert-CoopRuntimeRoleHealth')
+    'scripts\CoopAutomationRunner.Core.ps1' = @('ConvertTo-CoopUtcDateTime', 'Get-CoopFatalHelperExecutablePathsCore', 'Get-CoopOptionalPropertyValue', 'Get-CoopRoleHealthClassificationCore', 'New-CoopRoleHealthFailureEvidenceCore')
 }
 foreach ($relativePath in $definitions.Keys) {
     $tokens = $null; $parseErrors = $null
@@ -858,6 +868,135 @@ foreach ($caseName in @('missing','empty','unicode-single','exact-25','over-25-l
         Verify-Report -Name failed-collector-crash -ExpectedLines $lines -Outcome Crash -Code SyntheticCrash -Capture $failedCapture
     }
 }
+# Exercise the real shared reader/assertion, then change the file before invoking the real finalizer.
+$script:nonceSha256 = 'A' * 64
+foreach ($role in @('DedicatedServer', 'MultiplayerClient')) {
+    $roleId = if ($role -eq 'DedicatedServer') { 'dedicated-server-01' } else { 'multiplayer-client-01' }
+    foreach ($caseName in @('healthy', 'missing', 'empty', 'json-null', 'malformed', 'locked', 'stale', 'no-progress',
+        'schema', 'timeline', 'run-id', 'token', 'role-type', 'role-id', 'capability')) {
+        $name = $role + '-' + $caseName
+        $script:RunId = 'role-health-' + $name
+        $script:runRoot = Join-Path $ArtifactRoot $name
+        $script:eventsPath = Join-Path $script:runRoot 'events\absent.jsonl'
+        $path = Join-Path $script:runRoot ('status\' + $roleId + '.json')
+        [IO.Directory]::CreateDirectory((Split-Path -Parent $path)) | Out-Null
+        $now = [DateTime]::UtcNow
+        $status = [pscustomobject][ordered]@{
+            SchemaVersion=2; ProtocolMajorVersion=1; ProtocolMinorVersion=1
+            RunId=$script:RunId; RunTokenSha256=$script:nonceSha256; RoleType=$role; RoleInstanceId=$roleId
+            State='WaitingForDedicatedReady'; StateRevision=7; UpdatedUtc=$now.ToString('O')
+            HeartbeatUtc=$now.ToString('O'); LastProgressUtc=$now.AddSeconds(-1).ToString('O')
+            StateEnteredUtc=$now.AddSeconds(-1).ToString('O'); AuthoritativeSource='SyntheticContract'
+            Capabilities=@('RoleHealthV1')
+        }
+        $expectedRead = 'ReadSucceeded'; $expectedRejection = 'NoHeartbeat'
+        switch ($caseName) {
+            'missing' { $expectedRead = 'MissingOrNotVisible' }
+            'empty' { $expectedRead = 'Empty' }
+            'json-null' { $expectedRead = 'JsonNull' }
+            'malformed' { $expectedRead = 'MalformedJson' }
+            'locked' { $expectedRead = 'ReadFailed' }
+            'stale' {
+                $status.HeartbeatUtc = $now.AddSeconds(-10).ToString('O')
+                $status.LastProgressUtc = $status.HeartbeatUtc; $status.StateEnteredUtc = $status.HeartbeatUtc
+            }
+            'no-progress' { $status.LastProgressUtc=$now.AddSeconds(-200).ToString('O'); $expectedRejection='NoProgress' }
+            'schema' { $status.SchemaVersion=1; $expectedRejection='SchemaOrTimelineRejected' }
+            'timeline' { $status.LastProgressUtc=$now.AddSeconds(10).ToString('O'); $expectedRejection='SchemaOrTimelineRejected' }
+            'run-id' { $status.RunId='wrong'; $expectedRejection='IdentityRejected' }
+            'token' { $status.RunTokenSha256='B'*64; $expectedRejection='IdentityRejected' }
+            'role-type' { $status.RoleType='wrong'; $expectedRejection='IdentityRejected' }
+            'role-id' { $status.RoleInstanceId='wrong'; $expectedRejection='IdentityRejected' }
+            'capability' { $status.Capabilities=@(); $expectedRejection='CapabilityRejected' }
+        }
+        if ($caseName -ne 'missing') { Write-CoopJsonAtomic -Path $path -Value $status }
+        if ($caseName -eq 'empty') { [IO.File]::WriteAllText($path, '', $utf8) }
+        if ($caseName -eq 'json-null') { [IO.File]::WriteAllText($path, 'null', $utf8) }
+        if ($caseName -eq 'malformed') { [IO.File]::WriteAllText($path, '{broken', $utf8) }
+        $lock = $null; $roleFailure = $null; $accepted = $null
+        try {
+            if ($caseName -eq 'locked') { $lock = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None) }
+            try { $accepted = Assert-CoopRuntimeRoleHealth -StatusPath $path -ExpectedRoleType $role -ExpectedRoleInstanceId $roleId }
+            catch { $roleFailure = $_.Exception }
+        } finally { if ($null -ne $lock) { $lock.Dispose() } }
+        if ($caseName -eq 'healthy') {
+            Assert-True ($null -eq $roleFailure -and $accepted.StateRevision -eq 7) ('Healthy role rejected: ' + $name)
+            # Deterministic equality/just-over-boundary checks, without changing the production clock.
+            Assert-True ((Get-CoopRoleHealthClassificationCore -Status $status -NowUtc $now.AddSeconds(5)) -ceq 'Healthy') 'The exact 5-second boundary changed.'
+            Assert-True ((Get-CoopRoleHealthClassificationCore -Status $status -NowUtc $now.AddSeconds(5).AddTicks(1)) -ceq 'NoHeartbeat') 'The >5-second boundary changed.'
+            $cases.Add([pscustomobject]@{ Name=$name; Outcome='Pass' })
+            continue
+        }
+        Assert-True ($null -ne $roleFailure) ('Invalid role accepted: ' + $name)
+        $failureFact = $roleFailure.Data['CoopRoleHealthFailure']
+        Assert-True ($null -ne $failureFact) ('Rejected observation lost: ' + $name)
+        Assert-True ($failureFact.Rejection -ceq $expectedRejection -and $failureFact.Read.Outcome -ceq $expectedRead) ('Wrong rejection/read evidence: ' + $name)
+        $decision = ConvertTo-CoopUtcDateTime $failureFact.DecisionUtc
+        Assert-True ($decision -ge (ConvertTo-CoopUtcDateTime $failureFact.Read.CompletedUtc) -and
+            (ConvertTo-CoopUtcDateTime $failureFact.Read.CompletedUtc) -ge (ConvertTo-CoopUtcDateTime $failureFact.Read.StartedUtc)) ('Read/decision ordering lost: ' + $name)
+        if ($caseName -in @('malformed', 'locked')) {
+            Assert-True (-not [string]::IsNullOrWhiteSpace($failureFact.Read.ExceptionType) -and $null -ne $failureFact.Read.HResult) ('Read exception facts missing: ' + $name)
+        }
+        if ($caseName -eq 'stale') { Assert-True ($failureFact.HeartbeatAgeSeconds -ge 10 -and $failureFact.HeartbeatDeadlineSeconds -eq 5) 'Stale age/deadline lost.' }
+        if ($expectedRejection -in @('NoHeartbeat', 'NoProgress')) {
+            Assert-True ($roleFailure -is [TimeoutException] -and $roleFailure.Data['CoopRuntimeOutcome'] -ceq 'Timeout' -and
+                $roleFailure.Data['CoopFailureCode'] -ceq $expectedRejection) ('Primary outcome changed: ' + $name)
+        } else { Assert-True ($null -eq $roleFailure.Data['CoopRuntimeOutcome']) ('Validation failure changed to timeout: ' + $name) }
+        $frozenJson = $failureFact | ConvertTo-Json -Depth 8 -Compress
+        # Later status is fully healthy, while the rejected observation stays independent.
+        $status.SchemaVersion=2; $status.RunId=$script:RunId; $status.RunTokenSha256=$script:nonceSha256
+        $status.RoleType=$role; $status.RoleInstanceId=$roleId; $status.Capabilities=@('RoleHealthV1')
+        $status.State='LaterHealthy'; $status.StateRevision=8
+        $status.HeartbeatUtc=[DateTime]::UtcNow.ToString('O'); $status.UpdatedUtc=$status.HeartbeatUtc
+        $status.LastProgressUtc=$status.HeartbeatUtc; $status.StateEnteredUtc=$status.HeartbeatUtc
+        Write-CoopJsonAtomic -Path $path -Value $status
+        $null = Assert-CoopRuntimeRoleHealth -StatusPath $path -ExpectedRoleType $role -ExpectedRoleInstanceId $roleId
+        $result = Write-CoopRuntimeFailureEvidence -Outcome Timeout -FailureCode $expectedRejection -FailureMessage $name -ProcessSnapshotCapture $failedCapture -RoleHealthFailure $failureFact
+        $published = Read-CoopJsonShared $result.Path
+        Assert-True ($published.RoleHealthFailure.Rejection -ceq $expectedRejection -and
+            $published.RoleHealthFailure.Read.Outcome -ceq $expectedRead -and $published.LastRoleState -ceq 'LaterHealthy' -and
+            (ConvertTo-CoopUtcDateTime $published.RoleHealthFailure.DecisionUtc) -eq $decision) ('Later snapshot replaced original decision: ' + $name)
+        Assert-True (($failureFact | ConvertTo-Json -Depth 8 -Compress) -ceq $frozenJson) ('Evidence mutated: ' + $name)
+        Assert-True (-not $frozenJson.Contains($script:nonceSha256) -and -not $frozenJson.Contains('RunTokenSha256')) 'Raw token escaped.'
+        $cases.Add([pscustomobject]@{ Name=$name; Outcome='Pass'; Artifact=$result.Path; Sha256=(Get-ContractFileHash $result.Path) })
+    }
+}
+
+# Execute each production consumer's catch and writer call without invoking its native startup/finally.
+$runnerAst = [Management.Automation.Language.Parser]::ParseFile((Join-Path $RepositoryRoot 'scripts\Invoke-CoopTest.ps1'), [ref]$null, [ref]$null)
+foreach ($consumer in @('Invoke-CoopFeasibility', 'Invoke-CoopDedicatedSpawnSmokeAttempt')) {
+    $function = @($runnerAst.FindAll({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $consumer }, $true))[0]
+    $catch = @($function.FindAll({ param($n) $n -is [Management.Automation.Language.CatchClauseAst] -and $n.Body.Extent.Text.Contains("`$roleHealthFailure = `$_") }, $true))
+    $writer = @($function.FindAll({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Write-CoopRuntimeFailureEvidence' }, $true))
+    Assert-True ($catch.Count -eq 1 -and $writer.Count -eq 1) ('Consumer integration ambiguous: ' + $consumer)
+    $roleHealthFailure = $null; $outcomeExitCodes = @{ Timeout=31 }
+    Invoke-Expression ('try { throw $roleFailure } catch ' + $catch[0].Body.Extent.Text)
+    Assert-True ($null -ne $roleHealthFailure -and $roleHealthFailure.Rejection -ceq 'CapabilityRejected') ('Consumer dropped evidence: ' + $consumer)
+    $failureEvidenceOutcome='Timeout'; $failureEvidenceCode='SyntheticTimeout'; $failureEvidenceMessage=$consumer
+    $runtimeProcessSnapshotCapture=$failedCapture
+    $result = Invoke-Expression $writer[0].Extent.Text
+    Assert-True ($result.Evidence.RoleHealthFailure.Rejection -ceq 'CapabilityRejected') ('Writer call dropped evidence: ' + $consumer)
+    $cases.Add([pscustomobject]@{ Name=$consumer+'-propagation'; Outcome='Pass' })
+}
+
+# Projection detaches the original object and refuses graphs/oversized text, including escaped characters.
+$status.State = ([string][char]1) * 100000
+$status.AuthoritativeSource = [pscustomobject]@{ Nested=$status }
+$bounded = New-CoopRoleHealthFailureEvidenceCore -Status $status -ReadEvidence $failureFact.Read -DecisionUtc ([DateTime]::UtcNow) -Rejection NoHeartbeat -ExpectedRunId $RunId -ExpectedTokenSha256 $nonceSha256 -ExpectedRoleType $role -ExpectedRoleInstanceId $roleId -HeartbeatDeadlineSeconds 5 -ProgressDeadlineSeconds 180
+$status.State='changed'; $failureFact.Read.Outcome='changed'
+$boundedJson = $bounded | ConvertTo-Json -Depth 8 -Compress
+Assert-True ($bounded.ObservedStatus.State.Length -eq 256 -and $bounded.ObservedStatus.AuthoritativeSource -ceq '[UnsupportedValueType]' -and $bounded.Read.Outcome -cne 'changed' -and $utf8.GetByteCount($boundedJson) -lt 65536) 'Projection retained references, graphs or excessive text.'
+$cases.Add([pscustomobject]@{ Name='bounded-detached-projection'; Outcome='Pass'; JsonBytes=$utf8.GetByteCount($boundedJson) })
+# Even a failed diagnostic projection must preserve the original timeout and cleanup classification.
+$projectionDefinition = (Get-Command New-CoopRoleHealthFailureEvidenceCore).Definition
+try {
+    function New-CoopRoleHealthFailureEvidenceCore { throw 'Synthetic projection failure.' }
+    $primary = $null
+    try { $null = Assert-CoopRuntimeRoleHealth -StatusPath (Join-Path $script:runRoot 'absent.json') -ExpectedRoleType $role -ExpectedRoleInstanceId $roleId }
+    catch { $primary = $_.Exception }
+    Assert-True ($primary -is [TimeoutException] -and $primary.Data['CoopRuntimeOutcome'] -ceq 'Timeout' -and $primary.Data['CoopFailureCode'] -ceq 'NoHeartbeat') 'Diagnostic failure replaced the primary timeout.'
+} finally { Invoke-Expression ('function New-CoopRoleHealthFailureEvidenceCore {' + $projectionDefinition + '}') }
+$cases.Add([pscustomobject]@{ Name='projection-failure-preserves-primary'; Outcome='Pass' })
 Write-CoopJsonAtomic -Path (Join-Path $ArtifactRoot 'cases.json') -Value ([ordered]@{
     Schema='coop-failure-evidence-cases-v1'; ShellVersion=$PSVersionTable.PSVersion.ToString()
     PassedCount=$cases.Count; Cases=$cases.ToArray(); ProductProcessLaunched=$false

@@ -527,24 +527,64 @@ function Test-CoopSha256Hex {
 }
 
 function Read-CoopJsonShared {
-    param([Parameter(Mandatory = $true)][string]$Path)
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        # Untyped optional reference: a typed [ref] rejects its null default in both supported hosts.
+        [AllowNull()]$ReadEvidence = $null
+    )
 
-    if (-not [System.IO.File]::Exists($Path)) { return $null }
+    $readFact = if ($null -ne $ReadEvidence) {
+        [ordered]@{
+            StartedUtc = [DateTime]::UtcNow.ToString('O'); CompletedUtc = ''
+            Outcome = 'MissingOrNotVisible'; Phase = 'Exists'; ExceptionType = ''; HResult = $null
+        }
+    } else { $null }
+    $phase = 'Exists'
     try {
+        # File.Exists also returns false for some access/path errors; do not claim proven absence.
+        if (-not [System.IO.File]::Exists($Path)) { return $null }
+        $phase = 'Open'
         $stream = New-Object System.IO.FileStream(
             $Path,
             [System.IO.FileMode]::Open,
             [System.IO.FileAccess]::Read,
             ([System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete))
         try {
+            $phase = 'Read'
             $reader = New-Object System.IO.StreamReader($stream)
-            try { return ($reader.ReadToEnd() | ConvertFrom-Json) }
+            try {
+                $json = $reader.ReadToEnd()
+                $phase = 'Parse'
+                $value = $json | ConvertFrom-Json
+                if ($null -ne $readFact) {
+                    $readFact.Outcome = if ([string]::IsNullOrWhiteSpace($json)) { 'Empty' }
+                        elseif ($json.Trim() -ceq 'null') { 'JsonNull' }
+                        elseif ($null -eq $value) { 'NoValue' }
+                        else { 'ReadSucceeded' }
+                }
+                return $value
+            }
             finally { $reader.Dispose() }
         }
         finally { $stream.Dispose() }
     }
     catch {
+        if ($null -ne $readFact) {
+            $cause = $_.Exception.GetBaseException()
+            $readFact.Outcome = if ($phase -eq 'Parse') { 'MalformedJson' }
+                elseif ($cause -is [UnauthorizedAccessException]) { 'AccessDenied' }
+                else { 'ReadFailed' }
+            $readFact.ExceptionType = $cause.GetType().FullName
+            $readFact.HResult = $cause.HResult
+        }
         return $null
+    }
+    finally {
+        if ($null -ne $readFact) {
+            $readFact.Phase = $phase
+            $readFact.CompletedUtc = [DateTime]::UtcNow.ToString('O')
+            $ReadEvidence.Value = [pscustomobject]$readFact
+        }
     }
 }
 
@@ -960,7 +1000,8 @@ function Write-CoopRuntimeFailureEvidence {
         [Parameter(Mandatory = $true)][ValidateSet('Crash', 'Timeout')][string]$Outcome,
         [Parameter(Mandatory = $true)][string]$FailureCode,
         [Parameter(Mandatory = $true)][string]$FailureMessage,
-        [AllowNull()]$ProcessSnapshotCapture = $null
+        [AllowNull()]$ProcessSnapshotCapture = $null,
+        [AllowNull()]$RoleHealthFailure = $null
     )
 
     $rootProcessIds = @($ownedRuntimeProcesses | Where-Object {
@@ -1045,6 +1086,8 @@ function Write-CoopRuntimeFailureEvidence {
         LastHeartbeatUtc = if ($lastRoleStatus.Count -eq 1) { [string]$lastRoleStatus[0].HeartbeatUtc } else { $null }
         LastProgressUtc = if ($lastRoleStatus.Count -eq 1) { [string]$lastRoleStatus[0].LastProgressUtc } else { $null }
         RoleStatuses = $roleStatuses
+        # These later snapshots cannot replace the rejected read/decision captured by the assertion.
+        RoleHealthFailure = $RoleHealthFailure
         LastEvents = $eventTail
         OwnedProcessIdentities = $ownedRuntimeProcesses.ToArray()
         CorrelatedFailureProcesses = $correlatedFailureProcesses
@@ -1080,29 +1123,48 @@ function Assert-CoopRuntimeRoleHealth {
         [ValidateRange(1, 86400)][int]$ProgressDeadlineSeconds = 180
     )
 
-    $status = Read-CoopJsonShared -Path $StatusPath
-    $classification = Get-CoopRoleHealthClassificationCore `
-        -Status $status `
-        -NowUtc ([DateTime]::UtcNow) `
-        -HeartbeatDeadlineSeconds $HeartbeatDeadlineSeconds `
-        -ProgressDeadlineSeconds $ProgressDeadlineSeconds
-    if ($null -ne $status) {
-        if (-not (@($status.Capabilities) -contains 'RoleHealthV1')) {
-            throw "RoleHealthV1 capability is missing: $StatusPath"
+    $readEvidence = $null
+    $status = Read-CoopJsonShared -Path $StatusPath -ReadEvidence ([ref]$readEvidence)
+    $decisionUtc = [DateTime]::UtcNow
+    $rejection = 'SchemaOrTimelineRejected'
+    try {
+        $classification = Get-CoopRoleHealthClassificationCore `
+            -Status $status `
+            -NowUtc $decisionUtc `
+            -HeartbeatDeadlineSeconds $HeartbeatDeadlineSeconds `
+            -ProgressDeadlineSeconds $ProgressDeadlineSeconds
+        if ($null -ne $status) {
+            $rejection = 'CapabilityRejected'
+            if (-not (@($status.Capabilities) -contains 'RoleHealthV1')) {
+                throw "RoleHealthV1 capability is missing: $StatusPath"
+            }
+            $rejection = 'IdentityRejected'
+            if (-not [string]::Equals([string]$status.RunId, $RunId, [StringComparison]::Ordinal) -or
+                -not [string]::Equals([string]$status.RunTokenSha256, $nonceSha256, [StringComparison]::OrdinalIgnoreCase) -or
+                -not [string]::Equals([string]$status.RoleType, $ExpectedRoleType, [StringComparison]::Ordinal) -or
+                -not [string]::Equals([string]$status.RoleInstanceId, $ExpectedRoleInstanceId, [StringComparison]::Ordinal)) {
+                throw "RoleHealthV1 identity mismatch: $StatusPath"
+            }
         }
-        if (-not [string]::Equals([string]$status.RunId, $RunId, [StringComparison]::Ordinal) -or
-            -not [string]::Equals([string]$status.RunTokenSha256, $nonceSha256, [StringComparison]::OrdinalIgnoreCase) -or
-            -not [string]::Equals([string]$status.RoleType, $ExpectedRoleType, [StringComparison]::Ordinal) -or
-            -not [string]::Equals([string]$status.RoleInstanceId, $ExpectedRoleInstanceId, [StringComparison]::Ordinal)) {
-            throw "RoleHealthV1 identity mismatch: $StatusPath"
+        $rejection = $classification
+        if ($classification -ne 'Healthy') {
+            $failure = [System.TimeoutException]::new("$classification for runtime role $ExpectedRoleInstanceId.")
+            $failure.Data['CoopRuntimeOutcome'] = 'Timeout'
+            $failure.Data['CoopFailureCode'] = $classification
+            throw $failure
         }
     }
-    if ($classification -ne 'Healthy') {
-        $failure = [System.TimeoutException]::new("$classification for runtime role $ExpectedRoleInstanceId.")
-        $failure.Data['CoopRuntimeOutcome'] = 'Timeout'
-        $failure.Data['CoopFailureCode'] = $classification
-        if ($null -ne $status) { $failure.Data['CoopRoleHealthStatus'] = $status }
-        throw $failure
+    catch {
+        $primaryError = $_
+        try {
+            $primaryError.Exception.Data['CoopRoleHealthFailure'] = New-CoopRoleHealthFailureEvidenceCore `
+                -Status $status -ReadEvidence $readEvidence -DecisionUtc $decisionUtc -Rejection $rejection `
+                -ExpectedRunId $RunId -ExpectedTokenSha256 $nonceSha256 `
+                -ExpectedRoleType $ExpectedRoleType -ExpectedRoleInstanceId $ExpectedRoleInstanceId `
+                -HeartbeatDeadlineSeconds $HeartbeatDeadlineSeconds -ProgressDeadlineSeconds $ProgressDeadlineSeconds
+        }
+        catch { } # Diagnostic projection must never replace the primary rejection.
+        throw $primaryError
     }
     return $status
 }
@@ -2310,6 +2372,7 @@ function Invoke-CoopFeasibility {
     $runtimeSupersession = ''
     $runtimeFailureCode = ''
     $runtimeFailureEvidence = $null
+    $roleHealthFailure = $null
     $dedicatedRoleStatus = $null
     $clientRoleStatus = $null
     $clientJoinStatus = $null
@@ -2573,6 +2636,7 @@ function Invoke-CoopFeasibility {
         }
         $outcomeHint = [string]$_.Exception.Data['CoopRuntimeOutcome']
         $runtimeFailureCode = [string]$_.Exception.Data['CoopFailureCode']
+        $roleHealthFailure = $_.Exception.Data['CoopRoleHealthFailure']
         $runtimeOutcome = if ($outcomeExitCodes.ContainsKey($outcomeHint)) { $outcomeHint }
         elseif ($runtimeReason -match 'Timed out') { 'Timeout' }
         elseif ($runtimeReason -match 'exited|crash') { 'Crash' }
@@ -2633,7 +2697,8 @@ function Invoke-CoopFeasibility {
                     -Outcome $failureEvidenceOutcome `
                     -FailureCode $failureEvidenceCode `
                     -FailureMessage $failureEvidenceMessage `
-                    -ProcessSnapshotCapture $runtimeProcessSnapshotCapture
+                    -ProcessSnapshotCapture $runtimeProcessSnapshotCapture `
+                    -RoleHealthFailure $roleHealthFailure
                 if (@($runtimeFailureEvidence.Evidence.CorrelatedFailureProcesses).Count -gt 0) {
                     $runtimeOutcome = 'Crash'
                     $runtimeFailureCode = 'CrashReporterDetected'
@@ -3102,6 +3167,7 @@ function Invoke-CoopDedicatedSpawnSmokeAttempt {
     $runtimeSupersession = ''
     $runtimeFailureCode = ''
     $runtimeFailureEvidence = $null
+    $roleHealthFailure = $null
     $dedicatedRoleStatus = $null
     $ownedHostStatus = $null
     $dedicatedProcess = $null
@@ -3291,6 +3357,7 @@ function Invoke-CoopDedicatedSpawnSmokeAttempt {
 
         $outcomeHint = [string]$_.Exception.Data['CoopRuntimeOutcome']
         $runtimeFailureCode = [string]$_.Exception.Data['CoopFailureCode']
+        $roleHealthFailure = $_.Exception.Data['CoopRoleHealthFailure']
         $runtimeOutcome = if ($outcomeExitCodes.ContainsKey($outcomeHint)) { $outcomeHint }
         elseif ($_.Exception -is [OperationCanceledException]) { 'Cancelled' }
         elseif ($runtimeReason -match 'Timed out') { 'Timeout' }
@@ -3347,7 +3414,8 @@ function Invoke-CoopDedicatedSpawnSmokeAttempt {
                     -Outcome $failureEvidenceOutcome `
                     -FailureCode $failureEvidenceCode `
                     -FailureMessage $failureEvidenceMessage `
-                    -ProcessSnapshotCapture $runtimeProcessSnapshotCapture
+                    -ProcessSnapshotCapture $runtimeProcessSnapshotCapture `
+                    -RoleHealthFailure $roleHealthFailure
                 if (@($runtimeFailureEvidence.Evidence.CorrelatedFailureProcesses).Count -gt 0) {
                     $runtimeOutcome = 'Crash'
                     $runtimeFailureCode = 'CrashReporterDetected'

@@ -1,7 +1,7 @@
 # Milestone 4 — Field dedicated spawn smoke: source, contracts, local isolation and live findings
 
 Date: **2026-09-09** (Europe/Kyiv; validation IDs retain the approved 20260908 names).
-Status: **Milestone 4 remains open. Published `438b434` passed fresh 24/24 contracts and both CompileOnly builds. The clean zero-client live attempt loaded that exact candidate but returned `Timeout/NoHeartbeat` before control readiness/bootstrap, with no mission opened and attempt two Not Run. Automatic timeout evidence/cleanup and full module/dump restoration passed. Section 26 records the unresolved heartbeat observation and next boundary; sections 24-25 retain the mode/clock/peer implementation evidence. No native L2 pass is claimed.**
+Status: **Milestone 4 remains open. The clean zero-client live attempt of published `438b434` returned `Timeout/NoHeartbeat` before control readiness/bootstrap, with no mission opened and attempt two Not Run; automatic timeout cleanup and full restoration passed. Section 27 records the subsequent exact-rejection evidence correction: 42 focused cases per PowerShell host and full 24/24 contracts passed, without another native launch. Section 26 preserves the unresolved historical heartbeat observation; sections 24-25 retain mode/clock/peer implementation evidence. No native L2 pass is claimed.**
 Original 4A approval: **"ок на Milestone 4A source/contracts"**. The separately approved local-only 4B live validation and restoration are recorded in section 12.
 Original 4A source baseline: branch `codex/v0.1.1-refresh`, HEAD/local upstream `452df7e30d3d8d120488570857134078d6072ecc`, initially clean.
 The original 4A implementation was subsequently published as 7d75742c338f504499ec01dd8e3b2f189a1f7a03. Section 11 records the local-isolation follow-up's pre-publication validation in `C:\Users\Admin\.codex\worktrees\1b21\BannerlordCoopSpectator3`.
@@ -1216,3 +1216,48 @@ Source inspection, implementation publication, build verification and automated/
 No unchanged native rerun is justified by this result. The next separately approved investigation must distinguish missing/read-failed/stale role health and preserve the exact failing decision before proposing a correction. Review shared dedicated/client consumers without expanding into battle adapters, altering the five-second guard, accepting an unverified process or relaxing the field fixture. Exact retained local code and artifacts answer the present evidence question; Internet research cannot recover the overwritten historical read.
 
 This approved outcome update reread and changed README.md, BUILD_TEST_DEBUG.md, BATTLE_TEST_AUTOMATION_SPEC.md, RUNTIME_FLOWS.md, INVARIANTS_AND_RISKS.md and this M4 report. Architecture/component location did not change, so ARCHITECTURE.md and CODE_MAP.md are intentionally unchanged. Earlier numbered reports remain historical evidence. This section owns exact run outcomes; other living documents link to it. The documentation-only publication follows the implementation commit and completed safe restoration, without claiming M4 completion.
+
+## 27. Exact role-health rejection source and contract correction (2026-09-10)
+
+### 27.1 Scope and evidence boundary
+
+The approved atomic task starts from clean `da4623037c283524baecab514439700c0139ccaa` and changes only `scripts/Invoke-CoopTest.ps1`, `scripts/CoopAutomationRunner.Core.ps1`, `Tests/CoopAutomationRunner.ContractTests/Program.cs` and the three immediately relevant living documents. The verified defect is loss of the rejected read/decision during failure finalization. The cause of the historical section-26 `NoHeartbeat` is still unknown. Exact local source and retained artifacts answer this reporting question; external research cannot recover that overwritten observation.
+
+The reader now optionally records the actual read result; the assertion captures its decision time and a detached bounded projection; both Feasibility and DedicatedSpawnSmoke retain it through their catch and writer call. Later role-file snapshots remain separate. The [canonical evidence contract](BUILD_TEST_DEBUG.md#exact-role-health-rejection-evidence-2026-09-10) owns field semantics, activation, cost and limits. No classifier rule, heartbeat/progress threshold, readiness acceptance, native module, deployment, fixture, spawning, result suppression or cleanup ownership changed. There is no retry, fallback acceptance or new product diagnostic flag.
+
+### 27.2 Validation and retained artifacts
+
+- **Source inspection:** reader, classifier, both consumers and the existing finalizer reviewed. Native atomic status writing and shared scenario/role impact were classified without changing game code.
+- **Focused contracts:** final `m4rh-e1/artifacts/execution-03` passed **42 cases in Windows PowerShell 5.1.26100.9444 and 42 in PowerShell 7.6.5**. Production reader/assertion/helper/writer definitions and both consumer catch/writer call sites are extracted from the AST, without invoking native startup. Both hosts cover fresh, missing/not-visible, empty, JSON null, malformed, locked, stale, stalled-progress, invalid schema/timeline/identity/capability cases; healthy overwrite after rejection; exact five-second boundary; detached/bounded projection; and primary timeout preservation if projection fails. Existing event-tail, collector-failure and crash/timeout publication cases also pass. An initial optional-reference binding failure was corrected in scope; its failed artifacts and the intermediate passing run remain retained.
+- **Bounds and cleanup:** final focused workers completed in 3,926 / 3,632 ms, with peak private memory 152,092,672 / 111,439,872 bytes, below their unchanged 15-second / 256-MiB limits. Both exited normally with code 0; no forced stop or product process was used.
+- **Full contracts:** `m4rh-c1` passed **24/24 projects**, including both runner shells, actual console-cancellation contracts and the existing **432 spawn-smoke assertions** with metadata-only installed clock IL inspection. The aggregate runner lock was released and independently reacquired. Validation used the approved working changes on the baseline revision; it is not a clean post-commit native run.
+- **Build evidence:** the .NET 8 contract executable compiled through the selected .NET SDK and isolated `CoopCompileOnly` output/package roots. Main client/dedicated builds were **Not Run** because no compiled product source changed. Installed modules were not deployed and Bannerlord was not launched. Runtime and native scenario regression are **Not Run**.
+
+Raw artifacts remain under private `%TEMP%/CoopSpectator/Automation`: `m4rh-e1` holds focused output and retained executions, `m4rh-c1` holds full contracts, and `m4rh-env` holds isolated CLI/cache state. Test-owned disposable directories remain governed by the existing harness cleanup. No raw logs or generated build outputs enter Git.
+
+| Retained evidence / validated source | SHA-256 |
+|---|---|
+| `m4rh-e1/artifacts/execution-03/summary.json` | `264FB6ED6F37BACF8F7AD5C5F48490F44B8A0AB120964E7FF3114A577F3C9A92` |
+| Focused Windows PowerShell `cases.json` | `BF167ABB1D6DE13411185FC50B31342FE4894A152BDEC38A7B3E3380821FE3E1` |
+| Focused PowerShell 7 `cases.json` | `97AAC17DDA11D55E4C222232DFC627D82B620E4C9277BF8A38F14233A3ECD511` |
+| `m4rh-c1/artifacts/results/contracts.json` | `C201F025A235A093F3A4AC286F10C8E1001A447FFC0784350E19A8181FCA31FF` |
+| `scripts/Invoke-CoopTest.ps1` | `BC05352102EE9B7C3A5D785AF9AB44DC2549FC85180CD1A31C4C72BFA82B5776` |
+| `scripts/CoopAutomationRunner.Core.ps1` | `32920BB7644FC23F5954D898DF3D2D14D1517DA515DC23AF55BE564FF1B799D7` |
+| `Tests/CoopAutomationRunner.ContractTests/Program.cs` | `1A9C5B68692B7211CF990ABE3285399DB3713E0774E6EA1CCDCF8BB2306C1DD4` |
+
+### 27.3 Focused acceptance and scenario coverage
+
+| Atomic acceptance criterion | Evidence | Status |
+|---|---|---|
+| Preserve the actual rejected read and decision despite a later healthy file | Real reader/assertion/finalizer contracts, both roles and shells | Satisfied |
+| Preserve existing acceptance, identity rejection and deadlines | Fresh/stale/boundary/progress/schema/timeline/capability/identity cases | Satisfied |
+| Bound and detach added diagnostics; preserve primary failure | Fixed scalar projection, graph/oversize/mutation and projection-failure tests | Satisfied |
+| Propagate evidence through both consumers; retain existing publication regression | Real catch/writer call extraction plus full 24/24 | Satisfied |
+
+Field zero-client dedicated smoke and dedicated/client Feasibility share the changed diagnostic path: source and contracts **Passed**, native runtime **Not Run**. Village, siege assault with deployment, sally out, siege ambush, relief, lords hall, day hideout and night hideout have no adapter changes; native regression for each is **Not Run**, with only shared diagnostic applicability established. Sequential missions/reconnect retain run-local evidence without a new cache; live regression is **Not Run**. Campaign-host fixture Record uses a separate wait/catch corridor and is **Not Applicable**. Unsupported blockade and blockade-sally-out are **Not Applicable**; their guards remain unchanged.
+
+### 27.4 Documentation and stopping condition
+
+This closes the approved reporting correction at source/contract level. It does **not** close M4 or verify a battle in Bannerlord. A subsequent native attempt requires its own exact plan; do not infer that the historical server was dead, that the timeout was false, or that changing a timeout is justified.
+
+Immediate documentation is limited to this focused evidence section, the canonical field contract in BUILD_TEST_DEBUG.md and the preservation invariant in INVARIANTS_AND_RISKS.md. The approved publication groups these safety/contract documents with the three implementation/test files in one atomic commit. README.md, the active specification, RUNTIME_FLOWS.md, ARCHITECTURE.md and CODE_MAP.md remain unchanged: no milestone closure, native flow, ownership or component-location change is claimed. Earlier sections remain historical evidence; broader canonical closure is deferred to the M4 substage boundary.
