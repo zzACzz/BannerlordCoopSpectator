@@ -13,6 +13,8 @@
     <Compile Include="..\..\Infrastructure\CoopBattleSpawnBridgeFile.cs" Link="CoopBattleSpawnBridgeFile.cs" />
     <Compile Include="..\..\Infrastructure\Automation\CoopAutomationSpawnSmokeContract.cs" Link="CoopAutomationSpawnSmokeContract.cs" />
     <Compile Include="..\..\Infrastructure\Automation\CoopAutomationSpawnSmokeBridge.cs" Link="CoopAutomationSpawnSmokeBridge.cs" />
+    <Compile Include="..\..\Infrastructure\Automation\CoopAutomationZeroClientRuntime.cs" Link="CoopAutomationZeroClientRuntime.cs" />
+    <Compile Include="..\..\Patches\CoopAutomationZeroClientClockPatch.cs" Link="CoopAutomationZeroClientClockPatch.cs" />
     <Compile Include="..\..\Infrastructure\Automation\CoopAutomationRuntimeContract.cs" Link="CoopAutomationRuntimeContract.cs" />
     <Compile Include="..\..\Infrastructure\Automation\CoopAutomationRuntimeBridge.cs" Link="CoopAutomationRuntimeBridge.cs" />
     <Compile Include="..\..\Infrastructure\Automation\CoopAutomationProtocolFileIO.cs" Link="CoopAutomationProtocolFileIO.cs" />
@@ -21,5 +23,6 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
+    <PackageReference Include="Lib.Harmony" Version="2.4.2" />
   </ItemGroup>
 </Project>

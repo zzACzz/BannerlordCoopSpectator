@@ -12,6 +12,7 @@ namespace CoopSpectator.Infrastructure.Automation
         private static CoopAutomationRuntimeConfiguration _configuration;
         private static CoopAutomationSmokeFixture _fixture;
         private static object _mission;
+        private static object _nativeModeInitializationMission;
         private static bool _opened;
         private static bool _initialized;
         private static bool _ended;
@@ -91,10 +92,29 @@ namespace CoopSpectator.Infrastructure.Automation
             OpenedShell = shell;
         }
 
+        public static bool ClaimNativeModeInitialization(object mission, string scene, bool isDedicatedServer)
+        {
+            if (!IsRequested) return false;
+            RequireActive();
+            if (Environment.GetEnvironmentVariable(ProfileVariable) != CoopAutomationSpawnSmokeContract.Profile ||
+                !isDedicatedServer || !_opened || OpenedShell != CoopAutomationSpawnSmokeContract.MissionShell ||
+                _initialized || _ended || mission == null || scene != CoopAutomationSpawnSmokeContract.Scene ||
+                _nativeModeInitializationMission != null)
+            {
+                Fail("SpawnSmokeNativeModeInitializationMismatch");
+                throw new InvalidOperationException(Failure);
+            }
+
+            // Claim the factory's mission once; the later observer must bind the same instance.
+            _nativeModeInitializationMission = mission;
+            return true;
+        }
+
         public static void ObserveInitialized(object mission)
         {
             if (!IsActive) return;
-            if (!_opened || _initialized || mission == null)
+            if (!_opened || _initialized || mission == null || !string.IsNullOrEmpty(Failure) ||
+                !ReferenceEquals(_nativeModeInitializationMission, mission))
             { Fail("SpawnSmokeMissionInitializationMismatch"); return; }
             _mission = mission;
             _initialized = true;
@@ -106,6 +126,22 @@ namespace CoopSpectator.Infrastructure.Automation
             if (!ReferenceEquals(_mission, mission)) { Fail("SpawnSmokeEndMissionMismatch"); return; }
             if (!_ended) PhaseBeforeEnd = phase;
             _ended = true;
+        }
+
+        public static bool CanUseZeroClientPreBattle(object mission, string scene, bool isDedicatedServer,
+            bool continuing, string mode, string phase, bool noConnectedClients, bool snapshotMatches)
+        {
+            if (!IsRequested || !IsActive || !_opened || !_initialized || _ended ||
+                !string.IsNullOrEmpty(Failure) || mission == null ||
+                Environment.GetEnvironmentVariable(ProfileVariable) != CoopAutomationSpawnSmokeContract.Profile ||
+                !ReferenceEquals(_mission, mission) || !ReferenceEquals(_nativeModeInitializationMission, mission) ||
+                OpenedShell != CoopAutomationSpawnSmokeContract.MissionShell ||
+                scene != CoopAutomationSpawnSmokeContract.Scene || !isDedicatedServer || !continuing ||
+                mode != "Battle" || !noConnectedClients || !snapshotMatches)
+                return false;
+
+            return phase == "Loading" || phase == "SideSelection" || phase == "UnitSelection" ||
+                phase == "Deployment" || phase == "PreBattleHold";
         }
 
         public static void ObserveResultAttempt(object mission, string battleId, int entryCount,
@@ -146,6 +182,7 @@ namespace CoopSpectator.Infrastructure.Automation
             _configuration = null;
             _fixture = null;
             _mission = null;
+            _nativeModeInitializationMission = null;
             _opened = _initialized = _ended = false;
             _protectedResultHash = _protectedResultPath = null;
             Failure = OpenedShell = PhaseBeforeEnd = string.Empty;

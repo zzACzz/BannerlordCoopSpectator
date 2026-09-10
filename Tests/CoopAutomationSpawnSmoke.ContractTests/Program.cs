@@ -5,6 +5,15 @@ using System.Collections.Generic;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using CoopSpectator.Infrastructure.Automation;
+using CoopSpectator.Infrastructure;
+using CoopSpectator.Patches;
+using TaleWorlds.MountAndBlade;
+using HarmonyLib;
+using System.Reflection;
+using System.Reflection.Emit;
+using System.Reflection.Metadata;
+using System.Reflection.Metadata.Ecma335;
+using System.Reflection.PortableExecutable;
 
 internal static class Program
 {
@@ -52,6 +61,7 @@ internal static class Program
     private static int Main()
     {
         ValidateNativeCommandReadinessSource();
+        ValidateInstalledClockIl();
         string runId = "m4-contract-" + Guid.NewGuid().ToString("N");
         string root = Path.Combine(Path.GetTempPath(), "CoopSpectator", "Automation", runId);
         string fixtureRoot = Path.Combine(root, "payloads", "field-current");
@@ -444,7 +454,11 @@ Write-Output ('Spawn-smoke runner contracts passed in PowerShell ' + $PSVersionT
             Environment.SetEnvironmentVariable(names[0], null);
             Environment.SetEnvironmentVariable(names[1], null);
             Check(!CoopAutomationSpawnSmokeBridge.IsRequested && !CoopAutomationSpawnSmokeBridge.IsActive, "Disabled gate armed.");
+            Check(!CoopAutomationSpawnSmokeBridge.ClaimNativeModeInitialization(null, "wrong", false),
+                "Disabled automation requested native mode initialization.");
             Environment.SetEnvironmentVariable(names[0], "1");
+            Check(!CoopAutomationSpawnSmokeBridge.ClaimNativeModeInitialization(null, "wrong", false),
+                "Automation without a smoke profile requested native mode initialization.");
             Environment.SetEnvironmentVariable(names[1], CoopAutomationSpawnSmokeContract.Profile);
             Environment.SetEnvironmentVariable(names[2], runId);
             Environment.SetEnvironmentVariable(names[3], root);
@@ -460,6 +474,8 @@ Write-Output ('Spawn-smoke runner contracts passed in PowerShell ' + $PSVersionT
             Check(!CoopAutomationSpawnSmokeBridge.TryActivate(configuration, CoopAutomationSpawnSmokeContract.Profile,
                 "field-current-sanitized-v1", "payloads/field-current", out _), "Wrong sentinel was accepted.");
             File.WriteAllText(sentinel, CoopAutomationRuntimeContract.LocalResultSentinelText(runId), new System.Text.UTF8Encoding(false));
+            ValidateNativeModeInitialization(configuration);
+            ValidateZeroClientAdmission(configuration);
             Check(!CoopAutomationSpawnSmokeBridge.TryActivate(configuration, "wrong", "field-current-sanitized-v1", "payloads/field-current", out _), "Wrong profile armed.");
             Check(CoopAutomationSpawnSmokeBridge.TryActivate(configuration, CoopAutomationSpawnSmokeContract.Profile,
                 "field-current-sanitized-v1", "payloads/field-current", out var reason), "Bridge admission failed: " + reason);
@@ -468,6 +484,8 @@ Write-Output ('Spawn-smoke runner contracts passed in PowerShell ' + $PSVersionT
             Check(CoopAutomationSpawnSmokeBridge.ReadRosterJson().Length > 0, "Admitted bytes missing.");
             object mission = new object();
             CoopAutomationSpawnSmokeBridge.ObserveOpening("battle_terrain_029", "MultiplayerBattle");
+            Check(CoopAutomationSpawnSmokeBridge.ClaimNativeModeInitialization(mission, "battle_terrain_029", true),
+                "Fresh admission after reset could not claim native mode initialization.");
             CoopAutomationSpawnSmokeBridge.ObserveInitialized(mission);
             Check(CoopAutomationSpawnSmokeBridge.MatchesMission(mission), "Mission identity lost.");
             CoopAutomationSpawnSmokeBridge.ObserveEnding(mission, "PreBattleHold");
@@ -485,6 +503,376 @@ Write-Output ('Spawn-smoke runner contracts passed in PowerShell ' + $PSVersionT
             CoopAutomationSpawnSmokeBridge.Reset();
             for (int i = 0; i < names.Length; i++) Environment.SetEnvironmentVariable(names[i], previous[i]);
         }
+    }
+
+    private static void ValidateNativeModeInitialization(CoopAutomationRuntimeConfiguration configuration)
+    {
+        void Activate(bool opened = true)
+        {
+            CoopAutomationSpawnSmokeBridge.Reset();
+            Check(CoopAutomationSpawnSmokeBridge.TryActivate(configuration, CoopAutomationSpawnSmokeContract.Profile,
+                "field-current-sanitized-v1", "payloads/field-current", out var reason), "Mode admission failed: " + reason);
+            if (opened)
+                CoopAutomationSpawnSmokeBridge.ObserveOpening(CoopAutomationSpawnSmokeContract.Scene,
+                    CoopAutomationSpawnSmokeContract.MissionShell);
+        }
+
+        void RejectClaim(object mission, string scene, bool dedicated, string label)
+        {
+            bool rejected = false;
+            try { CoopAutomationSpawnSmokeBridge.ClaimNativeModeInitialization(mission, scene, dedicated); }
+            catch (InvalidOperationException) { rejected = true; }
+            Check(rejected, "Native mode claim accepted: " + label);
+        }
+
+        object firstMission = new object();
+        string scene = CoopAutomationSpawnSmokeContract.Scene;
+        RejectClaim(firstMission, scene, true, "unadmitted request");
+        Activate(opened: false);
+        RejectClaim(firstMission, scene, true, "before mission opening");
+        Activate();
+        RejectClaim(firstMission, scene, false, "client or listen-server role");
+        Activate();
+        RejectClaim(null, scene, true, "null mission");
+        foreach (string wrongScene in new[] { null, "", "battle_terrain_030", "village_scene", "siege_scene" })
+        {
+            Activate();
+            RejectClaim(firstMission, wrongScene, true, "different scene");
+        }
+
+        Activate();
+        Environment.SetEnvironmentVariable(CoopAutomationSpawnSmokeBridge.ProfileVariable, "wrong");
+        try { RejectClaim(firstMission, scene, true, "changed profile"); }
+        finally
+        {
+            Environment.SetEnvironmentVariable(CoopAutomationSpawnSmokeBridge.ProfileVariable,
+                CoopAutomationSpawnSmokeContract.Profile);
+        }
+        RejectClaim(firstMission, scene, true, "failed claim cannot be retried without reset");
+
+        Activate();
+        CoopAutomationSpawnSmokeBridge.ObserveInitialized(firstMission);
+        Check(!CoopAutomationSpawnSmokeBridge.MatchesMission(firstMission) &&
+            CoopAutomationSpawnSmokeBridge.Failure == "SpawnSmokeMissionInitializationMismatch",
+            "Observer accepted a mission without a native mode claim.");
+
+        Activate();
+        Check(CoopAutomationSpawnSmokeBridge.ClaimNativeModeInitialization(firstMission, scene, true), "First mode claim failed.");
+        Check(!CoopAutomationSpawnSmokeBridge.MatchesMission(firstMission) &&
+            CoopAutomationSpawnSmokeBridge.PhaseBeforeEnd == "" && CoopAutomationSpawnSmokeBridge.ResultAttempts == 0,
+            "Mode claim prematurely initialized or ended the cooperative mission.");
+        CoopAutomationSpawnSmokeBridge.ObserveInitialized(new object());
+        Check(!CoopAutomationSpawnSmokeBridge.MatchesMission(firstMission) &&
+            CoopAutomationSpawnSmokeBridge.Failure == "SpawnSmokeMissionInitializationMismatch",
+            "Observer accepted a replacement mission.");
+
+        foreach (bool replaceMission in new[] { false, true })
+        {
+            Activate();
+            Check(CoopAutomationSpawnSmokeBridge.ClaimNativeModeInitialization(firstMission, scene, true), "Initial claim failed.");
+            RejectClaim(replaceMission ? new object() : firstMission, scene, true,
+                replaceMission ? "replacement factory invocation" : "duplicate factory invocation");
+            CoopAutomationSpawnSmokeBridge.ObserveInitialized(firstMission);
+            Check(!CoopAutomationSpawnSmokeBridge.MatchesMission(firstMission), "Rejected factory claim did not fail closed.");
+        }
+
+        foreach (bool ended in new[] { false, true })
+        {
+            Activate();
+            object mission = new object();
+            Check(CoopAutomationSpawnSmokeBridge.ClaimNativeModeInitialization(mission, scene, true), "Reset retained a claim.");
+            CoopAutomationSpawnSmokeBridge.ObserveInitialized(mission);
+            Check(CoopAutomationSpawnSmokeBridge.MatchesMission(mission) &&
+                !CoopAutomationSpawnSmokeBridge.MatchesMission(firstMission) &&
+                CoopAutomationSpawnSmokeBridge.CheckProtectedResult(), "Exact mission binding or protected result changed.");
+            if (ended) CoopAutomationSpawnSmokeBridge.ObserveEnding(mission, "PreBattleHold");
+            RejectClaim(mission, scene, true, ended ? "after mission end" : "after runtime initialization");
+        }
+
+        CoopAutomationSpawnSmokeBridge.Reset();
+        Check(!CoopAutomationSpawnSmokeBridge.IsActive && !CoopAutomationSpawnSmokeBridge.MatchesMission(firstMission) &&
+            CoopAutomationSpawnSmokeBridge.Failure == "", "Mode tests retained prior run state.");
+    }
+
+    private static void ValidateZeroClientAdmission(CoopAutomationRuntimeConfiguration configuration)
+    {
+        Mission Ready()
+        {
+            CoopAutomationSpawnSmokeBridge.Reset();
+            Environment.SetEnvironmentVariable(CoopAutomationSpawnSmokeBridge.ProfileVariable, CoopAutomationSpawnSmokeContract.Profile);
+            GameNetwork.IsServer = GameNetwork.IsDedicatedServer = GameNetwork.IsSessionActive = true;
+            GameNetwork.NativeHasParticipants = false;
+            GameNetwork.NetworkPeers = new List<NetworkCommunicator>();
+            var mission = new Mission { SceneName = CoopAutomationSpawnSmokeContract.Scene,
+                Mode = MissionMode.Battle, CurrentState = Mission.State.Continuing };
+            Mission.Current = mission;
+            Check(CoopAutomationSpawnSmokeBridge.TryActivate(configuration, CoopAutomationSpawnSmokeContract.Profile,
+                CoopAutomationSpawnSmokeContract.FixtureId, CoopAutomationSpawnSmokeContract.FixtureRelativeRoot,
+                out var failure), "Zero-client fixture admission failed: " + failure);
+            CoopAutomationSpawnSmokeBridge.ObserveOpening(mission.SceneName, CoopAutomationSpawnSmokeContract.MissionShell);
+            Check(CoopAutomationSpawnSmokeBridge.ClaimNativeModeInitialization(mission, mission.SceneName, true), "Mode claim failed.");
+            CoopAutomationSpawnSmokeBridge.ObserveInitialized(mission);
+            BattleSnapshotRuntimeState.Snapshot = JsonConvert.DeserializeObject<CoopSpectator.Network.Messages.BattleSnapshotMessage>(
+                JsonConvert.SerializeObject(CoopAutomationSpawnSmokeBridge.Fixture.Snapshot));
+            CoopBattlePhaseRuntimeState.Phase = CoopBattlePhase.SideSelection;
+            Check(CoopAutomationZeroClientRuntime.CanAdvancePreBattle(mission), "Valid zero-client mission was denied.");
+            return mission;
+        }
+
+        try
+        {
+            CoopAutomationSpawnSmokeBridge.Reset();
+            Check(!CoopAutomationZeroClientClockPatch.TryInstall(out _), "Unadmitted process installed a clock patch.");
+            Check(!CoopAutomationZeroClientRuntime.CanAdvancePreBattle(null), "Unadmitted runtime was accepted.");
+            var negatives = new (string Name, Action<Mission> Mutate)[] {
+                ("server role", m => GameNetwork.IsServer = false),
+                ("dedicated role", m => GameNetwork.IsDedicatedServer = false),
+                ("session", m => GameNetwork.IsSessionActive = false),
+                ("replacement current mission", m => Mission.Current = new Mission()),
+                ("missing current mission", m => Mission.Current = null),
+                ("scene", m => m.SceneName = "battle_terrain_030"),
+                ("startup mode", m => m.Mode = MissionMode.StartUp),
+                ("deployment mode", m => m.Mode = MissionMode.Deployment),
+                ("loading", m => m.CurrentState = Mission.State.Initializing),
+                ("new mission", m => m.CurrentState = Mission.State.NewlyCreated),
+                ("disposed", m => m.CurrentState = Mission.State.Over),
+                ("native end", m => m.MissionEnded = true),
+                ("unbound phase", m => CoopBattlePhaseRuntimeState.Phase = CoopBattlePhase.None),
+                ("active battle", m => CoopBattlePhaseRuntimeState.Phase = CoopBattlePhase.BattleActive),
+                ("ended battle", m => CoopBattlePhaseRuntimeState.Phase = CoopBattlePhase.BattleEnded),
+                ("unknown phase", m => CoopBattlePhaseRuntimeState.Phase = (CoopBattlePhase)999),
+                ("unknown peers", m => GameNetwork.NetworkPeers = null),
+                ("connected unsynchronized client", m => GameNetwork.NetworkPeers.Add(new NetworkCommunicator { IsConnectionActive = true })),
+                ("missing snapshot", m => BattleSnapshotRuntimeState.Snapshot = null),
+                ("campaign identity", m => BattleSnapshotRuntimeState.Snapshot.CampaignId = "other"),
+                ("battle identity", m => BattleSnapshotRuntimeState.Snapshot.BattleId = "other"),
+                ("generation identity", m => BattleSnapshotRuntimeState.Snapshot.BattleInstanceId = "other"),
+                ("snapshot scene", m => BattleSnapshotRuntimeState.Snapshot.MultiplayerScene = "other"),
+                ("missing scenario", m => BattleSnapshotRuntimeState.Snapshot.ScenarioContext = null),
+                ("village", m => BattleSnapshotRuntimeState.Snapshot.ScenarioContext.ScenarioKind = "VillageBattle"),
+                ("relief", m => BattleSnapshotRuntimeState.Snapshot.ScenarioContext.CampaignBattleType = "SiegeOutside"),
+                ("siege", m => BattleSnapshotRuntimeState.Snapshot.ScenarioContext.IsSiegeBattle = true),
+                ("missing sides", m => BattleSnapshotRuntimeState.Snapshot.Sides = null),
+                ("missing defender", m => BattleSnapshotRuntimeState.Snapshot.Sides.RemoveAt(1)),
+                ("missing side data", m => BattleSnapshotRuntimeState.Snapshot.Sides[0] = null),
+                ("missing troops", m => BattleSnapshotRuntimeState.Snapshot.Sides[0].Troops = null),
+                ("empty troops", m => BattleSnapshotRuntimeState.Snapshot.Sides[1].Troops.Clear()),
+                ("driver failure", m => CoopAutomationSpawnSmokeBridge.Fail("ContractDriverFailure")),
+                ("end observation", m => CoopAutomationSpawnSmokeBridge.ObserveEnding(m, "PreBattleHold")),
+                ("reset", m => CoopAutomationSpawnSmokeBridge.Reset()),
+                ("changed profile", m => Environment.SetEnvironmentVariable(CoopAutomationSpawnSmokeBridge.ProfileVariable, "wrong")),
+                ("removed profile", m => Environment.SetEnvironmentVariable(CoopAutomationSpawnSmokeBridge.ProfileVariable, null))
+            };
+            foreach (var negative in negatives)
+            {
+                Mission mission = Ready();
+                negative.Mutate(mission);
+                Check(!CoopAutomationZeroClientRuntime.CanAdvancePreBattle(mission), "Invalid admission: " + negative.Name);
+                Check(!CoopAutomationZeroClientClockPatch.AllowMissionTick(false, mission), "Clock exception escaped: " + negative.Name);
+                Check(CoopAutomationZeroClientClockPatch.AllowMissionTick(true, mission), "Native true changed: " + negative.Name);
+            }
+
+            Mission admitted = Ready();
+            foreach (CoopBattlePhase phase in new[] { CoopBattlePhase.Loading, CoopBattlePhase.SideSelection,
+                CoopBattlePhase.UnitSelection, CoopBattlePhase.Deployment, CoopBattlePhase.PreBattleHold })
+            {
+                CoopBattlePhaseRuntimeState.Phase = phase;
+                Check(CoopAutomationZeroClientRuntime.CanAdvancePreBattle(admitted), "Pre-battle phase denied: " + phase);
+            }
+            GameNetwork.NetworkPeers.Add(new NetworkCommunicator { IsServerPeer = true, IsConnectionActive = true });
+            GameNetwork.NetworkPeers.Add(new NetworkCommunicator { IsConnectionActive = false });
+            Check(CoopAutomationZeroClientRuntime.CanAdvancePreBattle(admitted), "Server/disconnected records counted as clients.");
+            Check(!CoopAutomationSpawnSmokeBridge.CanUseZeroClientPreBattle(new object(), admitted.SceneName,
+                true, true, "Battle", "PreBattleHold", true, true), "Foreign mission identity accepted.");
+            Check(CoopAutomationSpawnSmokeBridge.CheckProtectedResult(), "Admission changed the protected result.");
+            ValidateClockTranspiler(admitted);
+
+            // Exercise real Harmony registration/removal only against the native-free stand-in.
+            GameNetwork.IsServer = false; // Dedicated bootstrap installs before the network session starts.
+            Check(CoopAutomationZeroClientClockPatch.TryInstall(out var installFailure), "Stand-in install failed: " + installFailure);
+            GameNetwork.IsServer = true;
+            var state = new MissionState { CurrentMission = admitted };
+            state.TickForContract(0.5f);
+            Check(state.LastDelta == 0.5f, "Installed stand-in patch did not admit time.");
+            CoopBattlePhaseRuntimeState.Phase = CoopBattlePhase.BattleActive;
+            state.TickForContract(0.5f);
+            Check(state.LastDelta == 0f, "Installed stand-in patch admitted active battle.");
+            Check(CoopAutomationZeroClientClockPatch.Reset(out var resetFailure), "Stand-in reset failed: " + resetFailure);
+            CoopBattlePhaseRuntimeState.Phase = CoopBattlePhase.PreBattleHold;
+            state.TickForContract(0.5f);
+            Check(state.LastDelta == 0f, "Reset retained the stand-in patch.");
+            Check(CoopAutomationZeroClientClockPatch.TryInstall(out installFailure), "Fresh install after reset failed: " + installFailure);
+            Check(CoopAutomationZeroClientClockPatch.Reset(out resetFailure), "Fresh patch cleanup failed: " + resetFailure);
+        }
+        finally
+        {
+            bool removed = CoopAutomationZeroClientClockPatch.Reset(out var failure);
+            CoopAutomationSpawnSmokeBridge.Reset();
+            Mission.Current = null;
+            BattleSnapshotRuntimeState.Snapshot = null;
+            CoopBattlePhaseRuntimeState.Phase = CoopBattlePhase.None;
+            GameNetwork.IsServer = GameNetwork.IsDedicatedServer = GameNetwork.IsSessionActive = false;
+            GameNetwork.NativeHasParticipants = false;
+            GameNetwork.NetworkPeers = new List<NetworkCommunicator>();
+            Environment.SetEnvironmentVariable(CoopAutomationSpawnSmokeBridge.ProfileVariable, CoopAutomationSpawnSmokeContract.Profile);
+            Check(removed, "Clock patch cleanup failed: " + failure);
+        }
+    }
+
+    private static void ValidateClockTranspiler(Mission mission)
+    {
+        var method = new DynamicMethod("ClockContract", typeof(float),
+            new[] { typeof(MissionState), typeof(float), typeof(bool), typeof(bool), typeof(float) }, typeof(Program).Module, true);
+        ILGenerator il = method.GetILGenerator();
+        il.DeclareLocal(typeof(float));
+        Label fixedDelta = il.DefineLabel(), participantGate = il.DefineLabel(), resume = il.DefineLabel();
+        MethodInfo predicate = typeof(GameNetwork).GetMethod(nameof(GameNetwork.DoesDedicatedServerHaveAnyNetworkPeersOrBots));
+        var fixedCheck = new CodeInstruction(OpCodes.Ldarg_3); fixedCheck.labels.Add(fixedDelta);
+        var nativeCall = new CodeInstruction(OpCodes.Call, predicate); nativeCall.labels.Add(participantGate);
+        var result = new CodeInstruction(OpCodes.Ldloc_0); result.labels.Add(resume);
+        var codes = new List<CodeInstruction> {
+            new CodeInstruction(OpCodes.Ldarg_1), new CodeInstruction(OpCodes.Stloc_0),
+            new CodeInstruction(OpCodes.Ldarg_2), new CodeInstruction(OpCodes.Brfalse, fixedDelta),
+            new CodeInstruction(OpCodes.Ldc_R4, 0f), new CodeInstruction(OpCodes.Stloc_0), new CodeInstruction(OpCodes.Br, participantGate),
+            fixedCheck, new CodeInstruction(OpCodes.Brfalse, participantGate),
+            new CodeInstruction(OpCodes.Ldarg_S, (byte)4), new CodeInstruction(OpCodes.Stloc_0),
+            nativeCall, new CodeInstruction(OpCodes.Brtrue, resume),
+            new CodeInstruction(OpCodes.Ldc_R4, 0f), new CodeInstruction(OpCodes.Stloc_0), result, new CodeInstruction(OpCodes.Ret)
+        };
+        var transformed = CoopAutomationZeroClientClockPatch.Transpiler(codes).ToList();
+        Check(transformed.Count == codes.Count + 3 && transformed.Count(c => c.Calls(predicate)) == 1,
+            "Transpiler replaced the native predicate or injected more than one wrapper.");
+        Check(codes.All(original => transformed.Count(c => ReferenceEquals(c, original)) == 1), "Original instruction metadata was lost.");
+        foreach (var code in transformed)
+        {
+            foreach (var label in code.labels) il.MarkLabel(label);
+            if (code.operand == null) il.Emit(code.opcode);
+            else if (code.operand is Label label) il.Emit(code.opcode, label);
+            else if (code.operand is MethodInfo called) il.Emit(code.opcode, called);
+            else if (code.operand is float value) il.Emit(code.opcode, value);
+            else if (code.operand is byte argument) il.Emit(code.opcode, argument);
+            else throw new Exception("Unexpected synthetic operand.");
+        }
+        var tick = (Func<MissionState, float, bool, bool, float, float>)method.CreateDelegate(
+            typeof(Func<MissionState, float, bool, bool, float, float>));
+        var state = new MissionState { CurrentMission = mission };
+        foreach (bool admitted in new[] { false, true })
+        foreach (bool native in new[] { false, true })
+        foreach (bool paused in new[] { false, true })
+        foreach (bool fixedMode in new[] { false, true })
+        {
+            CoopBattlePhaseRuntimeState.Phase = admitted ? CoopBattlePhase.PreBattleHold : CoopBattlePhase.BattleActive;
+            GameNetwork.NativeHasParticipants = native;
+            float expected = !native && !admitted || paused ? 0f : fixedMode ? 0.25f : 0.5f;
+            Check(tick(state, 0.5f, paused, fixedMode, 0.25f) == expected,
+                $"Delta changed: admitted={admitted} native={native} paused={paused} fixed={fixedMode}");
+        }
+        CoopBattlePhaseRuntimeState.Phase = CoopBattlePhase.PreBattleHold;
+        GameNetwork.NativeHasParticipants = false;
+
+        foreach (string invalid in new[] { "missing", "duplicate", "inverted branch", "nonzero delta", "wrong store", "wrong resume" })
+        {
+            var bad = codes.Select(c => new CodeInstruction(c)).ToList();
+            int call = bad.FindIndex(c => c.Calls(predicate));
+            if (invalid == "missing") bad.RemoveAt(call);
+            if (invalid == "duplicate") bad.Add(new CodeInstruction(OpCodes.Call, predicate));
+            if (invalid == "inverted branch") bad[call + 1].opcode = OpCodes.Brfalse;
+            if (invalid == "nonzero delta") bad[call + 2].operand = 1f;
+            if (invalid == "wrong store") bad[call + 3].opcode = OpCodes.Pop;
+            if (invalid == "wrong resume") bad[call + 1].operand = fixedDelta;
+            bool rejected = false;
+            try { CoopAutomationZeroClientClockPatch.Transpiler(bad).ToList(); }
+            catch (InvalidOperationException) { rejected = true; }
+            Check(rejected, "Unsafe clock IL accepted: " + invalid);
+        }
+        bool repeated = false;
+        try { CoopAutomationZeroClientClockPatch.Transpiler(transformed).ToList(); }
+        catch (InvalidOperationException) { repeated = true; }
+        Check(repeated, "Repeated transformation was accepted.");
+    }
+
+    private static void ValidateInstalledClockIl()
+    {
+        string path = Environment.GetEnvironmentVariable("COOPSPECTATOR_CONTRACT_NATIVE_CLOCK_ASSEMBLY");
+        if (string.IsNullOrEmpty(path))
+        { Console.WriteLine("Installed native clock IL verification: Not Run (no explicit assembly path)."); return; }
+        string hash = CoopAutomationRuntimeContract.ComputeFileSha256(path);
+        using var stream = File.OpenRead(path);
+        using var pe = new PEReader(stream);
+        MetadataReader reader = pe.GetMetadataReader();
+        var type = reader.TypeDefinitions.Select(reader.GetTypeDefinition).Single(t =>
+            reader.GetString(t.Namespace) == "TaleWorlds.MountAndBlade" && reader.GetString(t.Name) == "MissionState");
+        var method = type.GetMethods().Select(reader.GetMethodDefinition).Single(m => reader.GetString(m.Name) == "TickMission");
+        var body = pe.GetMethodBody(method.RelativeVirtualAddress);
+        byte[] bytes = body.GetILBytes();
+        var opcodes = typeof(OpCodes).GetFields(BindingFlags.Public | BindingFlags.Static)
+            .Where(f => f.FieldType == typeof(OpCode)).Select(f => (OpCode)f.GetValue(null))
+            .ToDictionary(op => unchecked((ushort)op.Value));
+        var generator = new DynamicMethod("NativeClockIlLabels", typeof(void), Type.EmptyTypes).GetILGenerator();
+        var decoded = new List<(int Offset, CodeInstruction Code)>();
+        var labels = new Dictionary<int, Label>();
+        Label Target(int offset)
+        {
+            if (!labels.TryGetValue(offset, out var label)) labels[offset] = label = generator.DefineLabel();
+            return label;
+        }
+        bool IsParticipantPredicate(int token)
+        {
+            EntityHandle handle = MetadataTokens.EntityHandle(token);
+            if (handle.Kind != HandleKind.MethodDefinition) return false;
+            var called = reader.GetMethodDefinition((MethodDefinitionHandle)handle);
+            var declaringType = reader.GetTypeDefinition(called.GetDeclaringType());
+            return reader.GetString(declaringType.Namespace) == "TaleWorlds.MountAndBlade" &&
+                reader.GetString(declaringType.Name) == "GameNetwork" &&
+                reader.GetString(called.Name) == "DoesDedicatedServerHaveAnyNetworkPeersOrBots";
+        }
+        int position = 0;
+        while (position < bytes.Length)
+        {
+            int offset = position;
+            ushort value = bytes[position++];
+            if (value == 0xfe) value = (ushort)(0xfe00 | bytes[position++]);
+            OpCode op = opcodes[value];
+            object operand = null;
+            switch (op.OperandType)
+            {
+                case OperandType.InlineNone: break;
+                case OperandType.ShortInlineBrTarget:
+                    int shortJump = (sbyte)bytes[position++]; operand = Target(position + shortJump); break;
+                case OperandType.InlineBrTarget:
+                    int jump = BitConverter.ToInt32(bytes, position); position += 4; operand = Target(position + jump); break;
+                case OperandType.InlineSwitch:
+                    int count = BitConverter.ToInt32(bytes, position); position += 4;
+                    int next = position + 4 * count;
+                    var targets = new Label[count];
+                    for (int i = 0; i < count; i++) { targets[i] = Target(next + BitConverter.ToInt32(bytes, position)); position += 4; }
+                    operand = targets; break;
+                case OperandType.ShortInlineR: operand = BitConverter.ToSingle(bytes, position); position += 4; break;
+                case OperandType.InlineR: operand = BitConverter.ToDouble(bytes, position); position += 8; break;
+                case OperandType.InlineI8: operand = BitConverter.ToInt64(bytes, position); position += 8; break;
+                case OperandType.ShortInlineI: operand = (sbyte)bytes[position++]; break;
+                case OperandType.ShortInlineVar: operand = bytes[position++]; break;
+                case OperandType.InlineVar: operand = BitConverter.ToUInt16(bytes, position); position += 2; break;
+                default:
+                    int token = BitConverter.ToInt32(bytes, position); position += 4;
+                    operand = op.OperandType == OperandType.InlineMethod && IsParticipantPredicate(token)
+                        ? (object)typeof(GameNetwork).GetMethod(nameof(GameNetwork.DoesDedicatedServerHaveAnyNetworkPeersOrBots)) : token;
+                    break;
+            }
+            decoded.Add((offset, new CodeInstruction(op, operand)));
+        }
+        Check(position == bytes.Length && body.ExceptionRegions.Length == 0, "Native clock IL extent or exception layout changed.");
+        foreach (var label in labels)
+        {
+            var target = decoded.SingleOrDefault(code => code.Offset == label.Key).Code;
+            Check(target != null, "Native branch target missing: " + label.Key);
+            target.labels.Add(label.Value);
+        }
+        var transformed = CoopAutomationZeroClientClockPatch.Transpiler(decoded.Select(c => c.Code)).ToList();
+        Check(transformed.Count == decoded.Count + 3, "Exact installed clock method was not transformed once.");
+        Check(decoded.All(original => transformed.Count(c => ReferenceEquals(c, original.Code)) == 1), "Native IL instructions were lost.");
+        Check(CoopAutomationRuntimeContract.ComputeFileSha256(path) == hash, "Installed native assembly changed during inspection.");
+        Console.WriteLine("Installed native clock IL passed (metadata only, no engine execution): " + hash);
     }
 
     private static void Reject(CoopAutomationSmokeFixture fixture, CoopAutomationSmokeObservation baseline,

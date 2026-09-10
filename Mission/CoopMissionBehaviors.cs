@@ -7915,6 +7915,10 @@ namespace CoopSpectator.MissionBehaviors
 
             if (isExactCampaignBattleScene && synchronizedPeerCount <= 0)
             {
+                if (CoopSpectator.Infrastructure.Automation.CoopAutomationZeroClientRuntime.CanAdvancePreBattle(mission) &&
+                    IsBattleSnapshotReadyForMaterialization(mission, out _))
+                    return false;
+
                 reason =
                     "MissionMode=" + missionMode +
                     " MissionTime=" + missionTime.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture) +

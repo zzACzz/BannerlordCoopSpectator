@@ -999,3 +999,130 @@ Both commands exited zero. The first ran all runner-project contracts, including
 The approved continuation publishes this test-only correction with its immediate documentation, then runs clean full contracts as `m4fe-p2-c1` and, only on success, both CompileOnly builds as `m4fe-p1-b1`. Their outcomes, revision identities, output hashes and installed-inventory comparisons belong to their run-scoped reports; this pre-publication section does not predict a pass. Full M4 canonical closure remains deferred.
 
 Scenario impact remains test selection only: neither dedicated/client runtime code nor field, village, siege assault, sally out, siege ambush, relief, lords hall, day/night hideout, sequential/reconnect or unsupported-blockade guards change. No Bannerlord process or native scenario verification belongs to these invocation checks. Native failure finalization, mission materialization and L2 remain open.
+
+## 23. Zero-client startup contract diagnosis (2026-09-10)
+
+### 23.1 Provenance and recovered native boundary
+
+The separately approved offline diagnostic `m4zc-d1` started at clean `ab80784398464906d2ce9eb94f568ce47ab3ab96`. Retained clean gates from that revision passed: `m4fe-p2-c1`, 24/24, and `m4fe-p1-b1`, both CompileOnly builds with unchanged installed inventories. These gates were read, not repeated. The latter produced the same dedicated `74B03C00...2BD4B7` candidate as the historical `m4sd-p1-l1-01` role. There are no changes under `GameMode/`, `Mission/`, `DedicatedServer/`, `Infrastructure/` or `Patches/` between that run's `a1e5eee` and this diagnostic baseline.
+
+The previously uncaptured native `rgl_log_11448.txt` matches the retained role PID, launch time and RunId in its command line. Its SHA-256 is `B0D26ECF77AFC323B20100BCBFB677F436865B977E4057EC498430441ABDC885`. The native log uses local UTC+03:00; the following timestamps are UTC:
+
+| Time on 2026-09-09 | Observation |
+|---|---|
+| 16:22:14.456 | Initial 16-behavior list includes the corrected scoreboard bridge, scoreboard, CoopBattle owner, lobby, timer and network bridge. |
+| 16:22:17.635–17.759 | CoopBattle `AfterStart` exits; `Mission.State.Continuing` is observed; native `--Mission is running` is printed. Mode remains `StartUp`. |
+| 16:22:17.952–16:43:25.477 | Repeated spawn-owner deferrals report `MissionMode=StartUp MissionTime=0.002 SynchronizedPeers=0`. The process continues ticking and making service calls. |
+| 16:22:29.883 | The dedicated mission observer activates through its existing 15-second fallback despite incomplete mode readiness. |
+| 16:22:30.010 | Retained battle phase is `SideSelection`; the snapshot subsequently contains 47 entries. No materialization observation or `PreBattleHold` pass is retained. |
+| 16:24:04.303 / 16:29:09.196 | Old runner failure publication begins and stalls; later bootstrap status is `RequestExpired`, one start request, zero end requests and null observation. |
+
+This is a live historical startup stall, not evidence of another scoreboard `AfterStart` crash or a mission that never finished loading. The earlier PID-15968 dump belongs to another run. No PID-11448 dump was found in the configured directory; earlier optional-assembly load messages are not established as this stall's cause. Section 20's missing primary terminal evidence remains a limitation.
+
+### 23.2 Exact conditions and their independence
+
+Installed ILSpy 9.1.0.7988 inspected the exact server `TaleWorlds.MountAndBlade.dll` (`C40E283E72AA90E6ED3BD64D6B8081AC7005DA76437CB3D463A12A2A9148C4EE`, 2,577,920 bytes) and `TaleWorlds.MountAndBlade.ListedServer.dll` (`C7D27584FCE431B2D3734EB88C8DF52EF3B1BC8C5729F7FCE690CC277DA577E3`, 28,160 bytes). Native decompilation is evidence for these exact binaries, not a public API guarantee.
+
+1. **State and mode have different owners.** Native `Mission.AfterStart` assigns `CurrentState=Continuing` without setting the mode. `ServerSideIntermissionManager.StartMissionAux` waits for that state, then prints its success message; it does not establish Battle mode. The current `MissionMultiplayerCoopBattle.AfterStart`, `MissionMultiplayerCoopBattleClient.AfterStart` and minimal `MissionMultiplayerScoreboardServerBridge` provide no Battle-mode initialization. The retained stack never establishes that transition. Read-only inspection of the same exact assembly confirms that the base-client class has no `AfterStart` override, whereas native `MissionMultiplayerTeamDeathmatchClient.AfterStart` explicitly calls `SetMissionMode(Battle, true)`. The scoreboard bridge's minimal dependency correction does not supply a complete game-mode initializer.
+2. **Native simulation delta has a participant condition.** `MissionState.TickMission` sets delta to zero if `GameNetwork.DoesDedicatedServerHaveAnyNetworkPeersOrBots()` is false. That predicate is `NetworkPeerCount + NumberOfBotsTeam1 + NumberOfBotsTeam2 != 0`; it does not count the fixture's expected humans. Frozen mission time is consistent with this condition, but the historical network count, both bot options and pause flags were not retained. The predicate is exact-source verified; its exclusive responsibility for the historical zero delta is **Not Verifiable** from these artifacts.
+3. **The mod independently requires a synchronized peer.** `CoopMissionSpawnLogic.RunSharedServerBattleLifecycleTick` returns at `ShouldDeferBattleMapStartupRuntime` before materialization. For this ordinary field scene, the guard defers `StartUp`, mission time below 1.5 seconds, and—independently—an exact campaign scene with zero synchronized non-server peers. Its three startup exceptions are siege-specific and also require a peer. There is no admitted zero-client branch. Changing mode, time, bot counts or a timeout alone cannot satisfy the field path.
+
+`MissionLobbyComponent.SetStatePlayingAsServer` only changes lobby state, starts a timer and broadcasts it; it does not call `SetMissionMode`. A lobby `Playing` state must not be substituted for mission-mode or `PreBattleHold` evidence.
+
+The spawn-smoke contract project links fixture/protocol/bridge contracts and compile stubs, not native `MissionState.TickMission` or production `ShouldDeferBattleMapStartupRuntime`. The scoreboard contracts deliberately preserve a minimal bridge without an `AfterStart` override. Their passing results are valid within that scope; they did not prove zero-client mission progression.
+
+### 23.3 Scope, retained evidence and next boundary
+
+Private `%TEMP%\CoopSpectator\Automation\m4zc-d1` retains 25 byte-verified inputs, six selected native types, bounded decompiler process records, `diagnosis.md`, and final `verification.json`. The helper's `Capture`, `Inspect` and `Verify` modes use Windows PowerShell with `-NoProfile -ExecutionPolicy Bypass`; inspection uses `ilspycmd --disable-updatecheck -t <exact type> <exact installed assembly>`, saving stdout/stderr only below that root. The six recorded decompilations and help invocation exited zero; no deadline was reached. Additional same-assembly callee inspection was read-only stdout. `inputs.json` SHA-256 is `6551AE22F75031D30C0FDB4582F8808E16408DDF84EF41FC041AFE8A833192CC`; `native/MissionState.txt` SHA-256 is `F16B905FD2C9FF2EBBA5A9ADCB45FA9BD24DF28E49C58B4F7B779980BFB676BA`.
+
+Affected-scenario classification: ordinary field/dedicated/zero-client has the confirmed historical stall and source mismatch. Village, sally out and relief can share general exact/CoopBattle startup conditions; no runtime pass is inferred. Siege assault has separate deployment ownership and peer-dependent exceptions; siege ambush has its own controller and mount policy. Lords hall and day/night hideout are not admitted by this field fixture and retain their separate lifecycle contracts. Sequential/reconnect gates and same-process reset remain unverified. Unsupported blockade variants remain Not Applicable. Campaign host and local/remote clients were not launched; native regression is Not Run for all supported scenarios.
+
+The diagnostic objective is complete: it identifies the unsatisfied startup conditions and explains why the unchanged zero-client run cannot reach its intended boundary. The exact historical timeout trigger and clock inputs remain disclosed gaps. No production fix, new automated test, build, Bannerlord run, deployment, registry change or Git mutation belongs to this task. Input preservation and recorded tool exit checks belong to `verification.json`, not to a new full installed-file inventory.
+
+The next implementation plan must separate explicit mission-mode initialization from zero-client clock/peer admission. Keep mode ownership out of the minimal scoreboard dependency bridge. A proposed admission contract must bind the exact dedicated role, admitted immutable field fixture, same mission, completed loading and pre-battle phase, while preserving ordinary clients, active-battle reinforcements, reconnect, native-only physical spawning and result suppression. Section 3's no-peer-gate-bypass boundary must be reconciled explicitly before introducing any exception; this diagnosis does not authorize one. Fake peers/agents, relaxed fixture assertions, forced battle phases and arbitrary timeout/bot-count changes are not a justified repair. Do not repeat the unchanged native attempt to rediscover these established blockers.
+
+Immediate documentation changes are this safety finding and links in `README.md`, `BUILD_TEST_DEBUG.md` and the specification. Other living documents remain unchanged pending the separately approved implementation/substage closure. Exact local source and binary evidence answer the active question; Internet research cannot recover the missing historical runtime values. Milestone 4 and native failure-finalization verification remain open.
+
+## 24. Field automation native mode initialization (2026-09-10)
+
+### 24.1 Approved correction and focused acceptance
+
+The approved atomic task addresses only section 23's missing engine-mode initializer. Its baseline is `ab80784398464906d2ce9eb94f568ce47ab3ab96` with the four diagnostic documentation changes already present. Those changes were preserved; this implementation remains uncommitted. No native run, deployment, full 24-project aggregate or Git mutation was included in this approval.
+
+The composition and ownership contract has its canonical home in [RUNTIME_FLOWS.md](RUNTIME_FLOWS.md#field-automation-native-mode-initialization-2026-09-10-source-contract). Implementation is confined to `MissionMultiplayerCoopBattleMode.BuildServerMissionBehaviorsForCoopBattle`, `CoopAutomationSpawnSmokeBridge.ClaimNativeModeInitialization`, its `ObserveInitialized`/`Reset` integration, and the focused test program. Native `BattleMissionStarterLogic.AfterStart` was inspected in both exact reference profiles: server `TaleWorlds.MountAndBlade.dll` SHA-256 `C40E283E72AA90E6ED3BD64D6B8081AC7005DA76437CB3D463A12A2A9148C4EE` and client `19387F31557FF840D14F378F6BBDF1D58FCFF406AB9FF2294DFBB3E49A50B87E`. Both provide the same `SetMissionMode(Battle, true)` implementation. This exact-binary evidence required no Internet workaround or reference-profile changes.
+
+| Focused criterion | Evidence and result |
+|---|---|
+| One initializer immediately after the CoopBattle owner, only for the admitted dedicated field mission | Source inspection confirms the single insertion and later server filtering retains it; both reference-profile builds pass. Native callback execution is Not Run. |
+| Disabled or absent profile adds nothing; invalid requested role/profile/scene/opening is rejected | `ValidateBridge` and `ValidateNativeModeInitialization` pass default-off, absent-profile, unadmitted, unopened, wrong-role, null-mission, wrong-scene and changed-profile cases. |
+| Duplicate/replacement claims fail closed; later observer binds the exact mission | Contract cases pass duplicate and replacement factory rejection, no premature binding, missing-claim rejection, mismatched observer rejection and exact binding. |
+| Reset permits a fresh claim and result isolation remains intact | Re-admission after reset passes; ended/initialized missions reject another claim; protected local result and existing early-abort suppression checks pass. This is shared-state contract evidence, not a same-process Bannerlord reset proof. |
+| Keep cooperative phase, clock, peer gates and native spawning unchanged | The source diff adds no phase assignment, simulation-time override, bot-option mutation, peer exception or physical-agent creator. |
+
+These criteria are satisfied at their approved source/contract/build levels. They do not close M4 or establish a working zero-client battle.
+
+### 24.2 Validation and retained identity
+
+`m4mode-c1` ran `dotnet run --project Tests/CoopAutomationSpawnSmoke.ContractTests/CoopAutomationSpawnSmoke.ContractTests.csproj -c Release --property:CoopCompileOnly=true --property:CoopCompileOutputRoot=<run-root>/build`. The initial sandbox attempt could not read the existing user NuGet configuration and stopped before testing; the authorized access retry passed **141 assertions**, plus the existing runner harness in Windows PowerShell **5.1.26100.9444** and PowerShell **7.6.5**. The contract executable launched no product process and removed its own fresh fixture directory. Initial and retry output are retained separately in `m4mode-env/contracts.log` and `contracts-retry.log`.
+
+`m4mode-b1` ran the approved `scripts/Invoke-CoopTest.ps1 -Command CompileOnly` with the explicit installed client/server roots. Both Release projects compiled into run-owned output: client **77 warnings, 0 errors**; dedicated **49 warnings, 0 errors**. The runner reports `ProductProcessLaunched=false` and `InstalledInventoriesUnchanged=true` for client, legacy-client and dedicated inventories. Deployment was disabled. These are builds of the modified working tree, not of a new clean published revision.
+
+| Build artifact | SHA-256 |
+|---|---|
+| Client `CoopSpectator.dll` | `33E47A22F3D283DB290775725B02986EAAF5732BC4C32FA8467946C067E8E2E6` |
+| Dedicated `CoopSpectator.dll` | `EDF9EACD88C7FFCB562FEF2FD9ED0EB18D7A3A1CD404A9A1308B83CC2667EA68` |
+| `m4mode-b1/artifacts/results/compile-only.json` | `F6EB7BAC3D24F11796995BA1A610CDC711114E13564EDBDA9CE50E984B917145` |
+
+Private `%TEMP%/CoopSpectator/Automation/m4mode-env` retains the pre-edit file copies/hashes, validation logs and final verification summary. Build outputs, command identities, installed inventories and logs remain under `m4mode-b1`; focused build/restore outputs remain under `m4mode-c1`. No generated artifact is added to Git.
+
+### 24.3 Scenario coverage and remaining boundary
+
+Only the admitted ordinary-field dedicated test profile receives the new component. Ordinary non-automation field, village, siege assault with deployment, sally out, siege ambush, relief, lords hall, day hideout assault and night hideout ambush receive no new initializer from this change: the profile/fixture/scene contract excludes them, and specialized paths retain their owners. Campaign host and local/remote clients receive no new component. Reinforcements and reconnect do not use this initial claim; replacement/duplicate missions reject it, while reset/re-admission is contract tested. Unsupported blockade and blockade-sally-out guards are unchanged and Not Applicable to this field task. Native regression for every supported scenario and role is **Not Run**.
+
+Source inspection and implementation are complete; focused automated contracts and both module builds are verified. Runtime execution in Bannerlord, native mode callbacks, native sequential reset, failure-finalization regression and field materialization are **not runtime verified**. Calling the native mode setter can dispatch engine callbacks; compilation cannot establish their runtime safety. The independent mission-clock and synchronized-peer conditions from section 23 remain unresolved and require a separate approved plan before any zero-client exception. No peer-gate bypass, fake participant, forced cooperative battle phase or arbitrary bot/timeout change belongs to this correction.
+
+Immediate documentation updates are limited to this evidence section and the mode-ownership contract in `RUNTIME_FLOWS.md`. The pre-existing diagnostic text is retained. `README.md`, `BUILD_TEST_DEBUG.md` and `BATTLE_TEST_AUTOMATION_SPEC.md` remain byte-for-byte unchanged from this task's baseline. Full requirement/scenario auditing and canonical documentation closure remain deferred to the approved M4 milestone boundary.
+
+## 25. Zero-client clock and initial peer admission (2026-09-10)
+
+### 25.1 Approved scope and implementation evidence
+
+This separately approved atomic task follows the mode-only correction in section 24. It starts from `ab80784398464906d2ce9eb94f568ce47ab3ab96` plus the retained uncommitted mode/diagnostic changes. Its objective is source/contract/build proof of one shared zero-client pre-battle admission decision used at two participant checks. The [canonical admission, ownership, lifetime and failure contract](RUNTIME_FLOWS.md#field-automation-zero-client-pre-battle-admission-2026-09-10-source-contract) records the implementation details; this section owns validation evidence and limits.
+
+Changed production locations are `CoopAutomationSpawnSmokeBridge.CanUseZeroClientPreBattle`, new `CoopAutomationZeroClientRuntime` and `CoopAutomationZeroClientClockPatch`, the final peer branch of `CoopMissionSpawnLogic.ShouldDeferBattleMapStartupRuntime`, dedicated control `TryAcceptRequest`/`FailActiveRequest`/`Shutdown`, observer `Tick`/`Fail`, and the dedicated project includes. The client project already includes the shared paths. Installation is explicit after fixture admission and before native bootstrap commands, not attribute-driven `PatchAll`. Server session state is required when applying the runtime exception, not before `start_game` during patch installation.
+
+Read-only inspection confirmed that `TryResolveExactCampaignBootstrapSide` already has deterministic side fallback, and `HaveAllEligiblePeersAcknowledgedCurrentBattleSnapshot` already accepts zero eligible peers. The native bootstrap/materializer, player-side selection, reinforcements, normal phase transitions and result writer were not changed. The peer exception retains the prior mode/time checks and the existing snapshot-readiness check. It is the explicit narrow exception to the former blanket no-peer-gate-bypass wording; production and active-battle requirements remain protected.
+
+| Focused acceptance criterion | Evidence / disposition |
+|---|---|
+| Same admitted field mission, dedicated role, native readiness, exact snapshot header, no connected clients and allowed pre-battle phase | Shared bridge and runtime-adapter contracts passed; wrong role/session/current mission/scene/mode/state/phase, absent or mismatched snapshot, incomplete sides/troops and connected unsynchronized client are rejected. |
+| Preserve ordinary native time and real pause | The production transpiler preserves the native predicate and original instructions. Executable synthetic IL covers all 16 combinations of admission, native participant result, pause and fixed-delta mode. Original real/fixed delta and zero during pause are preserved. |
+| Change only the identified native call site; reject unknown/repeated transformations | Exact installed method metadata passes the production transpiler. Synthetic missing/duplicate predicate, inverted branch, nonzero assignment, invalid store, wrong branch target and repeated-transformation cases are rejected. |
+| Failure/end/reset withdraw the exception; patch ownership remains isolated | Admission negatives cover failure/end/reset/replacement and active/unknown phases. Real Harmony registration, phase denial, removal and reinstallation passed against the native-free `MissionState` stand-in. Production driver/observer/shutdown integration was source-inspected and compiled. |
+| Retain native-only spawning, ordinary readiness, fixture assertions and suppressed result protection | Focused contracts, final source diff and unchanged result/fixture code support this source obligation. Real materialization, callback safety and abort disposal remain Not Run. |
+
+The focused criteria are met at the approved evidence levels. This is not a full M4 requirement audit or runtime completion claim.
+
+### 25.2 Focused contracts, native metadata and module builds
+
+`m4zcfix-c1` ran the existing spawn-smoke contract project in Release with `CoopCompileOnly=true` and run-owned outputs. `COOPSPECTATOR_CONTRACT_NATIVE_CLOCK_ASSEMBLY` explicitly selected the installed dedicated `TaleWorlds.MountAndBlade.dll`. The test reads PE/CLR metadata only, decodes `MissionState.TickMission`, maps the exact native predicate to its test stand-in, passes the instruction list through the production transpiler and checks preservation. It does not load the game assembly for execution or run native mission callbacks. The selected native SHA-256 before and after inspection is `C40E283E72AA90E6ED3BD64D6B8081AC7005DA76437CB3D463A12A2A9148C4EE`.
+
+The focused run passed **432 assertions**, plus the existing runner checks in Windows PowerShell **5.1.26100.9444** and PowerShell **7.6.5**. `Lib.Harmony` **2.4.2** matches the existing module dependency and is used only in the test process for synthetic/stand-in verification. The fresh fixture directory is self-cleaned; logs, build/restore outputs and environment caches remain in the approved private run directories. `m4zcfix-env/contracts-01.log` retains the successful output.
+
+`m4zcfix-b1` ran the approved `scripts/Invoke-CoopTest.ps1 -Command CompileOnly` against explicit installed roots. Client Release passed with **77 warnings, 0 errors**; dedicated Release passed with **49 warnings, 0 errors**. The complete before/after inventories contain **32 client**, **0 legacy-client**, and **218 dedicated** files; the runner reports `InstalledInventoriesUnchanged=true` and `ProductProcessLaunched=false`. No installed candidate was staged. These outputs correspond to the modified working tree, not a new clean published commit.
+
+| Artifact | SHA-256 |
+|---|---|
+| Client `CoopSpectator.dll` | `8EF59F3D9DCF960DB37BC14D06F058A4E857D6D78588428F0835FEF623F078E5` |
+| Dedicated `CoopSpectator.dll` | `E384AC876684C7E986FAD1031A423F2A8657B7421EE372096F038C72404E394C` |
+| `m4zcfix-b1/artifacts/results/compile-only.json` | `694DC1EFDEDA78EFB329673EFA667984E26A78E7D6EA42DE2B09F02B7CC787E2` |
+
+Private `%TEMP%/CoopSpectator/Automation/m4zcfix-env` retains the 15 pre-edit file copies/hashes, Git baseline, contract/build logs and final `verification.json`. `m4zcfix-c1` contains contract build/restore outputs; `m4zcfix-b1` contains both module builds, exact command identities, installed inventories and runner results. `git diff --check` and focused final scope/identity checks are recorded in the final summary. No generated artifact, staging, commit, push or Git history change belongs to this task.
+
+### 25.3 Scenario/role coverage and remaining verification
+
+Only the exact ordinary-field dedicated automation profile receives the exception. Ordinary non-automation field, village, siege assault with deployment, sally out, siege ambush, relief, lords hall, day hideout assault and night hideout ambush remain outside its profile/scene/scenario admission. Campaign host and local/remote clients receive no installed clock patch. Active-battle reinforcements and reconnect/replacement paths receive no zero-client exception; pre-battle reset/re-admission is contract tested. Unsupported blockade and blockade-sally-out are Not Applicable. Native regression is **Not Run** for every supported scenario and role; no scenario runtime pass is inferred from the shared contract.
+
+Source inspection, implementation, focused automated contracts and both module builds are verified. Real engine patch installation, mode/clock callbacks, native agent materialization, early-abort cleanup, native same-process sequential reset and failure-finalization regression remain **not runtime verified**. Exact historical clock inputs from section 23 remain unknown. The synthetic/metadata evidence proves neither a live zero-client pass nor complete battle stability. Any further live run needs a separately approved deployment/run/cleanup plan and appropriate source/artifact provenance; the full 24-project aggregate was not repeated here. Milestone 4 remains open.
+
+Immediate documentation updates are limited to the runtime contract, its protected-risk/specification references and this evidence section. Prior sections are retained as dated evidence. The earlier mode factory, `README.md` and `BUILD_TEST_DEBUG.md` are unchanged from this task's baseline. Broader canonical documentation closure and the full requirement-by-requirement audit remain deferred to the approved M4 milestone boundary.

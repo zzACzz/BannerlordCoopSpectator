@@ -274,6 +274,8 @@ namespace CoopSpectator.Infrastructure.Automation
                 _activeRequest = null;
                 _status = null;
                 _phase = 0;
+                if (!CoopSpectator.Patches.CoopAutomationZeroClientClockPatch.Reset(out string clockResetFailure))
+                    ModLogger.Info("CoopAutomationDedicatedControlBridge: " + clockResetFailure);
                 CoopAutomationDedicatedSpawnSmokeObserver.Reset();
                 CoopAutomationSpawnSmokeBridge.Reset();
             }
@@ -401,6 +403,12 @@ namespace CoopSpectator.Infrastructure.Automation
                     request.FixtureId, request.FixtureRelativeRoot, out failureCode))
                 {
                     WriteRejectedStatus(request, failureCode, "Field fixture/profile admission failed before native commands.");
+                    return;
+                }
+                if (!CoopSpectator.Patches.CoopAutomationZeroClientClockPatch.TryInstall(out failureCode))
+                {
+                    CoopAutomationSpawnSmokeBridge.Fail(failureCode);
+                    WriteRejectedStatus(request, failureCode, "Zero-client clock admission failed before native commands.");
                     return;
                 }
             }
@@ -704,6 +712,8 @@ namespace CoopSpectator.Infrastructure.Automation
 
         private static void FailActiveRequest(string failureCode, string failureMessage)
         {
+            if (CoopAutomationSpawnSmokeBridge.IsActive)
+                CoopAutomationSpawnSmokeBridge.Fail(failureCode ?? "DedicatedBootstrapFailed");
             if (_status == null)
                 _status = CreateStatus(_activeRequest);
             _status.State = CoopAutomationDedicatedControlContract.FailedState;

@@ -196,6 +196,8 @@
     <Compile Include="..\Infrastructure\Automation\CoopAutomationRuntimeBridge.cs" Link="Infrastructure\Automation\CoopAutomationRuntimeBridge.cs" />
     <Compile Include="..\Infrastructure\Automation\CoopAutomationSpawnSmokeContract.cs" Link="Infrastructure\Automation\CoopAutomationSpawnSmokeContract.cs" />
     <Compile Include="..\Infrastructure\Automation\CoopAutomationSpawnSmokeBridge.cs" Link="Infrastructure\Automation\CoopAutomationSpawnSmokeBridge.cs" />
+    <Compile Include="..\Infrastructure\Automation\CoopAutomationZeroClientRuntime.cs" Link="Infrastructure\Automation\CoopAutomationZeroClientRuntime.cs" />
+    <Compile Include="..\Patches\CoopAutomationZeroClientClockPatch.cs" Link="Patches\CoopAutomationZeroClientClockPatch.cs" />
     <Compile Include="Automation\CoopAutomationDedicatedSpawnSmokeObserver.cs" />
     <Compile Include="Automation\CoopAutomationDedicatedControlContract.cs" />
     <Compile Include="Automation\CoopAutomationDedicatedControlBridge.cs" />

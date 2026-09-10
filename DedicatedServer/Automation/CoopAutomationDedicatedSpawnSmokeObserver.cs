@@ -36,6 +36,8 @@ namespace CoopSpectator.Infrastructure.Automation
             {
                 if (!string.IsNullOrEmpty(CoopAutomationSpawnSmokeBridge.Failure))
                 { Fail(CoopAutomationSpawnSmokeBridge.Failure); return; }
+                if (!CoopAutomationZeroClientRuntime.HasNoConnectedClients())
+                { Fail("SpawnSmokeConnectedClientOrUnknownPeerState"); return; }
                 Mission current = Mission.Current;
                 if (_lifecycle.StartRequests == 0)
                 {
@@ -108,6 +110,7 @@ namespace CoopSpectator.Infrastructure.Automation
 
         private static void Fail(string failure)
         {
+            CoopAutomationSpawnSmokeBridge.Fail(failure);
             Failure = failure;
             State = "Failed";
             IsTerminal = true;

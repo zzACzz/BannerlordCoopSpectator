@@ -197,6 +197,10 @@ namespace CoopSpectator.GameMode // Простір імен для кастом�
             }
 
             list.Add(new MissionMultiplayerCoopBattle());
+            if (CoopSpectator.Infrastructure.Automation.CoopAutomationSpawnSmokeBridge.IsRequested &&
+                CoopSpectator.Infrastructure.Automation.CoopAutomationSpawnSmokeBridge.ClaimNativeModeInitialization(
+                    mission, ResolveRuntimeSceneName(mission), isDedicated && GameNetwork.IsDedicatedServer))
+                list.Add(new BattleMissionStarterLogic());
             if (!minimalBattleMapRuntime)
                 AddIfNotNull(list, MissionBehaviorHelpers.TryCreateBehavior("TaleWorlds.MountAndBlade.Multiplayer.MultiplayerAchievementComponent"));
             else
