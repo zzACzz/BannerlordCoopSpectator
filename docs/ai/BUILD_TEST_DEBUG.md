@@ -58,6 +58,22 @@ Therefore:
 4. Treat a build as an external deployment operation, not a read-only validation step.
 5. Restart a running dedicated process after deployment before trusting runtime results.
 
+### Development-owned installation policy
+
+This project may treat exact client and dedicated module roots as development-owned test surfaces when an environment profile or approved plan explicitly names and classifies them that way. On such an installation, development progress and a coherent current candidate take priority over preserving the exact module version that existed before the run.
+
+For a development-owned installation:
+
+- a successfully deployed and hash-verified current candidate SHOULD remain installed after build or runtime validation;
+- an exact pre-deployment backup and restoration to an older candidate are not required for normal completion;
+- client and dedicated targets, selected output hashes, changed-path allowlists, process shutdown/restart, and post-deployment loaded identity remain mandatory evidence;
+- an interrupted or partially verified deployment blocks the next runtime run until the complete intended current artifact is reapplied under the installation lock and its inventory/hashes are verified;
+- repair MUST converge on the approved current candidate, not reconstruct or guess the previous module state.
+
+The development-owned classification covers only the exact approved module roots. It does not authorize changing campaign saves, Documents data, Steam state, game configuration, unrelated modules, or other user files. A new or unknown machine remains protected until its exact installation roots are classified explicitly.
+
+The specification names this policy `DeployPersistent`. The current automation runner does not yet expose a verified `DeployPersistent` command mode, so do not pass an invented switch or relabel historical `DeployWithRestore` transactions. Until implementation is separately approved and verified, direct project deployment may follow the policy only when the build plan explicitly provides the installation lock, exact targets, changed-path boundary, identity checks, and partial-deployment repair procedure.
+
 `CoopCompileOnly=true`, together with an explicit run-owned `CoopCompileOutputRoot`, disables all three client/dedicated deployment targets and redirects build/package outputs. This is verified by recursive installed inventories, most recently in `m4a-compile-20260908-02`. `BuildDedicatedServerModule=false` alone only prevents the chained dedicated build and does not disable client deployment.
 
 ### Known write-surface matrix
@@ -84,7 +100,7 @@ Therefore:
 | `Start-CoopFieldFixtureCapture.ps1 -ValidateOnly` | No | No expected repository or run-root writes | No | No |
 | `Start-CoopFieldFixtureCapture.ps1 -UseExistingRunContract` | No | Aggregate-owned only; writes immutable process handoff below the selected run root and launches the exact singleplayer process | No | No |
 
-This table records current project/script behavior, not a guarantee that an arbitrary command is safe. Every approved plan containing one of these operations must still state the exact command and resolved destinations.
+This table records current project/script behavior, not a guarantee that an arbitrary command is safe. Every approved plan containing one of these operations must still state the exact command and resolved destinations. A row that writes installed modules is a persistent development deployment only when the plan explicitly selects the development-owned policy and includes its identity and partial-deployment repair checks.
 
 ## Build profiles
 

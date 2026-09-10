@@ -10,7 +10,7 @@ This file is the project-local entry point for AI-assisted engineering. The cano
 4. Before fixing behavior for one battle type, inspect whether the same failure can occur in every other relevant scenario listed in `docs/ai/RUNTIME_FLOWS.md`.
 5. Treat every build, test, restore, generator, packaging script, and development helper as potentially writable until its exact effects are known.
 6. Preserve unrelated local changes and external state.
-7. Complete a requirement-by-requirement compliance audit and all required documentation updates before declaring the task complete.
+7. Close each atomic task against its focused acceptance criteria. Reserve the full requirement-by-requirement compliance audit and canonical documentation closure for the approved substage or milestone boundary.
 
 ## Approval scope
 
@@ -23,9 +23,18 @@ Approval applies only to the latest presented plan and only to the following ite
 - documentation to create or update;
 - Git operations, if any.
 
-If new evidence changes the root cause, solution, affected files or methods, scenario impact, validation approach, risks, external write surfaces, documentation impact, or Git operations, stop and present a revised plan. Previous approval does not cover the revised plan.
+If new evidence changes the active task's root cause, solution, affected files or methods, scenario impact, validation approach, risks, external write surfaces, documentation impact, or Git operations, stop and present a revised plan. Previous approval does not cover the revised plan. An unrelated finding outside the active acceptance criteria does not expand the task: retain the evidence, identify it as follow-up work, and continue only when the current task can still be completed safely.
 
 Approval must never be inferred from silence, a previous task, an earlier approval, or general agreement with the direction.
+
+## Focused work units and stopping conditions
+
+- Prefer one primary defect, root cause, or independently measurable objective per task.
+- Define the success criterion and stopping condition before implementation. A specification or milestone is a roadmap, not authorization to solve every newly observed issue in one task.
+- Adjacent-scenario review is impact classification, not automatic scope expansion. One approved change MAY cover every scenario that shares the same verified root cause; distinct causes become separate follow-up tasks.
+- Use the lowest evidence level that can answer the active question, then add only the validation required by the change-risk matrix. Do not repeat a higher-cost live run when retained evidence or a lower-level check already answers the question.
+- Stop once the approved acceptance criterion is met and required safe cleanup is complete. Do not continue exploratory improvements merely because more work is visible.
+- If execution substantially exceeds the planned scope or expected effort, pause at the next safe checkpoint, report what consumed the time, and propose a narrower continuation. Never interrupt exact process cleanup, lock release, or repair of a partially deployed test installation merely to create a checkpoint.
 
 ## Pre-approval investigation
 
@@ -59,11 +68,12 @@ Every implementation plan must state:
 6. Validation levels to perform: source inspection, contract tests, build, runtime verification, and regression verification.
 7. Risks, failure behavior, and rollback proposal.
 8. Git operations requested, if any.
-9. A `Documentation Impact` section listing:
-   - living documents read;
-   - living documents to update;
-   - new documents to create;
-   - relevant documents intentionally not changed and why.
+9. A concise `Documentation Impact` section stating one of:
+   - no canonical documentation change is required, with the reason;
+   - documentation is deferred to a named substage or milestone closure;
+   - an immediate safety/contract update is required, with the exact living documents to change.
+
+At substage or milestone closure, the plan must list the living documents read, documents to update or create, and relevant documents intentionally left unchanged.
 
 ## Build, test, and deployment authorization
 
@@ -75,8 +85,8 @@ Every implementation plan must state:
 
 ## Git discipline
 
-- Implementation approval does not authorize staging, commit, branch creation, checkout, switch, merge, rebase, push, or any other Git state change unless that exact operation was separately included and approved.
-- By default, staging and commit require separate explicit approval after the final changed-file list, diff review, validation results, and repository status have been shown.
+- Implementation approval does not authorize staging, commit, branch creation, checkout, switch, merge, rebase, push, or any other Git state change unless each exact operation, path set, destination, and commit purpose was included in the approved plan.
+- An approved plan MAY pre-authorize path-specific staging, one atomic commit, and push to the current upstream branch after the final changed-file list, diff, validation results, and repository status have been inspected. If the final state differs materially from the approved scope, stop and request revised approval before changing Git state.
 - Record the read-only baseline with `git status --short` before implementation when Git is available. Treat every pre-existing change as unrelated and protected.
 - Do not use `git add .` or `git add -A`. Stage only explicitly approved paths.
 - Before requesting commit approval, show `git status --short`, inspect the final diff, run `git diff --check`, and report unrelated/generated files separately.
@@ -105,7 +115,9 @@ Before completion, derive the requirement baseline from:
 3. the latest approved plan and acceptance criteria;
 4. canonical invariants, contracts, and accepted architecture decisions.
 
-Perform a requirement-by-requirement compliance audit. For every requirement, report:
+For an atomic implementation task, report the focused acceptance criteria, implementation evidence, validation performed, affected scenarios/roles, and any deliberately deferred verification. Do not label source, build, contract, or runtime evidence as a stronger level than was actually executed.
+
+At an approved substage or milestone closure, perform the full requirement-by-requirement compliance audit. For every requirement, report:
 
 - implementation location or other evidence;
 - validation performed;
@@ -121,11 +133,11 @@ The final report must distinguish:
 - runtime verified in Bannerlord;
 - regression verified.
 
-For each required scenario and role, report `Passed`, `Failed`, `Not Run`, or `Not Applicable`. If runtime validation was not performed, state explicitly that the implementation is not runtime verified.
+At that closure boundary, report each required scenario and role as `Passed`, `Failed`, `Not Run`, or `Not Applicable`. If runtime validation was not performed, state explicitly that the implementation is not runtime verified.
 
-Do not declare the task complete while any mandatory requirement is `Partially Satisfied` or `Not Satisfied`. A mandatory `Not Verifiable` item must be disclosed as a remaining verification gap and handled according to the user's acceptance criteria.
+Do not declare a substage or milestone complete while any mandatory closure requirement is `Partially Satisfied` or `Not Satisfied`. A mandatory `Not Verifiable` item must be disclosed as a remaining verification gap and handled according to the user's acceptance criteria.
 
-Documentation updates required by the approved change are part of completion, not optional follow-up work.
+Immediate documentation updates required by a safety or contract change are part of the atomic task. Other canonical documentation updates are part of the approved substage or milestone closure, not every intermediate implementation.
 
 ## Failure and rollback behavior
 
@@ -245,10 +257,10 @@ Treat `bin/`, `obj/`, `.buildcheck/`, `.codex_tmp*/`, `dist/`, `work/`, ZIP pack
 Use separate evidence, implementation, and documentation cadences:
 
 - Retain raw logs, hashes, dumps, screenshots, and run-scoped diagnostic reports outside Git as soon as they are produced. Do not treat these private artifacts as canonical documentation.
-- Commit and push each completed atomic implementation together with its focused tests after validation. Do not create commits for incomplete mechanical steps unless the user explicitly approves a checkpoint commit.
+- Commit and push each completed atomic implementation together with its focused tests after validation when those exact Git operations were included in the approved plan. Do not create commits for incomplete mechanical steps unless the user explicitly approves a checkpoint commit.
 - Update canonical `docs/ai/` living documents once when the approved substage or milestone closes, not after every intermediate edit or diagnostic observation.
 - Use a separate documentation-only commit after the substage's implementation commits and final validation unless the user explicitly approves another grouping.
-- Document an observation immediately when it reveals a data-safety risk, native crash or hang, incomplete restoration, manual emergency intervention, changed architecture/contract, or evidence that materially changes the approved next action. This exception does not authorize an implementation change.
+- Document an observation immediately when it reveals a data-safety risk, native crash or hang, incomplete deployment/repair, manual emergency intervention, changed architecture/contract, or evidence that materially changes the approved next action. This exception does not authorize an implementation change.
 
 At substage closure, update the relevant `docs/ai/` file whenever any of these changed:
 
