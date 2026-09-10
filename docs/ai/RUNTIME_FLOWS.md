@@ -305,6 +305,8 @@ After fixture admission, before native bootstrap commands, `CoopAutomationDedica
 
 The dedicated observer rejects a connected client or unknown peer state. Observer/active-request failures revoke admission through the shared failure field; mission ending and reset also deny it. Shutdown removes only the clock owner's transpiler and preserves other patches. Installation/cleanup failures are reported, and failed installation rejects the request before native commands. These rules permit only the initial zero-client test corridor, not production peer readiness or `BattleActive`. No per-tick diagnostic output, agent scan or physical spawner was added. The admitted path performs bounded scalar/snapshot-header checks and one peer enumeration per evaluation; disabled/unbound paths skip native reads. See [focused evidence and runtime limits](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#25-zero-client-clock-and-initial-peer-admission-2026-09-10).
 
+Runtime verification update (2026-09-10, `438b434`): the clean native child loaded the exact dedicated candidate, then stopped at control readiness with `Timeout/NoHeartbeat` before a bootstrap request existed. Neither the factory initializer nor the admitted clock/peer exception was exercised in a mission. Native mode callbacks, pre-battle progression, agent assertions and early-abort result suppression remain Not Run. The separate automatic timeout-finalization/cleanup path passed; see [live evidence and next boundary](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#26-clean-zero-client-live-attempt-stops-before-bootstrap-2026-09-10).
+
 ### Siege assault with deployment
 
 1. `SiegeAssaultMissionOpenBridge` chooses the exact native siege initializer profile.

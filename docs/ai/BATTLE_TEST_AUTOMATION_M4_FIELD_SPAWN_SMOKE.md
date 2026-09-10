@@ -1,7 +1,7 @@
 # Milestone 4 — Field dedicated spawn smoke: source, contracts, local isolation and live findings
 
 Date: **2026-09-09** (Europe/Kyiv; validation IDs retain the approved 20260908 names).
-Status: **Milestone 4 remains open. The event-tail correction passed 16 focused cases; the first clean aggregate then returned 23/24 because the test entry point rejected `--nologo`. This revision restores that invocation compatibility and passed both runner-project invocation modes before publication. See section 22 for exact evidence and subsequent clean gates, section 21 for the event-tail correction, and section 20 for the recovered native failure. No post-correction native pass is claimed.**
+Status: **Milestone 4 remains open. Published `438b434` passed fresh 24/24 contracts and both CompileOnly builds. The clean zero-client live attempt loaded that exact candidate but returned `Timeout/NoHeartbeat` before control readiness/bootstrap, with no mission opened and attempt two Not Run. Automatic timeout evidence/cleanup and full module/dump restoration passed. Section 26 records the unresolved heartbeat observation and next boundary; sections 24-25 retain the mode/clock/peer implementation evidence. No native L2 pass is claimed.**
 Original 4A approval: **"ок на Milestone 4A source/contracts"**. The separately approved local-only 4B live validation and restoration are recorded in section 12.
 Original 4A source baseline: branch `codex/v0.1.1-refresh`, HEAD/local upstream `452df7e30d3d8d120488570857134078d6072ecc`, initially clean.
 The original 4A implementation was subsequently published as 7d75742c338f504499ec01dd8e3b2f189a1f7a03. Section 11 records the local-isolation follow-up's pre-publication validation in `C:\Users\Admin\.codex\worktrees\1b21\BannerlordCoopSpectator3`.
@@ -1126,3 +1126,93 @@ Only the exact ordinary-field dedicated automation profile receives the exceptio
 Source inspection, implementation, focused automated contracts and both module builds are verified. Real engine patch installation, mode/clock callbacks, native agent materialization, early-abort cleanup, native same-process sequential reset and failure-finalization regression remain **not runtime verified**. Exact historical clock inputs from section 23 remain unknown. The synthetic/metadata evidence proves neither a live zero-client pass nor complete battle stability. Any further live run needs a separately approved deployment/run/cleanup plan and appropriate source/artifact provenance; the full 24-project aggregate was not repeated here. Milestone 4 remains open.
 
 Immediate documentation updates are limited to the runtime contract, its protected-risk/specification references and this evidence section. Prior sections are retained as dated evidence. The earlier mode factory, `README.md` and `BUILD_TEST_DEBUG.md` are unchanged from this task's baseline. Broader canonical documentation closure and the full requirement-by-requirement audit remain deferred to the approved M4 milestone boundary.
+
+## 26. Clean zero-client live attempt stops before bootstrap (2026-09-10)
+
+### 26.1 Approved scope and clean gates
+
+The user approved publication of the 17 completed mode/clock/peer implementation and safety-documentation files, fresh clean Contracts/CompileOnly gates, one private DeployWithRestore transaction, one public zero-client smoke invocation, exact cleanup/restoration and a separate documentation-only outcome commit. Source revision is **438b434e5f144af2d407fea7f454391c530d16b0**, published to the existing origin/codex/v0.1.1-refresh branch. All pre-existing implementation files matched the prior retained verification before publication. No new production logic, test relaxation, dependency installation, Git history rewrite or persistent deployment was performed.
+
+- **m4zclive-c1:** 24/24 contract projects passed from the clean published revision; the focused spawn-smoke suite includes 432 assertions and metadata-only inspection of exact installed clock IL. This inspection executes no engine method.
+- **m4zclive-b1:** both Release CompileOnly builds passed, client 77 warnings / 0 errors, dedicated 49 warnings / 0 errors. Complete installed inventories remained unchanged; outputs stayed under the run root.
+- **m4zclive-s1:** the private work/Invoke-M4ZeroClientLiveTransaction.ps1 passed six self-test groups: invalid path/source/current hash rejection; reparse rejection; injected first-file failure restoration; two-file restoration; bounded hidden child success/timeout cleanup; and missing-dump restoration with foreign-content refusal. Only synthetic files and owned PowerShell processes were used in SelfTest.
+
+| Retained identity | SHA-256 |
+|---|---|
+| Full contract result | 5CE0ABCBB66ADC12B6376E904791A7FCF3E01AF884CF4CA19CDB84F5BF2CC134 |
+| CompileOnly result | 5C05F4754CE0BC1A22D974C8343914286AE16E728317D70E648637CB4146C434 |
+| Before/after installed inventory | B817EEA278FFFC398A61E0FD92C65EB07314E0A7474D11FC417492C39B8B1E6B |
+| Client output (not installed) | 6E98C0D8BEE84FC3E6DE60579CCAA3E9FBF794D67F37F0EEC67F8A822FE3ABBE |
+| Dedicated output / loaded candidate | E384AC876684C7E986FAD1031A423F2A8657B7421EE372096F038C72404E394C |
+| Private transaction helper | 1FA6FB5B2716BEB0EF7FCAD93EB3AFA73C8B4890BC3CEB5BA69A0563DDB18B9C |
+| Immutable private inputs | 0437CF0C8A62D2523D547F149681F1EC02F1AB20CE51A1331874FF0098C16C3A |
+| Final transaction record | 3FD46D66C82C8D4CDDBAF8256BD25F8697044FEDBA0369A0875E7FD1B334DBAF |
+| Child attempt result | D2C95A4E43D01D2D9C38375F70C2F076075DB90D565C374F1F1F63135399BB33 |
+| Timeout artifact | C6BF88416DA165935B3D2FBD0019E3668D879B34EEE1BC53379202B9E424A09D |
+
+### 26.2 Transaction and native result
+
+Artifacts remain below the private %TEMP%\CoopSpectator\Automation root. The helper binds the exact revision, clean local/upstream state, passing reports, native binaries, original module identities and input hashes. It uses bounded lightweight process inspection, rejects occupied ports and reparse paths, acquires the six installation/profile/port resources, and backs up the complete 218-file dedicated module before replacing only its server-bin and client-bin CoopSpectator.dll with the dedicated candidate. The installed client module is not staged.
+
+The existing Windows LocalDumps configuration was read and preserved: the dedicated starter uses C:\dumps, full dumps and a count limit of five. All five existing dumps (PIDs 101340, 101980, 150788, 15968 and 162752) were hashed and copied before native launch. This precaution follows Microsoft's documented oldest-dump replacement when the count limit is exceeded: [Collecting user-mode dumps](https://learn.microsoft.com/en-us/windows/win32/wer/collecting-user-mode-dumps), accessed 2026-09-10, applied to this Windows LocalDumps configuration. No registry setting changed.
+
+The public command used scripts/Invoke-CoopTest.ps1 with Command=DedicatedSpawnSmoke, RunId=m4zclive-l1, the verified GameRoot and DedicatedServerRoot, Port=7210, RuntimeTimeoutSeconds=420 and ExpectedDedicatedModuleSha256 equal to the dedicated hash above. It ran through Windows PowerShell with -NoProfile -ExecutionPolicy Bypass -File. The helper additionally bounds its public child to 1800 seconds. Private attempt flags were not invoked directly. No campaign or multiplayer client was launched.
+
+Child **m4zclive-l1-01**, dedicated PID **32980**, process start **2026-09-10T08:03:51.0878710Z**, loaded the exact candidate from the dedicated module's Win64_Shipping_Client bin. Native watchdog evidence identifies **v1.4.8.118999**. The initial retained role status is ModuleReady at **08:04:02.5094347Z**. The runner then waited for authoritative dedicated control readiness, returned **Timeout / NoHeartbeat / exit 31**, and produced no bootstrap request, acknowledgements, start_game, start_mission or mission observation. Parent exit is also 31. The public pair report contains one exited child runner; the second child root was never created. The two-attempt acceptance is not satisfied.
+
+The later final status and hang.json contain WaitingForDedicatedReady, state revision 2, last progress **08:04:04.0790096Z** and heartbeat **08:04:22.2308984Z**. The failure artifact was captured at **08:04:22.8562699Z**. Native logs show asset loading and successful backend alive messages through this period. These later observations do not identify the input used at the failing health decision.
+
+Source inspection locates the evidence gap in Assert-CoopRuntimeRoleHealth, Get-CoopRoleHealthClassificationCore and Read-CoopJsonShared: a missing status or any swallowed file-read/JSON error becomes null and therefore NoHeartbeat; a timestamp older than five seconds receives the same classification. The assertion attaches a non-null rejected status to its exception, but the spawn-smoke catch retains only outcome/code/message; failure publication rereads role files later. The exact rejected snapshot, read failure and classifier time are not in the retained result. **Transient unreadability versus a real heartbeat gap is unresolved; neither a dead server nor a proven false timeout may be asserted.**
+
+The native error log also retains Cannot load warnings for ASP.NET dependencies and 0Harmony.dll. The candidate role initialized and continued publishing health, so these lines alone do not establish the cause of this timeout. No dependency repair, file copying workaround or new native run was attempted.
+
+### 26.3 Automatic failure handling and restoration
+
+The bounded process collector completed in **1655 ms**, with **72,617,984 bytes** peak private memory and 335 lightweight records. FailureEvidenceCaptureStarted / Completed occurred at **08:04:22.7444378Z / 08:04:22.8592854Z**. RuntimeCleanupStarted / Completed occurred at **08:04:22.8612788Z / 08:04:40.9509489Z**; child terminal publication completed at **08:04:51.5504292Z**. The original Timeout outcome was preserved without cleanup supersession.
+
+The dedicated process accepted graceful closure (IdentityMatched=true, ForcedStopUsed=false, Outcome=Stopped). Its Watchdog, console support and bounded collector were already stopped when checked. No fatal helper was correlated, no new native dump appeared, and no manual cancellation, recovery or forced termination was needed. This proves the automatic **timeout** path for this exact run; it does not prove native-crash finalization or in-mission cleanup.
+
+The child reports no remaining owned processes or required ports, and its six shared-lock release/reacquisition probes pass. Parent and child runner-lock probes also pass. The transaction reacquired the installation resources, restored both original DLLs (SHA-256 **2E1494BCAEE1DCE440B4373BBA99A4F724B9C32519AACD486DE8F041C0CA1414**) and original timestamps, and compared all **218 dedicated / 32 client / 0 legacy** files without differences. All five dump originals and their backups passed hash verification; no original was rotated away. The run-local 69-byte result sentinel remained unchanged; no actual mission result suppression was exercised because no mission opened. Personal Documents/campaign results were not accessed or claimed measured.
+
+Transaction completion is **08:05:32.5044362Z**, with Restored=true, DumpsRestored=true, no restoration error and the original live failure retained. Independent m4zclive-s1/verification.json confirms the original DLL/dump hashes, zero product processes, zero required-port owners, no second attempt and no new dump. Raw reports/logs, inputs, helper and backups remain private; no temporary diagnostic code was added to production.
+
+### 26.4 Focused requirement audit and coverage
+
+| Approved requirement | Implementation / evidence | Status |
+|---|---|---|
+| Publish only the completed approved change set | Exact 17-file hash baseline, reviewed diff, LF/hygiene checks, clean published 438b434 | Satisfied |
+| Fresh full contracts and non-deploying builds | m4zclive-c1, 24/24; m4zclive-b1, both builds; unchanged installed inventory | Satisfied |
+| Validate the private installation/rollback tool | Exact helper and inputs; six SelfTest groups | Satisfied |
+| Load the exact dedicated candidate | PID/start/path-bound ModuleReady and matching module SHA-256 | Satisfied |
+| Open the field mission and reach PreBattleHold | No bootstrap request or mission; first attempt Timeout | Not Satisfied |
+| Verify 47 entries, 74 humans, 21 mounts and exact identities/equipment | Native observation was never reached | Not Verifiable |
+| One normal mission end, disposal and actual result suppression | Mission never opened; sentinel preservation alone is insufficient | Not Verifiable |
+| Two successful fresh-process attempts | First attempt failed; second correctly blocked | Not Satisfied |
+| Preserve failure evidence and clean exact processes/resources | Complete hang artifact, graceful dedicated stop, no residual owner/port, eight runner/shared release probes | Satisfied |
+| Restore installed state and protect prior dumps | Full 218/32/0 inventories; two original DLLs; five original/backup dump hashes | Satisfied |
+| Preserve original failure and stop at the approved boundary | Exit 31 retained, no retry or source/dependency repair | Satisfied |
+| Record outcome, limits and next action in living docs | This section plus focused README/build/spec/flow/risk updates | Satisfied |
+
+Source inspection, implementation publication, build verification and automated/contract verification are **complete at their stated levels**. Runtime verification was executed and **failed before the mission**. Automatic timeout cleanup and installation restoration passed. Native mode/clock/peer progression and battle regression remain unverified. Mandatory live requirements above prevent closure of this validation substage and of Milestone 4.
+
+| Scenario / role | Native status in this invocation |
+|---|---|
+| Ordinary field, dedicated zero-client profile | Failed — control-readiness boundary, no mission opened |
+| Village battle | Not Run |
+| Siege assault with deployment | Not Run |
+| Sally out | Not Run |
+| Siege ambush | Not Run |
+| Relief battle | Not Run |
+| Lords hall stage | Not Run |
+| Day hideout assault | Not Run |
+| Night hideout ambush | Not Run |
+| Sequential missions in one process / reconnect | Not Run |
+| Second fresh-process field attempt | Not Run — blocked by first failure |
+| Unsupported blockade / blockade-sally-out | Not Applicable — unsupported, not admitted |
+| Campaign host / local or remote mission clients | Not Applicable to this zero-client invocation; no runtime regression claim |
+
+### 26.5 Next boundary and documentation ownership
+
+No unchanged native rerun is justified by this result. The next separately approved investigation must distinguish missing/read-failed/stale role health and preserve the exact failing decision before proposing a correction. Review shared dedicated/client consumers without expanding into battle adapters, altering the five-second guard, accepting an unverified process or relaxing the field fixture. Exact retained local code and artifacts answer the present evidence question; Internet research cannot recover the overwritten historical read.
+
+This approved outcome update reread and changed README.md, BUILD_TEST_DEBUG.md, BATTLE_TEST_AUTOMATION_SPEC.md, RUNTIME_FLOWS.md, INVARIANTS_AND_RISKS.md and this M4 report. Architecture/component location did not change, so ARCHITECTURE.md and CODE_MAP.md are intentionally unchanged. Earlier numbered reports remain historical evidence. This section owns exact run outcomes; other living documents link to it. The documentation-only publication follows the implementation commit and completed safe restoration, without claiming M4 completion.
