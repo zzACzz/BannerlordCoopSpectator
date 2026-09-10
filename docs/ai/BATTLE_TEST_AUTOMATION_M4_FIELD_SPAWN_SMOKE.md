@@ -1,7 +1,7 @@
 # Milestone 4 — Field dedicated spawn smoke: source, contracts, local isolation and live findings
 
 Date: **2026-09-09** (Europe/Kyiv; validation IDs retain the approved 20260908 names).
-Status: **Scoreboard correction `a6fe74f` remains source/L1 verified. Recovered run `m4sd-p1-l1` loaded the corrected dedicated DLL, but finalization did not finish and L2 did not pass. This revision records the event-string serialization correction and its tests, with 16 focused cases passing in PowerShell 5.1 and 7 on 2026-09-10. A post-correction native run remains pending. See section 21 for the current boundary and section 20 for the diagnosis.**
+Status: **Milestone 4 remains open. The event-tail correction passed 16 focused cases; the first clean aggregate then returned 23/24 because the test entry point rejected `--nologo`. This revision restores that invocation compatibility and passed both runner-project invocation modes before publication. See section 22 for exact evidence and subsequent clean gates, section 21 for the event-tail correction, and section 20 for the recovered native failure. No post-correction native pass is claimed.**
 Original 4A approval: **"ок на Milestone 4A source/contracts"**. The separately approved local-only 4B live validation and restoration are recorded in section 12.
 Original 4A source baseline: branch `codex/v0.1.1-refresh`, HEAD/local upstream `452df7e30d3d8d120488570857134078d6072ecc`, initially clean.
 The original 4A implementation was subsequently published as 7d75742c338f504499ec01dd8e3b2f189a1f7a03. Section 11 records the local-isolation follow-up's pre-publication validation in `C:\Users\Admin\.codex\worktrees\1b21\BannerlordCoopSpectator3`.
@@ -961,8 +961,41 @@ Cases cover missing/empty journals, one Unicode line, exactly 25 lines, 40 LF li
 
 Source inspection, implementation, contract-project compilation and the 16 focused regression cases are complete. Shared Feasibility dedicated/client evidence and zero-client field smoke use the corrected writer. Campaign `Record` does not. Review against `RUNTIME_FLOWS.md` found no separate writer for village, siege assault, sally out, siege ambush, relief, lords hall, day/night hideout, sequential/reconnect, or unsupported blockade variants; their mission, spawn, completion and result paths are unchanged. Native scenario/role regression is Not Run because this atomic change only copies report strings outside mission code.
 
-The approved atomic acceptance criteria are met at source/focused-contract level. The full contract suite, client/dedicated module builds, native failure cleanup, scoreboard lifecycle and mission materialization are Not Run for this correction. A separately approved publication step records the correction, focused tests and immediate safety documentation together in this revision; the tested source hashes above remain unchanged. Remote publication is verified separately against the resulting commit. This is not a full M4 compliance closure or an L2 pass.
+At this atomic stage's publication as `5d6c4e4`, the acceptance criteria were met at source/focused-contract level. The full contract suite, client/dedicated module builds, native failure cleanup, scoreboard lifecycle and mission materialization were Not Run. The correction, focused tests and immediate safety documentation were recorded together; the source hashes above identify that tested version. Section 22 records the subsequent aggregate failure and compatibility correction. This historical boundary is not a full M4 compliance closure or an L2 pass.
 
 The next separately approved continuation must select required validation gates and a safe native-run strategy. It must verify terminal failure evidence and cleanup in Bannerlord before relying on them to diagnose any remaining mission-opening/materialization failure. `DeployPersistent` remains a separate unimplemented requirement; the retained historical staging helper must not be reused unchanged.
 
 Immediate documentation updates are limited to this canonical safety finding and its links in `README.md`, `BUILD_TEST_DEBUG.md` and `BATTLE_TEST_AUTOMATION_SPEC.md`. Architecture, runtime flows, invariants, code map and broader test inventory remain unchanged; their milestone audit is deferred to M4 closure.
+
+## 22. Aggregate test invocation compatibility correction (2026-09-10)
+
+Clean published `5d6c4e4107038662676c311629b9d856fa2ebb42` ran the full inventory as `m4fe-p1-c1`: 23 projects passed, while `CoopAutomationRunner.ContractTests` exited with an unhandled argument-validation exception before its tests started. The aggregate finished `AssertionFailed` / exit 20 and verified runner-lock release. Postflight found the runner absent, no matching contract-process candidate or product process, unchanged three installed DLL hashes, and a clean repository. The conditional module-build step did not start. Retained `artifacts/results/contracts.json` SHA-256 is `E70C374E9F91184B38BA9751A9B7DBEB562F1EA3572B8DEBD8D4EBDEFBB6B0DF` under that run root.
+
+`Invoke-CoopContracts` already passes `--nologo` to `dotnet run`. The new `Main(string[] args)` introduced for focused selection rejected every nonempty argument list except the focused form; the previous `Main()` ignored application arguments. Microsoft documents forwarding unrecognized `dotnet run` arguments to the application ([dotnet run arguments](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-run#arguments), accessed 2026-09-10; observed SDK 10.0.102). The retained invocation and stack identify this as an introduced test-selection regression, separate from production failure-report serialization.
+
+The correction changes only `Program.Main` in `Tests/CoopAutomationRunner.ContractTests/Program.cs`: the exact singleton `--nologo` is normalized to an empty argument list, selecting the existing normal suite. The focused argument contract and rejection of other unsupported forms remain unchanged. `scripts/Invoke-CoopTest.ps1` retains SHA-256 `C7CE7C85DEBE6F696F85D7EB63421253EC20371EB39E89E6E85C338C9550A6ED`; no game/runner production behavior changed.
+
+Pre-publication verification used the existing process-local .NET service directories under `m4fe-p1-env`, with telemetry, certificate generation, global-tool PATH changes and workload update notifications disabled:
+
+```powershell
+$fixRoot = Join-Path $env:TEMP 'CoopSpectator\Automation\m4arg-c1'
+$testArgs = @(
+    '--project', 'Tests/CoopAutomationRunner.ContractTests/CoopAutomationRunner.ContractTests.csproj',
+    '-c', 'Release', '--property:CoopCompileOnly=true',
+    "--property:CoopCompileOutputRoot=$fixRoot\build"
+)
+dotnet run @testArgs --nologo
+dotnet run @testArgs -- --failure-evidence-only --artifacts-root "$fixRoot\focused"
+```
+
+Both commands exited zero. The first ran all runner-project contracts, including the new failure-evidence cases and existing process/cancellation contracts in Windows PowerShell 5.1.26100.9444 and PowerShell 7.6.5. The second passed 8/8 focused cases per shell, with both workers exited. These are one project's invocation checks, not a full 24-project pass. The normal suite removes its own temporary harness tree; the command output and focused reports remain retained.
+
+| Tested source / retained artifact | SHA-256 |
+|---|---|
+| `Tests/CoopAutomationRunner.ContractTests/Program.cs` | `9D6700448AF9DB35505CD675AF208D9EFE3D7B9C0685B9EB6960F372C81738DD` |
+| `m4arg-c1/aggregate-invocation.log` | `68C8F5748989B1738C66FC9EB6668E1E3128ABAEBD1C92B5E6B895ABC7307C4A` |
+| `m4arg-c1/focused/summary.json` | `D154F3D2301CC5A33B188CEAA5B9C3D0969405B88246385CD554F25BA0448B1A` |
+
+The approved continuation publishes this test-only correction with its immediate documentation, then runs clean full contracts as `m4fe-p2-c1` and, only on success, both CompileOnly builds as `m4fe-p1-b1`. Their outcomes, revision identities, output hashes and installed-inventory comparisons belong to their run-scoped reports; this pre-publication section does not predict a pass. Full M4 canonical closure remains deferred.
+
+Scenario impact remains test selection only: neither dedicated/client runtime code nor field, village, siege assault, sally out, siege ambush, relief, lords hall, day/night hideout, sequential/reconnect or unsupported-blockade guards change. No Bannerlord process or native scenario verification belongs to these invocation checks. Native failure finalization, mission materialization and L2 remain open.

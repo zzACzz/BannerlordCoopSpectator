@@ -13,6 +13,9 @@ internal static class Program
     private static int Main(string[] args)
     {
         string repositoryRoot = ResolveRepositoryRoot();
+        // The aggregate's dotnet run command forwards --nologo to this application.
+        if (args.Length == 1 && args[0] == "--nologo")
+            args = Array.Empty<string>();
         if (args.Length != 0)
         {
             Assert(args.Length == 3 && args[0] == "--failure-evidence-only" && args[1] == "--artifacts-root",
