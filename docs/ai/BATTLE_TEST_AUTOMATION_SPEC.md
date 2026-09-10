@@ -2,13 +2,15 @@
 
 Status: **Canonical implementation specification — implementation in progress**
 Specification date: **2026-09-10**
-Revision: **34 — Focused delivery and development-owned persistent deployment are defined; the Revision 33 scoreboard source/L1 boundary remains unchanged**
+Revision: **34 — Focused delivery and development-owned persistent deployment are defined; current implementation evidence is amended below on 2026-09-10 without changing normative requirements**
 Live-evidence repository baseline: **`c6507e99d7bc71665e839b2adc90401921428a3d`** (`c6507e9`)
 Current published connection corrections: **`d1af692`**, **`3fdcda3`**
 Current exact-fixture live evidence: **`baf5c691eaf1f5beb17bd000a30945aba9003939`** (`baf5c69`), run **`m3b-live-capture-02`**
 Current M4 scoreboard dependency correction: **`a6fe74fec0e596b5466faf477b9713bea0b95e72`** (`a6fe74f`)
 Current shareable field derivative: **259,744 bytes**, SHA-256 **`B47D7AF7FA057C36CA8EF759A6D597C00007158A22E3A556AC57A1299579D49D`**
 Companion audit: [BATTLE_TEST_AUTOMATION_AUDIT.md](BATTLE_TEST_AUTOMATION_AUDIT.md)
+
+Current M4 evidence addendum (2026-09-10): recovered `m4sd-p1-l1` proves staging and loading the scoreboard-corrected dedicated candidate, but not a passing L2 run or complete automatic cleanup. This revision records the reproduced Windows PowerShell 5.1 event-tail serialization correction with 16 focused cases passing across both supported shells. No full-suite, module-build or post-correction native pass is claimed. This supersedes earlier next-action statements without changing Revision 34 requirements. [Canonical implementation, focused evidence and next boundary](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#21-event-tail-serialization-correction-and-focused-contracts-2026-09-10).
 
 | Revision | Summary |
 |---|---|
@@ -1292,6 +1294,8 @@ Exit criteria:
 - no parallel authoritative scenario model exists.
 
 ### Milestone 4 — Field dedicated spawn smoke
+
+**Current boundary (2026-09-10):** The [event-tail correction](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#21-event-tail-serialization-correction-and-focused-contracts-2026-09-10) meets its atomic source/focused-contract acceptance criteria in both supported shells and is recorded with its tests in this revision. Only the contract project was compiled; full-suite and module-build verification and native failure finalization require a separately approved continuation. The recorded dispositions below remain historical, and Milestone 4 remains open.
 
 **4B live disposition (2026-09-09):** Clean ebf9cd3 passed fresh 24/24 contracts and both CompileOnly builds. m4b-local-live-20260909-01 returned Timeout (exit 31): its first child loaded the exact staged DLL and completed native bootstrap, but the opening guard names the wrong IIntermissionState namespace. The child stalled during failure handling; the exact instruction is not established. Manual exact cleanup was required, after which the approved outer transaction restored all 218 dedicated files and preserved the 32-file client inventory; processes, ports and locks are clear. The second child was Not Run. Mission/materialization/abort and real result suppression were not reached. Correct readiness and verify bounded failure handling, including ordinary watchdog classification, before another native attempt. No fixture relaxation or L2 pass is authorized by these findings. See [the canonical live audit](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#12-first-clean-local-only-live-attempt-2026-09-09).
 

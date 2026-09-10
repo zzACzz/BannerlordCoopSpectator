@@ -1,15 +1,34 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
+using System.Threading.Tasks;
 
 internal static class Program
 {
-    private static int Main()
+    private static int Main(string[] args)
     {
         string repositoryRoot = ResolveRepositoryRoot();
+        if (args.Length != 0)
+        {
+            Assert(args.Length == 3 && args[0] == "--failure-evidence-only" && args[1] == "--artifacts-root",
+                "Expected --failure-evidence-only --artifacts-root <absolute artifact directory>.");
+            try
+            {
+                RunFailureEvidenceContracts(repositoryRoot, args[2]);
+                Console.WriteLine("Focused failure-evidence contracts passed in both PowerShell hosts; this is a subset.");
+                return 0;
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine(exception.Message);
+                return 1;
+            }
+        }
         string corePath = Path.Combine(repositoryRoot, "scripts", "CoopAutomationRunner.Core.ps1");
         string runnerPath = Path.Combine(repositoryRoot, "scripts", "Invoke-CoopTest.ps1");
         string clientLauncherPath = Path.Combine(repositoryRoot, "scripts", "Start-CoopBattleTestClient.ps1");
@@ -33,6 +52,7 @@ internal static class Program
 
         try
         {
+            RunFailureEvidenceContracts(repositoryRoot, Path.Combine(temporaryRoot, "failure-evidence"));
             RunHarness("powershell.exe", harnessPath, corePath);
             RunHarness("pwsh.exe", harnessPath, corePath);
             ValidateActualConsoleCancellation("powershell.exe", corePath, temporaryRoot);
@@ -45,6 +65,158 @@ internal static class Program
             if (Directory.Exists(temporaryRoot))
                 Directory.Delete(temporaryRoot, recursive: true);
         }
+    }
+
+    private static void RunFailureEvidenceContracts(string repositoryRoot, string artifactsRoot)
+    {
+        Assert(Path.IsPathFullyQualified(artifactsRoot), "Failure-evidence artifacts require an absolute path.");
+        artifactsRoot = Path.GetFullPath(artifactsRoot);
+        Assert(!File.Exists(artifactsRoot), "An artifact directory cannot be a file.");
+        for (DirectoryInfo directory = new DirectoryInfo(artifactsRoot); directory != null; directory = directory.Parent)
+            if (directory.Exists)
+                Assert((directory.Attributes & FileAttributes.ReparsePoint) == 0, "Refuse a reparse artifact ancestor.");
+        if (Directory.Exists(artifactsRoot))
+        {
+            // Retain earlier failures when the same focused command is retried.
+            string retainedRoot = artifactsRoot;
+            for (int attempt = 2; ; attempt++)
+            {
+                artifactsRoot = Path.Combine(retainedRoot, "execution-" + attempt.ToString("D2"));
+                if (!Directory.Exists(artifactsRoot) && !File.Exists(artifactsRoot)) break;
+            }
+        }
+        Directory.CreateDirectory(artifactsRoot);
+        Console.WriteLine("Failure-evidence artifacts: " + artifactsRoot);
+        string harnessPath = Path.Combine(artifactsRoot, "FailureEvidence.Contracts.ps1");
+        File.WriteAllText(harnessPath, FailureEvidenceHarnessScript, new UTF8Encoding(false));
+        var reports = new List<object>();
+        var failures = new List<string>();
+        foreach (string shellName in new[] { "powershell.exe", "pwsh.exe" })
+        {
+            string shellPath = null;
+            foreach (string directory in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator))
+            {
+                if (string.IsNullOrWhiteSpace(directory)) continue;
+                string candidate = Path.GetFullPath(Path.Combine(directory.Trim('"'), shellName));
+                if (File.Exists(candidate)) { shellPath = candidate; break; }
+            }
+            Assert(shellPath != null, "The required shell is unavailable: " + shellName);
+            string shellRoot = Path.Combine(artifactsRoot, Path.GetFileNameWithoutExtension(shellName));
+            Directory.CreateDirectory(shellRoot);
+            string stdoutPath = Path.Combine(shellRoot, "stdout.txt");
+            string stderrPath = Path.Combine(shellRoot, "stderr.txt");
+            var startInfo = new ProcessStartInfo(shellPath)
+            {
+                UseShellExecute = false, CreateNoWindow = true,
+                RedirectStandardOutput = true, RedirectStandardError = true
+            };
+            foreach (string argument in new[] { "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                "-File", harnessPath, "-RepositoryRoot", repositoryRoot, "-ArtifactRoot", shellRoot })
+                startInfo.ArgumentList.Add(argument);
+            const long memoryLimit = 256L * 1024 * 1024;
+            const long outputLimit = 4L * 1024 * 1024;
+            var timer = Stopwatch.StartNew();
+            using var output = new FileStream(stdoutPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+            using var error = new FileStream(stderrPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+            using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Shell creation failed.");
+            // Drain asynchronously before waiting, including on failing serialization paths.
+            Task stdoutTask = process.StandardOutput.BaseStream.CopyToAsync(output);
+            Task stderrTask = process.StandardError.BaseStream.CopyToAsync(error);
+            DateTime? startUtc = null;
+            string observedPath = null;
+            long peakPrivateBytes = 0;
+            string outcome = "Running";
+            string cleanup = "AlreadyExited";
+            string failure = "";
+            try
+            {
+                var identityTimer = Stopwatch.StartNew();
+                while (!process.HasExited && identityTimer.ElapsedMilliseconds < 2000)
+                {
+                    try
+                    {
+                        using var observation = Process.GetProcessById(process.Id);
+                        observedPath = observation.MainModule?.FileName;
+                        startUtc = observation.StartTime.ToUniversalTime();
+                        if (!string.IsNullOrEmpty(observedPath)) break;
+                    }
+                    catch (System.ComponentModel.Win32Exception) { }
+                    catch (InvalidOperationException) { }
+                    Thread.Sleep(25);
+                }
+                Assert(startUtc.HasValue && string.Equals(observedPath, shellPath, StringComparison.OrdinalIgnoreCase),
+                    "The shell was not admitted: exact path/start-time identity is unavailable.");
+                File.WriteAllText(Path.Combine(shellRoot, "owned-process.json"), JsonSerializer.Serialize(new
+                {
+                    ProcessId = process.Id, ExecutablePath = observedPath, StartUtc = startUtc.Value,
+                    StartTicks = startUtc.Value.Ticks, ParentProcessId = Environment.ProcessId
+                }));
+                File.WriteAllText(Path.Combine(shellRoot, "admitted.txt"), "admitted", new UTF8Encoding(false));
+                while (!process.WaitForExit(25))
+                {
+                    try
+                    {
+                        process.Refresh();
+                        peakPrivateBytes = Math.Max(peakPrivateBytes, process.PrivateMemorySize64);
+                    }
+                    catch (InvalidOperationException) when (process.HasExited) { break; }
+                    catch (System.ComponentModel.Win32Exception) when (process.HasExited) { break; }
+                    if (peakPrivateBytes > memoryLimit) { outcome = "MemoryLimitExceeded"; break; }
+                    if (timer.ElapsedMilliseconds >= 15000) { outcome = "TimedOut"; break; }
+                    if (new FileInfo(stdoutPath).Length > outputLimit || new FileInfo(stderrPath).Length > outputLimit)
+                    { outcome = "OutputLimitExceeded"; break; }
+                }
+                if (outcome == "Running") outcome = process.ExitCode == 0 ? "Pass" : "Failed";
+            }
+            catch (Exception exception) { outcome = "ControllerFailed"; failure = exception.Message; }
+            finally
+            {
+                if (!process.HasExited)
+                {
+                    if (!startUtc.HasValue || string.IsNullOrEmpty(observedPath))
+                    {
+                        // An unadmitted worker exits itself after five seconds; never guess cleanup identity.
+                        Assert(process.WaitForExit(6000), "Unidentified worker did not exit; exact inspection is required.");
+                        cleanup = "UnadmittedWorkerExited";
+                    }
+                    else
+                    {
+                        try
+                        {
+                            using var live = Process.GetProcessById(process.Id);
+                            Assert(live.StartTime.ToUniversalTime().Ticks == startUtc.Value.Ticks &&
+                                string.Equals(live.MainModule?.FileName, observedPath, StringComparison.OrdinalIgnoreCase),
+                                "Exact worker cleanup refused a PID/path/start-time mismatch.");
+                            live.Kill();
+                            Assert(live.WaitForExit(3000), "Exact worker did not exit within cleanup grace.");
+                            cleanup = "ExactIdentityStopped";
+                        }
+                        catch (ArgumentException) when (process.HasExited) { cleanup = "AlreadyExited"; }
+                        catch (InvalidOperationException) when (process.HasExited) { cleanup = "AlreadyExited"; }
+                    }
+                }
+                Assert(Task.WhenAll(stdoutTask, stderrTask).Wait(2000), "Worker output did not close after exit.");
+                output.Flush(); error.Flush(); timer.Stop();
+            }
+            var report = new
+            {
+                Shell = shellPath, Outcome = outcome, Failure = failure, ProcessId = process.Id,
+                DurationMilliseconds = timer.ElapsedMilliseconds, PeakPrivateMemoryBytes = peakPrivateBytes,
+                DeadlineMilliseconds = 15000, PrivateMemoryStopThresholdBytes = memoryLimit,
+                Cleanup = cleanup, Exited = process.HasExited, ExitCode = process.ExitCode
+            };
+            reports.Add(report);
+            File.WriteAllText(Path.Combine(shellRoot, "controller-result.json"), JsonSerializer.Serialize(report));
+            Console.WriteLine(shellName + ": " + outcome + "; " + timer.ElapsedMilliseconds + " ms; " + cleanup);
+            if (outcome != "Pass") failures.Add(shellName + ": " + outcome + ". " + failure + " See " + stderrPath);
+        }
+        File.WriteAllText(Path.Combine(artifactsRoot, "summary.json"), JsonSerializer.Serialize(new
+        {
+            Schema = "coop-failure-evidence-contracts-v1", SuiteSelection = "FailureEvidenceOnly",
+            IsFullSuite = false, Shells = reports, FailedShellCount = failures.Count,
+            ProductProcessLaunched = false
+        }, new JsonSerializerOptions { WriteIndented = true }));
+        Assert(failures.Count == 0, string.Join(Environment.NewLine, failures));
     }
 
     private static void ValidateRunnerIntegration(
@@ -540,6 +712,155 @@ finally {
         if (!condition)
             throw new InvalidOperationException(message);
     }
+
+    private const string FailureEvidenceHarnessScript = """
+param(
+    [Parameter(Mandatory = $true)][string]$RepositoryRoot,
+    [Parameter(Mandatory = $true)][string]$ArtifactRoot)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$utf8 = New-Object Text.UTF8Encoding($false)
+[Console]::OutputEncoding = $utf8
+$admissionDeadline = [DateTime]::UtcNow.AddSeconds(5)
+while (-not [IO.File]::Exists((Join-Path $ArtifactRoot 'admitted.txt'))) {
+    if ([DateTime]::UtcNow -ge $admissionDeadline) { throw 'Worker admission expired.' }
+    Start-Sleep -Milliseconds 25
+}
+function Assert-True([bool]$Condition, [string]$Message) {
+    if (-not $Condition) { throw $Message }
+}
+function Get-ContractFileHash([string]$Path) {
+    $stream = [IO.File]::OpenRead($Path)
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($algorithm.ComputeHash($stream)).Replace('-','') }
+    finally { $algorithm.Dispose(); $stream.Dispose() }
+}
+$definitions = @{
+    'scripts\Invoke-CoopTest.ps1' = @('Write-CoopRuntimeFailureEvidence', 'Read-CoopJsonShared', 'Write-CoopJsonAtomic')
+    'scripts\CoopAutomationRunner.Core.ps1' = @('ConvertTo-CoopUtcDateTime', 'Get-CoopFatalHelperExecutablePathsCore')
+}
+foreach ($relativePath in $definitions.Keys) {
+    $tokens = $null; $parseErrors = $null
+    $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $RepositoryRoot $relativePath), [ref]$tokens, [ref]$parseErrors)
+    Assert-True ($parseErrors.Count -eq 0) ('Cannot parse ' + $relativePath)
+    foreach ($functionName in $definitions[$relativePath]) {
+        $nodes = @($ast.FindAll({ param($node)
+            $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName
+        }, $true))
+        Assert-True ($nodes.Count -eq 1) ('Missing or duplicate production function ' + $functionName)
+        Invoke-Expression $nodes[0].Extent.Text
+    }
+}
+# No top-level runner/core invocation, process enumeration, native module or real role is used.
+function Get-CoopBoundedRuntimeProcessSnapshot { throw 'Unexpected live process collection.' }
+function Get-CoopProcessIdentity { throw 'Unexpected live process identity lookup.' }
+function Add-CoopOwnedRuntimeProcess { throw 'Unexpected live role registration.' }
+$script:ownedRuntimeProcesses = New-Object 'System.Collections.Generic.List[object]'
+$script:GameRoot = 'C:\failure-contract-game-not-used'
+$script:DedicatedServerRoot = 'C:\failure-contract-server-not-used'
+$failedCapture = [pscustomobject][ordered]@{
+    Schema='coop-bounded-process-snapshot-v1'; State='TimedOut'; Failure='Synthetic collector deadline.'
+    DurationMilliseconds=300L; DeadlineMilliseconds=300; PrivateMemoryLimitBytes=268435456L
+    PeakPrivateMemoryBytes=67108864L; CollectorProcessId=12345; ForcedStopUsed=$true; RecordCount=0; Records=@()
+}
+$captured = [pscustomobject][ordered]@{
+    Schema='coop-bounded-process-snapshot-v1'; State='Captured'; Failure=''
+    DurationMilliseconds=10L; DeadlineMilliseconds=300; PrivateMemoryLimitBytes=268435456L
+    PeakPrivateMemoryBytes=67108864L; CollectorProcessId=12345; ForcedStopUsed=$false; RecordCount=0; Records=@()
+}
+$cases = New-Object 'System.Collections.Generic.List[object]'
+$nonAscii = -join @([char]0x041F,[char]0x043E,[char]0x0434,[char]0x0456,[char]0x044F,[char]0x0020,[char]0x96EA)
+$unicodeText = $nonAscii + ' ' + [char]::ConvertFromUtf32(0x1F6E1) + ' "quoted" \path\ ' + [char]9 + ' end '
+$fortyLines = @(for ($i=1; $i -le 40; $i++) {
+    if ($i -eq 20) { '' } else { 'event-' + $i.ToString('D2') + ': ' + $unicodeText }
+})
+
+function Verify-Report([string]$Name, [string[]]$ExpectedLines, [string]$Outcome, [string]$Code, $Capture) {
+    $expected = @($ExpectedLines | Select-Object -Last 25)
+    $beforeHash = if ([IO.File]::Exists($script:eventsPath)) { Get-ContractFileHash $script:eventsPath } else { '' }
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $result = Write-CoopRuntimeFailureEvidence -Outcome $Outcome -FailureCode $Code -FailureMessage ('message-' + $Name) -ProcessSnapshotCapture $Capture
+    $timer.Stop()
+    $published = Read-CoopJsonShared -Path $result.Path
+    Assert-True ($null -ne $published) ('Invalid published JSON: ' + $Name)
+    Assert-True ($published.RunId -ceq $script:RunId -and $published.Outcome -ceq $Outcome -and
+        $published.FailureCode -ceq $Code -and $published.FailureMessage -ceq ('message-' + $Name)) ('Outcome changed: ' + $Name)
+    Assert-True ($published.LastRoleState -ceq 'SyntheticLatestClientState' -and $published.LastStateRevision -eq 8 -and
+        @($published.RoleStatuses).Count -eq 2) ('Nonempty role status lost: ' + $Name)
+    Assert-True (@($published.LastEvents).Count -eq $expected.Count) ('Tail count changed: ' + $Name)
+    Assert-True (@($result.Evidence.LastEvents).Count -eq $expected.Count) ('In-memory tail count changed: ' + $Name)
+    for ($index=0; $index -lt $expected.Count; $index++) {
+        $line = $published.LastEvents[$index]
+        Assert-True ($line -is [string] -and [string]::Equals($line,$expected[$index],[StringComparison]::Ordinal)) ('Tail text/order changed: ' + $Name + '/' + $index)
+        foreach ($property in @('PSPath','PSParentPath','PSChildName','PSDrive','PSProvider','ReadCount')) {
+            Assert-True ($null -eq $result.Evidence.LastEvents[$index].PSObject.Properties[$property]) ('Provider metadata retained: ' + $property)
+        }
+    }
+    Assert-True ($published.ProcessSnapshot.State -ceq $Capture.State -and
+        $null -eq $published.ProcessSnapshot.PSObject.Properties['Records']) ('Collector state/record boundary changed: ' + $Name)
+    if ($Capture.State -eq 'TimedOut') {
+        Assert-True ($published.ProcessSnapshotFailure -match 'Synthetic collector deadline' -and $published.ProcessSnapshot.ForcedStopUsed) ('Collector failure lost: ' + $Name)
+    } else { Assert-True ([string]::IsNullOrEmpty($published.ProcessSnapshotFailure)) ('Unexpected collector failure: ' + $Name) }
+    $afterHash = if ([IO.File]::Exists($script:eventsPath)) { Get-ContractFileHash $script:eventsPath } else { '' }
+    Assert-True ($beforeHash -ceq $afterHash) ('Writer modified its event journal: ' + $Name)
+    $leftovers = @([IO.Directory]::GetFiles((Split-Path -Parent $result.Path)) | Where-Object { $_ -match '\.(tmp|bak)$' })
+    Assert-True ($leftovers.Count -eq 0) ('Atomic writer leaked files: ' + $Name)
+    $bytes = (Get-Item -LiteralPath $result.Path).Length
+    Assert-True ($bytes -lt 65536) ('Small fixture generated excessive JSON: ' + $Name)
+    $cases.Add([pscustomobject][ordered]@{
+        Name=$Name; Outcome='Pass'; ExpectedEvents=$expected.Count; PublicationMilliseconds=$timer.ElapsedMilliseconds
+        JsonBytes=$bytes; Artifact=$result.Path; Sha256=(Get-ContractFileHash $result.Path)
+    })
+}
+
+foreach ($caseName in @('missing','empty','unicode-single','exact-25','over-25-lf','over-25-crlf-no-final-newline')) {
+    $script:RunId = 'failure-contract-' + $caseName
+    $script:runRoot = Join-Path $ArtifactRoot $caseName
+    $script:eventsPath = Join-Path $script:runRoot 'events\events.jsonl'
+    [IO.Directory]::CreateDirectory((Split-Path -Parent $script:eventsPath)) | Out-Null
+    foreach ($role in @('dedicated-server-01','multiplayer-client-01')) {
+        $isClient = $role -eq 'multiplayer-client-01'
+        $status = [ordered]@{
+            RunId=$script:RunId; RoleInstanceId=$role
+            RoleType=$(if($isClient){'MultiplayerClient'}else{'DedicatedServer'})
+            State=$(if($isClient){'SyntheticLatestClientState'}else{'SyntheticDedicatedState'})
+            StateRevision=$(if($isClient){8}else{7})
+            UpdatedUtc=$(if($isClient){'2026-09-10T00:00:02Z'}else{'2026-09-10T00:00:01Z'})
+            HeartbeatUtc='2026-09-10T00:00:01Z'; LastProgressUtc='2026-09-10T00:00:00Z'
+        }
+        Write-CoopJsonAtomic -Path (Join-Path $script:runRoot ('status\' + $role + '.json')) -Value $status
+    }
+    $lines = switch ($caseName) {
+        'missing' { @() }
+        'empty' { @() }
+        'unicode-single' { @($unicodeText) }
+        'exact-25' { @($fortyLines | Select-Object -First 25) }
+        default { $fortyLines }
+    }
+    $lines = @($lines)
+    if ($caseName -ne 'missing') {
+        $separator = if ($caseName -eq 'over-25-crlf-no-final-newline') { "`r`n" } else { "`n" }
+        $content = [string]::Join($separator, [string[]]$lines)
+        if ($lines.Count -gt 0 -and $caseName -ne 'over-25-crlf-no-final-newline') { $content += $separator }
+        # BOM fixes fixture decoding in both hosts; this regression preserves the existing reader encoding policy.
+        [IO.File]::WriteAllText($script:eventsPath, $content, (New-Object Text.UTF8Encoding($true)))
+    }
+    Verify-Report -Name $caseName -ExpectedLines $lines -Outcome Timeout -Code SyntheticTimeout -Capture $captured
+    if ($caseName -eq 'over-25-lf') {
+        # Same path: the second publication must replace the old report and select the new last 25 entries.
+        $extra = @('appended-first', 'appended-second')
+        [IO.File]::AppendAllText($script:eventsPath, ([string]::Join("`n",$extra)+"`n"),$utf8)
+        $lines = @($lines) + $extra
+        Verify-Report -Name repeated-publication -ExpectedLines $lines -Outcome Timeout -Code SecondTimeout -Capture $failedCapture
+        Verify-Report -Name failed-collector-crash -ExpectedLines $lines -Outcome Crash -Code SyntheticCrash -Capture $failedCapture
+    }
+}
+Write-CoopJsonAtomic -Path (Join-Path $ArtifactRoot 'cases.json') -Value ([ordered]@{
+    Schema='coop-failure-evidence-cases-v1'; ShellVersion=$PSVersionTable.PSVersion.ToString()
+    PassedCount=$cases.Count; Cases=$cases.ToArray(); ProductProcessLaunched=$false
+})
+Write-Output ('PASS ' + $PSVersionTable.PSVersion.ToString() + ': ' + $cases.Count + ' failure-evidence cases.')
+""";
 
     private const string HarnessScript = """
 param([Parameter(Mandatory = $true)][string]$CorePath)

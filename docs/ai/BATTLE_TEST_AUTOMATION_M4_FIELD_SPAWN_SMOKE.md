@@ -1,7 +1,7 @@
 # Milestone 4 — Field dedicated spawn smoke: source, contracts, local isolation and live findings
 
 Date: **2026-09-09** (Europe/Kyiv; validation IDs retain the approved 20260908 names).
-Status: **The shared failure-evidence process snapshot is isolated and bounded at source/L1. The recovered full dump localized the mission-opening failure to a null `MissionMultiplayerGameModeBaseClient` dependency inside `MissionScoreboardComponent.AfterStart`; published correction `a6fe74f` now enforces that dependency for direct CoopBattle and full TdmClone and passes source/L1 verification. Controlled staging, native lifecycle confirmation and L2 remain open.**
+Status: **Scoreboard correction `a6fe74f` remains source/L1 verified. Recovered run `m4sd-p1-l1` loaded the corrected dedicated DLL, but finalization did not finish and L2 did not pass. This revision records the event-string serialization correction and its tests, with 16 focused cases passing in PowerShell 5.1 and 7 on 2026-09-10. A post-correction native run remains pending. See section 21 for the current boundary and section 20 for the diagnosis.**
 Original 4A approval: **"ок на Milestone 4A source/contracts"**. The separately approved local-only 4B live validation and restoration are recorded in section 12.
 Original 4A source baseline: branch `codex/v0.1.1-refresh`, HEAD/local upstream `452df7e30d3d8d120488570857134078d6072ecc`, initially clean.
 The original 4A implementation was subsequently published as 7d75742c338f504499ec01dd8e3b2f189a1f7a03. Section 11 records the local-isolation follow-up's pre-publication validation in `C:\Users\Admin\.codex\worktrees\1b21\BannerlordCoopSpectator3`.
@@ -837,3 +837,132 @@ This satisfies all three known engine lifecycle callers: `AfterStart`, `OnClearS
 | Mission materialization, early abort and L2 | Not Satisfied |
 
 The next stage must start from the clean published technical and documentation revisions, re-run the required clean gates if source identity changes, create a new one-use full-backup staging transaction, stage only the exact candidate binaries, prove existing dump capture without rewriting its working configuration, and execute one bounded zero-client live attempt. Restoration remains unconditional. A second attempt is allowed only according to the existing two-attempt contract and only if the first attempt reaches a valid evidence boundary. This live stage requires a separate approved plan.
+
+## 20. Recovered scoreboard-candidate run and bounded failure-writer diagnosis (2026-09-10)
+
+### 20.1 Scope and provenance
+
+This section owns the recovered `m4sd-p1-l1` evidence and the separately approved `m4sd-fe-d1` diagnostic. It supersedes section 19's prospective staging/rerun instruction; it does not rewrite that stage's historical source/L1 result or close Milestone 4.
+
+The investigation started at clean local/upstream `dae61f9561c27cb0a4d6b8e751e02dd59b5159f9`, branch `codex/v0.1.1-refresh`; read-only `git ls-remote` confirmed the same remote head. Between the recovered run's `a1e5eee3393e2ce0a0d69bde1e1f176ba67c1bde` and that baseline, only `AGENTS.md`, `docs/ai/BATTLE_TEST_AUTOMATION_SPEC.md`, and `docs/ai/BUILD_TEST_DEBUG.md` changed; no production source changed. Other worktrees were not modified.
+
+Artifacts below are relative to the private `%TEMP%\CoopSpectator\Automation` root. No raw run data, generated probe, or installed binary is added to Git.
+
+### 20.2 Recovered native attempt: staging succeeded, finalization did not
+
+| Retained evidence | Observed fact |
+|---|---|
+| `m4sd-p1-c1/artifacts/results/contracts.json` | Full inventory: 24 passed, zero failed; historical evidence, not rerun on September 10. |
+| `m4sd-p1-b1/artifacts/results/compile-only.json` | Both builds exited zero, installed inventories unchanged; dedicated output SHA-256 `74B03C00987F46AD76A6F21BAF807672FC699A402C3BE5EE5D52CB6CEC2BD4B7`. |
+| `m4sd-p1-s1/self-test.json` | Path/hash rejection, junction rejection, first-file-failure restoration, and complete two-file replacement/restoration passed. |
+| `m4sd-p1-s1/work/Invoke-M4SDLocalTransaction.ps1` | Retained helper hash matches `DE215D0C938421647716289DABE6458AC41250827DA1716D8AD094518D76D2DC`; helper pins the historical checkout, revision and RunIds and cannot be reused unchanged. |
+| `m4sd-p1-l1-01/state/dedicated-control.ready.json` | Exact PID 11448 reports the corrected dedicated hash loaded from the dedicated module's `Win64_Shipping_Client` DLL and authoritative readiness. |
+| `m4sd-p1-l1-01/state/dedicated-bootstrap.status.json` | Seven bootstrap acknowledgements, one `start_mission` request, zero end requests, no materialization observation; final status `Failed/RequestExpired`. |
+| `m4sd-p1-l1-01/artifacts/processes/runtime-process-tree-snapshot.json` | Bounded collector completed in 1,872 ms, peak private memory 73,031,680 bytes, 313 records; descendant registration completed. |
+| `m4sd-p1-l1-01/events/events.jsonl` | Last event: `FailureEvidenceCaptureStarted`, 2026-09-09 16:24:04 UTC; no completion marker or terminal crash/hang report. |
+| `m4sd-p1-l1/manifest.json` | Parent terminal `Timeout`, exit 31; child manifest remains unfinished. Attempt 2 was not run. |
+| `m4sd-p1-s1/transaction.json` | Initial restoration refused while product processes remained. Subsequently records `Restored=true` at 16:43:53 UTC and zero dedicated/client/legacy differences against 218/32-file pre-images; the earlier `RestorationFailure` text remains retained. |
+
+Do not report automatic live cleanup success: child terminal/cleanup evidence is incomplete and restoration initially encountered live processes. The saved collector result demonstrates that process acquisition had already completed before failure publication stalled; it is not the missing terminal report. The later `RequestExpired` status does not establish the earlier runner timeout's exact triggering condition. `ProtectedResultUnchanged=false` without a completed observation is not proof of a changed result file.
+
+September 10 read-only checks found no matching product processes or owners of UDP 7210/7777. Both installed dedicated DLLs had the original `2E1494BC...C0CA1414` hash and the client retained `2A1E17E4...250FFB4`. The diagnostic's before/after checks independently preserved those three DLL hashes. Full historical inventory restoration is supported by the retained transaction, not claimed as a fresh 250-file inventory verification.
+
+### 20.3 Bounded diagnostic and isolated cause
+
+Approved invocation:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File work/Invoke-M4FailureEvidenceProbe.ps1 -RunId m4sd-fe-d1 -CaseTimeoutSeconds 15 -MemoryLimitMiB 256
+```
+
+The ignored, one-use probe extracts only named function definitions from `scripts/Invoke-CoopTest.ps1` and `scripts/CoopAutomationRunner.Core.ps1`; neither script's top-level entry point runs. It copies the retained six-line event journal and final dedicated status into each fresh case root, uses saved owned identities as data, and supplies an explicitly synthetic empty process snapshot. Historical PIDs are never observed, attached to, registered, or terminated. Final statuses were retained after the initial failure, so this is not an exact reconstruction of every value at 16:24:04 UTC.
+
+The first probe execution exposed a probe-only process-path acquisition race and missing cached exit-code handle. Reading completed, but the controller misclassified it; a subsequent unadmitted worker exited itself. No worker remained. Those incomplete files are preserved at `m4sd-fe-d1/`. The corrected probe used the fresh `m4sd-fe-d1/execution-02/` subtree, cached its process handle, and admitted workers only after bounded path/start-time acquisition.
+
+Each worker has a 15-second deadline, a sampled 256-MiB private-memory stop threshold, and 4-MiB per-stream output threshold. These are polling thresholds, not hard OS memory caps: the two stopped samples overshot 256 MiB slightly. Forced cleanup revalidates exact PID/path/start ticks and waits for exit. No product process or build ran.
+
+| Case | Windows PowerShell 5.1.26100.9444 | PowerShell 7.6.5 |
+|---|---|---|
+| Read status and event lines | Completed | Completed |
+| Assemble failure evidence without serialization | Completed | Completed |
+| Serialize role status alone | Completed | Completed |
+| Serialize original event lines alone | Memory threshold reached; exact cleanup | Completed |
+| Original full failure writer | Memory threshold reached; exact cleanup | Completed |
+| Full evidence with empty event list | Completed | Completed |
+| Full evidence with text-identical plain event strings | Completed | Completed |
+
+Windows PowerShell 5.1 `EventsOnly` stopped at 9,693 ms / 273,723,392 bytes; `FullOriginal` stopped at 10,009 ms / 272,691,200 bytes. Both reached `AtomicSerializationStarted` but never its completion. Reading, assembly, status-only and both event-list substitutions completed in 2.3–2.7 seconds including shell startup. All seven PowerShell 7 cases completed in 1.3–1.7 seconds.
+
+The failure is isolated to `Write-CoopRuntimeFailureEvidence` retaining the objects returned by `Get-Content -Tail 25` in `LastEvents`, then passing them to `Write-CoopJsonAtomic` / `ConvertTo-Json -Depth 30`. They are `System.String` objects with provider-added `PSPath`, `PSParentPath`, `PSChildName`, `PSDrive`, `PSProvider`, and `ReadCount` properties. In Windows PowerShell 5.1 those extra properties participate in serialization. Replacing only `LastEvents` with plain strings read through `File.ReadAllLines` completes publication; the probe explicitly checks all six texts for ordinal equality. The resulting full report is valid JSON, 12,385 bytes. This substitution is diagnostic evidence, not an approved production implementation: the probe's small-file reader does not establish a bounded production tail-reading design.
+
+Microsoft documents that PowerShell 7.2 and later omit extended properties on `String` and `DateTime` during JSON conversion ([ConvertTo-Json](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/convertto-json?view=powershell-7.6), accessed 2026-09-10; applicable comparison: installed Windows PowerShell 5.1 versus PowerShell 7.6.5). This supports the observed shell difference; the exact local substitution tests are the primary causal evidence.
+
+At the diagnostic baseline, the existing `Tests/CoopAutomationRunner.ContractTests/Program.cs` failure-writer case supplied missing role statuses and a nonexistent event journal. It verified failed-collector publication, but could not expose this nonempty provider-string serialization path. The collector correction remains useful; those tests did not close all finalization risks. Section 21 records the added populated-journal coverage.
+
+### 20.4 Evidence integrity, scope and next boundary
+
+| Artifact | SHA-256 |
+|---|---|
+| Ignored `work/Invoke-M4FailureEvidenceProbe.ps1` | `0FAD99AA3E49D4376A092820B655FEA585E0F9EE99D0486CF01DE59484D4D6CB` |
+| `m4sd-fe-d1/execution-02/summary.json` | `F0CD6A72A09B57815256CC4A819949DAF1278C5021E3599E27D3FD75126F4AD3` |
+| `m4sd-fe-d1/execution-02/inputs-before.json` | `FF2A63F37B799F6E7FF2147DE7E0EFB0FFD64ED96C7D93741603966AABB870F2` |
+
+The summary records 12 completed cases and two bounded reproductions, unchanged selected source/retained-input/installed-DLL hashes, and zero remaining exact worker processes. Per-case phase, process identity, memory, publication and cleanup facts remain under the execution root. No production source, test project, project file, installed module, registry, game configuration or Git state changed during this diagnostic task.
+
+The focused diagnostic objective is satisfied: a repeatable failing substep and discriminating successful substitution are identified. This is isolated diagnostic evidence, not a production fix, full contract-suite pass, new build verification, native runtime pass, or game regression pass. The original mission/materialization failure and scoreboard clear/remove lifecycle remain unverified by this task; L2 remains open.
+
+The affected source surface is the shared runner failure writer called by `Invoke-CoopFeasibility` and `Invoke-CoopDedicatedSpawnSmokeAttempt`: dedicated and multiplayer-client failure evidence is relevant. Field dedicated evidence supplied the input. `Record` / `Invoke-CoopFixtureRecord` does not call this writer, so the current campaign-capture path is not directly affected by this particular defect. Village, siege assault, sally-out, siege ambush, relief, lords-hall, day/night hideout, sequential/reconnect and unsupported-blockade/blockade-sally-out guards have no separate writer call site; future automation using the same writer would inherit its risk. This is impact classification, not proof of a failure in each scenario. No mission, spawn, result or scenario contract changed. Native scenario/role regression was not run.
+
+At diagnostic closure, the next independently approved implementation was to make the failure writer's event tail safe for Windows PowerShell 5.1 while retaining bounded reading, all event text, outcome evidence and exact cleanup, and add a populated-journal regression. Section 21 records that implementation. Do not repeat a native run merely to rediscover the reproduced finalization failure.
+
+`DeployPersistent` remains specified, not implemented or verified. It is not a prerequisite for fixing this runner defect: the recovered `DeployWithRestore` transaction already proves loading the exact scoreboard-corrected dedicated candidate for a zero-client run. That does not prove updated client/server joint operation, authorize reuse of a pinned historical helper, or authorize another live run. For future staging, Revision 34's development-owned policy supersedes section 19's unconditional-old-version-restoration requirement when the approved plan explicitly selects that mode and supplies locks, exact targets, identity verification and complete-candidate repair.
+
+Immediate documentation scope: this section owns the detailed finding; `README.md`, `BUILD_TEST_DEBUG.md`, and the specification link to it. Architecture, runtime flows, invariants, code map and test inventory are unchanged because this task introduces no production behavior or contract. This is an atomic investigation closure, not a full substage/milestone compliance audit.
+
+## 21. Event-tail serialization correction and focused contracts (2026-09-10)
+
+### 21.1 Implementation and acceptance boundary
+
+The separately approved atomic correction changes only `Write-CoopRuntimeFailureEvidence` in `scripts/Invoke-CoopTest.ps1`. It retains `Get-Content -Tail 25` and copies each returned line into a new `System.String` from its character array before assigning `LastEvents`. The provider's extended properties therefore cannot expand into JSON object graphs in Windows PowerShell 5.1. Reading/encoding policy, line text/order, primary outcome, role evidence and atomic publication remain unchanged. The tail is bounded by line count; this change introduces no byte limit for an individual event line.
+
+`Tests/CoopAutomationRunner.ContractTests/Program.cs` adds `RunFailureEvidenceContracts`, `FailureEvidenceHarnessScript`, and a `Main` selection for `--failure-evidence-only --artifacts-root <absolute directory>`. The normal runner suite also invokes these cases. The focused selection compiles the contract project but explicitly reports `IsFullSuite=false`. Retried focused executions retain earlier artifacts and use a fresh numbered subtree.
+
+Tests extract the actual writer, shared JSON reader and atomic writer as function definitions, without running either production script's top-level entry point. Nonempty synthetic dedicated/client statuses and supplied synthetic snapshots cover publication without live process collection. Each shell worker has a 15-second deadline, sampled 256-MiB memory threshold, 4-MiB per-stream threshold, asynchronous output draining, admission by PID/path/start time and exact-identity cleanup. These are test-controller limits, not a new production resource cap.
+
+### 21.2 Focused validation and retained evidence
+
+The approved command used .NET SDK 10.0.102 and the existing local 8.0.23 reference/package cache:
+
+```powershell
+$fixRoot = Join-Path $env:TEMP 'CoopSpectator\Automation\m4fe-fix-c1'
+dotnet run --project Tests/CoopAutomationRunner.ContractTests/CoopAutomationRunner.ContractTests.csproj -c Release --property:CoopCompileOnly=true "--property:CoopCompileOutputRoot=$fixRoot\build" "--property:RestoreConfigFile=$fixRoot\NuGet.Config" --property:NuGetAudit=false -- --failure-evidence-only --artifacts-root "$fixRoot\checks"
+```
+
+The run-owned `NuGet.Config` clears package sources and uses only the retained `m4sd-p1-c1/work/contract-build/packages` fallback. Process-only `DOTNET_CLI_HOME` and `NUGET_HTTP_CACHE_PATH` point below `$fixRoot`; telemetry, ASP.NET certificate generation, global-tool PATH changes and workload update notifications are disabled for the final invocation. Restore still attempted to read the user NuGet configuration and required sandbox access escalation; that configuration was not edited. Test build outputs, reports and logs are retained below `$fixRoot`; no client/server build or deployment target ran.
+
+Initial restore failures and the first incomplete test execution remain retained. The first test execution passed all eight PowerShell 7 cases, but PowerShell 5.1 lacked an auto-loaded `Get-FileHash`; the controller also raced process exit while sampling memory. The in-scope harness now hashes through .NET, and the sampler accepts an observed process exit. Final execution `checks/execution-02` exited zero:
+
+| Host | Cases passed | Total worker time | Peak sampled private bytes | Publication time | Largest JSON |
+|---|---|---|---|---|---|
+| Windows PowerShell 5.1.26100.9444 | 8/8 | 1,878 ms | 137,994,240 | 4–94 ms | 4,897 bytes |
+| PowerShell 7.6.5 | 8/8 | 1,523 ms | 59,838,464 | 5–63 ms | 3,469 bytes |
+
+Cases cover missing/empty journals, one Unicode line, exactly 25 lines, 40 LF lines, 40 CRLF lines without a final newline, repeat replacement after appending events, and primary Crash publication with a timed-out collector. Checks verify exact last-25 text/order including an empty line, quotes, backslashes, tabs and non-BMP characters; absent provider metadata; nonempty role-state selection; primary outcome/error retention; collector-failure retention; unchanged event-file hashes; valid small JSON; and no atomic temporary/backup leftovers. Unicode fixtures carry a UTF-8 BOM to preserve the existing cross-shell decoding policy; BOM-less decoding is not claimed newly verified.
+
+| Retained artifact / tested source | SHA-256 |
+|---|---|
+| `m4fe-fix-c1/checks/execution-02/summary.json` | `4E70EBB011CC931B3E72BFE785021D6802CDCAD779D74513BE5AA69E5A1BE4D1` |
+| `scripts/Invoke-CoopTest.ps1` | `C7CE7C85DEBE6F696F85D7EB63421253EC20371EB39E89E6E85C338C9550A6ED` |
+| `Tests/CoopAutomationRunner.ContractTests/Program.cs` | `AF6BC67B0C20A30EFB36AFE31A5C87325949CE8238805A3BD41B031FB7470573` |
+
+`m4fe-fix-c1/verification.json` records unchanged hashes for the three installed DLLs, all four workers from both executions absent, and no matching product process. No full installed-file inventory is claimed. Repository diff/hygiene validation is recorded with the final task result.
+
+### 21.3 Scope, completion and next gate
+
+Source inspection, implementation, contract-project compilation and the 16 focused regression cases are complete. Shared Feasibility dedicated/client evidence and zero-client field smoke use the corrected writer. Campaign `Record` does not. Review against `RUNTIME_FLOWS.md` found no separate writer for village, siege assault, sally out, siege ambush, relief, lords hall, day/night hideout, sequential/reconnect, or unsupported blockade variants; their mission, spawn, completion and result paths are unchanged. Native scenario/role regression is Not Run because this atomic change only copies report strings outside mission code.
+
+The approved atomic acceptance criteria are met at source/focused-contract level. The full contract suite, client/dedicated module builds, native failure cleanup, scoreboard lifecycle and mission materialization are Not Run for this correction. A separately approved publication step records the correction, focused tests and immediate safety documentation together in this revision; the tested source hashes above remain unchanged. Remote publication is verified separately against the resulting commit. This is not a full M4 compliance closure or an L2 pass.
+
+The next separately approved continuation must select required validation gates and a safe native-run strategy. It must verify terminal failure evidence and cleanup in Bannerlord before relying on them to diagnose any remaining mission-opening/materialization failure. `DeployPersistent` remains a separate unimplemented requirement; the retained historical staging helper must not be reused unchanged.
+
+Immediate documentation updates are limited to this canonical safety finding and its links in `README.md`, `BUILD_TEST_DEBUG.md` and `BATTLE_TEST_AUTOMATION_SPEC.md`. Architecture, runtime flows, invariants, code map and broader test inventory remain unchanged; their milestone audit is deferred to M4 closure.

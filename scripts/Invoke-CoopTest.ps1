@@ -1002,7 +1002,10 @@ function Write-CoopRuntimeFailureEvidence {
     } -Descending | Select-Object -First 1)
     $eventTail = @()
     if ([System.IO.File]::Exists($eventsPath)) {
-        $eventTail = @(Get-Content -LiteralPath $eventsPath -Tail 25 -ErrorAction SilentlyContinue)
+        # Windows PowerShell 5.1 serializes Get-Content provider metadata on strings.
+        # Copy only the text so LastEvents cannot expand PSDrive/PSProvider graphs.
+        $eventTail = @(Get-Content -LiteralPath $eventsPath -Tail 25 -ErrorAction SilentlyContinue |
+            ForEach-Object { [string]::new(([string]$_).ToCharArray()) })
     }
     $correlationOwnershipFailures = New-Object 'System.Collections.Generic.List[object]'
     foreach ($record in $correlatedFailureProcesses) {
