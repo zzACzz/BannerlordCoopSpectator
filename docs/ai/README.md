@@ -46,6 +46,7 @@ The project converts a single-player Bannerlord campaign encounter into a synchr
 | [CODE_MAP.md](CODE_MAP.md) | Finding the correct file, class, subsystem, adapter, patch, UI, bridge, or test |
 | [RUNTIME_FLOWS.md](RUNTIME_FLOWS.md) | Campaign-to-mission startup, topology handshake, snapshot transfer, spawn/materialization, phases, reconnect, completion, and scenario routing |
 | [BUILD_TEST_DEBUG.md](BUILD_TEST_DEBUG.md) | Reference profiles, side-effecting builds, contract tests, scripts, logs, diagnostics, and safe validation |
+| [GOAL_MODE.md](GOAL_MODE.md) | Autonomous Goal-mode authorization, precedence, allowed actions, boundaries, and stopping conditions |
 | [RELEASE_PACKAGING.md](RELEASE_PACKAGING.md) | Canonical GitHub/Nexus archive layouts, packaging commands, exclusions, validation, and publication boundaries |
 | [BATTLE_TEST_AUTOMATION_AUDIT.md](BATTLE_TEST_AUTOMATION_AUDIT.md) | Source-verified feasibility findings, unsafe assumptions in the supplied proposal, and the required evidence ladder |
 | [BATTLE_TEST_AUTOMATION_SPEC.md](BATTLE_TEST_AUTOMATION_SPEC.md) | Canonical staged requirements and acceptance criteria for battle-test automation |
