@@ -36,6 +36,30 @@ namespace CoopSpectator.Infrastructure
         Special = 5
     }
 
+    [Flags]
+    public enum CoopCampaignMapPrototypeQuestMarkerFlags
+    {
+        None = 0,
+        AvailableIssue = 1,
+        ActiveIssue = 2,
+        ActiveStoryQuest = 4,
+        TrackedIssue = 8,
+        TrackedStoryQuest = 16
+    }
+
+    [Flags]
+    public enum CoopCampaignMapPrototypeSettlementEventFlags
+    {
+        None = 0,
+        Tournament = 1 << 0,
+        AvailableIssue = 1 << 1,
+        ActiveQuest = 1 << 2,
+        ActiveStoryQuest = 1 << 3,
+        TrackedIssue = 1 << 4,
+        TrackedStoryQuest = 1 << 5,
+        Production = 1 << 6
+    }
+
     /// <summary>
     /// Pure host-disclosure and client camera rules matching the campaign-map
     /// nameplate behavior used by Bannerlord 1.4.8.
@@ -124,6 +148,109 @@ namespace CoopSpectator.Infrastructure
         }
     }
 
+    /// <summary>
+    /// Pure bounds and input arbitration for the client-side map-replica
+    /// camera. Keeping the scale rules here makes wheel zoom and keyboard
+    /// panning deterministic and independently testable.
+    /// </summary>
+    public static class CoopCampaignMapPrototypeInteractionPolicy
+    {
+        public const double SelectionRadiusPixels = 96d;
+        public const double MinimumCameraClearance = 2.5d;
+        public const double MinimumPanSpeed = 20d;
+        public const double PanHeightMultiplier = 0.8d;
+        public const double MaximumPanSpeedSpanMultiplier = 0.25d;
+        public const double MinimumZoomStep = 2.5d;
+        public const double ZoomHeightMultiplier = 0.18d;
+        public const double MaximumZoomStepSpanMultiplier = 0.12d;
+        public const double MaximumCameraHeightSpanMultiplier = 2d;
+
+        public static int ResolveZoomIntent(
+            bool scrollUpPressed,
+            bool scrollDownPressed,
+            double deltaMouseScroll)
+        {
+            if (scrollUpPressed && scrollDownPressed)
+                return 0;
+            if (scrollUpPressed)
+                return 1;
+            if (scrollDownPressed)
+                return -1;
+            if (!IsFinite(deltaMouseScroll))
+                return 0;
+            if (deltaMouseScroll > 0.01d)
+                return 1;
+            if (deltaMouseScroll < -0.01d)
+                return -1;
+            return 0;
+        }
+
+        public static double ResolvePanSpeed(
+            double horizontalSpan,
+            double cameraHeight)
+        {
+            if (!IsFinite(horizontalSpan) || horizontalSpan <= 0d)
+                return MinimumPanSpeed;
+            double height = IsFinite(cameraHeight)
+                ? Math.Max(0d, cameraHeight)
+                : 0d;
+            return Clamp(
+                height * PanHeightMultiplier,
+                MinimumPanSpeed,
+                Math.Max(
+                    MinimumPanSpeed,
+                    horizontalSpan * MaximumPanSpeedSpanMultiplier));
+        }
+
+        public static double ResolveZoomStep(
+            double horizontalSpan,
+            double cameraHeight)
+        {
+            if (!IsFinite(horizontalSpan) || horizontalSpan <= 0d)
+                return MinimumZoomStep;
+            double height = IsFinite(cameraHeight)
+                ? Math.Max(0d, cameraHeight)
+                : 0d;
+            return Clamp(
+                height * ZoomHeightMultiplier,
+                MinimumZoomStep,
+                Math.Max(
+                    MinimumZoomStep,
+                    horizontalSpan * MaximumZoomStepSpanMultiplier));
+        }
+
+        public static double ClampCameraAltitude(
+            double terrainHeight,
+            double candidateAltitude,
+            double horizontalSpan)
+        {
+            if (!IsFinite(terrainHeight))
+                terrainHeight = 0d;
+            if (!IsFinite(candidateAltitude))
+                candidateAltitude = terrainHeight + MinimumCameraClearance;
+            double maximumHeight =
+                IsFinite(horizontalSpan) && horizontalSpan > 0d
+                    ? Math.Max(
+                        MinimumCameraClearance,
+                        horizontalSpan * MaximumCameraHeightSpanMultiplier)
+                    : MinimumCameraClearance;
+            return Clamp(
+                candidateAltitude,
+                terrainHeight + MinimumCameraClearance,
+                terrainHeight + maximumHeight);
+        }
+
+        private static double Clamp(double value, double minimum, double maximum)
+        {
+            return Math.Max(minimum, Math.Min(maximum, value));
+        }
+
+        private static bool IsFinite(double value)
+        {
+            return !double.IsNaN(value) && !double.IsInfinity(value);
+        }
+    }
+
     public sealed class CoopCampaignMapPrototypeAgentVisualState
     {
         public string BodyProperties { get; set; }
@@ -204,6 +331,12 @@ namespace CoopSpectator.Infrastructure
 
         public CoopCampaignMapPrototypeAgentVisualState CaravanMountVisual { get; set; }
 
+        public int QuestMarkerFlags { get; set; }
+
+        public int SettlementEventFlags { get; set; }
+
+        public string SettlementProductionIconId { get; set; } = string.Empty;
+
         public CoopCampaignMapPrototypeEntityState Clone()
         {
             return new CoopCampaignMapPrototypeEntityState
@@ -224,7 +357,10 @@ namespace CoopSpectator.Infrastructure
                 PartyVisualKind = PartyVisualKind,
                 HumanVisual = HumanVisual?.Clone(),
                 MountVisual = MountVisual?.Clone(),
-                CaravanMountVisual = CaravanMountVisual?.Clone()
+                CaravanMountVisual = CaravanMountVisual?.Clone(),
+                QuestMarkerFlags = QuestMarkerFlags,
+                SettlementEventFlags = SettlementEventFlags,
+                SettlementProductionIconId = SettlementProductionIconId
             };
         }
     }
@@ -280,6 +416,8 @@ namespace CoopSpectator.Infrastructure
 
         public int SelectionRadius { get; set; }
 
+        public string SettlementProductionIconId { get; set; } = string.Empty;
+
         public CoopCampaignMapPrototypeCatalogEntityState Clone()
         {
             return new CoopCampaignMapPrototypeCatalogEntityState
@@ -305,7 +443,8 @@ namespace CoopSpectator.Infrastructure
                 ArmyId = ArmyId,
                 ArmyName = ArmyName,
                 IsArmyLeader = IsArmyLeader,
-                SelectionRadius = SelectionRadius
+                SelectionRadius = SelectionRadius,
+                SettlementProductionIconId = SettlementProductionIconId
             };
         }
     }
@@ -387,7 +526,11 @@ namespace CoopSpectator.Infrastructure
                        right.ArmyName,
                        StringComparison.Ordinal) &&
                    left.IsArmyLeader == right.IsArmyLeader &&
-                   left.SelectionRadius == right.SelectionRadius;
+                   left.SelectionRadius == right.SelectionRadius &&
+                   string.Equals(
+                       left.SettlementProductionIconId,
+                       right.SettlementProductionIconId,
+                       StringComparison.Ordinal);
         }
 
         public static List<CoopCampaignMapPrototypeCatalogEntityState> BuildDelta(
@@ -524,6 +667,10 @@ namespace CoopSpectator.Infrastructure
 
         public int InformationRevision { get; set; }
 
+        public int QuestMarkerFlags { get; set; }
+
+        public int SettlementEventFlags { get; set; }
+
         public CoopCampaignMapPrototypeDynamicEntityState Clone()
         {
             return (CoopCampaignMapPrototypeDynamicEntityState)MemberwiseClone();
@@ -559,7 +706,9 @@ namespace CoopSpectator.Infrastructure
                    left.ArmyTotalSize == right.ArmyTotalSize &&
                    left.ArmyCohesion == right.ArmyCohesion &&
                    left.AppearanceRevision == right.AppearanceRevision &&
-                   left.InformationRevision == right.InformationRevision;
+                   left.InformationRevision == right.InformationRevision &&
+                   left.QuestMarkerFlags == right.QuestMarkerFlags &&
+                   left.SettlementEventFlags == right.SettlementEventFlags;
         }
 
         public static List<CoopCampaignMapPrototypeDynamicEntityState> BuildDelta(
@@ -737,6 +886,166 @@ namespace CoopSpectator.Infrastructure
         }
     }
 
+    public sealed class CoopCampaignMapConversationOptionState
+    {
+        public string Text { get; set; } = string.Empty;
+
+        public bool IsEnabled { get; set; }
+
+        public bool IsSpecial { get; set; }
+
+        public CoopCampaignMapConversationOptionState Clone()
+        {
+            return (CoopCampaignMapConversationOptionState)MemberwiseClone();
+        }
+    }
+
+    public sealed class CoopCampaignMapConversationState
+    {
+        public int Revision { get; set; }
+
+        public bool IsActive { get; set; }
+
+        public string SpeakerName { get; set; } = string.Empty;
+
+        public string DialogText { get; set; } = string.Empty;
+
+        public string GoldText { get; set; } = string.Empty;
+
+        public string ContinueText { get; set; } = string.Empty;
+
+        public List<CoopCampaignMapConversationOptionState> Options { get; set; } =
+            new List<CoopCampaignMapConversationOptionState>();
+
+        public CoopCampaignMapConversationState Clone()
+        {
+            var clone = new CoopCampaignMapConversationState
+            {
+                Revision = Revision,
+                IsActive = IsActive,
+                SpeakerName = SpeakerName ?? string.Empty,
+                DialogText = DialogText ?? string.Empty,
+                GoldText = GoldText ?? string.Empty,
+                ContinueText = ContinueText ?? string.Empty
+            };
+            if (Options != null)
+            {
+                foreach (CoopCampaignMapConversationOptionState option in Options)
+                {
+                    if (option != null)
+                        clone.Options.Add(option.Clone());
+                }
+            }
+            return clone;
+        }
+    }
+
+    public sealed class CoopCampaignMapConversationSnapshotAssembler
+    {
+        private int _activeRevision = -1;
+        private int _completedRevision = -1;
+        private int _expectedCount;
+        private CoopCampaignMapConversationState _header;
+        private readonly Dictionary<int, CoopCampaignMapConversationOptionState>
+            _optionsByIndex =
+                new Dictionary<int, CoopCampaignMapConversationOptionState>();
+
+        public bool TryBegin(
+            CoopCampaignMapConversationState header,
+            int expectedCount,
+            out CoopCampaignMapConversationState completed)
+        {
+            completed = null;
+            if (!CoopCampaignMapPrototypeContract.TryValidateConversationHeader(
+                    header,
+                    expectedCount,
+                    out _) ||
+                header.Revision <= _completedRevision)
+            {
+                return false;
+            }
+
+            _activeRevision = header.Revision;
+            _expectedCount = expectedCount;
+            _header = header.Clone();
+            _header.Options.Clear();
+            _optionsByIndex.Clear();
+            if (_expectedCount != 0)
+                return true;
+
+            completed = Complete();
+            return completed != null;
+        }
+
+        public bool TryAdd(
+            int revision,
+            int index,
+            int expectedCount,
+            CoopCampaignMapConversationOptionState option,
+            out CoopCampaignMapConversationState completed)
+        {
+            completed = null;
+            if (_header == null ||
+                revision != _activeRevision ||
+                expectedCount != _expectedCount ||
+                index < 0 ||
+                index >= _expectedCount ||
+                _optionsByIndex.ContainsKey(index) ||
+                !CoopCampaignMapPrototypeContract.IsValidConversationOption(option))
+            {
+                return false;
+            }
+
+            _optionsByIndex[index] = option.Clone();
+            if (_optionsByIndex.Count != _expectedCount)
+                return true;
+
+            completed = Complete();
+            return completed != null;
+        }
+
+        public void Reset()
+        {
+            _activeRevision = -1;
+            _completedRevision = -1;
+            _expectedCount = 0;
+            _header = null;
+            _optionsByIndex.Clear();
+        }
+
+        private CoopCampaignMapConversationState Complete()
+        {
+            if (_header == null)
+                return null;
+
+            CoopCampaignMapConversationState completed = _header.Clone();
+            completed.Options.Clear();
+            for (int index = 0; index < _expectedCount; index++)
+            {
+                if (!_optionsByIndex.TryGetValue(
+                        index,
+                        out CoopCampaignMapConversationOptionState option))
+                {
+                    return null;
+                }
+                completed.Options.Add(option.Clone());
+            }
+            if (!CoopCampaignMapPrototypeContract.TryValidateConversationState(
+                    completed,
+                    out _))
+            {
+                return null;
+            }
+
+            _completedRevision = completed.Revision;
+            _activeRevision = -1;
+            _expectedCount = 0;
+            _header = null;
+            _optionsByIndex.Clear();
+            return completed;
+        }
+    }
+
     public sealed class CoopCampaignMapPrototypeState
     {
         public int Revision { get; set; }
@@ -815,6 +1124,9 @@ namespace CoopSpectator.Infrastructure
 
         public CoopCampaignMapPrototypeCameraState Camera { get; set; }
 
+        public CoopCampaignMapConversationState Conversation { get; set; } =
+            CoopCampaignMapPrototypeContract.CreateInactiveConversation();
+
         public DateTime UpdatedUtc { get; set; }
 
         public CoopCampaignMapPrototypeHostSnapshot Clone()
@@ -837,6 +1149,7 @@ namespace CoopSpectator.Infrastructure
                 DynamicRevision = DynamicRevision,
                 VisibleEntities = CloneVisibleEntities(VisibleEntities),
                 Camera = Camera?.Clone(),
+                Conversation = Conversation?.Clone(),
                 UpdatedUtc = UpdatedUtc
             };
         }
@@ -984,8 +1297,8 @@ namespace CoopSpectator.Infrastructure
     /// </summary>
     public static class CoopCampaignMapPrototypeContract
     {
-        public const int ProtocolVersion = 14;
-        public const int HostBridgeSchemaVersion = 10;
+        public const int ProtocolVersion = 16;
+        public const int HostBridgeSchemaVersion = 12;
         public const int MaxCatalogEntities = 2048;
         public const int MaxCatalogLogicalBytes = 16777216;
         public const int MaxDynamicEntities = 2048;
@@ -1004,10 +1317,19 @@ namespace CoopSpectator.Infrastructure
         public const int MaxVisualCharacterIdCharacters = 96;
         public const int MaxCultureIdCharacters = 64;
         public const int MaxInformationTextCharacters = 96;
+        public const int MaxProductionIconIdCharacters = 64;
+        public const int MaxQuestMarkerFlags = 31;
+        public const int MaxSettlementEventFlags = 127;
         public const int EquipmentSlotCount = 12;
         public const int MaxVisualItemIdCharacters = 128;
         public const int MaxBodyPropertiesCharacters = 2048;
         public const int MaxMountCreationKeyCharacters = 1024;
+        public const int MaxConversationOptions = 64;
+        public const int MaxConversationSpeakerCharacters = 256;
+        public const int MaxConversationDialogCharacters = 4096;
+        public const int MaxConversationOptionCharacters = 2048;
+        public const int MaxConversationGoldCharacters = 64;
+        public const int MaxConversationContinueCharacters = 256;
         public const int MaximumVisualRace = 255;
         public const int MaximumSkeletonType = 15;
         public const int MaximumPartySize = 100000;
@@ -1019,6 +1341,140 @@ namespace CoopSpectator.Infrastructure
         public const string GameModeId = "CoopCampaignMapPrototype";
         public const string MissionBootstrapScene = "mp_tdm_map_001";
         public const string CampaignMapScene = "Main_map";
+
+        public static CoopCampaignMapConversationState CreateInactiveConversation(
+            int revision = 0)
+        {
+            return new CoopCampaignMapConversationState
+            {
+                Revision = Math.Max(0, revision),
+                IsActive = false,
+                SpeakerName = string.Empty,
+                DialogText = string.Empty,
+                GoldText = string.Empty,
+                ContinueText = string.Empty,
+                Options = new List<CoopCampaignMapConversationOptionState>()
+            };
+        }
+
+        public static string BoundConversationText(
+            string value,
+            int maximumCharacters)
+        {
+            string normalized = value ?? string.Empty;
+            return normalized.Length <= maximumCharacters
+                ? normalized
+                : normalized.Substring(0, maximumCharacters);
+        }
+
+        public static bool AreConversationContentsEquivalent(
+            CoopCampaignMapConversationState left,
+            CoopCampaignMapConversationState right)
+        {
+            if (ReferenceEquals(left, right))
+                return true;
+            if (left == null || right == null ||
+                left.IsActive != right.IsActive ||
+                !string.Equals(left.SpeakerName, right.SpeakerName, StringComparison.Ordinal) ||
+                !string.Equals(left.DialogText, right.DialogText, StringComparison.Ordinal) ||
+                !string.Equals(left.GoldText, right.GoldText, StringComparison.Ordinal) ||
+                !string.Equals(left.ContinueText, right.ContinueText, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            int leftCount = left.Options?.Count ?? 0;
+            int rightCount = right.Options?.Count ?? 0;
+            if (leftCount != rightCount)
+                return false;
+            for (int index = 0; index < leftCount; index++)
+            {
+                CoopCampaignMapConversationOptionState leftOption =
+                    left.Options[index];
+                CoopCampaignMapConversationOptionState rightOption =
+                    right.Options[index];
+                if (leftOption == null || rightOption == null ||
+                    leftOption.IsEnabled != rightOption.IsEnabled ||
+                    leftOption.IsSpecial != rightOption.IsSpecial ||
+                    !string.Equals(
+                        leftOption.Text,
+                        rightOption.Text,
+                        StringComparison.Ordinal))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        public static bool TryValidateConversationHeader(
+            CoopCampaignMapConversationState state,
+            int expectedOptionCount,
+            out string reason)
+        {
+            reason = null;
+            if (state == null)
+                return Fail("conversation-missing", out reason);
+            if (state.Revision < 0 ||
+                expectedOptionCount < 0 ||
+                expectedOptionCount > MaxConversationOptions ||
+                !IsSafeConversationText(
+                    state.SpeakerName,
+                    MaxConversationSpeakerCharacters) ||
+                !IsSafeConversationText(
+                    state.DialogText,
+                    MaxConversationDialogCharacters) ||
+                !IsSafeConversationText(
+                    state.GoldText,
+                    MaxConversationGoldCharacters) ||
+                !IsSafeConversationText(
+                    state.ContinueText,
+                    MaxConversationContinueCharacters))
+            {
+                return Fail("conversation-header", out reason);
+            }
+            if (!state.IsActive &&
+                (expectedOptionCount != 0 ||
+                 state.SpeakerName.Length != 0 ||
+                 state.DialogText.Length != 0 ||
+                 state.GoldText.Length != 0 ||
+                 state.ContinueText.Length != 0))
+            {
+                return Fail("conversation-inactive-payload", out reason);
+            }
+            return true;
+        }
+
+        public static bool TryValidateConversationState(
+            CoopCampaignMapConversationState state,
+            out string reason)
+        {
+            int optionCount = state?.Options?.Count ?? -1;
+            if (!TryValidateConversationHeader(state, optionCount, out reason))
+                return false;
+            foreach (CoopCampaignMapConversationOptionState option in state.Options)
+            {
+                if (!IsValidConversationOption(option))
+                    return Fail("conversation-option", out reason);
+            }
+            return true;
+        }
+
+        public static bool IsValidConversationOption(
+            CoopCampaignMapConversationOptionState option)
+        {
+            return option != null &&
+                   IsSafeConversationText(
+                       option.Text,
+                       MaxConversationOptionCharacters);
+        }
+
+        private static bool IsSafeConversationText(
+            string value,
+            int maximumCharacters)
+        {
+            return value != null && value.Length <= maximumCharacters;
+        }
 
         public static CoopCampaignMapPrototypeState CreateSyntheticState(
             double elapsedSeconds,
@@ -1279,6 +1735,8 @@ namespace CoopSpectator.Infrastructure
             }
             if (!TryValidateVisibleEntities(snapshot.VisibleEntities, out reason))
                 return false;
+            if (!TryValidateConversationState(snapshot.Conversation, out reason))
+                return false;
             if (snapshot.UpdatedUtc == DateTime.MinValue)
                 return Fail("timestamp", out reason);
 
@@ -1344,6 +1802,10 @@ namespace CoopSpectator.Infrastructure
                     entity.CultureId,
                     MaxCultureIdCharacters,
                     allowEmpty: true) ||
+                !IsSafeBoundedText(
+                    entity.SettlementProductionIconId,
+                    MaxProductionIconIdCharacters,
+                    allowEmpty: true) ||
                 !Enum.IsDefined(typeof(CoopCampaignMapPrototypeEntityKind), entity.Kind) ||
                 !Enum.IsDefined(
                     typeof(CoopCampaignMapPrototypeSettlementNameplateSize),
@@ -1355,7 +1817,11 @@ namespace CoopSpectator.Infrastructure
                 !IsUnitInRange(entity.NormalizedY) ||
                 !IsUnitInRange(entity.Heading) ||
                 entity.PartySize < 0 ||
-                entity.PartySize > MaximumPartySize)
+                entity.PartySize > MaximumPartySize ||
+                entity.QuestMarkerFlags < 0 ||
+                entity.QuestMarkerFlags > MaxQuestMarkerFlags ||
+                entity.SettlementEventFlags < 0 ||
+                entity.SettlementEventFlags > MaxSettlementEventFlags)
             {
                 return false;
             }
@@ -1377,6 +1843,18 @@ namespace CoopSpectator.Infrastructure
                  entity.HumanVisual != null ||
                  entity.MountVisual != null ||
                  entity.CaravanMountVisual != null))
+            {
+                return false;
+            }
+
+            bool hasProductionEvent =
+                (entity.SettlementEventFlags &
+                 (int)CoopCampaignMapPrototypeSettlementEventFlags.Production) != 0;
+            if ((!isSettlement &&
+                 (entity.SettlementEventFlags != 0 ||
+                  !string.IsNullOrEmpty(entity.SettlementProductionIconId))) ||
+                hasProductionEvent !=
+                    !string.IsNullOrEmpty(entity.SettlementProductionIconId))
             {
                 return false;
             }
@@ -1499,6 +1977,10 @@ namespace CoopSpectator.Infrastructure
                 !IsInformationText(entity.LeaderName) ||
                 !IsInformationText(entity.ArmyId) ||
                 !IsInformationText(entity.ArmyName) ||
+                !IsSafeBoundedText(
+                    entity.SettlementProductionIconId,
+                    MaxProductionIconIdCharacters,
+                    true) ||
                 !Enum.IsDefined(typeof(CoopCampaignMapPrototypeEntityKind), entity.Kind) ||
                 !Enum.IsDefined(typeof(CoopCampaignMapPrototypeSettlementNameplateSize), entity.SettlementNameplateSize) ||
                 !Enum.IsDefined(typeof(CoopCampaignMapPrototypeSettlementKind), entity.SettlementKind) ||
@@ -1515,6 +1997,13 @@ namespace CoopSpectator.Infrastructure
             bool settlement = entity.Kind == CoopCampaignMapPrototypeEntityKind.Settlement;
             if (settlement != (entity.SettlementKind != CoopCampaignMapPrototypeSettlementKind.None) ||
                 settlement != (entity.SettlementNameplateSize != CoopCampaignMapPrototypeSettlementNameplateSize.None))
+            {
+                return false;
+            }
+            if ((!settlement ||
+                 entity.SettlementKind !=
+                     CoopCampaignMapPrototypeSettlementKind.Village) &&
+                !string.IsNullOrEmpty(entity.SettlementProductionIconId))
             {
                 return false;
             }
@@ -1541,7 +2030,11 @@ namespace CoopSpectator.Infrastructure
                    entity.ArmyTotalSize <= MaximumPartySize &&
                    IsUnitInRange(entity.ArmyCohesion) &&
                    entity.AppearanceRevision >= 0 &&
-                   entity.InformationRevision >= 0;
+                   entity.InformationRevision >= 0 &&
+                   entity.QuestMarkerFlags >= 0 &&
+                   entity.QuestMarkerFlags <= MaxQuestMarkerFlags &&
+                   entity.SettlementEventFlags >= 0 &&
+                   entity.SettlementEventFlags <= MaxSettlementEventFlags;
         }
 
         public static bool TryValidateCatalogSnapshot(

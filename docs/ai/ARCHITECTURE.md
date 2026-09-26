@@ -141,6 +141,16 @@ The server remains the only physical spawner. Initial siege client materializati
 - The campaign map prototype has isolated network, rendering, bridge, and scene-load state and is disabled by default.
 - `TdmClone` code remains for experimentation, but its feature switch is off.
 
+### Campaign-map replica and dialogue projection
+
+The campaign process is the sole source of truth for the map replica. `CoopCampaignMapPrototypePublisherBehavior` publishes only objects already visible to the host, their bounded display/catalog and dynamic state, and the currently rendered map-conversation text. The local file bridge is a same-machine handoff to the dedicated process; it is not remote network authority.
+
+For dialogue, `CoopCampaignMapConversationCapture` reads the already formatted native `MapConversationVM.DialogController` owned by `GauntletMapConversationView`. It does not advance the conversation, invoke an answer, or reconstruct campaign dialogue rules. Barter is outside the current milestone and projects as inactive. Unavailable or structurally invalid native state fails closed to an inactive dialogue.
+
+The dedicated `CoopCampaignMapPrototypeNetworkController` assigns its own monotonically increasing dialogue revision and sends a bounded header followed by the exact option records. The client applies only a complete revision, including the current revision for a late joiner. Both message types are server-to-client only; there is no client answer message.
+
+`CoopCampaignMapConversationView` renders the accepted projection with the native `SPConversation` movie in the isolated multiplayer mission. Answer commands are deliberately no-op: the campaign host remains the only actor that can select a response. The separate hideout boss-conversation path is unchanged.
+
 ## The battle snapshot
 
 `BattleStartMessage` carries launch metadata and a `BattleSnapshotMessage`. The snapshot is the cross-process logical description of the encounter.

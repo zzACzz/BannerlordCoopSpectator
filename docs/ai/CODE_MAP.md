@@ -159,6 +159,21 @@ Use symbol search aggressively. Relevant method groups are clustered by message 
 
 Each mode usually has server/client marker classes beside its `*Mode.cs` file. The mode class builds the behaviors; the marker classes help Bannerlord registration and side-specific identification.
 
+### Campaign map prototype
+
+| Concern | Files |
+|---|---|
+| Host-visible map and dialogue publication | `Campaign/CoopCampaignMapPrototypePublisherBehavior.cs`, `Campaign/CoopCampaignMapConversationCapture.cs` |
+| Bounded host/dedicated contract and bridge codec | `Infrastructure/CoopCampaignMapPrototypeContract.cs`, `Infrastructure/CoopCampaignMapPrototypeBridgeCodec.cs` |
+| Static catalog payload | `Infrastructure/CoopCampaignMapCatalogBinarySerializer.cs` |
+| Dedicated authority and client assembly | `Mission/CoopCampaignMapPrototypeNetworkController.cs` |
+| Map and dialogue wire messages | `Network/Messages/CoopCampaignMapPrototypeNetworkMessages.cs`, `Network/Messages/CoopCampaignMapReplicaNetworkMessages.cs`, `Network/Messages/CoopCampaignMapConversationNetworkMessages.cs` |
+| Client map rendering and interaction | `UI/CoopCampaignMapPrototypeMissionView.cs`, map overlay and replica-info view-models |
+| Client synchronous dialogue | `UI/CoopCampaignMapConversationView.cs`, `UI/CoopCampaignMapConversationVM.cs` |
+| Contract coverage | `Tests/CoopCampaignMapPrototype.ContractTests/Program.cs` |
+
+The dialogue projection is server-to-client only. The client uses the native `SPConversation` movie but its answer/continue commands are no-op; no campaign object or choice authority is created in the multiplayer process.
+
 ## Snapshot, identity, and exact transfer
 
 | Concern | Files |
@@ -342,8 +357,8 @@ This layer remains non-authoritative for campaign and battle state. Milestone 2A
 | `CoopHideoutBossPhaseNetworkMessages.cs` | Hideout boss-stage state |
 | `CoopHideoutAmbushNetworkMessages.cs` | Night ambush state/interactions |
 | `CoopHeroCreationNetworkMessages.cs` | Hero draft/progress/result transport |
-| `CoopCampaignMapPrototypeNetworkMessages.cs` | Prototype host state |
-| `CoopCampaignMapReplicaNetworkMessages.cs` | Replica/catalog state |
+| `CoopCampaignMapPrototypeNetworkMessages.cs` | Prototype host state, settlement events, and quest-marker flags |
+| `CoopCampaignMapReplicaNetworkMessages.cs` | Replica/catalog state including the host-visible marker projection |
 | `HostGameState.cs` / codec | TCP host state |
 | `NetworkMessagePrefixes.cs` | Stable message prefixes/constants |
 
@@ -413,7 +428,8 @@ Primary views/view-models:
 - `CoopBattlePowerScoreView`, `CoopBattleAiControlHintVM`: battle HUD additions;
 - hero creator view/model/culture selection;
 - day/night hideout objective, stealth, cinematic, conversation, and marker views;
-- `CoopCampaignMapPrototypeMissionView`, party visual, overlays, and replica info. The mission view collects meshes tagged `ticked_map_entity`, calls `MBMapScene.TickVisuals` while the map scene is render-ready, and clears those cached arrays during scene release.
+- `CoopCampaignMapPrototypeMissionView`, party visual, overlays, and replica info. The mission view loads the native `Main_map` atmosphere data after `Scene.Read` and before optimization, collects meshes tagged `ticked_map_entity`, calls `MBMapScene.TickVisuals` while the map scene is render-ready, and clears those cached arrays during scene release. The atmosphere load is required because the visual tick reaches the native map color-grade/atmosphere path even though this is an isolated client scene layer. Publisher-to-client marker state uses explicit bit flags for available/active/tracked issue and story-quest semantics plus settlement tournament/production events; hidden campaign objects clear these fields instead of leaking markers.
+- `CoopCampaignMapConversationView` and `CoopCampaignMapConversationVM`: synchronized display-only projection of the host's already formatted native map dialogue into the `SPConversation` movie. It restores mission-layer activation/focus on close and exposes no client choice transport.
 
 Gauntlet prefabs live in `Module/CoopSpectator/GUI/Prefabs/`. When changing a view-model property or command, search the matching XML binding. `CoopSelection.xml` and `CoopCommanderDeployment.xml` are primary selection/deployment assets.
 

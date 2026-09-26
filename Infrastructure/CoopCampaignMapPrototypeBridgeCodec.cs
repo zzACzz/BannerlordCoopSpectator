@@ -20,6 +20,16 @@ namespace CoopSpectator.Infrastructure
             int visibleEntityCount = Math.Min(
                 visibleEntities.Count,
                 CoopCampaignMapPrototypeContract.MaxVisibleEntities);
+            CoopCampaignMapConversationState conversation =
+                snapshot.Conversation ??
+                CoopCampaignMapPrototypeContract.CreateInactiveConversation();
+            IReadOnlyList<CoopCampaignMapConversationOptionState>
+                conversationOptions = conversation.Options ??
+                    (IReadOnlyList<CoopCampaignMapConversationOptionState>)
+                        Array.Empty<CoopCampaignMapConversationOptionState>();
+            int conversationOptionCount = Math.Min(
+                conversationOptions.Count,
+                CoopCampaignMapPrototypeContract.MaxConversationOptions);
             var lines = new List<string>
             {
                 "SchemaVersion=" + snapshot.SchemaVersion.ToString(CultureInfo.InvariantCulture),
@@ -37,8 +47,26 @@ namespace CoopSpectator.Infrastructure
                 "VisibleEntitiesRevision=" + snapshot.VisibleEntitiesRevision.ToString(CultureInfo.InvariantCulture),
                 "CatalogRevision=" + snapshot.CatalogRevision.ToString(CultureInfo.InvariantCulture),
                 "DynamicRevision=" + snapshot.DynamicRevision.ToString(CultureInfo.InvariantCulture),
-                "VisibleEntityCount=" + visibleEntityCount.ToString(CultureInfo.InvariantCulture)
+                "VisibleEntityCount=" + visibleEntityCount.ToString(CultureInfo.InvariantCulture),
+                "ConversationRevision=" + conversation.Revision.ToString(CultureInfo.InvariantCulture),
+                "ConversationIsActive=" + conversation.IsActive,
+                "ConversationSpeakerName=" + EncodeText(conversation.SpeakerName),
+                "ConversationDialogText=" + EncodeText(conversation.DialogText),
+                "ConversationGoldText=" + EncodeText(conversation.GoldText),
+                "ConversationContinueText=" + EncodeText(conversation.ContinueText),
+                "ConversationOptionCount=" + conversationOptionCount.ToString(CultureInfo.InvariantCulture)
             };
+
+            for (int index = 0; index < conversationOptionCount; index++)
+            {
+                CoopCampaignMapConversationOptionState option =
+                    conversationOptions[index];
+                string prefix = "ConversationOption." +
+                                index.ToString(CultureInfo.InvariantCulture) + ".";
+                lines.Add(prefix + "Text=" + EncodeText(option?.Text));
+                lines.Add(prefix + "IsEnabled=" + (option?.IsEnabled ?? false));
+                lines.Add(prefix + "IsSpecial=" + (option?.IsSpecial ?? false));
+            }
 
             if (snapshot.Camera != null)
             {
@@ -73,6 +101,9 @@ namespace CoopSpectator.Infrastructure
                 lines.Add(prefix + "VisualCharacterId=" + EncodeText(entity?.VisualCharacterId));
                 lines.Add(prefix + "CultureId=" + EncodeText(entity?.CultureId));
                 lines.Add(prefix + "PartyVisualKind=" + (entity != null ? (int)entity.PartyVisualKind : 0).ToString(CultureInfo.InvariantCulture));
+                lines.Add(prefix + "QuestMarkerFlags=" + (entity?.QuestMarkerFlags ?? 0).ToString(CultureInfo.InvariantCulture));
+                lines.Add(prefix + "SettlementEventFlags=" + (entity?.SettlementEventFlags ?? 0).ToString(CultureInfo.InvariantCulture));
+                lines.Add(prefix + "SettlementProductionIconId=" + EncodeText(entity?.SettlementProductionIconId));
                 SerializeAgentVisual(
                     lines,
                     prefix + "HumanVisual.",
@@ -138,6 +169,13 @@ namespace CoopSpectator.Infrastructure
                 !TryReadInt(values, "CatalogRevision", out int catalogRevision) ||
                 !TryReadInt(values, "DynamicRevision", out int dynamicRevision) ||
                 !TryReadInt(values, "VisibleEntityCount", out int visibleEntityCount) ||
+                !TryReadInt(values, "ConversationRevision", out int conversationRevision) ||
+                !TryReadBool(values, "ConversationIsActive", out bool conversationIsActive) ||
+                !TryReadText(values, "ConversationSpeakerName", out string conversationSpeakerName) ||
+                !TryReadText(values, "ConversationDialogText", out string conversationDialogText) ||
+                !TryReadText(values, "ConversationGoldText", out string conversationGoldText) ||
+                !TryReadText(values, "ConversationContinueText", out string conversationContinueText) ||
+                !TryReadInt(values, "ConversationOptionCount", out int conversationOptionCount) ||
                 !TryReadDateTime(values, "UpdatedUtc", out DateTime updatedUtc))
             {
                 return Fail("malformed", out reason);
@@ -145,9 +183,46 @@ namespace CoopSpectator.Infrastructure
 
             if (visibleEntityCount < 0 ||
                 visibleEntityCount > CoopCampaignMapPrototypeContract.MaxVisibleEntities ||
-                visibleEntitiesRevision < 0)
+                visibleEntitiesRevision < 0 ||
+                conversationOptionCount < 0 ||
+                conversationOptionCount >
+                    CoopCampaignMapPrototypeContract.MaxConversationOptions)
             {
                 return Fail("malformed-visible-entity-header", out reason);
+            }
+
+            var conversation = new CoopCampaignMapConversationState
+            {
+                Revision = conversationRevision,
+                IsActive = conversationIsActive,
+                SpeakerName = conversationSpeakerName,
+                DialogText = conversationDialogText,
+                GoldText = conversationGoldText,
+                ContinueText = conversationContinueText
+            };
+            for (int index = 0; index < conversationOptionCount; index++)
+            {
+                string prefix = "ConversationOption." +
+                                index.ToString(CultureInfo.InvariantCulture) + ".";
+                if (!TryReadText(values, prefix + "Text", out string text) ||
+                    !TryReadBool(values, prefix + "IsEnabled", out bool isEnabled) ||
+                    !TryReadBool(values, prefix + "IsSpecial", out bool isSpecial))
+                {
+                    return Fail("malformed-conversation-option", out reason);
+                }
+                conversation.Options.Add(
+                    new CoopCampaignMapConversationOptionState
+                    {
+                        Text = text,
+                        IsEnabled = isEnabled,
+                        IsSpecial = isSpecial
+                    });
+            }
+            if (!CoopCampaignMapPrototypeContract.TryValidateConversationState(
+                    conversation,
+                    out reason))
+            {
+                return false;
             }
 
             CoopCampaignMapPrototypeCameraState camera = null;
@@ -209,6 +284,9 @@ namespace CoopSpectator.Infrastructure
                     !values.TryGetValue(prefix + "CultureId", out string encodedCultureId) ||
                     !TryDecodeText(encodedCultureId, out string cultureId) ||
                     !TryReadInt(values, prefix + "PartyVisualKind", out int partyVisualKind) ||
+                    !TryReadInt(values, prefix + "QuestMarkerFlags", out int questMarkerFlags) ||
+                    !TryReadInt(values, prefix + "SettlementEventFlags", out int settlementEventFlags) ||
+                    !TryReadText(values, prefix + "SettlementProductionIconId", out string settlementProductionIconId) ||
                     !TryParseAgentVisual(
                         values,
                         prefix + "HumanVisual.",
@@ -244,6 +322,9 @@ namespace CoopSpectator.Infrastructure
                     CultureId = cultureId,
                     PartyVisualKind =
                         (CoopCampaignMapPrototypePartyVisualKind)partyVisualKind,
+                    QuestMarkerFlags = questMarkerFlags,
+                    SettlementEventFlags = settlementEventFlags,
+                    SettlementProductionIconId = settlementProductionIconId,
                     HumanVisual = humanVisual,
                     MountVisual = mountVisual,
                     CaravanMountVisual = caravanMountVisual
@@ -278,6 +359,7 @@ namespace CoopSpectator.Infrastructure
                 DynamicRevision = dynamicRevision,
                 VisibleEntities = visibleEntities,
                 Camera = camera,
+                Conversation = conversation,
                 UpdatedUtc = updatedUtc
             };
             return true;
@@ -328,6 +410,7 @@ namespace CoopSpectator.Infrastructure
                 lines.Add(prefix + "ArmyName=" + EncodeText(entity?.ArmyName));
                 lines.Add(prefix + "IsArmyLeader=" + (entity?.IsArmyLeader ?? false));
                 lines.Add(prefix + "SelectionRadius=" + (entity?.SelectionRadius ?? 0).ToString(CultureInfo.InvariantCulture));
+                lines.Add(prefix + "SettlementProductionIconId=" + EncodeText(entity?.SettlementProductionIconId));
                 SerializeAgentVisual(lines, prefix + "HumanVisual.", entity?.HumanVisual);
                 SerializeAgentVisual(lines, prefix + "MountVisual.", entity?.MountVisual);
                 SerializeAgentVisual(lines, prefix + "CaravanMountVisual.", entity?.CaravanMountVisual);
@@ -378,6 +461,7 @@ namespace CoopSpectator.Infrastructure
                     !TryReadText(values, prefix + "ArmyName", out string armyName) ||
                     !TryReadBool(values, prefix + "IsArmyLeader", out bool isArmyLeader) ||
                     !TryReadInt(values, prefix + "SelectionRadius", out int selectionRadius) ||
+                    !TryReadText(values, prefix + "SettlementProductionIconId", out string settlementProductionIconId) ||
                     !TryParseAgentVisual(values, prefix + "HumanVisual.", out CoopCampaignMapPrototypeAgentVisualState humanVisual) ||
                     !TryParseAgentVisual(values, prefix + "MountVisual.", out CoopCampaignMapPrototypeAgentVisualState mountVisual) ||
                     !TryParseAgentVisual(values, prefix + "CaravanMountVisual.", out CoopCampaignMapPrototypeAgentVisualState caravanMountVisual))
@@ -406,6 +490,7 @@ namespace CoopSpectator.Infrastructure
                     ArmyName = armyName,
                     IsArmyLeader = isArmyLeader,
                     SelectionRadius = selectionRadius,
+                    SettlementProductionIconId = settlementProductionIconId,
                     HumanVisual = humanVisual,
                     MountVisual = mountVisual,
                     CaravanMountVisual = caravanMountVisual
@@ -460,6 +545,8 @@ namespace CoopSpectator.Infrastructure
                 lines.Add(prefix + "ArmyCohesion=" + (entity?.ArmyCohesion ?? 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "AppearanceRevision=" + (entity?.AppearanceRevision ?? 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "InformationRevision=" + (entity?.InformationRevision ?? 0).ToString(CultureInfo.InvariantCulture));
+                lines.Add(prefix + "QuestMarkerFlags=" + (entity?.QuestMarkerFlags ?? 0).ToString(CultureInfo.InvariantCulture));
+                lines.Add(prefix + "SettlementEventFlags=" + (entity?.SettlementEventFlags ?? 0).ToString(CultureInfo.InvariantCulture));
             }
             lines.Add("UpdatedUtc=" + snapshot.UpdatedUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
             return lines.ToArray();
@@ -498,7 +585,9 @@ namespace CoopSpectator.Infrastructure
                     !TryReadInt(values, prefix + "ArmyTotalSize", out int armyTotalSize) ||
                     !TryReadInt(values, prefix + "ArmyCohesion", out int armyCohesion) ||
                     !TryReadInt(values, prefix + "AppearanceRevision", out int appearanceRevision) ||
-                    !TryReadInt(values, prefix + "InformationRevision", out int informationRevision))
+                    !TryReadInt(values, prefix + "InformationRevision", out int informationRevision) ||
+                    !TryReadInt(values, prefix + "QuestMarkerFlags", out int questMarkerFlags) ||
+                    !TryReadInt(values, prefix + "SettlementEventFlags", out int settlementEventFlags))
                 {
                     return Fail("malformed-dynamic-entity", out reason);
                 }
@@ -516,7 +605,9 @@ namespace CoopSpectator.Infrastructure
                     ArmyTotalSize = armyTotalSize,
                     ArmyCohesion = armyCohesion,
                     AppearanceRevision = appearanceRevision,
-                    InformationRevision = informationRevision
+                    InformationRevision = informationRevision,
+                    QuestMarkerFlags = questMarkerFlags,
+                    SettlementEventFlags = settlementEventFlags
                 };
                 if (!CoopCampaignMapPrototypeContract.IsValidDynamicEntity(entity))
                     return Fail("invalid-dynamic-entity", out reason);

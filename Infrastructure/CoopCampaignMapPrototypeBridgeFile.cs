@@ -107,6 +107,15 @@ namespace CoopSpectator.Infrastructure
             {
                 if (!File.Exists(path))
                 {
+                    if (TryGetCachedFreshHostSnapshot(
+                            path,
+                            utcNow,
+                            maximumAge,
+                            out snapshot))
+                    {
+                        return true;
+                    }
+
                     reason = "missing-file";
                     return false;
                 }
@@ -134,16 +143,28 @@ namespace CoopSpectator.Infrastructure
                             lines,
                             out parsedSnapshot,
                             out parseReason);
-                        _cachedPath = path;
-                        _cachedWriteUtc = writeUtc;
-                        _cachedLength = length;
-                        _cachedSnapshot = parsed ? parsedSnapshot?.Clone() : null;
-                        _cachedParseReason = parseReason;
+                        if (parsed)
+                        {
+                            _cachedPath = path;
+                            _cachedWriteUtc = writeUtc;
+                            _cachedLength = length;
+                            _cachedSnapshot = parsedSnapshot?.Clone();
+                            _cachedParseReason = parseReason;
+                        }
                     }
                 }
 
                 if (parsedSnapshot == null)
                 {
+                    if (TryGetCachedFreshHostSnapshot(
+                            path,
+                            utcNow,
+                            maximumAge,
+                            out snapshot))
+                    {
+                        return true;
+                    }
+
                     reason = parseReason ?? "malformed";
                     return false;
                 }
@@ -162,6 +183,16 @@ namespace CoopSpectator.Infrastructure
             }
             catch (Exception ex)
             {
+                if (IsTransientReadFailure(ex) &&
+                    TryGetCachedFreshHostSnapshot(
+                        path,
+                        utcNow,
+                        maximumAge,
+                        out snapshot))
+                {
+                    return true;
+                }
+
                 reason = ex.GetType().Name + ":" + ex.Message;
                 return false;
             }
@@ -179,7 +210,18 @@ namespace CoopSpectator.Infrastructure
             try
             {
                 if (!TryGetFileIdentity(path, out DateTime writeUtc, out long length, out reason))
+                {
+                    if (TryGetCachedFreshCatalogSnapshot(
+                            path,
+                            utcNow,
+                            maximumAge,
+                            out snapshot))
+                    {
+                        return true;
+                    }
+
                     return false;
+                }
 
                 CoopCampaignMapPrototypeCatalogSnapshot parsed;
                 string parseReason;
@@ -198,11 +240,14 @@ namespace CoopSpectator.Infrastructure
                             AtomicBridgeFileIO.ReadAllLinesShared(path),
                             out parsed,
                             out parseReason);
-                        _cachedCatalogPath = path;
-                        _cachedCatalogWriteUtc = writeUtc;
-                        _cachedCatalogLength = length;
-                        _cachedCatalog = success ? parsed?.Clone() : null;
-                        _cachedCatalogParseReason = parseReason;
+                        if (success)
+                        {
+                            _cachedCatalogPath = path;
+                            _cachedCatalogWriteUtc = writeUtc;
+                            _cachedCatalogLength = length;
+                            _cachedCatalog = parsed?.Clone();
+                            _cachedCatalogParseReason = parseReason;
+                        }
                     }
                 }
 
@@ -210,6 +255,15 @@ namespace CoopSpectator.Infrastructure
                     !CoopCampaignMapPrototypeContract.TryValidateCatalogSnapshot(parsed, out reason) ||
                     !IsFresh(parsed.UpdatedUtc, utcNow, maximumAge, out reason))
                 {
+                    if (TryGetCachedFreshCatalogSnapshot(
+                            path,
+                            utcNow,
+                            maximumAge,
+                            out snapshot))
+                    {
+                        return true;
+                    }
+
                     reason = reason ?? parseReason ?? "malformed";
                     return false;
                 }
@@ -218,6 +272,16 @@ namespace CoopSpectator.Infrastructure
             }
             catch (Exception ex)
             {
+                if (IsTransientReadFailure(ex) &&
+                    TryGetCachedFreshCatalogSnapshot(
+                        path,
+                        utcNow,
+                        maximumAge,
+                        out snapshot))
+                {
+                    return true;
+                }
+
                 reason = ex.GetType().Name + ":" + ex.Message;
                 return false;
             }
@@ -235,7 +299,18 @@ namespace CoopSpectator.Infrastructure
             try
             {
                 if (!TryGetFileIdentity(path, out DateTime writeUtc, out long length, out reason))
+                {
+                    if (TryGetCachedFreshDynamicSnapshot(
+                            path,
+                            utcNow,
+                            maximumAge,
+                            out snapshot))
+                    {
+                        return true;
+                    }
+
                     return false;
+                }
 
                 CoopCampaignMapPrototypeDynamicSnapshot parsed;
                 string parseReason;
@@ -254,11 +329,14 @@ namespace CoopSpectator.Infrastructure
                             AtomicBridgeFileIO.ReadAllLinesShared(path),
                             out parsed,
                             out parseReason);
-                        _cachedDynamicPath = path;
-                        _cachedDynamicWriteUtc = writeUtc;
-                        _cachedDynamicLength = length;
-                        _cachedDynamic = success ? parsed?.Clone() : null;
-                        _cachedDynamicParseReason = parseReason;
+                        if (success)
+                        {
+                            _cachedDynamicPath = path;
+                            _cachedDynamicWriteUtc = writeUtc;
+                            _cachedDynamicLength = length;
+                            _cachedDynamic = parsed?.Clone();
+                            _cachedDynamicParseReason = parseReason;
+                        }
                     }
                 }
 
@@ -266,6 +344,15 @@ namespace CoopSpectator.Infrastructure
                     !CoopCampaignMapPrototypeContract.TryValidateDynamicSnapshot(parsed, out reason) ||
                     !IsFresh(parsed.UpdatedUtc, utcNow, maximumAge, out reason))
                 {
+                    if (TryGetCachedFreshDynamicSnapshot(
+                            path,
+                            utcNow,
+                            maximumAge,
+                            out snapshot))
+                    {
+                        return true;
+                    }
+
                     reason = reason ?? parseReason ?? "malformed";
                     return false;
                 }
@@ -274,9 +361,94 @@ namespace CoopSpectator.Infrastructure
             }
             catch (Exception ex)
             {
+                if (IsTransientReadFailure(ex) &&
+                    TryGetCachedFreshDynamicSnapshot(
+                        path,
+                        utcNow,
+                        maximumAge,
+                        out snapshot))
+                {
+                    return true;
+                }
+
                 reason = ex.GetType().Name + ":" + ex.Message;
                 return false;
             }
+        }
+
+        private static bool TryGetCachedFreshHostSnapshot(
+            string path,
+            DateTime utcNow,
+            TimeSpan maximumAge,
+            out CoopCampaignMapPrototypeHostSnapshot snapshot)
+        {
+            lock (ReadCacheLock)
+            {
+                snapshot = string.Equals(
+                    _cachedPath,
+                    path,
+                    StringComparison.OrdinalIgnoreCase)
+                    ? _cachedSnapshot?.Clone()
+                    : null;
+            }
+
+            return snapshot != null &&
+                   CoopCampaignMapPrototypeContract.TryValidateHostSnapshot(
+                       snapshot,
+                       utcNow,
+                       maximumAge,
+                       out _);
+        }
+
+        private static bool TryGetCachedFreshCatalogSnapshot(
+            string path,
+            DateTime utcNow,
+            TimeSpan maximumAge,
+            out CoopCampaignMapPrototypeCatalogSnapshot snapshot)
+        {
+            lock (ReadCacheLock)
+            {
+                snapshot = string.Equals(
+                    _cachedCatalogPath,
+                    path,
+                    StringComparison.OrdinalIgnoreCase)
+                    ? _cachedCatalog?.Clone()
+                    : null;
+            }
+
+            return snapshot != null &&
+                   CoopCampaignMapPrototypeContract.TryValidateCatalogSnapshot(
+                       snapshot,
+                       out _) &&
+                   IsFresh(snapshot.UpdatedUtc, utcNow, maximumAge, out _);
+        }
+
+        private static bool TryGetCachedFreshDynamicSnapshot(
+            string path,
+            DateTime utcNow,
+            TimeSpan maximumAge,
+            out CoopCampaignMapPrototypeDynamicSnapshot snapshot)
+        {
+            lock (ReadCacheLock)
+            {
+                snapshot = string.Equals(
+                    _cachedDynamicPath,
+                    path,
+                    StringComparison.OrdinalIgnoreCase)
+                    ? _cachedDynamic?.Clone()
+                    : null;
+            }
+
+            return snapshot != null &&
+                   CoopCampaignMapPrototypeContract.TryValidateDynamicSnapshot(
+                       snapshot,
+                       out _) &&
+                   IsFresh(snapshot.UpdatedUtc, utcNow, maximumAge, out _);
+        }
+
+        private static bool IsTransientReadFailure(Exception ex)
+        {
+            return ex is IOException || ex is UnauthorizedAccessException;
         }
 
         private static bool TryWriteLines(

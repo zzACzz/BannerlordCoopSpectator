@@ -10,7 +10,7 @@ namespace CoopSpectator.Network.Messages
     public sealed class CoopCampaignMapCatalogSnapshotMessage : GameNetworkMessage
     {
         private static readonly CompressionInfo.Integer ProtocolCompression =
-            new CompressionInfo.Integer(0, 15, true);
+            new CompressionInfo.Integer(0, 31, true);
         private static readonly CompressionInfo.Integer RevisionCompression =
             new CompressionInfo.Integer(0, int.MaxValue, true);
         private static readonly CompressionInfo.Integer CountCompression =
@@ -68,7 +68,7 @@ namespace CoopSpectator.Network.Messages
     public sealed class CoopCampaignMapCatalogEntityMessage : GameNetworkMessage
     {
         private static readonly CompressionInfo.Integer ProtocolCompression =
-            new CompressionInfo.Integer(0, 15, true);
+            new CompressionInfo.Integer(0, 31, true);
         private static readonly CompressionInfo.Integer RevisionCompression =
             new CompressionInfo.Integer(0, int.MaxValue, true);
         private static readonly CompressionInfo.Integer CountCompression =
@@ -148,6 +148,8 @@ namespace CoopSpectator.Network.Messages
                 LeaderName = ReadStringFromPacket(ref valid) ?? string.Empty,
                 ArmyId = ReadStringFromPacket(ref valid) ?? string.Empty,
                 ArmyName = ReadStringFromPacket(ref valid) ?? string.Empty,
+                SettlementProductionIconId =
+                    ReadStringFromPacket(ref valid) ?? string.Empty,
                 Kind = (CoopCampaignMapPrototypeEntityKind)
                     ReadIntFromPacket(KindCompression, ref valid),
                 SettlementNameplateSize =
@@ -193,6 +195,10 @@ namespace CoopSpectator.Network.Messages
             WriteInformation(entity.LeaderName);
             WriteInformation(entity.ArmyId);
             WriteInformation(entity.ArmyName);
+            WriteBounded(
+                entity.SettlementProductionIconId,
+                CoopCampaignMapPrototypeContract.MaxProductionIconIdCharacters,
+                string.Empty);
             WriteIntToPacket((int)entity.Kind, KindCompression);
             WriteIntToPacket((int)entity.SettlementNameplateSize, NameplateCompression);
             WriteIntToPacket((int)entity.SettlementKind, SettlementKindCompression);
@@ -304,7 +310,7 @@ namespace CoopSpectator.Network.Messages
         GameNetworkMessage
     {
         private static readonly CompressionInfo.Integer ProtocolCompression =
-            new CompressionInfo.Integer(0, 15, true);
+            new CompressionInfo.Integer(0, 31, true);
         private static readonly CompressionInfo.Integer TransferCompression =
             new CompressionInfo.Integer(
                 0,
@@ -441,7 +447,7 @@ namespace CoopSpectator.Network.Messages
             CoopCampaignMapCatalogChunkCodec.MaxChunkBytes;
 
         private static readonly CompressionInfo.Integer ProtocolCompression =
-            new CompressionInfo.Integer(0, 15, true);
+            new CompressionInfo.Integer(0, 31, true);
         private static readonly CompressionInfo.Integer TransferCompression =
             new CompressionInfo.Integer(
                 0,
@@ -551,7 +557,7 @@ namespace CoopSpectator.Network.Messages
         GameNetworkMessage
     {
         private static readonly CompressionInfo.Integer ProtocolCompression =
-            new CompressionInfo.Integer(0, 15, true);
+            new CompressionInfo.Integer(0, 31, true);
         private static readonly CompressionInfo.Integer TransferCompression =
             new CompressionInfo.Integer(
                 0,
@@ -658,7 +664,7 @@ namespace CoopSpectator.Network.Messages
         GameNetworkMessage
     {
         private static readonly CompressionInfo.Integer ProtocolCompression =
-            new CompressionInfo.Integer(0, 15, true);
+            new CompressionInfo.Integer(0, 31, true);
         private static readonly CompressionInfo.Integer TransferCompression =
             new CompressionInfo.Integer(
                 0,
@@ -731,7 +737,7 @@ namespace CoopSpectator.Network.Messages
     public sealed class CoopCampaignMapDynamicSnapshotMessage : GameNetworkMessage
     {
         private static readonly CompressionInfo.Integer ProtocolCompression =
-            new CompressionInfo.Integer(0, 15, true);
+            new CompressionInfo.Integer(0, 31, true);
         private static readonly CompressionInfo.Integer RevisionCompression =
             new CompressionInfo.Integer(0, int.MaxValue, true);
         private static readonly CompressionInfo.Integer CountCompression =
@@ -775,13 +781,15 @@ namespace CoopSpectator.Network.Messages
     [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromServer)]
     public sealed class CoopCampaignMapDynamicBatchMessage : GameNetworkMessage
     {
-        private static readonly CompressionInfo.Integer ProtocolCompression = new CompressionInfo.Integer(0, 15, true);
+        private static readonly CompressionInfo.Integer ProtocolCompression = new CompressionInfo.Integer(0, 31, true);
         private static readonly CompressionInfo.Integer RevisionCompression = new CompressionInfo.Integer(0, int.MaxValue, true);
         private static readonly CompressionInfo.Integer TotalCompression = new CompressionInfo.Integer(0, CoopCampaignMapPrototypeContract.MaxDynamicEntities, true);
         private static readonly CompressionInfo.Integer IndexCompression = new CompressionInfo.Integer(0, CoopCampaignMapPrototypeContract.MaxDynamicEntities - 1, true);
         private static readonly CompressionInfo.Integer BatchCompression = new CompressionInfo.Integer(0, CoopCampaignMapPrototypeContract.DynamicBatchCompressionMaximum, true);
         private static readonly CompressionInfo.Integer UnitCompression = new CompressionInfo.Integer(0, CoopCampaignMapPrototypeContract.UnitScale, true);
         private static readonly CompressionInfo.Integer SizeCompression = new CompressionInfo.Integer(0, CoopCampaignMapPrototypeContract.MaximumPartySize, true);
+        private static readonly CompressionInfo.Integer QuestMarkerCompression = new CompressionInfo.Integer(0, CoopCampaignMapPrototypeContract.MaxQuestMarkerFlags, true);
+        private static readonly CompressionInfo.Integer SettlementEventCompression = new CompressionInfo.Integer(0, CoopCampaignMapPrototypeContract.MaxSettlementEventFlags, true);
 
         public CoopCampaignMapDynamicBatchMessage(
             int revision,
@@ -841,7 +849,9 @@ namespace CoopSpectator.Network.Messages
                     ArmyTotalSize = ReadIntFromPacket(SizeCompression, ref valid),
                     ArmyCohesion = ReadIntFromPacket(UnitCompression, ref valid),
                     AppearanceRevision = ReadIntFromPacket(RevisionCompression, ref valid),
-                    InformationRevision = ReadIntFromPacket(RevisionCompression, ref valid)
+                    InformationRevision = ReadIntFromPacket(RevisionCompression, ref valid),
+                    QuestMarkerFlags = ReadIntFromPacket(QuestMarkerCompression, ref valid),
+                    SettlementEventFlags = ReadIntFromPacket(SettlementEventCompression, ref valid)
                 };
                 valid = valid && CoopCampaignMapPrototypeContract.IsValidDynamicEntity(entity);
                 entities.Add(entity);
@@ -874,6 +884,16 @@ namespace CoopSpectator.Network.Messages
                 WriteIntToPacket(ClampUnit(entity?.ArmyCohesion ?? 0), UnitCompression);
                 WriteIntToPacket(Math.Max(0, entity?.AppearanceRevision ?? 0), RevisionCompression);
                 WriteIntToPacket(Math.Max(0, entity?.InformationRevision ?? 0), RevisionCompression);
+                WriteIntToPacket(
+                    ClampFlags(
+                        entity?.QuestMarkerFlags ?? 0,
+                        CoopCampaignMapPrototypeContract.MaxQuestMarkerFlags),
+                    QuestMarkerCompression);
+                WriteIntToPacket(
+                    ClampFlags(
+                        entity?.SettlementEventFlags ?? 0,
+                        CoopCampaignMapPrototypeContract.MaxSettlementEventFlags),
+                    SettlementEventCompression);
             }
         }
 
@@ -882,5 +902,6 @@ namespace CoopSpectator.Network.Messages
 
         private static int ClampUnit(int value) => value < 0 ? 0 : value > CoopCampaignMapPrototypeContract.UnitScale ? CoopCampaignMapPrototypeContract.UnitScale : value;
         private static int ClampSize(int value) => value < 0 ? 0 : value > CoopCampaignMapPrototypeContract.MaximumPartySize ? CoopCampaignMapPrototypeContract.MaximumPartySize : value;
+        private static int ClampFlags(int value, int maximum) => value < 0 ? 0 : value > maximum ? maximum : value;
     }
 }

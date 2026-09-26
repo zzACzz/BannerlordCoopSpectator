@@ -203,13 +203,13 @@ namespace CoopSpectator.UI
         internal CoopCampaignMapPrototypeEntityNameplateVM(string entityId)
         {
             _entityId = entityId ?? string.Empty;
-            Quests = new MBBindingList<CoopCampaignMapPrototypeEmptyQuestMarkerVM>();
+            Quests = new MBBindingList<CoopCampaignMapPrototypeQuestMarkerVM>();
             FactionColor = Color.FromUint(FallbackPrimaryColor).ToString();
             UpdateBanner(string.Empty, FallbackPrimaryColor, FallbackSecondaryColor);
         }
 
         [DataSourceProperty]
-        public MBBindingList<CoopCampaignMapPrototypeEmptyQuestMarkerVM>
+        public MBBindingList<CoopCampaignMapPrototypeQuestMarkerVM>
             Quests { get; }
 
         [DataSourceProperty]
@@ -368,6 +368,7 @@ namespace CoopSpectator.UI
                 : entity.SecondaryColor;
             FactionColor = Color.FromUint(primaryColor).ToString();
             UpdateBanner(entity.BannerCode, primaryColor, secondaryColor);
+            SynchronizeQuestMarkers(entity.QuestMarkerFlags);
         }
 
         internal bool UpdatePosition(
@@ -501,6 +502,33 @@ namespace CoopSpectator.UI
             PartyBanner = identifier;
         }
 
+        private void SynchronizeQuestMarkers(int flags)
+        {
+            int safeFlags = flags &
+                CoopCampaignMapPrototypeContract.MaxQuestMarkerFlags;
+            if (Quests.Count > 0)
+            {
+                int existingFlags = 0;
+                foreach (CoopCampaignMapPrototypeQuestMarkerVM marker in Quests)
+                    existingFlags |= marker.QuestMarkerType;
+                if (existingFlags == safeFlags)
+                    return;
+            }
+            else if (safeFlags == 0)
+            {
+                return;
+            }
+
+            Quests.Clear();
+            int[] markerTypes = { 1, 2, 4, 8, 16 };
+            foreach (int markerType in markerTypes)
+            {
+                if ((safeFlags & markerType) != 0)
+                    Quests.Add(
+                        new CoopCampaignMapPrototypeQuestMarkerVM(markerType));
+            }
+        }
+
         private static bool IsFinite(float value)
         {
             return !float.IsNaN(value) && !float.IsInfinity(value);
@@ -560,9 +588,21 @@ namespace CoopSpectator.UI
         public string TextureProviderName { get; }
     }
 
-    internal sealed class CoopCampaignMapPrototypeEmptyQuestMarkerVM : ViewModel
+    internal sealed class CoopCampaignMapPrototypeQuestMarkerVM : ViewModel
     {
+        internal CoopCampaignMapPrototypeQuestMarkerVM(int questMarkerType)
+        {
+            QuestMarkerType = questMarkerType;
+        }
+
         [DataSourceProperty]
-        public int QuestMarkerType => 0;
+        public int QuestMarkerType { get; }
+
+        [DataSourceProperty]
+        public bool IsTrackMarker =>
+            QuestMarkerType ==
+                (int)CoopCampaignMapPrototypeQuestMarkerFlags.TrackedIssue ||
+            QuestMarkerType ==
+                (int)CoopCampaignMapPrototypeQuestMarkerFlags.TrackedStoryQuest;
     }
 }

@@ -429,6 +429,10 @@ namespace CoopSpectator.UI
                 : entity.SecondaryColor;
             FactionColor = Color.FromUint(primaryColor).ToString();
             UpdateBanner(entity.BannerCode, primaryColor, secondaryColor);
+            SettlementEvents.Synchronize(
+                entity.SettlementEventFlags,
+                entity.SettlementProductionIconId,
+                entity.QuestMarkerFlags);
         }
 
         internal void UpdatePosition(Vec3 worldPosition, Camera camera)
@@ -646,19 +650,86 @@ namespace CoopSpectator.UI
         {
             EventsList =
                 new MBBindingList<
-                    CoopCampaignMapPrototypeSettlementEmptyItemVM>();
+                    CoopCampaignMapPrototypeSettlementEventItemVM>();
             TrackQuests =
                 new MBBindingList<
-                    CoopCampaignMapPrototypeSettlementEmptyItemVM>();
+                    CoopCampaignMapPrototypeQuestMarkerVM>();
         }
 
         [DataSourceProperty]
-        public MBBindingList<CoopCampaignMapPrototypeSettlementEmptyItemVM>
+        public MBBindingList<CoopCampaignMapPrototypeSettlementEventItemVM>
             EventsList { get; }
 
         [DataSourceProperty]
-        public MBBindingList<CoopCampaignMapPrototypeSettlementEmptyItemVM>
+        public MBBindingList<CoopCampaignMapPrototypeQuestMarkerVM>
             TrackQuests { get; }
+
+        internal void Synchronize(
+            int eventFlags,
+            string productionIconId,
+            int questMarkerFlags)
+        {
+            int safeEventFlags = eventFlags &
+                CoopCampaignMapPrototypeContract.MaxSettlementEventFlags;
+            int existingEventFlags = 0;
+            foreach (CoopCampaignMapPrototypeSettlementEventItemVM item in
+                     EventsList)
+            {
+                existingEventFlags |= 1 << item.Type;
+            }
+            if (existingEventFlags != safeEventFlags ||
+                !ProductionIconMatches(productionIconId))
+            {
+                EventsList.Clear();
+                for (int eventType = 0; eventType <= 6; eventType++)
+                {
+                    if ((safeEventFlags & (1 << eventType)) == 0)
+                        continue;
+                    EventsList.Add(
+                        new CoopCampaignMapPrototypeSettlementEventItemVM(
+                            eventType,
+                            eventType == 6
+                                ? productionIconId
+                                : string.Empty));
+                }
+            }
+
+            int safeQuestMarkerFlags = questMarkerFlags &
+                CoopCampaignMapPrototypeContract.MaxQuestMarkerFlags;
+            int existingQuestMarkerFlags = 0;
+            foreach (CoopCampaignMapPrototypeQuestMarkerVM marker in TrackQuests)
+                existingQuestMarkerFlags |= marker.QuestMarkerType;
+            if (existingQuestMarkerFlags == safeQuestMarkerFlags)
+                return;
+
+            TrackQuests.Clear();
+            int[] markerTypes = { 1, 2, 4, 8, 16 };
+            foreach (int markerType in markerTypes)
+            {
+                if ((safeQuestMarkerFlags & markerType) != 0)
+                {
+                    TrackQuests.Add(
+                        new CoopCampaignMapPrototypeQuestMarkerVM(markerType));
+                }
+            }
+        }
+
+        private bool ProductionIconMatches(string productionIconId)
+        {
+            string expected = productionIconId ?? string.Empty;
+            foreach (CoopCampaignMapPrototypeSettlementEventItemVM item in
+                     EventsList)
+            {
+                if (item.Type == 6)
+                {
+                    return string.Equals(
+                        item.AdditionalParameters,
+                        expected,
+                        StringComparison.Ordinal);
+                }
+            }
+            return string.IsNullOrEmpty(expected);
+        }
 
         public override void OnFinalize()
         {
@@ -693,5 +764,23 @@ namespace CoopSpectator.UI
     {
         [DataSourceProperty]
         public int QuestMarkerType => 0;
+    }
+
+    internal sealed class CoopCampaignMapPrototypeSettlementEventItemVM :
+        ViewModel
+    {
+        internal CoopCampaignMapPrototypeSettlementEventItemVM(
+            int type,
+            string additionalParameters)
+        {
+            Type = type;
+            AdditionalParameters = additionalParameters ?? string.Empty;
+        }
+
+        [DataSourceProperty]
+        public int Type { get; }
+
+        [DataSourceProperty]
+        public string AdditionalParameters { get; }
     }
 }

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using CoopSpectator.Infrastructure;
 
 internal static class Program
@@ -9,7 +10,10 @@ internal static class Program
         try
         {
             ValidateProtocolVersion();
+            ValidateConversationContract();
+            ValidateConversationSnapshotAssembler();
             ValidateVisibilityPolicy();
+            ValidateInteractionPolicy();
             ValidateDynamicBatchTransportPolicy();
             ValidateDynamicDeltaPolicy();
             ValidateCatalogDeltaPolicy();
@@ -32,8 +36,13 @@ internal static class Program
             ValidatePartyVisualCodec();
             ValidateExactPartyVisualContract();
             ValidateHostSnapshotFreshness();
+            ValidateTransientBridgeGapFallback();
             ValidateSceneOwnerResolution();
             ValidateDedicatedBattleObserverSuppression();
+            ValidateClientSceneInitializationParity();
+            ValidateClientInteractionSourceContract();
+            ValidateMarkerReplicationSourceContract();
+            ValidateConversationReplicationSourceContract();
             Console.WriteLine("Coop campaign map prototype contract tests passed.");
             return 0;
         }
@@ -103,9 +112,92 @@ internal static class Program
     private static void ValidateProtocolVersion()
     {
         Assert(
-            CoopCampaignMapPrototypeContract.ProtocolVersion == 14 &&
-            CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion == 10,
-            "The incremental campaign-map replica requires protocol 14 and bridge schema 10.");
+            CoopCampaignMapPrototypeContract.ProtocolVersion == 16 &&
+            CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion == 12 &&
+            CoopCampaignMapCatalogBinarySerializer.SchemaVersion == 2,
+            "Campaign-map dialogue replication requires protocol 16, bridge schema 12 and binary catalog schema 2.");
+    }
+
+    private static void ValidateConversationContract()
+    {
+        CoopCampaignMapConversationState conversation =
+            CreateConversationState(7);
+        Assert(
+            CoopCampaignMapPrototypeContract.TryValidateConversationState(
+                conversation,
+                out string reason),
+            "A bounded active host conversation must validate. Reason=" + reason);
+        CoopCampaignMapConversationState clone = conversation.Clone();
+        clone.Revision++;
+        Assert(
+            CoopCampaignMapPrototypeContract.AreConversationContentsEquivalent(
+                conversation,
+                clone),
+            "Content equality must ignore transport revision only.");
+        clone.Options[0].Text = "Different";
+        Assert(
+            !CoopCampaignMapPrototypeContract.AreConversationContentsEquivalent(
+                conversation,
+                clone),
+            "A changed answer must advance the synchronized dialogue state.");
+
+        CoopCampaignMapConversationState inactive =
+            CoopCampaignMapPrototypeContract.CreateInactiveConversation(8);
+        Assert(
+            CoopCampaignMapPrototypeContract.TryValidateConversationState(
+                inactive,
+                out reason),
+            "A canonical inactive dialogue state must validate. Reason=" + reason);
+        inactive.DialogText = "stale";
+        Assert(
+            !CoopCampaignMapPrototypeContract.TryValidateConversationState(
+                inactive,
+                out reason) &&
+            reason == "conversation-inactive-payload",
+            "An inactive state must fail closed when it retains dialogue text.");
+
+        conversation.Options[0].Text = new string(
+            'x',
+            CoopCampaignMapPrototypeContract.MaxConversationOptionCharacters + 1);
+        Assert(
+            !CoopCampaignMapPrototypeContract.TryValidateConversationState(
+                conversation,
+                out reason) &&
+            reason == "conversation-option",
+            "An oversized answer must be rejected instead of entering the UI.");
+    }
+
+    private static void ValidateConversationSnapshotAssembler()
+    {
+        CoopCampaignMapConversationState expected = CreateConversationState(11);
+        CoopCampaignMapConversationState header = expected.Clone();
+        header.Options.Clear();
+        var assembler = new CoopCampaignMapConversationSnapshotAssembler();
+        Assert(
+            assembler.TryBegin(header, 2, out var pending) && pending == null,
+            "A valid dialogue header must start an incomplete snapshot.");
+        Assert(
+            assembler.TryAdd(11, 1, 2, expected.Options[1], out pending) &&
+            pending == null,
+            "Out-of-order dialogue options must remain buffered.");
+        Assert(
+            assembler.TryAdd(11, 0, 2, expected.Options[0], out var completed) &&
+            completed != null &&
+            completed.Options.Count == 2 &&
+            completed.Options[0].Text == expected.Options[0].Text &&
+            completed.Options[1].Text == expected.Options[1].Text,
+            "A complete dialogue snapshot must preserve authoritative option order.");
+        Assert(
+            !assembler.TryBegin(header, 2, out _),
+            "A completed dialogue revision must reject stale replay.");
+
+        CoopCampaignMapConversationState inactive =
+            CoopCampaignMapPrototypeContract.CreateInactiveConversation(12);
+        Assert(
+            assembler.TryBegin(inactive, 0, out completed) &&
+            completed != null &&
+            !completed.IsActive,
+            "An inactive header must close the client dialogue atomically.");
     }
 
     private static void ValidateVisibilityPolicy()
@@ -262,6 +354,91 @@ internal static class Program
             "A settlement behind the camera must be hidden.");
     }
 
+    private static void ValidateInteractionPolicy()
+    {
+        Assert(
+            CoopCampaignMapPrototypeInteractionPolicy.ResolveZoomIntent(
+                scrollUpPressed: true,
+                scrollDownPressed: false,
+                deltaMouseScroll: 0d) == 1,
+            "Mouse-wheel up must request map zoom-in.");
+        Assert(
+            CoopCampaignMapPrototypeInteractionPolicy.ResolveZoomIntent(
+                scrollUpPressed: false,
+                scrollDownPressed: true,
+                deltaMouseScroll: 0d) == -1,
+            "Mouse-wheel down must request map zoom-out.");
+        Assert(
+            CoopCampaignMapPrototypeInteractionPolicy.ResolveZoomIntent(
+                scrollUpPressed: true,
+                scrollDownPressed: true,
+                deltaMouseScroll: 1d) == 0,
+            "Contradictory wheel buttons must fail closed.");
+        Assert(
+            CoopCampaignMapPrototypeInteractionPolicy.ResolveZoomIntent(
+                scrollUpPressed: false,
+                scrollDownPressed: false,
+                deltaMouseScroll: 0.5d) == 1 &&
+            CoopCampaignMapPrototypeInteractionPolicy.ResolveZoomIntent(
+                scrollUpPressed: false,
+                scrollDownPressed: false,
+                deltaMouseScroll: -0.5d) == -1,
+            "Raw wheel deltas must preserve their zoom direction.");
+        AssertNearlyEqual(
+            80d,
+            CoopCampaignMapPrototypeInteractionPolicy.ResolvePanSpeed(
+                horizontalSpan: 1000d,
+                cameraHeight: 100d),
+            "Pan speed must scale with camera height.");
+        AssertNearlyEqual(
+            20d,
+            CoopCampaignMapPrototypeInteractionPolicy.ResolvePanSpeed(
+                horizontalSpan: 1000d,
+                cameraHeight: 1d),
+            "Pan speed must retain its usable minimum.");
+        AssertNearlyEqual(
+            25d,
+            CoopCampaignMapPrototypeInteractionPolicy.ResolvePanSpeed(
+                horizontalSpan: 100d,
+                cameraHeight: 1000d),
+            "Pan speed must stay bounded by map span.");
+        AssertNearlyEqual(
+            18d,
+            CoopCampaignMapPrototypeInteractionPolicy.ResolveZoomStep(
+                horizontalSpan: 1000d,
+                cameraHeight: 100d),
+            "Zoom step must scale with camera height.");
+        AssertNearlyEqual(
+            2.5d,
+            CoopCampaignMapPrototypeInteractionPolicy.ResolveZoomStep(
+                horizontalSpan: 1000d,
+                cameraHeight: 1d),
+            "Zoom step must retain its usable minimum.");
+        AssertNearlyEqual(
+            12d,
+            CoopCampaignMapPrototypeInteractionPolicy.ResolveZoomStep(
+                horizontalSpan: 100d,
+                cameraHeight: 1000d),
+            "Zoom step must stay bounded by map span.");
+        AssertNearlyEqual(
+            52.5d,
+            CoopCampaignMapPrototypeInteractionPolicy.ClampCameraAltitude(
+                terrainHeight: 50d,
+                candidateAltitude: 40d,
+                horizontalSpan: 100d),
+            "Camera altitude must remain above terrain clearance.");
+        AssertNearlyEqual(
+            250d,
+            CoopCampaignMapPrototypeInteractionPolicy.ClampCameraAltitude(
+                terrainHeight: 50d,
+                candidateAltitude: 1000d,
+                horizontalSpan: 100d),
+            "Camera altitude must remain bounded above the map.");
+        Assert(
+            CoopCampaignMapPrototypeInteractionPolicy.SelectionRadiusPixels >= 70d,
+            "Replica selection must retain a practical screen-space radius.");
+    }
+
     private static void ValidateCatalogBinaryChunkTransport()
     {
         var expected = new List<
@@ -272,12 +449,12 @@ internal static class Program
             new CoopCampaignMapPrototypeCatalogEntityState
             {
                 EntityId = "settlement:town_V1",
-                DisplayName = "Vostrum",
+                DisplayName = "Village",
                 Kind = CoopCampaignMapPrototypeEntityKind.Settlement,
                 SettlementNameplateSize =
-                    CoopCampaignMapPrototypeSettlementNameplateSize.Large,
+                    CoopCampaignMapPrototypeSettlementNameplateSize.Small,
                 SettlementKind =
-                    CoopCampaignMapPrototypeSettlementKind.Town,
+                    CoopCampaignMapPrototypeSettlementKind.Village,
                 PrimaryColor = 0xFF102030u,
                 SecondaryColor = 0xFF405060u,
                 BannerCode = "settlement-banner",
@@ -291,7 +468,8 @@ internal static class Program
                 LeaderName = "Governor",
                 ArmyId = string.Empty,
                 ArmyName = string.Empty,
-                SelectionRadius = 30000
+                SelectionRadius = 30000,
+                SettlementProductionIconId = "grain"
             }
         };
 
@@ -666,6 +844,8 @@ internal static class Program
         };
         current[0].NormalizedX = 125;
         current[0].IsMoving = true;
+        current[0].QuestMarkerFlags =
+            (int)CoopCampaignMapPrototypeQuestMarkerFlags.ActiveIssue;
 
         List<CoopCampaignMapPrototypeDynamicEntityState> delta =
             CoopCampaignMapPrototypeDynamicDeltaPolicy.BuildDelta(
@@ -687,8 +867,10 @@ internal static class Program
                 "party:main",
                 out CoopCampaignMapPrototypeDynamicEntityState mainUpdate) &&
             mainUpdate.NormalizedX == 125 &&
-            mainUpdate.IsMoving,
-            "A moving main party must be represented by one current dynamic update.");
+            mainUpdate.IsMoving &&
+            mainUpdate.QuestMarkerFlags ==
+                (int)CoopCampaignMapPrototypeQuestMarkerFlags.ActiveIssue,
+            "A moving party update must preserve its changed quest marker state.");
         Assert(
             deltaById.TryGetValue(
                 "party:scout",
@@ -748,6 +930,14 @@ internal static class Program
                 previous[0],
                 ChangeFirstEquipmentItem(previous[0])),
             "Exact visual equipment changes must invalidate catalog equivalence.");
+        CoopCampaignMapPrototypeCatalogEntityState productionChanged =
+            previous[0].Clone();
+        productionChanged.SettlementProductionIconId = "iron";
+        Assert(
+            !CoopCampaignMapPrototypeCatalogDeltaPolicy.AreEquivalent(
+                previous[0],
+                productionChanged),
+            "A production-icon change must invalidate catalog equivalence.");
     }
 
     private static CoopCampaignMapPrototypeCatalogEntityState
@@ -959,6 +1149,10 @@ internal static class Program
                 actual.VisibleEntities,
                 expected.VisibleEntities) &&
             CameraEquals(actual.Camera, expected.Camera) &&
+            actual.Conversation.Revision == expected.Conversation.Revision &&
+            CoopCampaignMapPrototypeContract.AreConversationContentsEquivalent(
+                actual.Conversation,
+                expected.Conversation) &&
             actual.UpdatedUtc == expected.UpdatedUtc,
             "The bridge codec must preserve every authoritative field.");
 
@@ -1041,6 +1235,31 @@ internal static class Program
                 },
                 new CoopCampaignMapPrototypeCatalogEntityState
                 {
+                    EntityId = "settlement:village",
+                    DisplayName = "Village",
+                    Kind = CoopCampaignMapPrototypeEntityKind.Settlement,
+                    SettlementNameplateSize =
+                        CoopCampaignMapPrototypeSettlementNameplateSize.Small,
+                    SettlementKind =
+                        CoopCampaignMapPrototypeSettlementKind.Village,
+                    PrimaryColor = 0xFF102030u,
+                    SecondaryColor = 0xFF405060u,
+                    BannerCode = "banner",
+                    VisualCharacterId = string.Empty,
+                    CultureId = string.Empty,
+                    PartyVisualKind =
+                        CoopCampaignMapPrototypePartyVisualKind.None,
+                    FactionId = "empire",
+                    FactionName = "Empire",
+                    OwnerName = "Clan",
+                    LeaderName = "Leader",
+                    ArmyId = string.Empty,
+                    ArmyName = string.Empty,
+                    SelectionRadius = 30000,
+                    SettlementProductionIconId = "grain"
+                },
+                new CoopCampaignMapPrototypeCatalogEntityState
+                {
                     EntityId = "settlement:tutorial_training_field",
                     DisplayName = "Training Field",
                     Kind = CoopCampaignMapPrototypeEntityKind.Settlement,
@@ -1076,21 +1295,29 @@ internal static class Program
             "A serialized replica catalog must parse. Reason=" + reason);
         Assert(
             actual.Revision == catalog.Revision &&
-            actual.Entities.Count == 3 &&
+            actual.Entities.Count == 4 &&
             actual.Entities[0].LeaderName == "Leader" &&
             actual.Entities[0].MountVisual != null &&
             actual.Entities[1].SettlementKind ==
                 CoopCampaignMapPrototypeSettlementKind.Town &&
-            actual.Entities[2].SettlementKind ==
+            actual.Entities[2].SettlementProductionIconId == "grain" &&
+            actual.Entities[3].SettlementKind ==
                 CoopCampaignMapPrototypeSettlementKind.Special,
-            "The replica catalog codec must preserve identity, information and visuals.");
+            "The replica catalog codec must preserve identity, information, visuals and village production.");
         CoopCampaignMapPrototypeCatalogEntityState invalidSpecial =
-            actual.Entities[2].Clone();
+            actual.Entities[3].Clone();
         invalidSpecial.SettlementKind =
             CoopCampaignMapPrototypeSettlementKind.None;
         Assert(
             !CoopCampaignMapPrototypeContract.IsValidCatalogEntity(invalidSpecial),
             "A settlement without a concrete settlement kind must remain invalid.");
+        CoopCampaignMapPrototypeCatalogEntityState invalidTownProduction =
+            actual.Entities[1].Clone();
+        invalidTownProduction.SettlementProductionIconId = "grain";
+        Assert(
+            !CoopCampaignMapPrototypeContract.IsValidCatalogEntity(
+                invalidTownProduction),
+            "Only a village may carry a primary production icon.");
         Assert(
             CoopCampaignMapPrototypeContract.IsCompletePartyVisualState(
                 actual.Entities[0]),
@@ -1133,7 +1360,13 @@ internal static class Program
                     ArmyTotalSize = 210,
                     ArmyCohesion = 750000,
                     AppearanceRevision = 2,
-                    InformationRevision = 3
+                    InformationRevision = 3,
+                    QuestMarkerFlags =
+                        (int)CoopCampaignMapPrototypeQuestMarkerFlags
+                            .TrackedIssue,
+                    SettlementEventFlags =
+                        (int)CoopCampaignMapPrototypeSettlementEventFlags
+                            .AvailableIssue
                 }
             }
         };
@@ -1152,8 +1385,18 @@ internal static class Program
             actual.Entities.Count == 1 &&
             actual.Entities[0].IsMoving &&
             actual.Entities[0].ArmyTotalSize == 210 &&
-            actual.Entities[0].ArmyCohesion == 750000,
-            "The dynamic codec must preserve movement and army information.");
+            actual.Entities[0].ArmyCohesion == 750000 &&
+            actual.Entities[0].QuestMarkerFlags == 8 &&
+            actual.Entities[0].SettlementEventFlags == 2,
+            "The dynamic codec must preserve movement, army and marker information.");
+
+        CoopCampaignMapPrototypeDynamicEntityState invalid =
+            actual.Entities[0].Clone();
+        invalid.QuestMarkerFlags =
+            CoopCampaignMapPrototypeContract.MaxQuestMarkerFlags + 1;
+        Assert(
+            !CoopCampaignMapPrototypeContract.IsValidDynamicEntity(invalid),
+            "Unknown quest marker bits must fail closed.");
     }
 
     private static void ValidateVisibleEntityContract()
@@ -1234,6 +1477,26 @@ internal static class Program
         Assert(
             !CoopCampaignMapPrototypeContract.IsValidVisibleEntity(invalid),
             "A concrete party visual must have a character or culture fallback.");
+
+        invalid = entities[0].Clone();
+        invalid.SettlementEventFlags =
+            (int)CoopCampaignMapPrototypeSettlementEventFlags.AvailableIssue;
+        Assert(
+            !CoopCampaignMapPrototypeContract.IsValidVisibleEntity(invalid),
+            "A party must not carry settlement event markers.");
+
+        invalid = entities[1].Clone();
+        invalid.SettlementProductionIconId = "grain";
+        Assert(
+            !CoopCampaignMapPrototypeContract.IsValidVisibleEntity(invalid),
+            "A production icon without the production event bit must fail closed.");
+
+        invalid = entities[1].Clone();
+        invalid.QuestMarkerFlags =
+            CoopCampaignMapPrototypeContract.MaxQuestMarkerFlags + 1;
+        Assert(
+            !CoopCampaignMapPrototypeContract.IsValidVisibleEntity(invalid),
+            "Unknown quest marker bits must fail closed.");
 
         var oversized = new List<CoopCampaignMapPrototypeEntityState>();
         for (int index = 0;
@@ -1487,6 +1750,99 @@ internal static class Program
             "An inactive host snapshot must not drive the map mission.");
     }
 
+    private static void ValidateTransientBridgeGapFallback()
+    {
+        string directory = Path.Combine(
+            Path.GetTempPath(),
+            "CoopCampaignMapPrototypeBridgeTests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        CoopSpectator.Infrastructure.Automation.CoopAutomationRuntimeBridge
+            .TestCoopFolderPath = directory;
+
+        try
+        {
+            DateTime utcNow = new DateTime(
+                2026,
+                9,
+                26,
+                1,
+                30,
+                0,
+                DateTimeKind.Utc);
+            TimeSpan maximumAge = TimeSpan.FromSeconds(2d);
+            CoopCampaignMapPrototypeHostSnapshot expected =
+                CreateHostSnapshot(utcNow);
+
+            Assert(
+                CoopCampaignMapPrototypeBridgeFile.TryWrite(
+                    expected,
+                    out string reason),
+                "A valid host bridge snapshot must be writable. Reason=" +
+                reason);
+            Assert(
+                CoopCampaignMapPrototypeBridgeFile.TryReadFresh(
+                    utcNow,
+                    maximumAge,
+                    out CoopCampaignMapPrototypeHostSnapshot firstRead,
+                    out reason) &&
+                firstRead.Revision == expected.Revision,
+                "The first host bridge read must populate the validated cache. Reason=" +
+                reason);
+
+            File.Delete(CoopCampaignMapPrototypeBridgeFile.GetStateFilePath());
+            Assert(
+                CoopCampaignMapPrototypeBridgeFile.TryReadFresh(
+                    utcNow + TimeSpan.FromMilliseconds(250d),
+                    maximumAge,
+                    out CoopCampaignMapPrototypeHostSnapshot cachedRead,
+                    out reason) &&
+                cachedRead.Revision == expected.Revision,
+                "A transient replacement gap must reuse the last validated fresh snapshot. Reason=" +
+                reason);
+            Assert(
+                !CoopCampaignMapPrototypeBridgeFile.TryReadFresh(
+                    utcNow + TimeSpan.FromSeconds(3d),
+                    maximumAge,
+                    out _,
+                    out reason) &&
+                reason == "missing-file",
+                "An expired cached snapshot must fail closed when the bridge file stays absent.");
+
+            expected.UpdatedUtc = utcNow + TimeSpan.FromSeconds(4d);
+            expected.Revision++;
+            Assert(
+                CoopCampaignMapPrototypeBridgeFile.TryWrite(
+                    expected,
+                    out reason) &&
+                CoopCampaignMapPrototypeBridgeFile.TryReadFresh(
+                    expected.UpdatedUtc,
+                    maximumAge,
+                    out firstRead,
+                    out reason),
+                "A newer valid bridge snapshot must replace the expired cache. Reason=" +
+                reason);
+            File.WriteAllText(
+                CoopCampaignMapPrototypeBridgeFile.GetStateFilePath(),
+                "truncated");
+            Assert(
+                CoopCampaignMapPrototypeBridgeFile.TryReadFresh(
+                    expected.UpdatedUtc + TimeSpan.FromMilliseconds(250d),
+                    maximumAge,
+                    out cachedRead,
+                    out reason) &&
+                cachedRead.Revision == expected.Revision,
+                "A transient partial replacement must not discard the last validated fresh snapshot. Reason=" +
+                reason);
+        }
+        finally
+        {
+            CoopSpectator.Infrastructure.Automation.CoopAutomationRuntimeBridge
+                .TestCoopFolderPath = null;
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     private static CoopCampaignMapPrototypeHostSnapshot CreateHostSnapshot(
         DateTime updatedUtc)
     {
@@ -1509,8 +1865,38 @@ internal static class Program
                 DynamicRevision = 6,
                 VisibleEntities = CreateVisibleEntities(),
                 Camera = CreateCameraState(),
+                Conversation = CreateConversationState(3),
                 UpdatedUtc = updatedUtc
             };
+    }
+
+    private static CoopCampaignMapConversationState CreateConversationState(
+        int revision)
+    {
+        var state = new CoopCampaignMapConversationState
+        {
+            Revision = revision,
+            IsActive = true,
+            SpeakerName = "Bandit Leader",
+            DialogText = "You have cut quite a swathe through my men.",
+            GoldText = "1,234",
+            ContinueText = "Click to continue"
+        };
+        state.Options.Add(
+            new CoopCampaignMapConversationOptionState
+            {
+                Text = "Very well.",
+                IsEnabled = true,
+                IsSpecial = false
+            });
+        state.Options.Add(
+            new CoopCampaignMapConversationOptionState
+            {
+                Text = "I do not fight duels with brigands.",
+                IsEnabled = false,
+                IsSpecial = true
+            });
+        return state;
     }
 
     private static CoopCampaignMapPrototypeCatalogEntityState
@@ -1591,7 +1977,9 @@ internal static class Program
                 leftEntity.ArmyId != rightEntity.ArmyId ||
                 leftEntity.ArmyName != rightEntity.ArmyName ||
                 leftEntity.IsArmyLeader != rightEntity.IsArmyLeader ||
-                leftEntity.SelectionRadius != rightEntity.SelectionRadius)
+                leftEntity.SelectionRadius != rightEntity.SelectionRadius ||
+                leftEntity.SettlementProductionIconId !=
+                    rightEntity.SettlementProductionIconId)
             {
                 return false;
             }
@@ -1659,7 +2047,13 @@ internal static class Program
                 VisualCharacterId = string.Empty,
                 CultureId = string.Empty,
                 PartyVisualKind =
-                    CoopCampaignMapPrototypePartyVisualKind.None
+                    CoopCampaignMapPrototypePartyVisualKind.None,
+                QuestMarkerFlags =
+                    (int)CoopCampaignMapPrototypeQuestMarkerFlags
+                        .TrackedIssue,
+                SettlementEventFlags =
+                    (int)CoopCampaignMapPrototypeSettlementEventFlags
+                        .AvailableIssue
             }
         };
     }
@@ -1692,6 +2086,11 @@ internal static class Program
                     rightEntity.VisualCharacterId ||
                 leftEntity.CultureId != rightEntity.CultureId ||
                 leftEntity.PartyVisualKind != rightEntity.PartyVisualKind ||
+                leftEntity.QuestMarkerFlags != rightEntity.QuestMarkerFlags ||
+                leftEntity.SettlementEventFlags !=
+                    rightEntity.SettlementEventFlags ||
+                leftEntity.SettlementProductionIconId !=
+                    rightEntity.SettlementProductionIconId ||
                 !AgentVisualsEqual(
                     leftEntity.HumanVisual,
                     rightEntity.HumanVisual) ||
@@ -1876,6 +2275,276 @@ internal static class Program
                 hasPrototypeServerBehavior: true,
                 hasPrototypeNetworkController: true),
             "Both prototype markers must suppress the dedicated battle observer.");
+    }
+
+    private static void ValidateClientSceneInitializationParity()
+    {
+        string repositoryRoot = FindRepositoryRoot();
+        string source = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "UI",
+            "CoopCampaignMapPrototypeMissionView.cs"));
+
+        int sceneRead = source.IndexOf(
+            "_mapScene.Read(",
+            StringComparison.Ordinal);
+        int atmosphereLoad = source.IndexOf(
+            "MBMapScene.LoadAtmosphereData(_mapScene)",
+            StringComparison.Ordinal);
+        int sceneOptimize = source.IndexOf(
+            "_mapScene.OptimizeScene(",
+            StringComparison.Ordinal);
+        int visualTick = source.IndexOf(
+            "MBMapScene.TickVisuals(",
+            StringComparison.Ordinal);
+
+        Assert(
+            sceneRead >= 0 &&
+            atmosphereLoad > sceneRead &&
+            sceneOptimize > atmosphereLoad &&
+            visualTick > sceneOptimize,
+            "The isolated Main_map client must load native atmosphere data " +
+            "after Scene.Read and before optimization or visual ticking.");
+    }
+
+    private static void ValidateClientInteractionSourceContract()
+    {
+        string repositoryRoot = FindRepositoryRoot();
+        string missionView = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "UI",
+            "CoopCampaignMapPrototypeMissionView.cs"));
+        string infoViewModel = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "UI",
+            "CoopCampaignMapReplicaInfoVM.cs"));
+
+        Assert(
+            missionView.Contains(
+                "using GlobalInput = TaleWorlds.InputSystem.Input;") &&
+            missionView.Contains("IsFocusLayer = true") &&
+            missionView.Contains(
+                "InputRestrictions.SetInputRestrictions(") &&
+            missionView.Contains("InputUsageMask.All") &&
+            missionView.Contains("GlobalInput.DeltaMouseScroll") &&
+            missionView.Contains("InputKey.MouseScrollUp") &&
+            missionView.Contains("InputKey.MouseScrollDown"),
+            "The replica input layer must own focus and expose bounded wheel zoom.");
+        Assert(
+            missionView.Contains("forward.z = 0f") &&
+            missionView.Contains("InputKey.Up") &&
+            missionView.Contains("InputKey.Down") &&
+            missionView.Contains("InputKey.Left") &&
+            missionView.Contains("InputKey.Right") &&
+            missionView.Contains("ClampCameraOriginToMap"),
+            "Replica keyboard panning must be planar, bounded and available on WASD/arrows.");
+        Assert(
+            missionView.Contains(
+                "CoopCampaignMapPrototypeInteractionPolicy") &&
+            missionView.Contains(".SelectionRadiusPixels") &&
+            infoViewModel.Contains("коліщатко — масштаб") &&
+            infoViewModel.Contains("ЛКМ — відомості"),
+            "Selection radius and discoverable interaction guidance must remain wired.");
+    }
+
+    private static void ValidateMarkerReplicationSourceContract()
+    {
+        string repositoryRoot = FindRepositoryRoot();
+        string publisher = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "Campaign",
+            "CoopCampaignMapPrototypePublisherBehavior.cs"));
+        string bridgeCodec = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "Infrastructure",
+            "CoopCampaignMapPrototypeBridgeCodec.cs"));
+        string replicaMessages = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "Network",
+            "Messages",
+            "CoopCampaignMapReplicaNetworkMessages.cs"));
+        string networkController = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "Mission",
+            "CoopCampaignMapPrototypeNetworkController.cs"));
+        string partyOverlay = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "UI",
+            "CoopCampaignMapPrototypeEntityOverlayVM.cs"));
+        string settlementOverlay = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "UI",
+            "CoopCampaignMapPrototypeSettlementOverlayVM.cs"));
+
+        Assert(
+            publisher.Contains("CampaignUIHelper.GetQuestsRelatedToParty") &&
+            publisher.Contains("CampaignUIHelper.GetQuestsRelatedToSettlement") &&
+            publisher.Contains("GetNumOfActiveIssuesInSettlement") &&
+            publisher.Contains("GetNumOfAvailableIssuesInSettlement") &&
+            publisher.Contains("GetTournamentGame") &&
+            publisher.IndexOf(
+                ".ShouldReplicateSettlement(",
+                StringComparison.Ordinal) <
+            publisher.IndexOf(
+                "CaptureSettlementInformation(settlement)",
+                StringComparison.Ordinal),
+            "Marker capture must use native campaign quest/issue APIs only after host visibility filtering.");
+        Assert(
+            bridgeCodec.Contains("QuestMarkerFlags") &&
+            bridgeCodec.Contains("SettlementEventFlags") &&
+            bridgeCodec.Contains("SettlementProductionIconId") &&
+            replicaMessages.Contains("QuestMarkerCompression") &&
+            replicaMessages.Contains("SettlementEventCompression") &&
+            networkController.Contains(
+                "QuestMarkerFlags = dynamicState.QuestMarkerFlags") &&
+            networkController.Contains(
+                "SettlementProductionIconId ="),
+            "Every marker field must cross bridge, network and client merge boundaries.");
+        Assert(
+            partyOverlay.Contains(
+                "SynchronizeQuestMarkers(entity.QuestMarkerFlags)") &&
+            settlementOverlay.Contains(
+                "SettlementEvents.Synchronize(") &&
+            settlementOverlay.Contains(
+                "CoopCampaignMapPrototypeSettlementEventItemVM"),
+            "Replicated marker state must reach both party and settlement nameplate view models.");
+    }
+
+    private static void ValidateConversationReplicationSourceContract()
+    {
+        string repositoryRoot = FindRepositoryRoot();
+        string capture = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "Campaign",
+            "CoopCampaignMapConversationCapture.cs"));
+        string publisher = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "Campaign",
+            "CoopCampaignMapPrototypePublisherBehavior.cs"));
+        string bridgeCodec = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "Infrastructure",
+            "CoopCampaignMapPrototypeBridgeCodec.cs"));
+        string messages = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "Network",
+            "Messages",
+            "CoopCampaignMapConversationNetworkMessages.cs"));
+        string controller = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "Mission",
+            "CoopCampaignMapPrototypeNetworkController.cs"));
+        string view = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "UI",
+            "CoopCampaignMapConversationView.cs"));
+        string viewModel = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "UI",
+            "CoopCampaignMapConversationVM.cs"));
+        string mode = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "GameMode",
+            "MissionMultiplayerCoopCampaignMapPrototypeMode.cs"));
+        int conversationUpdateStart = publisher.IndexOf(
+            "private void UpdateConversationSnapshot()",
+            StringComparison.Ordinal);
+        int conversationUpdateEnd = publisher.IndexOf(
+            "private void LogFailureRateLimited(",
+            conversationUpdateStart,
+            StringComparison.Ordinal);
+        string conversationUpdate =
+            conversationUpdateStart >= 0 &&
+            conversationUpdateEnd > conversationUpdateStart
+                ? publisher.Substring(
+                    conversationUpdateStart,
+                    conversationUpdateEnd - conversationUpdateStart)
+                : string.Empty;
+        int captureFailureLog = conversationUpdate.IndexOf(
+            "conversation-capture:",
+            StringComparison.Ordinal);
+        int captureFailureReturn = captureFailureLog >= 0
+            ? conversationUpdate.IndexOf(
+                "return;",
+                captureFailureLog,
+                StringComparison.Ordinal)
+            : -1;
+        int conversationEquivalence = conversationUpdate.IndexOf(
+            "AreConversationContentsEquivalent",
+            StringComparison.Ordinal);
+
+        Assert(
+            capture.Contains("MissionConversationVM") &&
+            capture.Contains("CurrentCharacterNameLbl") &&
+            capture.Contains("dialog.DialogText") &&
+            capture.Contains("dialog.AnswerList") &&
+            capture.Contains("dataSource.IsBarterActive") &&
+            !capture.Contains("DoOption(") &&
+            !capture.Contains("ContinueConversation(") &&
+            captureFailureReturn > captureFailureLog &&
+            captureFailureReturn < conversationEquivalence &&
+            !conversationUpdate.Contains("captured ="),
+            "Host capture must read the native formatted map-dialogue VM without advancing it.");
+        Assert(
+            bridgeCodec.Contains("ConversationRevision") &&
+            bridgeCodec.Contains("ConversationOptionCount") &&
+            messages.Contains(
+                "GameNetworkMessageSendType.FromServer") &&
+            !messages.Contains("GameNetworkMessageSendType.FromClient") &&
+            controller.Contains("BroadcastConversation(") &&
+            controller.Contains("SendConversation(networkPeer") &&
+            controller.Contains("ClientConversationAssembler"),
+            "Dialogue must cross the existing authoritative bridge and server-only network projection, including late join.");
+        Assert(
+            view.Contains("LoadMovie(") &&
+            view.Contains("\"SPConversation\"") &&
+            view.Contains("SetConversationActive(true)") &&
+            view.Contains("RestoreMissionLayerState") &&
+            viewModel.Contains("public void ExecuteAction()") &&
+            viewModel.Contains(
+                "Display-only milestone: no client choice leaves this process.") &&
+            mode.Contains("new CoopSpectator.UI.CoopCampaignMapConversationView()"),
+            "The map mission must reuse the native conversation window and keep every remote answer display-only.");
+
+        string hideoutView = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "UI",
+            "CoopHideoutBossCinematicView.cs"));
+        Assert(
+            hideoutView.Contains("CoopHideoutBossConversationVM") &&
+            hideoutView.Contains("SendHostChoiceWithConfirmation"),
+            "The map-dialogue feature must not replace the adjacent hideout host-choice path.");
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        string configuredRoot = Environment.GetEnvironmentVariable(
+            "COOPSPECTATOR_REPOSITORY_ROOT");
+        if (!string.IsNullOrWhiteSpace(configuredRoot))
+        {
+            string resolvedRoot = Path.GetFullPath(configuredRoot);
+            if (File.Exists(Path.Combine(resolvedRoot, "CoopSpectator.csproj")))
+                return resolvedRoot;
+            throw new InvalidOperationException(
+                "COOPSPECTATOR_REPOSITORY_ROOT does not identify this repository.");
+        }
+
+        DirectoryInfo directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory != null &&
+               !File.Exists(Path.Combine(
+                   directory.FullName,
+                   "CoopSpectator.csproj")))
+        {
+            directory = directory.Parent;
+        }
+
+        if (directory == null)
+        {
+            throw new InvalidOperationException(
+                "Could not locate the repository root for source contract checks.");
+        }
+
+        return directory.FullName;
     }
 
     private static void AssertNearlyEqual(

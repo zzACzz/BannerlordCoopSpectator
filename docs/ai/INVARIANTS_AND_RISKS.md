@@ -211,6 +211,14 @@ Exact dedicated and client `rgl_log` plus `rgl_log_errors` evidence remains requ
 
 Owned-process correlation must never be treated as proof of fatality by itself. Exact client/dedicated `CrashUploader.exe` and system `WerFault.exe` paths are fatal reporters; `Watchdog.exe` is an owned support process unless independent fatal evidence exists. Support-role cleanup may use a one-second graceful budget, while primary campaign/dedicated/client roles retain 15 seconds. Both paths must preserve exact PID/path/start-time validation and forced-termination evidence. Failure evidence and cleanup must emit separate phase markers so a future stall can be localized without enabling production hot-path diagnostics.
 
+### 20. Campaign-map dialogue is a display-only host projection
+
+The campaign host remains the only dialogue authority. Capture may read only the already formatted native `MapConversationVM.DialogController` state owned by the active `GauntletMapConversationView`; it must not call continue, choose an answer, synthesize campaign objects, or infer hidden dialogue state. Barter and unreadable/invalid native state project as inactive.
+
+The local bridge and dedicated network messages must bound every string and option count. The dedicated process assigns a mission-local monotonic revision, sends only server-to-client messages, and includes the current complete revision for late join. The client must not publish a partial or mixed revision, and its `SPConversation` commands must remain no-op. Voting, progression, market/inventory reservation, hero-edit locking, and all campaign mutation require separate contracts and are outside this milestone.
+
+This path is isolated from hideout boss dialogue. A correction to map-dialogue capture, transport, or presentation must not be applied to hideout, settlement, battle, or other conversation types without their own contract and runtime verification.
+
 ## Known current limitations and unverified areas
 
 ### Source-verified limitations
@@ -280,7 +288,9 @@ The initial automation feasibility profile is recorded in [BATTLE_TEST_AUTOMATIO
 | Siege machine controller | Critical | AI waits forever, invisible active object, bad detachment | both sides, native controller lists, point/weapon identity |
 | Remote exact-siege occlusion guard | High | native renderer crash or over-broad loss of occlusion | remote-only role, accepted topology, exact shell/scene, adjacent scenarios |
 | Campaignless conversation safety patch | High | native getter crash or suppressed valid campaign conversation | Harmony target/version, campaign/null paths, client and dedicated registration |
-| Campaign map prototype visual tick | Medium | stale tagged meshes, missing animation, or excessive per-frame work | tag collection, scene release, render-ready gate, runtime profiling |
+| Campaign map prototype visual tick | High | native access violation from missing atmosphere state, stale tagged meshes, missing animation, or excessive per-frame work | load atmosphere data after `Scene.Read` and before optimization/ticking, tag collection, scene release, render-ready gate, runtime profiling |
+| Campaign map prototype visibility/marker projection | High | leaking host-hidden objects, stale quest markers, or settlement/party semantic drift | derive flags from stock campaign UI helpers and tracked quest state, clear all marker/event fields for hidden objects, fail closed on unknown bits/schema, compare host/client screenshots after dynamic movement |
+| Campaign map synchronous dialogue projection | High | partial revision, stale dialogue, client-side authority leak, or native Gauntlet binding crash | host read-only capture, bounded complete-revision assembly, server-to-client-only schema, late join, open/change/close runtime screenshots |
 | Deployment boundaries | High | invalid orders, flags in wrong place, client/server mismatch | scenario-specific geometry, version/hash ack, rollback |
 | Control/reconnect state | High | wrong peer controls agent, stale peer index | disconnect/rejoin, index migration, death/respawn |
 | Result bridge/writeback | Critical | lost or duplicated campaign effects | atomic/stable read, IDs, journal timing, stage aggregation |

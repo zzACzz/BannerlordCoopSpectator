@@ -81,7 +81,10 @@ namespace CoopSpectator.GameMode
             list.Add(new CoopCampaignMapPrototypeNetworkController());
 #if !COOPSPECTATOR_DEDICATED
             if (!GameNetwork.IsServer)
+            {
                 list.Add(new CoopSpectator.UI.CoopCampaignMapPrototypeMissionView());
+                list.Add(new CoopSpectator.UI.CoopCampaignMapConversationView());
+            }
 #endif
             return list;
         }

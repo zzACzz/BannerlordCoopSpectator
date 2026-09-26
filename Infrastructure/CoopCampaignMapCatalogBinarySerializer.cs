@@ -8,7 +8,7 @@ namespace CoopSpectator.Infrastructure
     public static class CoopCampaignMapCatalogBinarySerializer
     {
         private const int Magic = 0x434D4331; // "CMC1"
-        public const int SchemaVersion = 1;
+        public const int SchemaVersion = 2;
         private static readonly Encoding StrictUtf8 =
             new UTF8Encoding(false, true);
 
@@ -183,6 +183,7 @@ namespace CoopSpectator.Infrastructure
             WriteString(writer, entity.ArmyName);
             writer.Write(entity.IsArmyLeader);
             writer.Write(entity.SelectionRadius);
+            WriteString(writer, entity.SettlementProductionIconId);
         }
 
         private static CoopCampaignMapPrototypeCatalogEntityState ReadEntity(
@@ -244,7 +245,11 @@ namespace CoopSpectator.Infrastructure
                     CoopCampaignMapPrototypeContract
                         .MaxInformationTextCharacters),
                 IsArmyLeader = reader.ReadBoolean(),
-                SelectionRadius = reader.ReadInt32()
+                SelectionRadius = reader.ReadInt32(),
+                SettlementProductionIconId = ReadString(
+                    reader,
+                    CoopCampaignMapPrototypeContract
+                        .MaxProductionIconIdCharacters)
             };
         }
 

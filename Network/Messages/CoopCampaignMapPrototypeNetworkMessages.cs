@@ -10,7 +10,7 @@ namespace CoopSpectator.Network.Messages
     public sealed class CoopCampaignMapPrototypeStateMessage : GameNetworkMessage
     {
         private static readonly CompressionInfo.Integer ProtocolCompression =
-            new CompressionInfo.Integer(0, 15, maximumValueGiven: true);
+            new CompressionInfo.Integer(0, 31, maximumValueGiven: true);
         private static readonly CompressionInfo.Integer RevisionCompression =
             new CompressionInfo.Integer(0, int.MaxValue, maximumValueGiven: true);
         private static readonly CompressionInfo.Integer UnitCompression =
@@ -214,7 +214,7 @@ namespace CoopSpectator.Network.Messages
         GameNetworkMessage
     {
         private static readonly CompressionInfo.Integer ProtocolCompression =
-            new CompressionInfo.Integer(0, 15, maximumValueGiven: true);
+            new CompressionInfo.Integer(0, 31, maximumValueGiven: true);
         private static readonly CompressionInfo.Integer RevisionCompression =
             new CompressionInfo.Integer(0, int.MaxValue, maximumValueGiven: true);
         private static readonly CompressionInfo.Integer CountCompression =
@@ -283,7 +283,7 @@ namespace CoopSpectator.Network.Messages
         GameNetworkMessage
     {
         private static readonly CompressionInfo.Integer ProtocolCompression =
-            new CompressionInfo.Integer(0, 15, maximumValueGiven: true);
+            new CompressionInfo.Integer(0, 31, maximumValueGiven: true);
         private static readonly CompressionInfo.Integer RevisionCompression =
             new CompressionInfo.Integer(0, int.MaxValue, maximumValueGiven: true);
         private static readonly CompressionInfo.Integer CountCompression =
@@ -329,6 +329,16 @@ namespace CoopSpectator.Network.Messages
             new CompressionInfo.Integer(
                 0,
                 CoopCampaignMapPrototypeContract.EquipmentSlotCount,
+                maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer QuestMarkerCompression =
+            new CompressionInfo.Integer(
+                0,
+                CoopCampaignMapPrototypeContract.MaxQuestMarkerFlags,
+                maximumValueGiven: true);
+        private static readonly CompressionInfo.Integer SettlementEventCompression =
+            new CompressionInfo.Integer(
+                0,
+                CoopCampaignMapPrototypeContract.MaxSettlementEventFlags,
                 maximumValueGiven: true);
 
         public CoopCampaignMapPrototypeEntityStateMessage(
@@ -379,6 +389,8 @@ namespace CoopSpectator.Network.Messages
             string visualCharacterId =
                 ReadStringFromPacket(ref valid) ?? string.Empty;
             string cultureId = ReadStringFromPacket(ref valid) ?? string.Empty;
+            string settlementProductionIconId =
+                ReadStringFromPacket(ref valid) ?? string.Empty;
             Entity = new CoopCampaignMapPrototypeEntityState
             {
                 EntityId = entityId,
@@ -398,6 +410,13 @@ namespace CoopSpectator.Network.Messages
                         ReadIntFromPacket(
                             PartyVisualKindCompression,
                             ref valid),
+                QuestMarkerFlags = ReadIntFromPacket(
+                    QuestMarkerCompression,
+                    ref valid),
+                SettlementEventFlags = ReadIntFromPacket(
+                    SettlementEventCompression,
+                    ref valid),
+                SettlementProductionIconId = settlementProductionIconId,
                 NormalizedX = ReadIntFromPacket(UnitCompression, ref valid),
                 NormalizedY = ReadIntFromPacket(UnitCompression, ref valid),
                 Heading = ReadIntFromPacket(UnitCompression, ref valid),
@@ -475,6 +494,11 @@ namespace CoopSpectator.Network.Messages
                     safeEntity.CultureId,
                     CoopCampaignMapPrototypeContract.MaxCultureIdCharacters,
                     string.Empty));
+            WriteStringToPacket(
+                CoopCampaignMapPrototypeContract.BoundEntityText(
+                    safeEntity.SettlementProductionIconId,
+                    CoopCampaignMapPrototypeContract.MaxProductionIconIdCharacters,
+                    string.Empty));
             WriteIntToPacket((int)safeEntity.Kind, KindCompression);
             WriteIntToPacket(
                 (int)safeEntity.SettlementNameplateSize,
@@ -482,6 +506,16 @@ namespace CoopSpectator.Network.Messages
             WriteIntToPacket(
                 (int)safeEntity.PartyVisualKind,
                 PartyVisualKindCompression);
+            WriteIntToPacket(
+                ClampFlags(
+                    safeEntity.QuestMarkerFlags,
+                    CoopCampaignMapPrototypeContract.MaxQuestMarkerFlags),
+                QuestMarkerCompression);
+            WriteIntToPacket(
+                ClampFlags(
+                    safeEntity.SettlementEventFlags,
+                    CoopCampaignMapPrototypeContract.MaxSettlementEventFlags),
+                SettlementEventCompression);
             WriteIntToPacket(ClampUnit(safeEntity.NormalizedX), UnitCompression);
             WriteIntToPacket(ClampUnit(safeEntity.NormalizedY), UnitCompression);
             WriteIntToPacket(ClampUnit(safeEntity.Heading), UnitCompression);
@@ -516,6 +550,11 @@ namespace CoopSpectator.Network.Messages
                 : value > CoopCampaignMapPrototypeContract.UnitScale
                     ? CoopCampaignMapPrototypeContract.UnitScale
                     : value;
+        }
+
+        private static int ClampFlags(int value, int maximum)
+        {
+            return value < 0 ? 0 : value > maximum ? maximum : value;
         }
 
         private CoopCampaignMapPrototypeAgentVisualState ReadAgentVisual(

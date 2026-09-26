@@ -322,6 +322,30 @@ Mission behavior ordering is a compatibility contract. A class being present som
 
 Campaignless conversation safety is independent of battle subtype. The client and dedicated startup paths register `CampaignlessConversationMissionSafetyPatch`; if the native `ConversationMission.OneToOneConversationAgent` getter is reached without `Campaign.Current` or `ConversationManager`, the prefix returns null. With valid campaign conversation state, it preserves the original getter.
 
+### Campaign-map replica mission and synchronous dialogue
+
+Primary owners:
+
+- `Campaign/CoopCampaignMapPrototypePublisherBehavior.cs`
+- `Campaign/CoopCampaignMapConversationCapture.cs`
+- `Infrastructure/CoopCampaignMapPrototypeBridgeCodec.cs`
+- `Mission/CoopCampaignMapPrototypeNetworkController.cs`
+- `Network/Messages/CoopCampaignMapConversationNetworkMessages.cs`
+- `UI/CoopCampaignMapConversationView.cs`
+
+Sequence:
+
+1. The campaign host publishes the bounded host-visible map snapshot through the existing local prototype bridge.
+2. While a native map conversation is active, the publisher reads the already formatted speaker, line, gold/continue labels, and answer rows from `MapConversationVM.DialogController`; it never invokes native continuation or answer actions.
+3. A content change increments the host dialogue revision. Barter, absent native view state, and invalid capture project as inactive rather than exposing partial or guessed state.
+4. The dedicated process reads the bridge, converts a changed host revision to its own mission-local network revision, and broadcasts one header plus the declared answer records.
+5. A joining peer receives the current dialogue after the current map state, catalog, and dynamic projection.
+6. The client assembler publishes a dialogue only when every declared option for one revision is present and valid. Stale or mixed revisions are rejected.
+7. `CoopCampaignMapConversationView` opens the native `SPConversation` movie, reproduces the host-formatted strings and enabled/special answer presentation, and restores the prior mission-layer focus when the host dialogue closes.
+8. Client answer and continue commands perform no action and send no message. During this milestone only the campaign host can advance or choose a response; the resulting next host revision is then projected to all clients.
+
+This flow does not grant campaign authority to the dedicated process or multiplayer clients. Voting, inventory/market reservation, hero-edit locks, progression, and barter remain outside this milestone.
+
 ## Flow 5: dedicated mission stabilization and bootstrap
 
 Primary owner: dedicated `SubModule` observer plus `CoopMissionSpawnLogic`.

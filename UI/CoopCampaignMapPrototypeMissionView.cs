@@ -16,6 +16,7 @@ using TaleWorlds.InputSystem;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.View.MissionViews;
 using TaleWorlds.ScreenSystem;
+using GlobalInput = TaleWorlds.InputSystem.Input;
 
 namespace CoopSpectator.UI
 {
@@ -378,6 +379,7 @@ namespace CoopSpectator.UI
                 _mapScene.DisableStaticShadows(true);
                 _mapScene.InvalidateTerrainPhysicsMaterials();
                 _mapScene.SetDontLoadInvisibleEntities(true);
+                MBMapScene.LoadAtmosphereData(_mapScene);
                 _mapScene.OptimizeScene(optimizeFlora: true, optimizeOro: false);
 
                 ResolveSceneLimits(_mapScene, out _sceneMinimum, out _sceneMaximum);
@@ -481,9 +483,15 @@ namespace CoopSpectator.UI
             _replicaInfoLayer = new GauntletLayer(
                 "CoopCampaignMapReplicaInfo",
                 ViewOrderPriority + 3,
-                false);
+                false)
+            {
+                IsFocusLayer = true
+            };
             _previousMissionMouseVisible = MissionScreen.MouseVisible;
             _missionMouseVisibilityCaptured = true;
+            _replicaInfoLayer.InputRestrictions.SetInputRestrictions(
+                true,
+                InputUsageMask.All);
             _replicaInfoLayer.InputRestrictions.SetMouseVisibility(true);
             MissionScreen.MouseVisible = true;
             MissionScreen.AddLayer(_replicaInfoLayer);
@@ -985,19 +993,21 @@ namespace CoopSpectator.UI
             if (_replicaInfoViewModel == null || _camera == null)
                 return;
 
-            bool clicked = Input.IsKeyPressed(InputKey.LeftMouseButton);
+            bool clicked = GlobalInput.IsKeyPressed(InputKey.LeftMouseButton);
             _replicaHoverUpdateDelay -= Math.Max(0f, dt);
             if (!clicked && _replicaHoverUpdateDelay > 0f)
                 return;
             _replicaHoverUpdateDelay = 0.08f;
 
-            Vec2 rangedMouse =
-                TaleWorlds.InputSystem.Input.MousePositionRanged;
+            Vec2 rangedMouse = GlobalInput.MousePositionRanged;
             Vec2 mouse = new Vec2(
                 rangedMouse.x * Screen.RealScreenResolutionWidth,
                 rangedMouse.y * Screen.RealScreenResolutionHeight);
             string hoveredId = null;
-            float nearestDistanceSquared = 70f * 70f;
+            float selectionRadius =
+                (float)CoopCampaignMapPrototypeInteractionPolicy
+                    .SelectionRadiusPixels;
+            float nearestDistanceSquared = selectionRadius * selectionRadius;
             foreach (KeyValuePair<string, EntityReplica> pair in _entityReplicas)
             {
                 EntityReplica replica = pair.Value;
@@ -1705,6 +1715,7 @@ namespace CoopSpectator.UI
                 {
                     _replicaInfoLayer.InputRestrictions.ResetInputRestrictions();
                     _replicaInfoLayer.InputRestrictions.SetMouseVisibility(false);
+                    _replicaInfoLayer.IsFocusLayer = false;
                 }
                 if (_replicaInfoLayer != null)
                     MissionScreen?.RemoveLayer(_replicaInfoLayer);
@@ -1783,10 +1794,10 @@ namespace CoopSpectator.UI
             if (sideLength <= 0.0001f)
                 return;
 
-            if (Input.IsKeyDown(InputKey.RightMouseButton))
+            if (GlobalInput.IsKeyDown(InputKey.RightMouseButton))
             {
-                float yaw = Input.GetMouseMoveX() * 0.0025f;
-                float pitch = -Input.GetMouseMoveY() * 0.0025f;
+                float yaw = GlobalInput.GetMouseMoveX() * 0.0025f;
+                float pitch = -GlobalInput.GetMouseMoveY() * 0.0025f;
                 if (Math.Abs(yaw) > 0.00001f)
                 {
                     direction = RotateAroundAxis(direction, Vec3.Up, yaw);
@@ -1809,58 +1820,111 @@ namespace CoopSpectator.UI
                 TryNormalizeCameraBasis(ref direction, ref up);
             }
 
+            float horizontalSpan = Math.Max(
+                _sceneMaximum.x - _sceneMinimum.x,
+                _sceneMaximum.y - _sceneMinimum.y);
+            Vec3 origin = _displayedCameraOrigin;
+            int zoomIntent =
+                CoopCampaignMapPrototypeInteractionPolicy.ResolveZoomIntent(
+                    GlobalInput.IsKeyPressed(InputKey.MouseScrollUp),
+                    GlobalInput.IsKeyPressed(InputKey.MouseScrollDown),
+                    GlobalInput.DeltaMouseScroll);
+            if (zoomIntent != 0)
+            {
+                float currentTerrainHeight = _mapScene.GetTerrainHeight(
+                    new Vec2(origin.x, origin.y));
+                if (!IsFinite(currentTerrainHeight))
+                    currentTerrainHeight = 0f;
+                double cameraHeight = Math.Max(
+                    0d,
+                    origin.z - currentTerrainHeight);
+                float zoomStep =
+                    (float)CoopCampaignMapPrototypeInteractionPolicy
+                        .ResolveZoomStep(horizontalSpan, cameraHeight);
+                origin += direction * (zoomStep * zoomIntent);
+                ClampCameraOriginToMap(ref origin, horizontalSpan);
+            }
+
             float moveForward = 0f;
             float moveSide = 0f;
             float moveUp = 0f;
-            if (Input.IsKeyDown(InputKey.W))
+            if (GlobalInput.IsKeyDown(InputKey.W) ||
+                GlobalInput.IsKeyDown(InputKey.Up))
                 moveForward += 1f;
-            if (Input.IsKeyDown(InputKey.S))
+            if (GlobalInput.IsKeyDown(InputKey.S) ||
+                GlobalInput.IsKeyDown(InputKey.Down))
                 moveForward -= 1f;
-            if (Input.IsKeyDown(InputKey.D))
+            if (GlobalInput.IsKeyDown(InputKey.D) ||
+                GlobalInput.IsKeyDown(InputKey.Right))
                 moveSide += 1f;
-            if (Input.IsKeyDown(InputKey.A))
+            if (GlobalInput.IsKeyDown(InputKey.A) ||
+                GlobalInput.IsKeyDown(InputKey.Left))
                 moveSide -= 1f;
-            if (Input.IsKeyDown(InputKey.Space) || Input.IsKeyDown(InputKey.E))
+            if (GlobalInput.IsKeyDown(InputKey.Space) ||
+                GlobalInput.IsKeyDown(InputKey.E))
                 moveUp += 1f;
-            if (Input.IsKeyDown(InputKey.LeftControl) ||
-                Input.IsKeyDown(InputKey.RightControl) ||
-                Input.IsKeyDown(InputKey.Q))
+            if (GlobalInput.IsKeyDown(InputKey.LeftControl) ||
+                GlobalInput.IsKeyDown(InputKey.RightControl) ||
+                GlobalInput.IsKeyDown(InputKey.Q))
             {
                 moveUp -= 1f;
             }
 
-            side = Cross(direction, up);
-            side.Normalize();
+            Vec3 forward = direction;
+            forward.z = 0f;
+            if (forward.Normalize() <= 0.0001f)
+                forward = Vec3.Forward;
+            side = Cross(forward, Vec3.Up);
+            if (side.Normalize() <= 0.0001f)
+                side = Vec3.Side;
             Vec3 movement =
-                direction * moveForward +
+                forward * moveForward +
                 side * moveSide +
                 Vec3.Up * moveUp;
             if (movement.IsNonZero)
             {
                 movement.Normalize();
-                float horizontalSpan = Math.Max(
-                    _sceneMaximum.x - _sceneMinimum.x,
-                    _sceneMaximum.y - _sceneMinimum.y);
-                float speed = Math.Max(20f, horizontalSpan * 0.08f);
-                if (Input.IsKeyDown(InputKey.LeftShift) ||
-                    Input.IsKeyDown(InputKey.RightShift))
+                float terrainHeight = _mapScene.GetTerrainHeight(
+                    new Vec2(origin.x, origin.y));
+                if (!IsFinite(terrainHeight))
+                    terrainHeight = 0f;
+                float speed =
+                    (float)CoopCampaignMapPrototypeInteractionPolicy
+                        .ResolvePanSpeed(
+                            horizontalSpan,
+                            Math.Max(0f, origin.z - terrainHeight));
+                if (GlobalInput.IsKeyDown(InputKey.LeftShift) ||
+                    GlobalInput.IsKeyDown(InputKey.RightShift))
                 {
                     speed *= 3f;
                 }
-                _displayedCameraOrigin += movement * (speed * safeDt);
-                _displayedCameraOrigin.x = Math.Max(
-                    _sceneMinimum.x,
-                    Math.Min(_sceneMaximum.x, _displayedCameraOrigin.x));
-                _displayedCameraOrigin.y = Math.Max(
-                    _sceneMinimum.y,
-                    Math.Min(_sceneMaximum.y, _displayedCameraOrigin.y));
-                _displayedCameraOrigin.z = Math.Max(
-                    1f,
-                    Math.Min(horizontalSpan * 2f, _displayedCameraOrigin.z));
+                origin += movement * (speed * safeDt);
+                ClampCameraOriginToMap(ref origin, horizontalSpan);
             }
 
+            _displayedCameraOrigin = origin;
             _displayedCameraDirection = direction;
             _displayedCameraUp = up;
+        }
+
+        private void ClampCameraOriginToMap(
+            ref Vec3 origin,
+            float horizontalSpan)
+        {
+            origin.x = Math.Max(
+                _sceneMinimum.x,
+                Math.Min(_sceneMaximum.x, origin.x));
+            origin.y = Math.Max(
+                _sceneMinimum.y,
+                Math.Min(_sceneMaximum.y, origin.y));
+            float terrainHeight = _mapScene.GetTerrainHeight(
+                new Vec2(origin.x, origin.y));
+            origin.z =
+                (float)CoopCampaignMapPrototypeInteractionPolicy
+                    .ClampCameraAltitude(
+                        IsFinite(terrainHeight) ? terrainHeight : 0f,
+                        origin.z,
+                        horizontalSpan);
         }
 
         private static Vec3 Cross(Vec3 left, Vec3 right)

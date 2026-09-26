@@ -64,6 +64,10 @@ namespace CoopSpectator.UI
                 nameof(InteractionText));
         }
 
+        [DataSourceProperty]
+        public string ControlsText =>
+            "WASD/стрілки — рух • коліщатко — масштаб • ПКМ — огляд • ЛКМ — відомості";
+
         internal void Show(
             CoopCampaignMapPrototypeCatalogEntityState catalog,
             CoopCampaignMapPrototypeDynamicEntityState dynamicState,

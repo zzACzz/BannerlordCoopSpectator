@@ -9,6 +9,7 @@ using SandBox.View.Map.Visuals;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Settlements;
+using TaleWorlds.CampaignSystem.ViewModelCollection;
 using TaleWorlds.Core;
 using TaleWorlds.Engine;
 using TaleWorlds.Library;
@@ -34,6 +35,7 @@ namespace CoopSpectator.Campaign
         private int _visibleEntitiesRevision;
         private int _catalogRevision;
         private int _dynamicRevision;
+        private int _conversationRevision;
         private int _lastHeading;
         private float _timeUntilNextPublish;
         private float _timeUntilNextVisibleEntityCapture;
@@ -41,6 +43,8 @@ namespace CoopSpectator.Campaign
             new List<CoopCampaignMapPrototypeEntityState>();
         private CoopCampaignMapPrototypeCatalogSnapshot _cachedCatalog;
         private CoopCampaignMapPrototypeDynamicSnapshot _cachedDynamic;
+        private CoopCampaignMapConversationState _cachedConversation =
+            CoopCampaignMapPrototypeContract.CreateInactiveConversation();
         private bool _catalogDirty;
         private bool _dynamicDirty;
         private readonly Dictionary<string, int> _entityHeadings =
@@ -276,6 +280,7 @@ namespace CoopSpectator.Campaign
                 }
                 CoopCampaignMapPrototypeCameraState cameraState =
                     TryCaptureMapCamera();
+                UpdateConversationSnapshot();
                 snapshot = new CoopCampaignMapPrototypeHostSnapshot
                 {
                     SchemaVersion =
@@ -295,6 +300,7 @@ namespace CoopSpectator.Campaign
                     DynamicRevision = _dynamicRevision,
                     VisibleEntities = new List<CoopCampaignMapPrototypeEntityState>(),
                     Camera = cameraState,
+                    Conversation = _cachedConversation.Clone(),
                     UpdatedUtc = DateTime.UtcNow
                 };
                 return true;
@@ -489,6 +495,9 @@ namespace CoopSpectator.Campaign
                             ArmyId = information?.ArmyId ?? string.Empty,
                             ArmyName = information?.ArmyName ?? string.Empty,
                             IsArmyLeader = information?.IsArmyLeader ?? false,
+                            SettlementProductionIconId =
+                                information?.SettlementProductionIconId ??
+                                string.Empty,
                             SelectionRadius = entity.Kind ==
                                 CoopCampaignMapPrototypeEntityKind.Settlement
                                 ? 30000
@@ -508,7 +517,11 @@ namespace CoopSpectator.Campaign
                             ArmyTotalSize = information?.ArmyTotalSize ?? 0,
                             ArmyCohesion = information?.ArmyCohesion ?? 0,
                             AppearanceRevision = 0,
-                            InformationRevision = 0
+                            InformationRevision = 0,
+                            QuestMarkerFlags =
+                                information?.QuestMarkerFlags ?? 0,
+                            SettlementEventFlags =
+                                information?.SettlementEventFlags ?? 0
                         };
                     if (!CoopCampaignMapPrototypeContract.IsValidCatalogEntity(
                             catalogEntity) ||
@@ -574,6 +587,8 @@ namespace CoopSpectator.Campaign
                     _knownDynamicById[entityId].Clone();
                 hidden.IsVisible = false;
                 hidden.IsMoving = false;
+                hidden.QuestMarkerFlags = 0;
+                hidden.SettlementEventFlags = 0;
                 _knownDynamicById[entityId] = hidden;
             }
 
@@ -895,6 +910,8 @@ namespace CoopSpectator.Campaign
                         CoopCampaignMapPrototypeContract.QuantizeUnit(
                             army.Cohesion / 100d);
                 }
+                information.QuestMarkerFlags =
+                    CapturePartyQuestMarkerFlags(party);
             }
             catch
             {
@@ -924,6 +941,7 @@ namespace CoopSpectator.Campaign
                     settlement.OwnerClan?.Name?.ToString());
                 information.LeaderName = BoundInformation(
                     settlement.OwnerClan?.Leader?.Name?.ToString());
+                CaptureSettlementMarkers(settlement, information);
             }
             catch
             {
@@ -937,6 +955,190 @@ namespace CoopSpectator.Campaign
                 value,
                 CoopCampaignMapPrototypeContract.MaxInformationTextCharacters,
                 string.Empty);
+        }
+
+        private static int CapturePartyQuestMarkerFlags(MobileParty party)
+        {
+            if (party == null)
+                return 0;
+
+            int flags = party == MobileParty.MainParty
+                ? 0
+                : CaptureSinglePartyQuestMarkerFlags(party);
+            Army army = party.Army;
+            if (army?.LeaderParty != party || party.AttachedParties == null)
+                return flags;
+
+            foreach (MobileParty attachedParty in party.AttachedParties)
+            {
+                if (attachedParty == null ||
+                    attachedParty == party ||
+                    attachedParty == MobileParty.MainParty)
+                {
+                    continue;
+                }
+                flags |= CaptureSinglePartyQuestMarkerFlags(attachedParty);
+            }
+            return flags & CoopCampaignMapPrototypeContract.MaxQuestMarkerFlags;
+        }
+
+        private static int CaptureSinglePartyQuestMarkerFlags(MobileParty party)
+        {
+            int flags = 0;
+            if (party?.LeaderHero?.Issue != null)
+            {
+                flags |= (int)CampaignUIHelper.GetIssueType(
+                    party.LeaderHero.Issue);
+            }
+
+            List<QuestBase> quests =
+                CampaignUIHelper.GetQuestsRelatedToParty(party);
+            if (quests == null)
+                return flags;
+
+            foreach (QuestBase quest in quests)
+            {
+                if (quest == null)
+                    continue;
+                bool isQuestGiver =
+                    party.LeaderHero != null &&
+                    quest.QuestGiver == party.LeaderHero;
+                flags |= isQuestGiver
+                    ? quest.IsSpecialQuest
+                        ? (int)CoopCampaignMapPrototypeQuestMarkerFlags
+                            .ActiveStoryQuest
+                        : (int)CoopCampaignMapPrototypeQuestMarkerFlags
+                            .ActiveIssue
+                    : quest.IsSpecialQuest
+                        ? (int)CoopCampaignMapPrototypeQuestMarkerFlags
+                            .TrackedStoryQuest
+                        : (int)CoopCampaignMapPrototypeQuestMarkerFlags
+                            .TrackedIssue;
+            }
+            return flags;
+        }
+
+        private static void CaptureSettlementMarkers(
+            Settlement settlement,
+            ReplicaInformation information)
+        {
+            if (settlement == null || information == null)
+                return;
+
+            int eventFlags = 0;
+            int questMarkerFlags = 0;
+            if (settlement.IsVillage &&
+                settlement.Village?.VillageType?.PrimaryProduction != null)
+            {
+                string itemId =
+                    settlement.Village.VillageType.PrimaryProduction.StringId ??
+                    string.Empty;
+                string productionIconId = itemId.IndexOf(
+                    "camel",
+                    StringComparison.OrdinalIgnoreCase) >= 0
+                    ? "camel"
+                    : itemId.IndexOf(
+                        "horse",
+                        StringComparison.OrdinalIgnoreCase) >= 0 ||
+                      itemId.IndexOf(
+                          "mule",
+                          StringComparison.OrdinalIgnoreCase) >= 0
+                        ? "horse"
+                        : itemId;
+                productionIconId =
+                    CoopCampaignMapPrototypeContract.BoundEntityText(
+                        productionIconId,
+                        CoopCampaignMapPrototypeContract
+                            .MaxProductionIconIdCharacters,
+                        string.Empty);
+                if (!string.IsNullOrEmpty(productionIconId))
+                {
+                    information.SettlementProductionIconId = productionIconId;
+                    eventFlags |= (int)
+                        CoopCampaignMapPrototypeSettlementEventFlags.Production;
+                }
+            }
+
+            if (settlement.Town != null &&
+                TaleWorlds.CampaignSystem.Campaign.Current.TournamentManager
+                    .GetTournamentGame(settlement.Town) != null)
+            {
+                eventFlags |= (int)
+                    CoopCampaignMapPrototypeSettlementEventFlags.Tournament;
+            }
+
+            int activeIssueCount =
+                TaleWorlds.CampaignSystem.Campaign.Current.IssueManager
+                    .GetNumOfActiveIssuesInSettlement(settlement, false);
+            int availableIssueCount =
+                TaleWorlds.CampaignSystem.Campaign.Current.IssueManager
+                    .GetNumOfAvailableIssuesInSettlement(settlement);
+            int activeStoryQuestCount = 0;
+            int trackedIssueCount = 0;
+            int trackedStoryQuestCount = 0;
+
+            if (TaleWorlds.CampaignSystem.Campaign.Current.QuestManager
+                    .TrackedObjects.TryGetValue(
+                        settlement,
+                        out List<QuestBase> directlyTrackedQuests) &&
+                directlyTrackedQuests != null)
+            {
+                foreach (QuestBase quest in directlyTrackedQuests)
+                {
+                    if (quest == null)
+                        continue;
+                    questMarkerFlags |= quest.IsSpecialQuest
+                        ? (int)CoopCampaignMapPrototypeQuestMarkerFlags
+                            .TrackedStoryQuest
+                        : (int)CoopCampaignMapPrototypeQuestMarkerFlags
+                            .TrackedIssue;
+                }
+            }
+
+            List<(bool isHeroQuestGiver, QuestBase quest)> relatedQuests =
+                CampaignUIHelper.GetQuestsRelatedToSettlement(settlement);
+            if (relatedQuests != null)
+            {
+                foreach ((bool isHeroQuestGiver, QuestBase quest) related in
+                         relatedQuests)
+                {
+                    if (related.quest == null)
+                        continue;
+                    if (related.isHeroQuestGiver)
+                    {
+                        if (related.quest.IsSpecialQuest)
+                            activeStoryQuestCount++;
+                        else
+                            activeIssueCount++;
+                    }
+                    else if (related.quest.IsSpecialQuest)
+                    {
+                        trackedStoryQuestCount++;
+                    }
+                    else
+                    {
+                        trackedIssueCount++;
+                    }
+                }
+            }
+
+            if (availableIssueCount > 0)
+                eventFlags |= (int)CoopCampaignMapPrototypeSettlementEventFlags.AvailableIssue;
+            if (activeIssueCount > 0)
+                eventFlags |= (int)CoopCampaignMapPrototypeSettlementEventFlags.ActiveQuest;
+            if (activeStoryQuestCount > 0)
+                eventFlags |= (int)CoopCampaignMapPrototypeSettlementEventFlags.ActiveStoryQuest;
+            if (trackedIssueCount > 0)
+                eventFlags |= (int)CoopCampaignMapPrototypeSettlementEventFlags.TrackedIssue;
+            if (trackedStoryQuestCount > 0)
+                eventFlags |= (int)CoopCampaignMapPrototypeSettlementEventFlags.TrackedStoryQuest;
+
+            information.QuestMarkerFlags =
+                questMarkerFlags &
+                CoopCampaignMapPrototypeContract.MaxQuestMarkerFlags;
+            information.SettlementEventFlags =
+                eventFlags &
+                CoopCampaignMapPrototypeContract.MaxSettlementEventFlags;
         }
 
         private static CoopCampaignMapPrototypeSettlementKind ResolveSettlementKind(
@@ -1402,6 +1604,13 @@ namespace CoopSpectator.Campaign
 
             public int ArmyCohesion { get; set; }
 
+            public int QuestMarkerFlags { get; set; }
+
+            public int SettlementEventFlags { get; set; }
+
+            public string SettlementProductionIconId { get; set; } =
+                string.Empty;
+
             public CoopCampaignMapPrototypeSettlementKind SettlementKind { get; set; }
         }
 
@@ -1437,6 +1646,32 @@ namespace CoopSpectator.Campaign
             {
                 return null;
             }
+        }
+
+        private void UpdateConversationSnapshot()
+        {
+            if (!CoopCampaignMapConversationCapture.TryCapture(
+                    out CoopCampaignMapConversationState captured,
+                    out string reason))
+            {
+                LogFailureRateLimited(
+                    "conversation-capture:" + (reason ?? "unknown"));
+                return;
+            }
+
+            if (CoopCampaignMapPrototypeContract
+                .AreConversationContentsEquivalent(
+                    _cachedConversation,
+                    captured))
+            {
+                return;
+            }
+
+            if (_conversationRevision == int.MaxValue)
+                _conversationRevision = 0;
+            _conversationRevision++;
+            captured.Revision = _conversationRevision;
+            _cachedConversation = captured.Clone();
         }
 
         private void LogFailureRateLimited(string reason)

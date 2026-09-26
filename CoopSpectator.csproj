@@ -62,6 +62,7 @@
     <Compile Remove="DedicatedServer\**\*" />
     <Compile Remove="GameMode\**\*" />
     <Compile Remove="Tests\**\*" />
+    <Compile Remove="artifacts\**\*.cs" />
     <Compile Remove="**\obj\**\*" />
     <Compile Remove="**\bin\**\*" />
     <Compile Remove="tmp_decompile_*\**\*.cs" />
