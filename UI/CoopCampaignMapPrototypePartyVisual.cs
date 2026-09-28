@@ -436,7 +436,7 @@ namespace CoopSpectator.UI
                 false);
         }
 
-        private static bool TryBuildEquipment(
+        internal static bool TryBuildEquipment(
             CoopCampaignMapPrototypeAgentVisualState exact,
             out Equipment equipment)
         {

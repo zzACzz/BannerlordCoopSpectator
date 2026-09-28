@@ -1069,6 +1069,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     CoopBattleResultCampaignDecision.AlreadyApplied)
                 {
                     _lastConsumedBattleResultKey = campaignEvaluation.JournalKey;
+                    CoopCampaignMissionHost.ObserveApplied(result, ShouldDeferFinalBattleAftermath(result));
                     if (_battleResultApplicationGate.IsOwned(
                             _battleResultApplicationLease) &&
                         string.Equals(
@@ -1135,6 +1136,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
                 _lastConsumedBattleResultKey = resultKey;
                 CompleteBattleResultApplicationLease();
+                CoopCampaignMissionHost.ObserveApplied(result, ShouldDeferFinalBattleAftermath(result));
 
                 int removedTotal = result.Entries?.Sum(entry => entry?.RemovedCount ?? 0) ?? 0;
                 int killedTotal = result.Entries?.Sum(entry => entry?.KilledCount ?? 0) ?? 0;
@@ -5461,13 +5463,16 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 if (!IsBattleStartPayloadReady(payload, "network-host", out _))
                     return false;
 
-                TryWriteBattleRosterFile(payload); // Варіант A: зберігаємо roster у спільний файл для dedicated на цьому ж ПК.
+                bool rosterWritten = TryWriteBattleRosterFile(payload); // Variant A: publish before mission admission.
+                if (CoopCampaignMissionHost.OwnsCommands && (!rosterWritten || !DedicatedServerCommands.SendStartMission()))
+                    return false;
                 string wireMessage = BattleStartMessageCodec.BuildBattleStartMessage(payload); // Серіалізуємо DTO в `BATTLE_START:{json}`
                 CoopRuntime.Network.BroadcastToClients(wireMessage); // Відправляємо повідомлення всім підключеним клієнтам
                 _hasSentBattleStartForThisMission = true;
                 UiFeedback.ShowMessageDeferred("Host: BATTLE_START sent to clients."); // Даємо короткий UI-індикатор для дебагу/перевірки
                 ModLogger.Info("BATTLE_START broadcasted."); // Логуємо факт відправки в лог гри
-                try { DedicatedServerCommands.SendStartMission(); } catch (Exception ex) { ModLogger.Info("DedicatedServerCommands.SendStartMission: " + ex.Message); } // Етап 3b: Dedicated Helper переводить у mission mode (поки stub)
+                if (!CoopCampaignMissionHost.OwnsCommands)
+                    try { DedicatedServerCommands.SendStartMission(); } catch (Exception ex) { ModLogger.Info("DedicatedServerCommands.SendStartMission: " + ex.Message); }
                 return true;
             } // Завершуємо блок try
             catch (Exception ex) // Ловимо будь-які винятки (API changes/null, тощо)
@@ -5486,8 +5491,10 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     return false;
 
                 ModLogger.Info("BattleDetector: not TCP host — sending start_mission to dedicated (campaign host path).");
-                TryWriteBattleRosterFile(payload); // Для host-only campaign path теж пишемо battle_roster.json перед start_mission.
+                bool rosterWritten = TryWriteBattleRosterFile(payload);
+                if (CoopCampaignMissionHost.OwnsCommands && !rosterWritten) return false;
                 bool sent = DedicatedServerCommands.SendStartMission();
+                if (CoopCampaignMissionHost.OwnsCommands && !sent) return false;
                 _hasSentBattleStartForThisMission = true;
                 ModLogger.Info("BattleDetector: SendStartMission() returned " + sent + ".");
                 return true;
@@ -5499,12 +5506,12 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             }
         }
 
-        private static void TryWriteBattleRosterFile(BattleStartMessage payload)
+        private static bool TryWriteBattleRosterFile(BattleStartMessage payload)
         {
             if (payload == null || payload.Troops == null || payload.Troops.Count == 0)
             {
                 ModLogger.Info("BattleDetector: skipping battle_roster.json write (payload troops empty).");
-                return;
+                return false;
             }
 
             try
@@ -5519,10 +5526,12 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
                 bool wrote = BattleRosterFileHelper.WriteRoster(troopIds, payload.Snapshot);
                 ModLogger.Info("BattleDetector: battle_roster.json write result = " + wrote + " (troop ids collected = " + troopIds.Count + ", snapshot sides = " + (payload.Snapshot?.Sides?.Count ?? 0) + ").");
+                return wrote;
             }
             catch (Exception ex)
             {
                 ModLogger.Error("BattleDetector: failed to write battle_roster.json.", ex);
+                return false;
             }
         }
 
@@ -14543,4 +14552,3 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
     } // Завершуємо блок класу
 } // Завершуємо блок простору імен
-

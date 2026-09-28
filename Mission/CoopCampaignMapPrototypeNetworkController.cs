@@ -7,7 +7,7 @@ using TaleWorlds.MountAndBlade.Network.Messages;
 
 namespace CoopSpectator.MissionBehaviors
 {
-    public sealed class CoopCampaignMapPrototypeNetworkController : MissionNetwork
+    public sealed partial class CoopCampaignMapPrototypeNetworkController : MissionNetwork
     {
         private const float BridgePollIntervalSeconds = 0.1f;
         private const int CatalogRequestWindowChunks = 4;
@@ -47,9 +47,23 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly CoopCampaignMapPrototypeEntitySnapshotAssembler
             ClientEntityAssembler =
                 new CoopCampaignMapPrototypeEntitySnapshotAssembler();
-        private static readonly CoopCampaignMapConversationSnapshotAssembler
-            ClientConversationAssembler =
-                new CoopCampaignMapConversationSnapshotAssembler();
+        private static readonly CoopCampaignMapConversationPayloadAssembler
+            ClientConversationAssembler = new CoopCampaignMapConversationPayloadAssembler();
+        private static readonly CoopCampaignMapConversationPoseReceiver ClientPoseReceiver =
+            new CoopCampaignMapConversationPoseReceiver();
+        private const int MaxConversationChunksPerPeerPerTick = 2;
+        private readonly Dictionary<int, ConversationSendState> _conversationSends =
+            new Dictionary<int, ConversationSendState>();
+        private CoopCampaignMapCatalogChunkedPayload _preparedConversation;
+        private int _preparedConversationRevision = -1;
+
+        private sealed class ConversationSendState
+        {
+            public NetworkCommunicator Peer;
+            public int Revision;
+            public CoopCampaignMapCatalogChunkedPayload Payload;
+            public int NextChunk;
+        }
 
         public static event Action<CoopCampaignMapPrototypeState> ClientStateChanged;
 
@@ -75,6 +89,7 @@ namespace CoopSpectator.MissionBehaviors
 
         public static event Action<CoopCampaignMapConversationState>
             ClientConversationChanged;
+        public static event Action<CoopCampaignMapConversationPose> ClientConversationPoseChanged;
 
         public static CoopCampaignMapPrototypeState CurrentClientState { get; private set; }
 
@@ -137,6 +152,7 @@ namespace CoopSpectator.MissionBehaviors
         public override void OnBehaviorInitialize()
         {
             base.OnBehaviorInitialize();
+            InitializeTooltips();
             if (GameNetwork.IsClient)
             {
                 CurrentClientState = null;
@@ -162,6 +178,9 @@ namespace CoopSpectator.MissionBehaviors
             _serverConversation =
                 CoopCampaignMapPrototypeContract.CreateInactiveConversation();
             _serverCatalogTransportByPeer.Clear();
+            _conversationSends.Clear();
+            _preparedConversation = null;
+            _preparedConversationRevision = -1;
             _preparedCatalogPayload = null;
             _preparedCatalogRevision = -1;
             _catalogTransferId = 0;
@@ -193,13 +212,15 @@ namespace CoopSpectator.MissionBehaviors
                     HandleServerDynamicSnapshot);
                 registerer.RegisterBaseHandler<CoopCampaignMapDynamicBatchMessage>(
                     HandleServerDynamicBatch);
-                registerer.RegisterBaseHandler<CoopCampaignMapConversationSnapshotMessage>(
-                    HandleServerConversationSnapshot);
-                registerer.RegisterBaseHandler<CoopCampaignMapConversationOptionMessage>(
-                    HandleServerConversationOption);
+                registerer.RegisterBaseHandler<CoopCampaignMapConversationChunkMessage>(
+                    HandleServerConversationChunk);
+                registerer.RegisterBaseHandler<CoopCampaignMapConversationPoseMessage>(HandleServerConversationPose);
+                registerer.RegisterBaseHandler<CoopCampaignMapTooltipControlMessage>(HandleTooltipControl);
+                registerer.RegisterBaseHandler<CoopCampaignMapTooltipChunkMessage>(HandleTooltipChunk);
             }
             else if (GameNetwork.IsServer)
             {
+                registerer.RegisterBaseHandler<CoopCampaignMapTooltipRequestMessage>(HandleTooltipRequest);
                 registerer.RegisterBaseHandler<CoopCampaignMapCatalogRangeAckMessage>(
                     HandleClientCatalogRangeAck);
                 registerer.RegisterBaseHandler<CoopCampaignMapCatalogCompleteAckMessage>(
@@ -210,6 +231,7 @@ namespace CoopSpectator.MissionBehaviors
         public override void OnMissionTick(float dt)
         {
             base.OnMissionTick(dt);
+            TickTooltips();
             if (GameNetwork.IsClient)
             {
                 TickClientCatalogTransport();
@@ -218,6 +240,7 @@ namespace CoopSpectator.MissionBehaviors
             if (!GameNetwork.IsServer)
                 return;
             TickServerCatalogTransports();
+            TickServerConversationTransports();
             if (Mission.CurrentTime < _nextBridgePollAt)
                 return;
 
@@ -229,6 +252,12 @@ namespace CoopSpectator.MissionBehaviors
                     out string reason))
             {
                 LogAvailabilityTransition("unavailable:" + (reason ?? "unknown"));
+                if (_serverConversation.IsActive && _networkConversationRevision < int.MaxValue)
+                {
+                    _serverConversation = CoopCampaignMapPrototypeContract.CreateInactiveConversation(++_networkConversationRevision);
+                    _lastBridgeConversationRevision = -1;
+                    BroadcastConversation(_serverConversation);
+                }
                 return;
             }
 
@@ -296,6 +325,9 @@ namespace CoopSpectator.MissionBehaviors
                 _serverCatalog.Clear();
                 _serverDynamic.Clear();
                 _serverCatalogTransportByPeer.Clear();
+                _conversationSends.Clear();
+                _preparedConversation = null;
+                _preparedConversationRevision = -1;
                 _preparedCatalogPayload = null;
                 _preparedCatalogRevision = -1;
                 _catalogTransferId = 0;
@@ -310,6 +342,8 @@ namespace CoopSpectator.MissionBehaviors
                 _networkRevision);
             if (_serverState == null)
                 return;
+
+            _tooltipHostSeenAt = TooltipNow;
 
             List<CoopCampaignMapPrototypeCatalogEntityState> catalogDelta = null;
             int previousNetworkCatalogRevision = _networkCatalogRevision;
@@ -388,6 +422,16 @@ namespace CoopSpectator.MissionBehaviors
                 BroadcastDynamic(_networkDynamicRevision, dynamicDelta);
             if (conversationChanged)
                 BroadcastConversation(_serverConversation);
+            // Motion never supersedes or restarts the reliable text/descriptor
+            // transfer. One bounded latest sample per accepted host publication.
+            if (snapshot.ConversationPose != null && _serverConversation.IsActive &&
+                CoopCampaignMapConversationPoseCodec.Matches(snapshot.ConversationPose, snapshot.Conversation))
+            {
+                var pose = snapshot.ConversationPose.Clone();
+                pose.ConversationRevision = _serverConversation.Revision;
+                pose.Sequence = _networkRevision;
+                BroadcastConversationPose(pose);
+            }
         }
 
         protected override void HandleNewClientAfterSynchronized(
@@ -411,6 +455,7 @@ namespace CoopSpectator.MissionBehaviors
 
         public override void OnMissionStateFinalized()
         {
+            FinalizeTooltips();
             if (GameNetwork.IsClient)
             {
                 CurrentClientState = null;
@@ -432,6 +477,9 @@ namespace CoopSpectator.MissionBehaviors
             _serverConversation =
                 CoopCampaignMapPrototypeContract.CreateInactiveConversation();
             _serverCatalogTransportByPeer.Clear();
+            _conversationSends.Clear();
+            _preparedConversation = null;
+            _preparedConversationRevision = -1;
             _preparedCatalogPayload = null;
             _preparedCatalogRevision = -1;
             _catalogTransferId = 0;
@@ -444,7 +492,11 @@ namespace CoopSpectator.MissionBehaviors
         {
             base.HandlePlayerDisconnect(networkPeer);
             if (networkPeer != null)
+            {
+                RemoveTooltipPeer(networkPeer);
                 _serverCatalogTransportByPeer.Remove(networkPeer.Index);
+                _conversationSends.Remove(networkPeer.Index);
+            }
         }
 
         private void LogAvailabilityTransition(string reason)
@@ -483,6 +535,7 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             CurrentClientState = state;
+            _tooltipClientStateAt = TooltipNow;
             try
             {
                 ClientStateChanged?.Invoke(state.Clone());
@@ -855,49 +908,37 @@ namespace CoopSpectator.MissionBehaviors
             ApplyCompletedDynamic(message.Revision, completed);
         }
 
-        private static void HandleServerConversationSnapshot(
-            GameNetworkMessage baseMessage)
+        private static void HandleServerConversationChunk(GameNetworkMessage baseMessage)
         {
-            CoopCampaignMapConversationSnapshotMessage message =
-                baseMessage as CoopCampaignMapConversationSnapshotMessage;
-            if (message == null ||
-                message.ProtocolVersion !=
-                    CoopCampaignMapPrototypeContract.ProtocolVersion)
-            {
+            var message = baseMessage as CoopCampaignMapConversationChunkMessage;
+            if (message == null || message.ProtocolVersion != CoopCampaignMapPrototypeContract.ProtocolVersion)
                 return;
-            }
-
-            if (ClientConversationAssembler.TryBegin(
-                    message.ToState(),
-                    message.OptionCount,
-                    out CoopCampaignMapConversationState completed) &&
-                completed != null)
-            {
+            if (ClientConversationAssembler.TryAccept(message.Revision, message.LogicalBytes,
+                message.WireBytes, message.ChunkCount, message.Compression, message.PayloadHash,
+                message.ChunkIndex, message.PayloadBytes, out var completed) && completed != null)
                 ApplyCompletedConversation(completed);
-            }
         }
 
-        private static void HandleServerConversationOption(
-            GameNetworkMessage baseMessage)
+        private static void HandleServerConversationPose(GameNetworkMessage baseMessage)
         {
-            CoopCampaignMapConversationOptionMessage message =
-                baseMessage as CoopCampaignMapConversationOptionMessage;
-            if (message == null ||
-                message.ProtocolVersion !=
-                    CoopCampaignMapPrototypeContract.ProtocolVersion)
-            {
-                return;
-            }
+            var message = baseMessage as CoopCampaignMapConversationPoseMessage;
+            if (message == null || message.ProtocolVersion != CoopCampaignMapPrototypeContract.ProtocolVersion ||
+                !ClientPoseReceiver.TryAccept(message.Pose, out var pose)) return;
+            ClientConversationPoseChanged?.Invoke(pose);
+        }
 
-            if (ClientConversationAssembler.TryAdd(
-                    message.Revision,
-                    message.Index,
-                    message.ExpectedCount,
-                    message.ToOption(),
-                    out CoopCampaignMapConversationState completed) &&
-                completed != null)
+        private void BroadcastConversationPose(CoopCampaignMapConversationPose pose)
+        {
+            if (GameNetwork.NetworkPeers == null) return;
+            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
             {
-                ApplyCompletedConversation(completed);
+                if (peer == null || peer.IsServerPeer || !peer.IsConnectionActive || !peer.IsSynchronized ||
+                    _conversationSends.ContainsKey(peer.Index)) continue;
+                // Text and close have priority. If not ready, skip this motion
+                // sample; the next host publication replaces it without a queue.
+                GameNetwork.BeginModuleEventAsServer(peer);
+                GameNetwork.WriteMessage(new CoopCampaignMapConversationPoseMessage(pose));
+                GameNetwork.EndModuleEventAsServer();
             }
         }
 
@@ -1172,6 +1213,7 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             CurrentClientConversation = state.Clone();
+            ClientPoseReceiver.Bind(state);
             try
             {
                 ClientConversationChanged?.Invoke(state.Clone());
@@ -1210,30 +1252,10 @@ namespace CoopSpectator.MissionBehaviors
                     continue;
                 }
 
-                merged.Add(new CoopCampaignMapPrototypeEntityState
-                {
-                    EntityId = catalog.EntityId,
-                    DisplayName = catalog.DisplayName,
-                    Kind = catalog.Kind,
-                    SettlementNameplateSize = catalog.SettlementNameplateSize,
-                    NormalizedX = dynamicState.NormalizedX,
-                    NormalizedY = dynamicState.NormalizedY,
-                    Heading = dynamicState.Heading,
-                    PartySize = dynamicState.PartySize,
-                    PrimaryColor = catalog.PrimaryColor,
-                    SecondaryColor = catalog.SecondaryColor,
-                    BannerCode = catalog.BannerCode,
-                    VisualCharacterId = catalog.VisualCharacterId,
-                    CultureId = catalog.CultureId,
-                    PartyVisualKind = catalog.PartyVisualKind,
-                    HumanVisual = catalog.HumanVisual?.Clone(),
-                    MountVisual = catalog.MountVisual?.Clone(),
-                    CaravanMountVisual = catalog.CaravanMountVisual?.Clone(),
-                    QuestMarkerFlags = dynamicState.QuestMarkerFlags,
-                    SettlementEventFlags = dynamicState.SettlementEventFlags,
-                    SettlementProductionIconId =
-                        catalog.SettlementProductionIconId
-                });
+                CoopCampaignMapPrototypeEntityState entity =
+                    CoopCampaignMapReplicaStateProjection.Merge(catalog, dynamicState);
+                if (entity != null)
+                    merged.Add(entity);
             }
 
             if (_clientMergedRevision < int.MaxValue)
@@ -1294,45 +1316,48 @@ namespace CoopSpectator.MissionBehaviors
         private static void ResetClientConversation()
         {
             ClientConversationAssembler.Reset();
+            ClientPoseReceiver.Reset();
             CurrentClientConversation = null;
         }
 
-        private static void BroadcastConversation(
-            CoopCampaignMapConversationState state)
+        private void BroadcastConversation(CoopCampaignMapConversationState state)
         {
-            if (!CoopCampaignMapPrototypeContract.TryValidateConversationState(
-                    state,
-                    out _))
-            {
-                return;
-            }
+            // Supersession also cancels unfinished sends of the previous dialogue.
+            _conversationSends.Clear();
+            if (GameNetwork.NetworkPeers == null) return;
+            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+                SendConversation(peer, state);
+        }
 
-            try
+        private void TickServerConversationTransports()
+        {
+            foreach (var send in new List<ConversationSendState>(_conversationSends.Values))
             {
-                GameNetwork.BeginBroadcastModuleEvent();
-                GameNetwork.WriteMessage(
-                    new CoopCampaignMapConversationSnapshotMessage(state));
-                GameNetwork.EndBroadcastModuleEvent(
-                    GameNetwork.EventBroadcastFlags.None);
-                int optionCount = state.Options.Count;
-                for (int index = 0; index < optionCount; index++)
+                NetworkCommunicator current = FindNetworkPeer(send.Peer.Index);
+                if (!ReferenceEquals(current, send.Peer) || !current.IsConnectionActive || !current.IsSynchronized)
                 {
-                    GameNetwork.BeginBroadcastModuleEvent();
-                    GameNetwork.WriteMessage(
-                        new CoopCampaignMapConversationOptionMessage(
-                            state.Revision,
-                            index,
-                            optionCount,
-                            state.Options[index]));
-                    GameNetwork.EndBroadcastModuleEvent(
-                        GameNetwork.EventBroadcastFlags.None);
+                    _conversationSends.Remove(send.Peer.Index);
+                    continue;
                 }
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Info(
-                    "CoopCampaignMapPrototypeNetworkController: conversation broadcast failed. Error=" +
-                    ex.Message + ".");
+                try
+                {
+                    for (int budget = 0; budget < MaxConversationChunksPerPeerPerTick &&
+                         send.NextChunk < send.Payload.ChunkCount; budget++)
+                    {
+                        GameNetwork.BeginModuleEventAsServer(current);
+                        GameNetwork.WriteMessage(new CoopCampaignMapConversationChunkMessage(
+                            send.Revision, send.Payload, send.NextChunk));
+                        GameNetwork.EndModuleEventAsServer();
+                        send.NextChunk++;
+                    }
+                    if (send.NextChunk == send.Payload.ChunkCount)
+                        _conversationSends.Remove(send.Peer.Index);
+                }
+                catch (Exception ex)
+                {
+                    _conversationSends.Remove(send.Peer.Index);
+                    ModLogger.Info("CoopCampaignMapPrototypeNetworkController: conversation transfer failed. Error=" + ex.Message + ".");
+                }
             }
         }
 
@@ -1651,6 +1676,11 @@ namespace CoopSpectator.MissionBehaviors
             if (count <= 0)
                 return true;
 
+            // Occupant lists can exceed a native single-message budget. Admission
+            // must happen before the header: queue the bounded binary transfer instead.
+            for (int index = 0; index < count; index++)
+                if (!string.IsNullOrEmpty(entities[index]?.SettlementPartyBadges)) return false;
+
             try
             {
                 GameNetwork.BeginModuleEventAsServer(peer);
@@ -1745,43 +1775,29 @@ namespace CoopSpectator.MissionBehaviors
             }
         }
 
-        private static void SendConversation(
-            NetworkCommunicator peer,
-            CoopCampaignMapConversationState state)
+        private void SendConversation(NetworkCommunicator peer, CoopCampaignMapConversationState state)
         {
-            if (peer == null ||
-                !CoopCampaignMapPrototypeContract.TryValidateConversationState(
-                    state,
-                    out _))
+            if (peer == null || !peer.IsConnectionActive || !peer.IsSynchronized ||
+                !CoopCampaignMapPrototypeContract.TryValidateConversationState(state, out _)) return;
+            if (_preparedConversationRevision != state.Revision)
             {
-                return;
-            }
-
-            try
-            {
-                GameNetwork.BeginModuleEventAsServer(peer);
-                GameNetwork.WriteMessage(
-                    new CoopCampaignMapConversationSnapshotMessage(state));
-                GameNetwork.EndModuleEventAsServer();
-                int optionCount = state.Options.Count;
-                for (int index = 0; index < optionCount; index++)
+                _preparedConversationRevision = state.Revision;
+                _preparedConversation = null;
+                if (!CoopCampaignMapConversationPayloadCodec.TrySerialize(state, out var bytes) ||
+                    !CoopCampaignMapCatalogChunkCodec.TryEncode(bytes, out _preparedConversation, out _))
                 {
-                    GameNetwork.BeginModuleEventAsServer(peer);
-                    GameNetwork.WriteMessage(
-                        new CoopCampaignMapConversationOptionMessage(
-                            state.Revision,
-                            index,
-                            optionCount,
-                            state.Options[index]));
-                    GameNetwork.EndModuleEventAsServer();
+                    // A malformed optional presentation must not retain an older active
+                    // dialogue indefinitely. Send an inactive state at the same revision.
+                    var inactive = CoopCampaignMapPrototypeContract.CreateInactiveConversation(state.Revision);
+                    if (CoopCampaignMapConversationPayloadCodec.TrySerialize(inactive, out bytes))
+                        CoopCampaignMapCatalogChunkCodec.TryEncode(bytes, out _preparedConversation, out _);
                 }
             }
-            catch (Exception ex)
+            if (_preparedConversation == null) return;
+            _conversationSends[peer.Index] = new ConversationSendState
             {
-                ModLogger.Info(
-                    "CoopCampaignMapPrototypeNetworkController: conversation direct send failed. Peer=" +
-                    peer.Index + " Error=" + ex.Message + ".");
-            }
+                Peer = peer, Revision = state.Revision, Payload = _preparedConversation, NextChunk = 0
+            };
         }
 
         private static void SendVisibleEntities(

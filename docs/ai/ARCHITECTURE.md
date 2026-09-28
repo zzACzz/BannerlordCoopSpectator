@@ -1,5 +1,51 @@
 # Architecture
 
+Tooltip local relay source now has a distinct launcher-inherited run GUID, exact
+host/dedicated PID/start/path binding and fixed run-local files. It does not borrow
+AutomaticCampaignMissions authority. The host polls on its owner thread; the
+dedicated endpoint now receives exact-peer-gated requests from the native mission
+controller. Local file binding is not remote-peer authentication. The client stock
+presenter owns only a private marker registration and detached rows, never campaign
+providers; global hide/unregister requires exact ownership. Native verification is
+open. See [network ownership](CAMPAIGN_MAP_RESUME_2026-09-26.md#tooltip-native-network-candidate-2026-09-28-source-only)
+and [presenter ownership](CAMPAIGN_MAP_RESUME_2026-09-26.md#tooltip-stock-presenter-candidate-2026-09-28-not-native-verified).
+
+Current cmp-b10 host authority includes wall/preparation presentation (25/21/6).
+Only disclosed host inputs cross the transport; clients apply to owned map roots
+after level filtering and hide unknown/failed states. No local campaign simulation
+or physical battle-scene mutation. See [implementation and bounded native result](CAMPAIGN_MAP_RESUME_2026-09-26.md#wall-and-siege-preparation-candidate-2026-09-27).
+
+cmp-b9 authoring helper removal is owned-map initialization only, never campaign
+or physical mission scene logic. Protocol remains 24/20/5. See
+[scope](CAMPAIGN_MAP_RESUME_2026-09-26.md#fortification-authoring-helper-candidate-2026-09-27).
+
+cmp-b8 level ownership: host reads its native visual selection after disclosure
+admission; clients resolve semantic flags against their owned scene. Unknown state
+keeps roots hidden; no local campaign state or guessed civilian defaults.
+See [implementation and bounded result](CAMPAIGN_MAP_RESUME_2026-09-26.md#host-selected-settlement-levels-2026-09-27-bounded-native-result).
+
+cmp-b5 static geometry ownership: only host-admitted settlement projections may
+reveal client-owned roots. Camera/label visibility cannot grant admission. Missing
+or ambiguous bindings stay hidden; no client campaign simulation or hidden queries.
+See [candidate and limits](CAMPAIGN_MAP_RESUME_2026-09-26.md#static-settlement-geometry-admission-2026-09-27).
+
+Map camera ownership (2026-09-27 candidate): host owns visible entities and the
+reference frame; each client owns only its local follow/detached mode. Explicit
+return is not a campaign command. Tracking/inspection comes from host state, not
+client camera distance. See [behavior and evidence](CAMPAIGN_MAP_RESUME_2026-09-26.md#host-camera-following-and-settlement-presentation-2026-09-27).
+
+## Automatic campaign mission ownership (source, native acceptance pending)
+
+With both map and automatic-mission opt-ins, the supported campaign-owned server
+launcher establishes a fresh process-bound local session. `CoopCampaignMissionHost`
+owns campaign intent and exact applied-aftermath proof; `CoopCampaignMissionChannel`
+owns bounded atomic transport and detached identity/freshness admission;
+`CoopCampaignMissionServer` alone dispatches map/battle transitions through the
+native ListedServer manager. Existing battle behaviors still own battle completion
+and ending. Campaign legacy start/end and hero-creator paths cannot issue competing
+commands during a bound session. Default behavior remains unchanged when disabled.
+See [source details and open native gates](CAMPAIGN_MAP_AUTOMATIC_LIFECYCLE.md).
+
 Local file ownership (2026-09-09): CoopAutomationRuntimeBridge.ResolveCoopFolderPath delegates to the pure runtime contract with a lazy production Documents provider. Exact field smoke selects only its validated local state/bridge directory; disabled/non-smoke callers retain the original directory. All shared module Documents factories now use this boundary, including optional diagnostics and helper modes. Phase remains under state/phase. The runner owns sentinel creation; the server independently admits its bytes and observes real result suppression. Attempt-v2 evidence explicitly describes local preservation and no personal-result access. [Source map and validation](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#11-local-only-file-isolation-2026-09-09).
 
 The default-off FieldDedicatedSpawnSmokeV1 profile binds an immutable run-owned field roster before the existing dedicated bootstrap opens CoopBattle / MultiplayerBattle. A dedicated-only observer reads native materialization once at PreBattleHold and requests normal early abort with result suppression. Physical spawn authority and disabled production paths are preserved. See [M4 field spawn smoke](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md); native proof remains pending.
@@ -143,13 +189,33 @@ The server remains the only physical spawner. Initial siege client materializati
 
 ### Campaign-map replica and dialogue projection
 
+Settlement occupant badge source update (2026-09-28): the campaign alone admits
+the native in-range settlement party grid. Bounded kind/bandit/clan-banner data
+crosses the existing catalog (wire26/bridge22/binary7), not full party/roster
+objects. Nonempty badge updates require chunked catalog transport; range loss
+clears the client projection. The client owns passive native-grid binding items,
+not campaign events/parties or choice authority. Native acceptance pending; see
+[current candidate](CAMPAIGN_MAP_RESUME_2026-09-26.md#settlement-occupant-badge-candidate-2026-09-28).
+
+Nameplate dependency boundary (2026-09-26 source candidate): only the campaign
+publisher calls installed `SandBox.ViewModelCollection.SandBoxUIHelper` to resolve
+native healthy/wounded/prisoner text and attached-army aggregation. The client
+assembly references it with `Private=false`; the dedicated assembly does not.
+Multiplayer consumes bounded host-localized strings, not campaign roster objects.
+This does not change authority or enable client campaign actions. Build-verified,
+not runtime-verified; see [current evidence](CAMPAIGN_MAP_RESUME_2026-09-26.md).
+
 The campaign process is the sole source of truth for the map replica. `CoopCampaignMapPrototypePublisherBehavior` publishes only objects already visible to the host, their bounded display/catalog and dynamic state, and the currently rendered map-conversation text. The local file bridge is a same-machine handoff to the dedicated process; it is not remote network authority.
 
 For dialogue, `CoopCampaignMapConversationCapture` reads the already formatted native `MapConversationVM.DialogController` owned by `GauntletMapConversationView`. It does not advance the conversation, invoke an answer, or reconstruct campaign dialogue rules. Barter is outside the current milestone and projects as inactive. Unavailable or structurally invalid native state fails closed to an inactive dialogue.
 
-The dedicated `CoopCampaignMapPrototypeNetworkController` assigns its own monotonically increasing dialogue revision and sends a bounded header followed by the exact option records. The client applies only a complete revision, including the current revision for a late joiner. Both message types are server-to-client only; there is no client answer message.
+The separate `CoopCampaignMapConversationTableauCapture` now optionally reads the host's initialized rendered actors during dialogue capture instead of querying hidden rosters, keeping camera/body/equipment/color data separate from campaign authority (2026-09-26 source). The descriptor crosses bridge schema 17 and protocol 21 in the same atomic dialogue payload. Unavailable visuals retain text-only dialogue. The client scene owner described below now consumes that descriptor with independent scene/lifecycle ownership; it never initializes the native campaign tableau cache or creates physical mission agents. Initial action capture is not full live animation/audio synchronization. This source candidate is not deployed/live-verified.
+
+The dedicated `CoopCampaignMapPrototypeNetworkController` assigns its own monotonically increasing dialogue revision and prepares a bounded binary payload containing all text/options and optional tableau. A server-only chunk message carries at most 256 payload bytes, paced at two chunks per peer per tick over the native reliable channel. The client validates metadata, hash, bounded decompression, embedded revision and all content before publishing one complete dialogue. New revisions replace unfinished transfers; late join gets the current state, and disconnect/mission reset clear owned queues. No client answer message exists. The previous single text-header/option wire messages are replaced, so all roles need coherent protocol 21 binaries.
 
 `CoopCampaignMapConversationView` renders the accepted projection with the native `SPConversation` movie in the isolated multiplayer mission. Answer commands are deliberately no-op: the campaign host remains the only actor that can select a response. The separate hideout boss-conversation path is unchanged.
+
+The source candidate now also owns `CoopCampaignMapConversationTableauView`: a passive scene layer, separate scene/camera/agent-renderer controller, and up to three visual-only actors. Equal descriptors preserve this scene across text updates; replacement, close and mission-screen finalization dispose owned resources. Readiness is polled with a monotonic 15-second limit and optional failures retain text. The layer does not clear the scene automatically; the owner detaches rendering before clearing its own native resources. No shared native campaign tableau/cache or physical-agent lifecycle is used. This renderer is build/test-verified only; initial-action data still lacks continuous facial/reaction/audio parity.
 
 ## The battle snapshot
 

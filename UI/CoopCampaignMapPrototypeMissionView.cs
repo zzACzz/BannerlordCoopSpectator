@@ -24,7 +24,7 @@ namespace CoopSpectator.UI
     /// Experimental client-only renderer that places Main_map in a separate scene layer.
     /// It deliberately does not create Campaign.Current or any campaign managers.
     /// </summary>
-    public sealed class CoopCampaignMapPrototypeMissionView : MissionView
+    public sealed partial class CoopCampaignMapPrototypeMissionView : MissionView
     {
         private const string MarkerMeshName = "order_flag_small";
         private const string EntityOverlayMovieName = "PartyNameplate";
@@ -35,6 +35,7 @@ namespace CoopSpectator.UI
         private const float PartyVisualRetryDelaySeconds = 0.25f;
         private const float PartyVisualStableResetSeconds = 2f;
         private const float StaticOverlayUpdateIntervalSeconds = 0.05f;
+        private const float PartyNameplateHeadHeight = 0.8f;
         private const double WorldPositionRefreshNormalizedEpsilon = 0.0000005d;
 
         private sealed class EntityReplica
@@ -56,6 +57,10 @@ namespace CoopSpectator.UI
             public bool HasWorldPosition { get; set; }
 
             public GameEntity Marker { get; set; }
+
+            public GameEntity PickBody { get; set; }
+            public MatrixFrame PickFrame;
+            public bool HasPickFrame;
 
             public CoopCampaignMapPrototypePartyVisual PartyVisual { get; set; }
 
@@ -104,6 +109,15 @@ namespace CoopSpectator.UI
         private GameEntity _hostMarker;
         private GameEntity[] _tickedMapEntities = Array.Empty<GameEntity>();
         private Mesh[] _tickedMapMeshes = Array.Empty<Mesh>();
+        private readonly CoopCampaignMapSettlementGeometryAdmission<GameEntity>
+            _settlementGeometry;
+
+        public CoopCampaignMapPrototypeMissionView()
+        {
+            _settlementGeometry = new CoopCampaignMapSettlementGeometryAdmission<GameEntity>(
+                (root, visible) => root.SetVisibilityExcludeParents(visible), ApplySettlementLevels,
+                ApplySettlementPresentation);
+        }
         private readonly Dictionary<string, EntityReplica> _entityReplicas =
             new Dictionary<string, EntityReplica>(StringComparer.OrdinalIgnoreCase);
         private IReadOnlyList<CoopCampaignMapPrototypeEntityState>
@@ -131,6 +145,8 @@ namespace CoopSpectator.UI
                 new Dictionary<string, CoopCampaignMapPrototypeDynamicEntityState>(
                     StringComparer.OrdinalIgnoreCase);
         private string _selectedReplicaId;
+        private string _hoveredReplicaId;
+        private CoopCampaignMapTooltipPresenter _tooltipPresenter;
         private float _replicaHoverUpdateDelay;
         private Vec3 _sceneMinimum;
         private Vec3 _sceneMaximum;
@@ -138,7 +154,8 @@ namespace CoopSpectator.UI
         private double _displayedY = 0.5d;
         private double _displayedHeading;
         private bool _hasDisplayedCamera;
-        private bool _hostCameraInitialized;
+        private readonly CoopCampaignMapReplicaCameraPolicy _cameraPolicy =
+            new CoopCampaignMapReplicaCameraPolicy();
         private Vec3 _displayedCameraOrigin;
         private Vec3 _displayedCameraDirection;
         private Vec3 _displayedCameraUp;
@@ -177,13 +194,15 @@ namespace CoopSpectator.UI
         {
             base.OnMissionScreenInitialize();
             ViewOrderPriority = 1;
+            if (GameNetwork.IsClient && ExperimentalFeatures.EnableCampaignMapPrototype)
+                _tooltipPresenter = new CoopCampaignMapTooltipPresenter();
         }
 
         public override void OnMissionScreenTick(float dt)
         {
             base.OnMissionScreenTick(dt);
             if (!GameNetwork.IsClient || !ExperimentalFeatures.EnableCampaignMapPrototype)
-                return;
+            { _tooltipPresenter?.Clear(); return; }
 
             if (_sceneLayer == null && !_loadAttempted)
             {
@@ -194,11 +213,11 @@ namespace CoopSpectator.UI
             }
 
             if (_sceneLayer == null)
-                return;
+            { _tooltipPresenter?.Clear(); return; }
 
             UpdateRenderReadiness(dt);
             if (_hostMarker == null)
-                return;
+            { _tooltipPresenter?.Clear(); return; }
 
             ApplyPendingVisibleEntities();
             CoopCampaignMapPrototypeState current =
@@ -228,12 +247,16 @@ namespace CoopSpectator.UI
             TickMapSceneVisuals();
             UpdateEntityReplicas(dt);
             TickReplicaFreeCamera(dt);
+            _replicaInfoViewModel?.SetCameraMode(_cameraPolicy.IsFollowingHost);
             UpdateMarkerAndCamera();
             UpdateReplicaInformation(dt);
+            _tooltipPresenter?.Tick(dt, _hoveredReplicaId);
         }
 
         public override void OnMissionScreenFinalize()
         {
+            _tooltipPresenter?.Dispose();
+            _tooltipPresenter = null;
             CoopCampaignMapPrototypeNetworkController.ClientStateChanged -=
                 OnClientStateChanged;
             CoopCampaignMapPrototypeNetworkController.ClientVisibleEntitiesChanged -=
@@ -376,6 +399,9 @@ namespace CoopSpectator.UI
                 ModLogger.Info(
                     "CoopCampaignMapPrototypeMissionView: Main_map Scene.Read returned successfully.");
 
+                RemoveSettlementAuthoringCircles();
+                RemoveFortificationAuthoringHelpers();
+                InitializeSettlementGeometryAdmission();
                 _mapScene.DisableStaticShadows(true);
                 _mapScene.InvalidateTerrainPhysicsMaterials();
                 _mapScene.SetDontLoadInvisibleEntities(true);
@@ -458,6 +484,132 @@ namespace CoopSpectator.UI
                 _entityOverlayViewModel);
         }
 
+        private void InitializeSettlementGeometryAdmission()
+        {
+            _settlementGeometry.Clear();
+            var observed = new HashSet<UIntPtr>();
+            // Stock Main_map roots: 492 installed settlement definitions match
+            // these tags. Dynamically instantiated/missing roots are not guessed.
+            foreach (string tag in new[] { "town", "castle", "village", "wm_hideout", "hideout" })
+            {
+                foreach (GameEntity root in _mapScene.FindEntitiesWithTag(tag))
+                {
+                    if (root == null || !observed.Add(root.Pointer))
+                        continue;
+                    _settlementGeometry.Register(root.Name, root);
+                    RegisterSettlementPickGeometry(root);
+                }
+            }
+        }
+
+        private bool ApplySettlementLevels(GameEntity root, int flags)
+        {
+            // The binding belongs exclusively to _mapScene, never Mission.Scene
+            // or the campaign scene. Visibility only: no physics or simulation.
+            try
+            {
+                uint mask = CoopCampaignMapSettlementLevelPolicy.Resolve(flags,
+                    name => _mapScene.GetUpgradeLevelMaskOfLevelName(name));
+                if (mask == 0) return false;
+                var children = new List<WeakGameEntity>();
+                root.WeakEntity.GetChildrenRecursive(ref children);
+                if (children.Count > 4096) return false;
+                foreach (WeakGameEntity child in children)
+                    child.SetVisibilityExcludeParents(CoopCampaignMapSettlementLevelPolicy.Matches(
+                        (uint)child.GetUpgradeLevelMask(), mask));
+                return true;
+            }
+            catch
+            {
+                // Admission keeps the entire root hidden if native application fails.
+                return false;
+            }
+        }
+
+        private bool ApplySettlementPresentation(GameEntity root, string walls, int preparation)
+        {
+            // Runs after level visibility while the admitted root is still hidden.
+            // Only this view's replica entities are changed; never native physics.
+            try
+            {
+                if (preparation == 0 || !CoopCampaignMapSettlementPresentationPolicy.IsValid(walls, preparation))
+                    return false;
+                var children = new List<GameEntity>();
+                root.GetChildrenRecursive(ref children);
+                if (children.Count > 4096) return false;
+                int wallIndex = 0;
+                foreach (GameEntity child in children)
+                {
+                    if (child.HasTag("map_breachable_wall"))
+                    {
+                        if (walls.Length == 0) return false;
+                        bool broken = CoopCampaignMapSettlementPresentationPolicy.IsWallBroken(walls, wallIndex++);
+                        foreach (GameEntity wallPart in child.GetChildren())
+                        {
+                            if (wallPart.HasTag("map_solid_wall")) wallPart.SetVisibilityExcludeParents(!broken);
+                            else if (wallPart.HasTag("map_broken_wall")) wallPart.SetVisibilityExcludeParents(broken);
+                        }
+                    }
+                }
+                // Native preparation override follows wall state and level filtering.
+                foreach (GameEntity child in children)
+                    if (child.HasTag("siege_preparation")) child.SetVisibilityExcludeParents(preparation == 2);
+                return true;
+            }
+            catch { return false; }
+        }
+
+        private void RemoveSettlementAuthoringCircles()
+        {
+            // SettlementVisual.OnStartup removes these frame-only helpers in
+            // the campaign. They are not the runtime selection/siege decals.
+            // Snapshot before removal: the native scene enumeration is live.
+            // Only this view's isolated Main_map scene may be mutated here.
+            var circles = new List<GameEntity>(
+                _mapScene.FindEntitiesWithTag("map_settlement_circle"));
+            foreach (GameEntity circle in circles)
+            {
+                circle.SetVisibilityExcludeParents(false);
+                circle.Remove(112);
+            }
+        }
+
+        private void RemoveFortificationAuthoringHelpers()
+        {
+            // Stock SettlementVisual.OnStartup removes these frame-only helpers
+            // from fortifications. Live replacement banners are separate objects.
+            // Snapshot only this view's scene, before bindings/layers can retain them.
+            var candidates = new List<GameEntity>();
+            var observed = new HashSet<UIntPtr>();
+            foreach (string tag in new[] { "town", "castle" })
+            {
+                foreach (GameEntity root in _mapScene.FindEntitiesWithTag(tag))
+                {
+                    if (root == null || !observed.Add(root.Pointer)) continue;
+                    var children = new List<GameEntity>();
+                    root.GetChildrenRecursive(ref children);
+                    if (children.Count > 4096)
+                        throw new InvalidOperationException("Fortification helper scan limit exceeded.");
+                    foreach (GameEntity child in children)
+                    {
+                        foreach (string childTag in child.Tags)
+                        {
+                            if (!CoopCampaignMapSettlementAuthoringPolicy.IsFortificationHelper(childTag)) continue;
+                            candidates.Add(child);
+                            break;
+                        }
+                    }
+                }
+            }
+            var removals = CoopCampaignMapSettlementAuthoringPolicy.SelectRemovalRoots(
+                candidates, entity => entity.Pointer, entity => entity.Parent);
+            foreach (GameEntity helper in removals)
+            {
+                helper.SetVisibilityExcludeParents(false);
+                helper.Remove(112);
+            }
+        }
+
         private void CreateSettlementOverlayLayer()
         {
             if (_settlementOverlayViewModel != null || MissionScreen == null)
@@ -479,7 +631,7 @@ namespace CoopSpectator.UI
         {
             if (_replicaInfoViewModel != null || MissionScreen == null)
                 return;
-            _replicaInfoViewModel = new CoopCampaignMapReplicaInfoVM();
+            _replicaInfoViewModel = new CoopCampaignMapReplicaInfoVM(FollowHostCamera);
             _replicaInfoLayer = new GauntletLayer(
                 "CoopCampaignMapReplicaInfo",
                 ViewOrderPriority + 3,
@@ -498,6 +650,7 @@ namespace CoopSpectator.UI
             _replicaInfoMovie = _replicaInfoLayer.LoadMovie(
                 ReplicaInfoMovieName,
                 _replicaInfoViewModel);
+            ScreenManager.TrySetFocus(_replicaInfoLayer);
         }
 
         private void QueueVisibleEntities(
@@ -533,9 +686,15 @@ namespace CoopSpectator.UI
                 return;
             }
 
+            // Catalog notifications queue a reconciliation, not permission to
+            // overwrite newer dynamic updates already received in this frame.
+            // Resolve both stores now, including new/hidden/removed entities.
+            List<CoopCampaignMapPrototypeEntityState> visibleEntities =
+                CoopCampaignMapReplicaStateProjection.BuildVisible(
+                    _catalogById.Values, _dynamicById);
             var observed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (CoopCampaignMapPrototypeEntityState entity in
-                     _pendingVisibleEntities)
+                     visibleEntities)
             {
                 if (!CoopCampaignMapPrototypeContract.IsValidVisibleEntity(entity) ||
                     !observed.Add(entity.EntityId))
@@ -554,8 +713,8 @@ namespace CoopSpectator.UI
             foreach (string entityId in removed)
                 RemoveEntityReplica(entityId, updateOverlay: false);
 
-            _entityOverlayViewModel?.Synchronize(_pendingVisibleEntities);
-            _settlementOverlayViewModel?.Synchronize(_pendingVisibleEntities);
+            _entityOverlayViewModel?.Synchronize(visibleEntities);
+            _settlementOverlayViewModel?.Synchronize(visibleEntities);
             _appliedVisibleEntitiesRevision = _pendingVisibleEntitiesRevision;
             _pendingVisibleEntitiesRevision = -1;
             _pendingVisibleEntities = null;
@@ -583,7 +742,7 @@ namespace CoopSpectator.UI
                 return;
             }
 
-            CoopCampaignMapPrototypeEntityState merged = MergeReplicaState(
+            CoopCampaignMapPrototypeEntityState merged = CoopCampaignMapReplicaStateProjection.Merge(
                 catalog,
                 dynamicState);
             if (merged != null)
@@ -653,6 +812,25 @@ namespace CoopSpectator.UI
                 replica.Marker = CreateHostMarker(_mapScene);
             }
             replica.Target = entity.Clone();
+            if (entity.Kind == CoopCampaignMapPrototypeEntityKind.Settlement ||
+                !CoopCampaignMapPartyBodyPolicy.ShouldRenderBody(entity.Kind, entity.PartyNameplateFlags))
+                RemovePartyPickGeometry(replica);
+            // Invalidate even while the cursor is over the pinned panel, where
+            // UpdateReplicaInformation intentionally yields to UI hit testing.
+            if (entity.Kind != CoopCampaignMapPrototypeEntityKind.Settlement &&
+                !CoopCampaignMapPartyBodyPolicy.ShouldRenderBody(
+                    entity.Kind, entity.PartyNameplateFlags))
+            {
+                if (string.Equals(_selectedReplicaId, entity.EntityId,
+                        StringComparison.OrdinalIgnoreCase))
+                    _selectedReplicaId = null;
+                if (string.Equals(_replicaInfoViewModel?.DisplayedEntityId, entity.EntityId,
+                        StringComparison.OrdinalIgnoreCase))
+                    _replicaInfoViewModel.Hide();
+            }
+            _settlementGeometry.Apply(entity.EntityId,
+                entity.Kind == CoopCampaignMapPrototypeEntityKind.Settlement, entity.SettlementLevelFlags,
+                entity.SettlementWallStates, entity.SettlementPreparationState);
             if (_dynamicById.TryGetValue(
                     entity.EntityId,
                     out CoopCampaignMapPrototypeDynamicEntityState dynamicState))
@@ -673,8 +851,10 @@ namespace CoopSpectator.UI
             if (string.IsNullOrWhiteSpace(entityId))
                 return;
 
+            _settlementGeometry.Apply(entityId, false);
             if (_entityReplicas.TryGetValue(entityId, out EntityReplica replica))
             {
+                RemovePartyPickGeometry(replica);
                 ResetPartyVisual(replica);
                 RemoveMarker(replica.Marker);
                 _entityReplicas.Remove(entityId);
@@ -691,42 +871,6 @@ namespace CoopSpectator.UI
                 _selectedReplicaId = null;
                 _replicaInfoViewModel?.Hide();
             }
-        }
-
-        private static CoopCampaignMapPrototypeEntityState MergeReplicaState(
-            CoopCampaignMapPrototypeCatalogEntityState catalog,
-            CoopCampaignMapPrototypeDynamicEntityState dynamicState)
-        {
-            if (catalog == null || dynamicState == null ||
-                !dynamicState.IsVisible ||
-                !string.Equals(
-                    catalog.EntityId,
-                    dynamicState.EntityId,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                return null;
-            }
-
-            return new CoopCampaignMapPrototypeEntityState
-            {
-                EntityId = catalog.EntityId,
-                DisplayName = catalog.DisplayName,
-                Kind = catalog.Kind,
-                SettlementNameplateSize = catalog.SettlementNameplateSize,
-                NormalizedX = dynamicState.NormalizedX,
-                NormalizedY = dynamicState.NormalizedY,
-                Heading = dynamicState.Heading,
-                PartySize = dynamicState.PartySize,
-                PrimaryColor = catalog.PrimaryColor,
-                SecondaryColor = catalog.SecondaryColor,
-                BannerCode = catalog.BannerCode,
-                VisualCharacterId = catalog.VisualCharacterId,
-                CultureId = catalog.CultureId,
-                PartyVisualKind = catalog.PartyVisualKind,
-                HumanVisual = catalog.HumanVisual?.Clone(),
-                MountVisual = catalog.MountVisual?.Clone(),
-                CaravanMountVisual = catalog.CaravanMountVisual?.Clone()
-            };
         }
 
         private void UpdateEntityReplicas(float dt)
@@ -832,7 +976,8 @@ namespace CoopSpectator.UI
                         if (IsSettlementProjectionCandidate(
                                 target.SettlementNameplateSize,
                                 replica.WorldPosition,
-                                _camera))
+                                _camera,
+                                target.IsSettlementTracked))
                         {
                             _settlementOverlayViewModel?.UpdatePosition(
                                 pair.Key,
@@ -852,10 +997,11 @@ namespace CoopSpectator.UI
                     (float)replica.DisplayedHeading);
                 visualFrame.origin = replica.WorldPosition;
                 Vec3 nameplateWorldPosition =
-                    replica.WorldPosition + Vec3.Up * (markerScale * 1.2f);
-                bool projectionCandidate = IsPartyProjectionCandidate(
-                    replica.WorldPosition,
-                    _camera);
+                    replica.WorldPosition + Vec3.Up * PartyNameplateHeadHeight;
+                bool projectionCandidate =
+                    CoopCampaignMapPartyBodyPolicy.ShouldRenderBody(
+                        target.Kind, target.PartyNameplateFlags) &&
+                    IsPartyProjectionCandidate(replica.WorldPosition, _camera);
                 bool shouldRenderParty;
                 if (projectionCandidate)
                 {
@@ -922,6 +1068,7 @@ namespace CoopSpectator.UI
 
                 bool hasPartyVisual =
                     replica.PartyVisual?.IsUsable == true;
+                UpdatePartyPickGeometry(replica, visualFrame, shouldRenderParty);
                 if (target.Kind ==
                     CoopCampaignMapPrototypeEntityKind.MainParty)
                 {
@@ -991,7 +1138,9 @@ namespace CoopSpectator.UI
         private void UpdateReplicaInformation(float dt)
         {
             if (_replicaInfoViewModel == null || _camera == null)
-                return;
+            { _hoveredReplicaId = null; return; }
+            if (!CanUseReplicaMapInput() || _replicaInfoLayer.HitTest())
+            { _hoveredReplicaId = null; return; }
 
             bool clicked = GlobalInput.IsKeyPressed(InputKey.LeftMouseButton);
             _replicaHoverUpdateDelay -= Math.Max(0f, dt);
@@ -1003,43 +1152,9 @@ namespace CoopSpectator.UI
             Vec2 mouse = new Vec2(
                 rangedMouse.x * Screen.RealScreenResolutionWidth,
                 rangedMouse.y * Screen.RealScreenResolutionHeight);
-            string hoveredId = null;
-            float selectionRadius =
-                (float)CoopCampaignMapPrototypeInteractionPolicy
-                    .SelectionRadiusPixels;
-            float nearestDistanceSquared = selectionRadius * selectionRadius;
-            foreach (KeyValuePair<string, EntityReplica> pair in _entityReplicas)
-            {
-                EntityReplica replica = pair.Value;
-                if (replica?.Target == null)
-                    continue;
-                try
-                {
-                    float x = -500f;
-                    float y = -500f;
-                    float depth = 0f;
-                    MBWindowManager.WorldToScreenInsideUsableArea(
-                        _camera,
-                        replica.WorldPosition,
-                        ref x,
-                        ref y,
-                        ref depth);
-                    if (depth <= 0f)
-                        continue;
-                    float dx = x - mouse.x;
-                    float dy = y - mouse.y;
-                    float distanceSquared = dx * dx + dy * dy;
-                    if (distanceSquared < nearestDistanceSquared)
-                    {
-                        nearestDistanceSquared = distanceSquared;
-                        hoveredId = pair.Key;
-                    }
-                }
-                catch
-                {
-                }
-            }
+            string hoveredId = ResolveNativeHoveredReplica();
 
+            _hoveredReplicaId = hoveredId;
             if (clicked && hoveredId != null)
             {
                 _selectedReplicaId = string.Equals(
@@ -1061,7 +1176,10 @@ namespace CoopSpectator.UI
                 !_dynamicById.TryGetValue(
                     effectiveId,
                     out CoopCampaignMapPrototypeDynamicEntityState dynamicState) ||
-                !dynamicState.IsVisible)
+                !dynamicState.IsVisible ||
+                (catalog.Kind != CoopCampaignMapPrototypeEntityKind.Settlement &&
+                 !CoopCampaignMapPartyBodyPolicy.ShouldRenderBody(
+                     catalog.Kind, dynamicState.PartyNameplateFlags)))
             {
                 if (pinned)
                     _selectedReplicaId = null;
@@ -1069,13 +1187,16 @@ namespace CoopSpectator.UI
                 return;
             }
 
+            // Native tooltip owns hover; preserve the explicit pinned summary.
+            if (!pinned) { _replicaInfoViewModel.Hide(); return; }
             _replicaInfoViewModel.Show(
                 catalog,
                 dynamicState,
                 mouse,
                 pinned,
                 Screen.RealScreenResolutionWidth,
-                Screen.RealScreenResolutionHeight);
+                Screen.RealScreenResolutionHeight,
+                _replicaInfoLayer?.UIContext?.CustomScale ?? 1f);
         }
 
         private static string BuildPartyVisualAttemptKey(
@@ -1231,37 +1352,20 @@ namespace CoopSpectator.UI
         private static bool IsSettlementProjectionCandidate(
             CoopCampaignMapPrototypeSettlementNameplateSize size,
             Vec3 worldPosition,
-            Camera camera)
+            Camera camera,
+            bool isTracked)
         {
             if (camera == null)
                 return false;
 
             Vec3 toEntity = worldPosition - camera.Position;
-            if (Vec3.DotProduct(toEntity, camera.Direction) <= 0f)
-                return false;
-
-            float cameraHeight = camera.Position.z;
-            if (cameraHeight >
-                CoopCampaignMapPrototypeVisibilityPolicy
-                    .SettlementTownOnlyCameraHeight)
-            {
-                return size ==
-                       CoopCampaignMapPrototypeSettlementNameplateSize.Large;
-            }
-            if (cameraHeight >
-                CoopCampaignMapPrototypeVisibilityPolicy
-                    .SettlementFortificationOnlyCameraHeight)
-            {
-                return size ==
-                           CoopCampaignMapPrototypeSettlementNameplateSize.Large ||
-                       size ==
-                           CoopCampaignMapPrototypeSettlementNameplateSize.Medium;
-            }
-
-            return worldPosition.Distance(camera.Position) <
-                   cameraHeight +
-                   CoopCampaignMapPrototypeVisibilityPolicy
-                       .SettlementNearDistanceMargin;
+            return CoopCampaignMapPrototypeVisibilityPolicy.ShouldShowSettlement(
+                size,
+                camera.Position.z,
+                worldPosition.Distance(camera.Position),
+                Vec3.DotProduct(toEntity, camera.Direction) > 0f,
+                isInsideViewport: true,
+                isTracked: isTracked);
         }
 
         private void UpdateRenderReadiness(float dt)
@@ -1580,6 +1684,8 @@ namespace CoopSpectator.UI
 
         private void ReleaseSceneLayer()
         {
+            ClearNativePicking();
+            _settlementGeometry.Clear();
             ReleaseReplicaInfoLayer();
             ReleaseSettlementOverlayLayer();
             ReleaseEntityOverlayLayer();
@@ -1657,6 +1763,8 @@ namespace CoopSpectator.UI
             {
             }
             _camera = null;
+            _hasDisplayedCamera = false;
+            _cameraPolicy.Reset();
         }
 
         private void ReleaseEntityOverlayLayer()
@@ -1707,6 +1815,8 @@ namespace CoopSpectator.UI
 
         private void ReleaseReplicaInfoLayer()
         {
+            _hoveredReplicaId = null;
+            _tooltipPresenter?.Clear();
             try
             {
                 if (_replicaInfoLayer != null && _replicaInfoMovie != null)
@@ -1749,15 +1859,46 @@ namespace CoopSpectator.UI
                 return;
             }
 
-            if (_hostCameraInitialized)
+            CoopCampaignMapCameraApplication application = _cameraPolicy.AdmitHostFrame(true);
+            if (application == CoopCampaignMapCameraApplication.None)
                 return;
 
+            if (application == CoopCampaignMapCameraApplication.Interpolate && _hasDisplayedCamera)
+            {
+                float amount = (float)interpolationAmount;
+                targetOrigin = Lerp(_displayedCameraOrigin, targetOrigin, amount);
+                Vec3 direction = Lerp(_displayedCameraDirection, targetDirection, amount);
+                Vec3 up = Lerp(_displayedCameraUp, targetUp, amount);
+                if (TryNormalizeCameraBasis(ref direction, ref up))
+                {
+                    targetDirection = direction;
+                    targetUp = up;
+                }
+                targetFov = _displayedCameraFov + (targetFov - _displayedCameraFov) * amount;
+            }
             _displayedCameraOrigin = targetOrigin;
             _displayedCameraDirection = targetDirection;
             _displayedCameraUp = targetUp;
             _displayedCameraFov = targetFov;
             _hasDisplayedCamera = true;
-            _hostCameraInitialized = true;
+        }
+
+        private void FollowHostCamera()
+        {
+            if (!CanUseReplicaMapInput()) return;
+            _cameraPolicy.FollowHost();
+            CoopCampaignMapPrototypeState current = _targetState ??
+                CoopCampaignMapPrototypeNetworkController.CurrentClientState;
+            UpdateDisplayedCamera(current?.Camera, 1d);
+            _replicaInfoViewModel?.SetCameraMode(true);
+        }
+
+        private bool CanUseReplicaMapInput()
+        {
+            return _replicaInfoLayer != null && _replicaInfoLayer.IsActive &&
+                   CoopCampaignMapPrototypeNetworkController.CurrentClientConversation?.IsActive != true &&
+                   (ScreenManager.FocusedLayer == null ||
+                    ReferenceEquals(ScreenManager.FocusedLayer, _replicaInfoLayer));
         }
 
         private void InitializeLocalFreeCamera()
@@ -1780,7 +1921,8 @@ namespace CoopSpectator.UI
 
         private void TickReplicaFreeCamera(float dt)
         {
-            if (!_hasDisplayedCamera || _mapScene == null)
+            if (!_hasDisplayedCamera || _mapScene == null || !CanUseReplicaMapInput() ||
+                _replicaInfoLayer.HitTest())
                 return;
 
             float safeDt = Math.Max(0f, Math.Min(0.1f, dt));
@@ -1902,6 +2044,10 @@ namespace CoopSpectator.UI
                 ClampCameraOriginToMap(ref origin, horizontalSpan);
             }
 
+            bool moved = (origin - _displayedCameraOrigin).LengthSquared > 0.00000001f ||
+                         (direction - _displayedCameraDirection).LengthSquared > 0.00000001f ||
+                         (up - _displayedCameraUp).LengthSquared > 0.00000001f;
+            _cameraPolicy.ObserveManualMovement(moved);
             _displayedCameraOrigin = origin;
             _displayedCameraDirection = direction;
             _displayedCameraUp = up;

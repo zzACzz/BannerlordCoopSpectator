@@ -231,6 +231,8 @@ namespace CoopSpectator.UI
         private Vec2 _position = new Vec2(-1000f, -1000f);
         private bool _isVisibleOnMap;
         private bool _isInside;
+        private bool _isTracked;
+        private bool _isInRange;
         private int _wSign = -1;
         private float _wPos = -1f;
         private float _distanceToCamera;
@@ -363,10 +365,18 @@ namespace CoopSpectator.UI
         public int Relation => 0;
 
         [DataSourceProperty]
-        public bool IsTracked => false;
+        public bool IsTracked
+        {
+            get => _isTracked;
+            private set => SetField(ref _isTracked, value, nameof(IsTracked));
+        }
 
         [DataSourceProperty]
-        public bool IsInRange => false;
+        public bool IsInRange
+        {
+            get => _isInRange;
+            private set => SetField(ref _isInRange, value, nameof(IsInRange));
+        }
 
         [DataSourceProperty]
         public bool IsTargetedByTutorial => false;
@@ -420,6 +430,8 @@ namespace CoopSpectator.UI
             }
 
             Size = entity.SettlementNameplateSize;
+            IsTracked = entity.IsSettlementTracked;
+            IsInRange = entity.IsSettlementInRange;
             Name = entity.DisplayName ?? string.Empty;
             uint primaryColor = entity.PrimaryColor == 0u
                 ? FallbackPrimaryColor
@@ -433,6 +445,7 @@ namespace CoopSpectator.UI
                 entity.SettlementEventFlags,
                 entity.SettlementProductionIconId,
                 entity.QuestMarkerFlags);
+            SettlementParties.Synchronize(entity.SettlementPartyBadges, entity.IsSettlementInRange);
         }
 
         internal void UpdatePosition(Vec3 worldPosition, Camera camera)
@@ -473,9 +486,6 @@ namespace CoopSpectator.UI
                     x + 200f * resolutionScale >= 0f &&
                     y + 100f * resolutionScale >= 0f;
 
-                Position = isInFront && isInside
-                    ? new Vec2(x, y)
-                    : new Vec2(-1000f, -1000f);
                 IsInside = isInside;
                 float distanceToCamera =
                     worldPosition.Distance(camera.Position);
@@ -486,7 +496,13 @@ namespace CoopSpectator.UI
                             camera.Position.z,
                             distanceToCamera,
                             isInFront,
-                            isInside);
+                            isInside,
+                            IsTracked);
+                // Preserve off-screen/behind-camera direction for the native
+                // tracked widget's edge placement; never replace it by a sentinel.
+                Position = IsVisibleOnMap
+                    ? new Vec2(x, y)
+                    : new Vec2(-1000f, -1000f);
                 WPos = isInFront ? 1.1f : -1f;
                 WSign = isInFront ? 1 : -1;
                 DistanceToCamera = distanceToCamera;
@@ -553,10 +569,11 @@ namespace CoopSpectator.UI
             try
             {
                 identifier = new CoopCampaignMapPrototypeBannerIdentifierVM(
-                    new Banner(
-                        safeBannerCode,
-                        primaryColor,
-                        secondaryColor));
+                    // Native SettlementNameplateVM keeps the banner's encoded
+                    // colors; faction colors belong to the nameplate separately.
+                    string.IsNullOrWhiteSpace(bannerCode)
+                        ? new Banner(FallbackBannerCode, primaryColor, secondaryColor)
+                        : new Banner(bannerCode));
             }
             catch
             {
@@ -741,20 +758,71 @@ namespace CoopSpectator.UI
 
     internal sealed class CoopCampaignMapPrototypeSettlementPartiesVM : ViewModel
     {
+        private string _encoded = string.Empty;
+
         internal CoopCampaignMapPrototypeSettlementPartiesVM()
         {
             PartiesInSettlement =
                 new MBBindingList<
-                    CoopCampaignMapPrototypeSettlementEmptyItemVM>();
+                    CoopCampaignMapPrototypeSettlementPartyBadgeVM>();
         }
 
         [DataSourceProperty]
-        public MBBindingList<CoopCampaignMapPrototypeSettlementEmptyItemVM>
+        public MBBindingList<CoopCampaignMapPrototypeSettlementPartyBadgeVM>
             PartiesInSettlement { get; }
+
+        internal void Synchronize(string encoded, bool inRange)
+        {
+            string admitted = inRange ? encoded ?? string.Empty : string.Empty;
+            if (string.Equals(_encoded, admitted, StringComparison.Ordinal)) return;
+            Clear();
+            if (!CoopCampaignMapSettlementPartyBadgePolicy.TryDecode(admitted, out var badges)) return;
+            try
+            {
+                foreach (var badge in badges)
+                    PartiesInSettlement.Add(new CoopCampaignMapPrototypeSettlementPartyBadgeVM(badge));
+                _encoded = admitted;
+            }
+            catch { Clear(); } // Never substitute a fabricated banner or retain a partial list.
+        }
+
+        private void Clear()
+        {
+            foreach (var item in PartiesInSettlement) item.OnFinalize();
+            PartiesInSettlement.Clear();
+            _encoded = string.Empty;
+        }
 
         public override void OnFinalize()
         {
-            PartiesInSettlement.Clear();
+            Clear();
+            base.OnFinalize();
+        }
+    }
+
+    internal sealed class CoopCampaignMapPrototypeSettlementPartyBadgeVM : ViewModel
+    {
+        internal CoopCampaignMapPrototypeSettlementPartyBadgeVM(CoopCampaignMapSettlementPartyBadge badge)
+        {
+            IsLord = badge.Kind == 0;
+            IsCaravan = badge.Kind == 1;
+            IsDefault = badge.Kind == 2;
+            IsBandit = badge.IsBandit;
+            if (IsLord)
+                Visual = new CoopCampaignMapPrototypeBannerIdentifierVM(
+                    badge.BannerCode.Length == 0 ? null : new Banner(badge.BannerCode));
+        }
+
+        [DataSourceProperty] public bool IsLord { get; }
+        [DataSourceProperty] public bool IsCaravan { get; }
+        [DataSourceProperty] public bool IsDefault { get; }
+        [DataSourceProperty] public bool IsBandit { get; }
+        [DataSourceProperty] public CoopCampaignMapPrototypeBannerIdentifierVM Visual { get; private set; }
+
+        public override void OnFinalize()
+        {
+            Visual?.OnFinalize();
+            Visual = null;
             base.OnFinalize();
         }
     }

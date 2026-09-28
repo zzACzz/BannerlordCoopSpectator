@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using CoopSpectator.Infrastructure;
 using Helpers;
 using SandBox.View.Map;
 using SandBox.View.Map.Managers;
 using SandBox.View.Map.Visuals;
+using SandBox.ViewModelCollection.Nameplate;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Settlements;
@@ -25,6 +27,10 @@ namespace CoopSpectator.Campaign
         private const float VisibleEntityCaptureIntervalSeconds = 0.5f;
         private const uint DefaultEntityColor = 0xFFB89A5Au;
         private const uint DefaultEntitySecondaryColor = 0xFFF2D078u;
+        private static readonly FieldInfo SettlementLevelMaskField = typeof(SettlementVisual)
+            .GetField("_currentLevelMask", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static MethodInfo _settlementNameplateViewGetter;
+        private static FieldInfo _settlementNameplateDataSourceField;
         private static readonly TimeSpan FailureLogInterval =
             TimeSpan.FromSeconds(10d);
         private static CoopCampaignMapPrototypePublisherBehavior
@@ -45,6 +51,7 @@ namespace CoopSpectator.Campaign
         private CoopCampaignMapPrototypeDynamicSnapshot _cachedDynamic;
         private CoopCampaignMapConversationState _cachedConversation =
             CoopCampaignMapPrototypeContract.CreateInactiveConversation();
+        private CoopCampaignMapConversationPose _capturedConversationPose;
         private bool _catalogDirty;
         private bool _dynamicDirty;
         private readonly Dictionary<string, int> _entityHeadings =
@@ -79,6 +86,11 @@ namespace CoopSpectator.Campaign
                 new Dictionary<string, AgentVisuals>(
                     StringComparer.OrdinalIgnoreCase);
         private bool _initialPublishLogged;
+        private readonly int _tooltipOwnerThread = System.Threading.Thread.CurrentThread.ManagedThreadId;
+        private CoopCampaignMapTooltipCapture _tooltipCapture;
+        private TaleWorlds.CampaignSystem.Campaign _lastPublishedCampaign;
+        private string _lastPublishedSession;
+        private long _lastPublishedTimestamp;
         private DateTime _nextFailureLogUtc = DateTime.MinValue;
 
         public override void RegisterEvents()
@@ -115,6 +127,57 @@ namespace CoopSpectator.Campaign
             _applicationTickPublisher = null;
         }
 
+        // Host-only entry for the future admitted local relay. NOT a client
+        // endpoint: peer/lease ownership and aggregate rate limits belong to that
+        // relay. No wire caller exists yet. Never resolve arbitrary hidden IDs.
+        internal static bool TryCapturePublishedTooltip(CoopCampaignMapTooltipRequest request, long sequence,
+            out CoopCampaignMapTooltipPayload payload, out string reason)
+        {
+            payload = null;
+            reason = "tooltip-published-target-unavailable";
+            var publisher = _applicationTickPublisher;
+            if (publisher == null || request == null || !ExperimentalFeatures.EnableCampaignMapPrototype ||
+                publisher._tooltipOwnerThread != System.Threading.Thread.CurrentThread.ManagedThreadId ||
+                !ReferenceEquals(publisher._lastPublishedCampaign, TaleWorlds.CampaignSystem.Campaign.Current) ||
+                publisher._lastPublishedCampaign == null || publisher._lastPublishedSession != publisher._sessionId) return false;
+            long now = System.Diagnostics.Stopwatch.GetTimestamp();
+            if (now < publisher._lastPublishedTimestamp ||
+                (now - publisher._lastPublishedTimestamp) / (double)System.Diagnostics.Stopwatch.Frequency >= 2d) return false;
+            try
+            {
+                if (!CoopCampaignMapTooltipCapture.IsMapContext() ||
+                    !CoopCampaignMapTooltipPayloadCodec.IsValidCorrelation(request.SessionId, request.EntityId, request.Generation, sequence) ||
+                    !publisher._knownCatalogById.TryGetValue(request.EntityId, out var catalog) ||
+                    !publisher._knownDynamicById.TryGetValue(request.EntityId, out var dynamicState) ||
+                    !CoopCampaignMapTooltipTargetAdmission.IsAdmitted(publisher._lastPublishedSession, request, catalog, dynamicState)) return false;
+                PartyBase target = null;
+                int matches = 0;
+                if (catalog.Kind == CoopCampaignMapPrototypeEntityKind.Settlement)
+                {
+                    foreach (Settlement settlement in Settlement.All)
+                    {
+                        if (settlement == null || "settlement:" + settlement.StringId != request.EntityId) continue;
+                        if (++matches > 1) return false; // Ambiguous native identity is never guessed.
+                        target = settlement.Party;
+                    }
+                }
+                else
+                {
+                    foreach (MobileParty party in MobileParty.All)
+                    {
+                        if (party == null || "party:" + party.StringId != request.EntityId) continue;
+                        if (++matches > 1) return false;
+                        target = party.Party;
+                    }
+                }
+                if (target == null) return false;
+                if (publisher._tooltipCapture == null) publisher._tooltipCapture = new CoopCampaignMapTooltipCapture();
+                return publisher._tooltipCapture.TryCapture(target, request.SessionId, request.EntityId,
+                    request.Generation, sequence, request.IsExtended, out payload, out reason);
+            }
+            catch (Exception) { reason = "tooltip-target-resolution-failed"; return false; }
+        }
+
         private static bool IsMapCameraAvailable()
         {
             try
@@ -136,6 +199,9 @@ namespace CoopSpectator.Campaign
                 return;
             _timeUntilNextPublish = PublishIntervalSeconds;
 
+            // A failed or partial capture/write must not admit tooltip reads from
+            // newer in-memory stores using an older successful publication stamp.
+            _lastPublishedCampaign = null;
             if (!TryCaptureSnapshot(out CoopCampaignMapPrototypeHostSnapshot snapshot, out string reason))
             {
                 LogFailureRateLimited("capture:" + (reason ?? "unknown"));
@@ -172,6 +238,9 @@ namespace CoopSpectator.Campaign
                 return;
             }
 
+            _lastPublishedCampaign = TaleWorlds.CampaignSystem.Campaign.Current;
+            _lastPublishedSession = snapshot.SessionId;
+            _lastPublishedTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
             if (!_initialPublishLogged)
             {
                 _initialPublishLogged = true;
@@ -301,6 +370,7 @@ namespace CoopSpectator.Campaign
                     VisibleEntities = new List<CoopCampaignMapPrototypeEntityState>(),
                     Camera = cameraState,
                     Conversation = _cachedConversation.Clone(),
+                    ConversationPose = _capturedConversationPose?.Clone(),
                     UpdatedUtc = DateTime.UtcNow
                 };
                 return true;
@@ -376,6 +446,7 @@ namespace CoopSpectator.Campaign
                     mobilePartyVisual);
             }
 
+            SettlementNameplatesVM settlementNameplates = TryGetSettlementNameplates();
             foreach (Settlement settlement in Settlement.All)
             {
                 if (settlement == null)
@@ -429,8 +500,13 @@ namespace CoopSpectator.Campaign
                         GetDistanceSquared(
                             mainParty.VisualPosition2DWithoutError,
                             settlementPosition)));
-                _replicaInformation[entity.EntityId] =
-                    CaptureSettlementInformation(settlement);
+                entity.SettlementLevelFlags = CaptureSettlementLevels(settlementVisualManager, settlement);
+                CaptureSettlementPresentation(settlement, entity);
+                ReplicaInformation settlementInformation = CaptureSettlementInformation(settlement);
+                _replicaInformation[entity.EntityId] = settlementInformation;
+                entity.IsSettlementInRange = settlementInformation.IsSettlementInRange;
+                entity.SettlementPartyBadges = CaptureSettlementPartyBadges(
+                    settlement, settlementInformation.IsSettlementInRange, settlementNameplates);
             }
 
             return candidates
@@ -447,6 +523,121 @@ namespace CoopSpectator.Campaign
                 .Take(CoopCampaignMapPrototypeContract.MaxVisibleEntities)
                 .Select(candidate => candidate.Entity.Clone())
                 .ToList();
+        }
+
+        private static SettlementNameplatesVM TryGetSettlementNameplates()
+        {
+            // Read only the existing loaded host view. Cache metadata, never a view/VM
+            // across screen lifetimes; do not load an absent UI module or create a view.
+            try
+            {
+                MapScreen screen = MapScreen.Instance;
+                if (screen == null) return null;
+                if (_settlementNameplateViewGetter == null)
+                {
+                    Type ownerType = null;
+                    foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+                        if (assembly.GetName().Name == "SandBox.GauntletUI")
+                            ownerType = assembly.GetType("SandBox.GauntletUI.Map.GauntletMapSettlementNameplateView", false);
+                    if (ownerType == null || !typeof(MapView).IsAssignableFrom(ownerType)) return null;
+                    FieldInfo field = ownerType.GetField("_dataSource", BindingFlags.Instance | BindingFlags.NonPublic);
+                    if (field?.FieldType != typeof(SettlementNameplatesVM)) return null;
+                    MethodInfo getter = typeof(MapScreen).GetMethod("GetMapView", BindingFlags.Instance | BindingFlags.Public);
+                    if (getter == null || !getter.IsGenericMethodDefinition || getter.GetParameters().Length != 0) return null;
+                    _settlementNameplateDataSourceField = field;
+                    _settlementNameplateViewGetter = getter.MakeGenericMethod(ownerType);
+                }
+                object owner = _settlementNameplateViewGetter.Invoke(screen, null);
+                return owner == null ? null : _settlementNameplateDataSourceField.GetValue(owner) as SettlementNameplatesVM;
+            }
+            catch { return null; }
+        }
+
+        private static string CaptureSettlementPartyBadges(Settlement settlement, bool inRange,
+            SettlementNameplatesVM source)
+        {
+            // Preserve the host UI's current event-owned order and cached banner.
+            // Re-enumerating Settlement.Parties and sorting can reorder equal-kind items.
+            if (!inRange || settlement == null || source == null) return string.Empty;
+            try
+            {
+                SettlementNameplateVM nameplate = source.GetNameplateOfSettlement(settlement);
+                if (nameplate == null || !nameplate.IsInRange) return string.Empty;
+                var items = nameplate.SettlementParties?.PartiesInSettlement;
+                if (items == null || items.Count > CoopCampaignMapSettlementPartyBadgePolicy.MaxBadges)
+                    return string.Empty;
+                bool disguised = TaleWorlds.CampaignSystem.Campaign.Current.IsMainHeroDisguised;
+                var badges = new List<CoopCampaignMapSettlementPartyBadge>();
+                foreach (SettlementNameplatePartyMarkerItemVM item in items)
+                {
+                    MobileParty party = item?.Party;
+                    if (party == null || !CoopCampaignMapSettlementPartyBadgePolicy.IsAdmitted(
+                        inRange, party.IsGarrison, party.IsMilitia, party.IsMainParty, disguised,
+                        party.Army != null, party.Army?.LeaderParty?.IsMainParty == true)) continue;
+                    if ((item.IsLord ? 1 : 0) + (item.IsCaravan ? 1 : 0) + (item.IsDefault ? 1 : 0) != 1)
+                        return string.Empty;
+                    int kind = item.IsLord ? 0 : item.IsCaravan ? 1 : 2;
+                    if (kind == 0 && item.Visual == null) return string.Empty;
+                    badges.Add(new CoopCampaignMapSettlementPartyBadge
+                    {
+                        Kind = kind, IsBandit = item.IsBandit,
+                        BannerCode = kind == 0 ? item.Visual.Id ?? string.Empty : string.Empty
+                    });
+                }
+                return CoopCampaignMapSettlementPartyBadgePolicy.TryEncode(badges, out string encoded)
+                    ? encoded : string.Empty;
+            }
+            catch { return string.Empty; }
+        }
+
+        private static int CaptureSettlementLevels(SettlementVisualManager manager, Settlement settlement)
+        {
+            // Called only after host disclosure admission, on the existing map tick.
+            // Read the native choice; never dirty, refresh or mutate host visuals.
+            try
+            {
+                if (manager == null || SettlementLevelMaskField?.FieldType != typeof(uint))
+                    return 0;
+                var visual = manager.GetVisualOfEntity(settlement.Party) as SettlementVisual;
+                var campaign = TaleWorlds.CampaignSystem.Campaign.Current;
+                if (visual?.StrategicEntity == null || campaign?.MapSceneWrapper == null)
+                    return 0;
+                uint mask = (uint)SettlementLevelMaskField.GetValue(visual);
+                return CoopCampaignMapSettlementLevelPolicy.Capture(mask,
+                    name => campaign.MapSceneWrapper.GetSceneLevel(name));
+            }
+            catch
+            {
+                // Unknown/version-mismatched visuals remain hidden on the replica.
+                return 0;
+            }
+        }
+
+        private static void CaptureSettlementPresentation(Settlement settlement,
+            CoopCampaignMapPrototypeEntityState entity)
+        {
+            // Already admitted by the host disclosure gate. Same authoritative
+            // inputs as native RefreshWallState/RefreshSiegePreparations, read-only.
+            try
+            {
+                string walls = settlement.IsFortification
+                    ? CoopCampaignMapSettlementPresentationPolicy.CaptureWalls(
+                        settlement.SettlementWallSectionHitPointsRatioList)
+                    : string.Empty;
+                float? progress = null;
+                if (settlement.IsUnderSiege)
+                    progress = settlement.SiegeEvent.GetSiegeEventSide(BattleSideEnum.Attacker)
+                        .SiegeEngines.SiegePreparations?.Progress;
+                int preparation = CoopCampaignMapSettlementPresentationPolicy.CapturePreparation(
+                    settlement.IsUnderSiege, progress);
+                entity.SettlementWallStates = walls;
+                entity.SettlementPreparationState = preparation;
+            }
+            catch
+            {
+                entity.SettlementWallStates = string.Empty;
+                entity.SettlementPreparationState = 0;
+            }
         }
 
         private void UpdateReplicaSnapshots(
@@ -476,11 +667,17 @@ namespace CoopSpectator.Campaign
                         {
                             EntityId = entity.EntityId,
                             DisplayName = entity.DisplayName,
+                            PartyNameplateNameText = entity.PartyNameplateNameText,
                             Kind = entity.Kind,
                             SettlementNameplateSize = entity.SettlementNameplateSize,
                             SettlementKind = settlementKind,
+                            SettlementLevelFlags = entity.SettlementLevelFlags,
+                            SettlementWallStates = entity.SettlementWallStates,
+                            SettlementPartyBadges = entity.SettlementPartyBadges,
+                            SettlementPreparationState = entity.SettlementPreparationState,
                             PrimaryColor = entity.PrimaryColor,
                             SecondaryColor = entity.SecondaryColor,
+                            NameplateColor = entity.NameplateColor,
                             BannerCode = entity.BannerCode,
                             VisualCharacterId = entity.VisualCharacterId,
                             CultureId = entity.CultureId,
@@ -511,17 +708,27 @@ namespace CoopSpectator.Campaign
                             NormalizedY = entity.NormalizedY,
                             Heading = entity.Heading,
                             PartySize = entity.PartySize,
+                            IsPartyInformationHidden = entity.IsPartyInformationHidden,
+                            PartyNameplateCountText = entity.PartyNameplateCountText,
+                            PartyNameplateExtraInfoText = entity.PartyNameplateExtraInfoText,
+                            PartyMovementSpeedText = entity.PartyMovementSpeedText,
+                            PartyNameplateFlags = entity.PartyNameplateFlags,
                             IsVisible = true,
                             IsMoving = information?.IsMoving ?? false,
-                            ArmyPartyCount = information?.ArmyPartyCount ?? 0,
-                            ArmyTotalSize = information?.ArmyTotalSize ?? 0,
-                            ArmyCohesion = information?.ArmyCohesion ?? 0,
+                            ArmyPartyCount = entity.IsPartyInformationHidden
+                                ? 0 : information?.ArmyPartyCount ?? 0,
+                            ArmyTotalSize = entity.IsPartyInformationHidden
+                                ? 0 : information?.ArmyTotalSize ?? 0,
+                            ArmyCohesion = entity.IsPartyInformationHidden
+                                ? 0 : information?.ArmyCohesion ?? 0,
                             AppearanceRevision = 0,
                             InformationRevision = 0,
                             QuestMarkerFlags =
                                 information?.QuestMarkerFlags ?? 0,
                             SettlementEventFlags =
-                                information?.SettlementEventFlags ?? 0
+                                information?.SettlementEventFlags ?? 0,
+                            IsSettlementTracked = information?.IsSettlementTracked ?? false,
+                            IsSettlementInRange = information?.IsSettlementInRange ?? false
                         };
                     if (!CoopCampaignMapPrototypeContract.IsValidCatalogEntity(
                             catalogEntity) ||
@@ -589,6 +796,8 @@ namespace CoopSpectator.Campaign
                 hidden.IsMoving = false;
                 hidden.QuestMarkerFlags = 0;
                 hidden.SettlementEventFlags = 0;
+                hidden.IsSettlementTracked = false;
+                hidden.IsSettlementInRange = false;
                 _knownDynamicById[entityId] = hidden;
             }
 
@@ -729,7 +938,8 @@ namespace CoopSpectator.Campaign
                     CoopCampaignMapPrototypeSettlementNameplateSize.None,
                     partyPosition,
                     heading,
-                    party.Party.NumberOfAllMembers,
+                    CoopCampaignMapPartyLabelPolicy.ResolvePublishedCount(
+                        party.IsInfoHidden, party.Party.NumberOfAllMembers),
                     primaryColor,
                     secondaryColor,
                     bannerCode,
@@ -746,6 +956,30 @@ namespace CoopSpectator.Campaign
                 return;
             }
 
+            entity.NameplateColor = ResolvePartyNameplateColor(party);
+            entity.PartyNameplateNameText = CoopCampaignMapPrototypeContract.BoundEntityText(
+                CoopCampaignMapPartyLabelPolicy.ResolveName(
+                    party.Army != null && party.Army.DoesLeaderPartyAndAttachedPartiesContain(party),
+                    party.ArmyName?.ToString(), party.LeaderHero?.Name?.ToString(), party.Name?.ToString()),
+                CoopCampaignMapPrototypeContract.MaxPartyNameplateNameCharacters, string.Empty);
+            entity.PartyNameplateFlags = CoopCampaignMapPartyLabelPolicy.ResolveFlags(
+                party.Army != null && party.Army.LeaderParty == party,
+                party.Army != null && party.AttachedTo != null,
+                party.CurrentSettlement != null, party.IsDisorganized,
+                party.IsCurrentlyAtSea, party.IsInRaftState);
+            float partySpeed = party.IsActive ? party.Speed : 0f;
+            entity.PartyMovementSpeedText = party.IsActive &&
+                !float.IsNaN(partySpeed) && !float.IsInfinity(partySpeed)
+                ? partySpeed.ToString("F1") : string.Empty;
+            entity.IsPartyInformationHidden = party.IsInfoHidden;
+            entity.PartyNameplateCountText = CoopCampaignMapPartyLabelPolicy.ResolveCountText(
+                party.IsInfoHidden, SandBox.ViewModelCollection.SandBoxUIHelper.GetPartyHealthyCount(party));
+            entity.PartyNameplateExtraInfoText = CoopCampaignMapPartyLabelPolicy.ResolveExtraInfoText(
+                party.IsInfoHidden,
+                SandBox.ViewModelCollection.SandBoxUIHelper.GetAllWoundedMembersAmount(party),
+                SandBox.ViewModelCollection.SandBoxUIHelper.GetAllPrisonerMembersAmount(party),
+                SandBox.ViewModelCollection.SandBoxUIHelper.GetPartyWoundedText,
+                SandBox.ViewModelCollection.SandBoxUIHelper.GetPartyPrisonerText);
             candidates.Add(
                 new VisibleEntityCandidate(
                     entity,
@@ -754,6 +988,28 @@ namespace CoopSpectator.Campaign
                         partyPosition)));
             _replicaInformation[entity.EntityId] =
                 CapturePartyInformation(party);
+        }
+
+        private static uint ResolvePartyNameplateColor(MobileParty party)
+        {
+            // Match native label precedence on the real campaign host only.
+            // Do not infer diplomacy or instantiate campaign objects on clients.
+            Army army = party.Army;
+            bool armyLeader = army != null && army.LeaderParty == party;
+            bool mainPartyOrAttachedPeer = party.IsMainParty ||
+                (army?.LeaderParty != null &&
+                 army.LeaderParty.AttachedParties.Contains(MobileParty.MainParty) &&
+                 army.LeaderParty.AttachedParties.Contains(party));
+            IFaction hostFaction = Hero.MainHero?.MapFaction;
+            return CoopCampaignMapPartyLabelPolicy.ResolveColor(
+                mainPartyOrAttachedPeer,
+                hostFaction != null &&
+                    FactionManager.IsAtWarAgainstFaction(party.MapFaction, hostFaction),
+                hostFaction != null &&
+                    DiplomacyHelper.IsSameFactionAndNotEliminated(party.MapFaction, hostFaction),
+                hostFaction != null &&
+                    DiplomacyHelper.HasAllianceWithFaction(party.MapFaction, hostFaction),
+                armyLeader);
         }
 
         private static bool TryCreateEntityState(
@@ -818,6 +1074,9 @@ namespace CoopSpectator.Campaign
                 SecondaryColor = secondaryColor == 0u
                     ? DefaultEntitySecondaryColor
                     : secondaryColor,
+                NameplateColor = primaryColor == 0u
+                    ? DefaultEntityColor
+                    : primaryColor,
                 BannerCode = CoopCampaignMapPrototypeContract.BoundEntityText(
                     bannerCode,
                     CoopCampaignMapPrototypeContract.MaxBannerCodeCharacters,
@@ -1024,6 +1283,15 @@ namespace CoopSpectator.Campaign
         {
             if (settlement == null || information == null)
                 return;
+
+            // Match stock SettlementNameplateVM host-local presentation semantics.
+            // Hideouts use spotting; ordinary settlements use inspection, not distance.
+            information.IsSettlementTracked =
+                TaleWorlds.CampaignSystem.Campaign.Current.VisualTrackerManager
+                    .CheckTracked(settlement);
+            information.IsSettlementInRange = settlement.IsHideout
+                ? (settlement.SettlementComponent as ISpottable)?.IsSpotted == true
+                : settlement.IsInspected;
 
             int eventFlags = 0;
             int questMarkerFlags = 0;
@@ -1608,6 +1876,10 @@ namespace CoopSpectator.Campaign
 
             public int SettlementEventFlags { get; set; }
 
+            public bool IsSettlementTracked { get; set; }
+
+            public bool IsSettlementInRange { get; set; }
+
             public string SettlementProductionIconId { get; set; } =
                 string.Empty;
 
@@ -1650,8 +1922,10 @@ namespace CoopSpectator.Campaign
 
         private void UpdateConversationSnapshot()
         {
+            _capturedConversationPose = null;
             if (!CoopCampaignMapConversationCapture.TryCapture(
                     out CoopCampaignMapConversationState captured,
+                    out CoopCampaignMapConversationPose pose,
                     out string reason))
             {
                 LogFailureRateLimited(
@@ -1659,19 +1933,23 @@ namespace CoopSpectator.Campaign
                 return;
             }
 
-            if (CoopCampaignMapPrototypeContract
+            if (!CoopCampaignMapPrototypeContract
                 .AreConversationContentsEquivalent(
                     _cachedConversation,
                     captured))
             {
-                return;
+                if (_conversationRevision == int.MaxValue)
+                    _conversationRevision = 0;
+                _conversationRevision++;
+                captured.Revision = _conversationRevision;
+                _cachedConversation = captured.Clone();
             }
-
-            if (_conversationRevision == int.MaxValue)
-                _conversationRevision = 0;
-            _conversationRevision++;
-            captured.Revision = _conversationRevision;
-            _cachedConversation = captured.Clone();
+            if (pose != null)
+            {
+                pose.ConversationRevision = _cachedConversation.Revision;
+                pose.Sequence = _revision;
+                _capturedConversationPose = pose;
+            }
         }
 
         private void LogFailureRateLimited(string reason)

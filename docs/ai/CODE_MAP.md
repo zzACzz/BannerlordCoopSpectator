@@ -1,5 +1,116 @@
 # Code Map
 
+Native picking candidate: `UI/CoopCampaignMapPrototypeMissionView.Picking.cs`
+owns map-scene ray hits, referenced settlement geometry and owned party spheres;
+`Infrastructure/CoopCampaignMapPickResolver.cs` resolves bounded admitted hits in
+audited native order. `PickResolverTests.cs` covers pure decisions and wiring.
+Source/build checks are not native acceptance. See [scope and gaps](CAMPAIGN_MAP_RESUME_2026-09-26.md#native-scene-picking-candidate-2026-09-28-not-runtime-verified).
+
+Current tooltip integration: controller partial .Tooltips owns exact-peer grants,
+relay scheduling and unicast chunks; CoopCampaignMapTooltipNetworkMessages defines
+three native messages; CoopCampaignMapTooltipChunks owns bounded assembly.
+UI/CoopCampaignMapTooltipPresenter.cs uses the stock movie for detached rows;
+MissionView supplies hover and lifecycle cleanup. TooltipPresenterTests compiles
+the real presenter with isolated test doubles. Earlier "unwired" entries below
+are historical. See [current implementation and gates](CAMPAIGN_MAP_RESUME_2026-09-26.md#tooltip-stock-presenter-candidate-2026-09-28-not-native-verified).
+
+`CoopCampaignMapTooltipRelay` defines the fixed local binary channel;
+`CoopCampaignMapTooltipRelayClient` is the not-yet-network-connected dedicated
+endpoint. `Campaign/CoopCampaignMapTooltipHost.cs` owns launcher Prepare/Attach
+and host tick capture. See [relay candidate](CAMPAIGN_MAP_RESUME_2026-09-26.md#launcher-owned-tooltip-relay-2026-09-28-source-candidate).
+
+`CoopCampaignMapTooltipWireCodec`/`CoopCampaignMapTooltipHandshake` define bounded
+semantic messages and reject grants from a previous client challenge. Publisher
+`TryCapturePublishedTooltip` applies `CoopCampaignMapTooltipTargetAdmission` before
+native target lookup/capture. These have no live relay/network/UI caller. See
+[envelope and host-entry candidate](CAMPAIGN_MAP_RESUME_2026-09-26.md#tooltip-semantic-envelopes-and-host-lookup-2026-09-28-unwired).
+
+`Campaign/CoopCampaignMapTooltipCapture.cs` is a host-only native-provider
+adapter reached by the new source host relay, with disclosure/routing checks and
+detached row capture; native MP submission/acceptance is still open. The pure
+`CoopCampaignMapTooltipTextTransaction<T>` restores variable entries and idle
+parser stacks. `CoopCampaignMapTooltipLanguageState` plus the pure thread-state
+scope isolate audited grammar fields and reject shared-empty writable templates.
+This is not arbitrary nested-state isolation; native gates precede live wiring. See
+[candidate and safety boundary](CAMPAIGN_MAP_RESUME_2026-09-26.md#host-native-tooltip-capture-candidate-2026-09-28-unwired).
+
+`Infrastructure/CoopCampaignMapTooltipInterest.cs` owns pure client correlation,
+request-age expiry and detached display; `CoopCampaignMapTooltipPeerGate.cs` owns
+one exact peer/map/session grant and bounded pending capture. Both are unwired;
+their dedicated contract tests are not network/native acceptance. See
+[lifetime boundary](CAMPAIGN_MAP_RESUME_2026-09-26.md#tooltip-request-lifetime-boundary-2026-09-28-candidate).
+
+`Infrastructure/CoopCampaignMapTooltipPayload.cs` is an unwired pure detached-row
+format and bounded UTF-8 codec; `TooltipPayloadTests` exercises presentation
+preservation, request correlation and hostile input. No host capture, transport
+or UI integration exists yet. See
+[foundation and native-provider risks](CAMPAIGN_MAP_RESUME_2026-09-26.md#tooltip-provider-isolation-and-detached-payload-foundation-2026-09-28).
+
+`CoopCampaignMapReplicaStateProjection.BuildVisible` projects latest admitted
+catalog/dynamic stores when MissionView drains deferred reconciliation, so queued
+clones cannot overwrite newer visibility/entry/exit/membership. PartyBodyTests
+covers temporal projection and consumer wiring. See
+[ordering correction](CAMPAIGN_MAP_RESUME_2026-09-26.md#deferred-reconciliation-ordering-correction-2026-09-28).
+
+`CoopCampaignMapPartyBodyPolicy` (prototype contract) separately gates mobile
+bodies using InSettlement. MissionView applies it to allocation/render/fallbacks,
+hover and upsert-time panel invalidation; InfoVM tracks DisplayedEntityId.
+`PartyBodyTests` covers admission transitions and source wiring. See
+[correction and validation](CAMPAIGN_MAP_RESUME_2026-09-26.md#mobile-body-admission-correction-2026-09-28).
+
+cmp-b10: Publisher.CaptureSettlementPresentation reads disclosed host wall health
+and siege preparation inputs. SettlementPresentationPolicy bounds/codifies them;
+MissionView.ApplySettlementPresentation applies wall then preparation overrides
+after level filtering, before owned-root reveal. Full/catalog/binary/native paths
+carry both fields (25/21/6). See [implementation and bounded native result](CAMPAIGN_MAP_RESUME_2026-09-26.md#wall-and-siege-preparation-candidate-2026-09-27).
+
+MissionView.RemoveFortificationAuthoringHelpers snapshots exact startup helper tags
+under owned town/castle roots. SettlementAuthoringPolicy selects topmost native
+removal roots before mutation. See [cmp-b9](CAMPAIGN_MAP_RESUME_2026-09-26.md#fortification-authoring-helper-candidate-2026-09-27).
+
+Settlement levels: SettlementLevelPolicy (in the geometry admission file) maps
+semantic/native masks; Publisher.CaptureSettlementLevels reads admitted host
+visuals; MissionView.ApplySettlementLevels changes only owned scene children.
+Protocol 24/bridge 20/catalog 5 carry SettlementLevelFlags through existing paths.
+See [implementation and bounded result](CAMPAIGN_MAP_RESUME_2026-09-26.md#host-selected-settlement-levels-2026-09-27-bounded-native-result).
+
+CoopCampaignMapSettlementGeometryAdmission<T> owns pure per-scene root admission;
+SettlementGeometryTests covers transitions/wiring. MissionView discovers hidden
+roots, reveals typed settlement upserts, hides removals and clears before disposal.
+See [candidate and limits](CAMPAIGN_MAP_RESUME_2026-09-26.md#static-settlement-geometry-admission-2026-09-27).
+
+Map scene helpers (2026-09-27): MissionView.RemoveSettlementAuthoringCircles
+snapshots/removes exact native helper-tag entities once after isolated Scene.Read.
+It does not update settlement variants; root admission is now handled separately
+as above. The variant gap is recorded
+in the [native investigation](CAMPAIGN_MAP_RESUME_2026-09-26.md#settlement-scene-presentation-investigation-2026-09-27).
+
+Map camera (2026-09-27): `CoopCampaignMapReplicaCameraPolicy` owns local follow/
+detach/reset; `ReplicaCameraTests` covers policy and bindings. Mission view, info VM
+and prefab implement the return button/input guards. Settlement tracked/inspected
+bits cross publisher, full/dynamic contracts/codecs/messages and settlement overlay.
+Both settlement culling gates share `ShouldShowSettlement`; tracked admitted
+entities retain their projection for the native widget's screen-edge placement.
+See [candidate and verification](CAMPAIGN_MAP_RESUME_2026-09-26.md#host-camera-following-and-settlement-presentation-2026-09-27).
+
+Campaign mission lifecycle foundation (2026-09-26):
+`Infrastructure/CoopCampaignMissionLifecycle.cs` is the pure one-shot map/battle
+transition reconciler; `Tests/CoopCampaignMapPrototype.ContractTests/MissionLifecycleTests.cs`
+exercises its transition, identity, stale-input and aftermath gates.
+`Infrastructure/CoopCampaignMissionChannel.cs` provides bounded atomic transport
+and process/freshness admission, tested by `MissionChannelTests.cs`.
+`Campaign/CoopCampaignMissionHost.cs` connects the supported dedicated launcher,
+battle roster admission and applied-result journal; `DedicatedServer/CoopCampaignMissionServer.cs`
+connects the reconciler to native readiness/opening/result observations and commands.
+`Infrastructure/CoopCampaignMissionOpening.cs` scopes the exact OpenNew return
+capture to one native dispatch/thread, with `MissionOpeningTests.cs` rejection
+coverage. The existing `MissionStateOpenNewPatches` postfix observes the return;
+it does not initialize or mutate missions. See the 2026-09-27 native failure in
+the lifecycle document for why immediate Mission.Current is not sufficient.
+Both SubModule ticks call their adapters. `CoopPreMissionTopologyNetworkComponent.TryPublishPreparedMission`
+supplies the pre-open scene contract. Separate default-off automatic-mission gate;
+see [source implementation and native acceptance boundary](CAMPAIGN_MAP_AUTOMATIC_LIFECYCLE.md).
+
 Local-isolation source map (2026-09-09): CoopAutomationRuntimeContract owns profile/path constants, ResolveCoopFolderPath, TryResolveContainedPath and LocalResultSentinelText; CoopAutomationRuntimeBridge supplies process configuration and the lazy production provider. Shared path factories route through it. CoopAutomationSpawnSmokeBridge admits/checks the local sentinel; the dedicated observer/control contract emit/validate its scope. CoopAutomationRunner.Core.ps1 contains the matching local-result helpers and v2 validators; Invoke-CoopTest.ps1 uses them only for DedicatedSpawnSmoke. Runtime, spawn-smoke and campaign-result guard suites cover this boundary; RuntimeCompileStubs.cs belongs only to the spawn-smoke test project. [Exact scope and evidence](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#11-local-only-file-isolation-2026-09-09).
 
 Milestone 4A adds CoopAutomationSpawnSmokeContract, CoopAutomationSpawnSmokeBridge, CoopAutomationDedicatedSpawnSmokeObserver, the DedicatedSpawnSmoke command and CoopAutomationSpawnSmoke.ContractTests. The [M4 source map](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#2-ownership-and-source-map) lists exact integration methods. The canonical inventory has 24 projects.
@@ -161,6 +272,14 @@ Each mode usually has server/client marker classes beside its `*Mode.cs` file. T
 
 ### Campaign map prototype
 
+Settlement occupant badge source (26/22/7): `CoopCampaignMapSettlementPartyBadgePolicy`
+in the map contract owns admission/codec bounds; publisher
+`CaptureSettlementPartyBadges` reads admitted host parties; catalog/full bridge,
+binary codec and shared projection carry the field. `SendCatalogDelta` routes
+nonempty lists to chunks. Settlement overlay `SettlementParties.Synchronize`
+owns the passive stock-grid items. `SettlementPartyBadgeTests.cs` covers detached
+contracts; native acceptance pending in the canonical resume report.
+
 | Concern | Files |
 |---|---|
 | Host-visible map and dialogue publication | `Campaign/CoopCampaignMapPrototypePublisherBehavior.cs`, `Campaign/CoopCampaignMapConversationCapture.cs` |
@@ -170,9 +289,20 @@ Each mode usually has server/client marker classes beside its `*Mode.cs` file. T
 | Map and dialogue wire messages | `Network/Messages/CoopCampaignMapPrototypeNetworkMessages.cs`, `Network/Messages/CoopCampaignMapReplicaNetworkMessages.cs`, `Network/Messages/CoopCampaignMapConversationNetworkMessages.cs` |
 | Client map rendering and interaction | `UI/CoopCampaignMapPrototypeMissionView.cs`, map overlay and replica-info view-models |
 | Client synchronous dialogue | `UI/CoopCampaignMapConversationView.cs`, `UI/CoopCampaignMapConversationVM.cs` |
+| Client dialogue scene ownership | `UI/CoopCampaignMapConversationTableauView.cs`, `Infrastructure/CoopCampaignMapConversationVisualLifetime.cs`, `ConversationVisualLifetimeTests.cs` in the map contract project |
+| Live dialogue body motion | `Infrastructure/CoopCampaignMapConversationPose.cs` (codec, exact receiver, pure `CoopConversationPosePlayback` rate steering), map contract `ConversationPoseTests.cs`, host capture, message/controller/view; protocol 22/bridge 18. cmt-b27 first-dialogue smoothness user-confirmed; first/repeat retention, read-only/text update and both closes passed. Installed b27 retained after exact cleanup; no full visual/battle-regression claim. |
+| 3D dialogue descriptor and atomic transport | `Campaign/CoopCampaignMapConversationTableauCapture.cs`, `Infrastructure/CoopCampaignMapConversationTableauState.cs`, `Infrastructure/CoopCampaignMapConversationPayloadCodec.cs`, map contract `ConversationTableauTests.cs` and `ConversationPayloadTests.cs` |
 | Contract coverage | `Tests/CoopCampaignMapPrototype.ContractTests/Program.cs` |
 
 The dialogue projection is server-to-client only. The client uses the native `SPConversation` movie but its answer/continue commands are no-op; no campaign object or choice authority is created in the multiplayer process.
+
+The 2026-09-26 tableau descriptor defines detached camera/atmosphere/weather and up to three native visible actors with a strict 64-KiB binary codec. Host dialogue capture now reads an already initialized native tableau and transports it via bridge schema 17. The whole dialogue uses a bounded 1-MiB atomic payload with 256-byte reliable chunks, two per peer per tick; protocol 21 replaces the old text header/option messages. The complete-payload assembler rejects mixed/stale/incomplete revisions. It preserves initial action identity, not continuous facial/voice/animation synchronization. The independent client scene owner now consumes the descriptor with bounded readiness and explicit cleanup; this candidate is not deployed or runtime-verified. Do not call this implemented live 3D dialogue. See the [implementation boundary and evidence](CAMPAIGN_MAP_RESUME_2026-09-26.md).
+
+`CoopCampaignMapReplicaStateProjection.Merge` in the map contract is the single full/incremental visible-entity projection used by both the network controller and mission view. It preserves all marker, production-icon, label-color and hidden-information fields, with detached visual descriptors. The 2026-09-26 follow-up audit found and removed divergent hand-written merges; the earlier `cmr-b4`/`cmr-b5` candidates had incomplete consumer coverage despite successful tests. `cmr-b6` builds both roles without installed mutation; see the resume report for verification boundaries.
+
+`CoopCampaignMapPartyLabelPolicy` in the map contract holds the inspected native relationship palette, caption precedence, status/label visibility, hidden-count redaction and text composition. The publisher resolves real host diplomacy and uses installed `SandBoxUIHelper` for healthy/wounded/prisoner attached-army aggregation and localization. `NameplateColor` is independent of banner/cloth colors. `IsPartyInformationHidden` zeroes transmitted detail numbers and restricts count/extra strings to native question-mark disclosure. `PartyNameplateNameText` is catalog-owned and separate from detail `DisplayName`; count/extra/speed strings and six presentation flags are dynamic. The shared merge feeds the overlay's native widget properties. Label suppression is separate from the return value used to gate 3D models. The party overlay uses spatial camera distance; the mission view projects a fixed 0.8-unit head anchor. Detail `PartySize` remains total members. Current source requires wire 22/bridge 18/catalog 4 and two-entity dynamic batches (the historical live `cmr-b10` used 20/16/4). Coherent `cmr-b10` passed bounded live mission startup, city selection, zoom, movement and read-only dialogue open/update/close; exact-owned cleanup and 64-file preservation passed. The candidate remains installed. Main-party-specific template, portrait, navigator and dialogue 3D tableau remain pending, as do broader visual and transfer-cost checks. See the resume report for exact build/test evidence and remaining parity gaps.
+
+The replica information panel binds scalar scaled-position offsets; `CoopCampaignMapPrototypeInteractionPolicy.ResolveInformationPanelPosition` clamps shared panel dimensions using the actual layer UI scale. Ordinary dialogue answers supply an inert non-null persuasion VM to suppress default-visible native child widgets; this does not transport actual persuasion state. Movie replacement/close clears information hints. Source/contracts and both builds passed on 2026-09-26; live validation of these corrections remains pending in [the resume report](CAMPAIGN_MAP_RESUME_2026-09-26.md).
 
 ## Snapshot, identity, and exact transfer
 
@@ -430,6 +560,7 @@ Primary views/view-models:
 - day/night hideout objective, stealth, cinematic, conversation, and marker views;
 - `CoopCampaignMapPrototypeMissionView`, party visual, overlays, and replica info. The mission view loads the native `Main_map` atmosphere data after `Scene.Read` and before optimization, collects meshes tagged `ticked_map_entity`, calls `MBMapScene.TickVisuals` while the map scene is render-ready, and clears those cached arrays during scene release. The atmosphere load is required because the visual tick reaches the native map color-grade/atmosphere path even though this is an isolated client scene layer. Publisher-to-client marker state uses explicit bit flags for available/active/tracked issue and story-quest semantics plus settlement tournament/production events; hidden campaign objects clear these fields instead of leaking markers.
 - `CoopCampaignMapConversationView` and `CoopCampaignMapConversationVM`: synchronized display-only projection of the host's already formatted native map dialogue into the `SPConversation` movie. It restores mission-layer activation/focus on close and exposes no client choice transport.
+- `CoopCampaignMapConversationTableauView`: owns the independent scene, up to three visual actors and an off-screen native TableauView texture. Its private passive Gauntlet layer/instance-local widget draws below the native conversation without global provider registration. Texture callback failures are consumed by the mission tick; resize invalidates readiness while preserving actors. cmt-b20 corrected gross image scaling/displacement using stock movie-style physical-pixel sizing. cmt-b22 restored visible scar/age detail with bounded immediate actor preparation; repeated readiness/retention/close passed. Animation, expressions and top HUD still differ; this is not visual 1:1 acceptance. See the canonical cmt-b22 native face-detail result in the resume report.
 
 Gauntlet prefabs live in `Module/CoopSpectator/GUI/Prefabs/`. When changing a view-model property or command, search the matching XML binding. `CoopSelection.xml` and `CoopCommanderDeployment.xml` are primary selection/deployment assets.
 

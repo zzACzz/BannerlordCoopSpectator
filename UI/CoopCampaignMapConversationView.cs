@@ -31,6 +31,9 @@ namespace CoopSpectator.UI
                 BindingFlags.NonPublic);
 
         private CoopCampaignMapConversationState _pendingState;
+        private CoopCampaignMapConversationPose _pendingPose;
+        private readonly System.Diagnostics.Stopwatch _poseAge = new System.Diagnostics.Stopwatch();
+        private CoopCampaignMapConversationTableauView _tableau;
         private int _appliedRevision = -1;
         private GauntletLayer _conversationLayer;
         private GauntletMovieIdentifier _conversationMovie;
@@ -47,6 +50,7 @@ namespace CoopSpectator.UI
             base.OnBehaviorInitialize();
             CoopCampaignMapPrototypeNetworkController.ClientConversationChanged +=
                 OnClientConversationChanged;
+            CoopCampaignMapPrototypeNetworkController.ClientConversationPoseChanged += OnClientConversationPoseChanged;
             if (CoopCampaignMapPrototypeNetworkController
                     .CurrentClientConversation != null)
             {
@@ -67,22 +71,31 @@ namespace CoopSpectator.UI
             if (!GameNetwork.IsClient || MissionScreen == null)
                 return;
 
-            CoopCampaignMapConversationState pending = _pendingState;
-            if (pending == null || pending.Revision <= _appliedRevision)
-                return;
+            _tableau?.Tick(dt);
 
-            _pendingState = null;
-            _appliedRevision = pending.Revision;
-            if (pending.IsActive)
-                ShowConversation(pending);
-            else
-                CloseConversation();
+            CoopCampaignMapConversationState pending = _pendingState;
+            if (pending != null && pending.Revision > _appliedRevision)
+            {
+                _pendingState = null;
+                _appliedRevision = pending.Revision;
+                if (pending.IsActive) ShowConversation(pending);
+                else CloseConversation();
+            }
+            if (_pendingPose != null)
+            {
+                if (_poseAge.Elapsed.TotalSeconds > 0.5 || _pendingPose.ConversationRevision < _appliedRevision)
+                    _pendingPose = null;
+                else if (_pendingPose.ConversationRevision == _appliedRevision && _tableau != null &&
+                    _tableau.ApplyPose(_pendingPose))
+                    _pendingPose = null;
+            }
         }
 
         public override void OnMissionScreenFinalize()
         {
             CoopCampaignMapPrototypeNetworkController.ClientConversationChanged -=
                 OnClientConversationChanged;
+            CoopCampaignMapPrototypeNetworkController.ClientConversationPoseChanged -= OnClientConversationPoseChanged;
             CloseConversation();
             _pendingState = null;
             _appliedRevision = -1;
@@ -101,12 +114,19 @@ namespace CoopSpectator.UI
             }
         }
 
+        private void OnClientConversationPoseChanged(CoopCampaignMapConversationPose pose)
+        {
+            if (pose == null || pose.ConversationRevision < _appliedRevision) return;
+            _pendingPose = pose.Clone();
+            _poseAge.Restart();
+        }
+
         private void ShowConversation(CoopCampaignMapConversationState state)
         {
             if (state == null || !state.IsActive || MissionScreen == null)
                 return;
 
-            CloseConversation();
+            CloseConversation(releaseTableau: false);
             CaptureMissionLayerState();
             try
             {
@@ -133,8 +153,12 @@ namespace CoopSpectator.UI
                 MissionScreen.SetConversationActive(true);
                 ((ScreenBase)MissionScreen)
                     .SetLayerCategoriesStateAndDeactivateOthers(
-                        new[] { "MissionConversation", "SceneLayer" },
+                        new[] { "MissionConversation", "SceneLayer", CoopCampaignMapConversationTableauView.LayerName },
                         true);
+                if (_tableau == null)
+                    _tableau = new CoopCampaignMapConversationTableauView(MissionScreen);
+                _tableau.Apply(state.Tableau);
+                _tableau.BindPose(state);
                 ScreenManager.TrySetFocus(_conversationLayer);
                 InformationManager.HideAllMessages();
             }
@@ -147,8 +171,15 @@ namespace CoopSpectator.UI
             }
         }
 
-        private void CloseConversation()
+        private void CloseConversation(bool releaseTableau = true)
         {
+            if (releaseTableau)
+            {
+                _pendingPose = null;
+                _poseAge.Reset();
+                _tableau?.Dispose();
+                _tableau = null;
+            }
             if (_conversationViewModel == null &&
                 _conversationLayer == null &&
                 _conversationSpriteCategory == null &&
@@ -159,6 +190,9 @@ namespace CoopSpectator.UI
 
             try
             {
+                // Removing the hovered widget need not dispatch HoverEnd.
+                // Clear dialogue-owned hints before restoring the map layers.
+                MBInformationManager.HideInformations();
                 _conversationViewModel?.OnFinalize();
             }
             catch

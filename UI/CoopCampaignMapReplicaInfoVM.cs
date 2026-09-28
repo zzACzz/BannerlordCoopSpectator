@@ -7,11 +7,38 @@ namespace CoopSpectator.UI
     internal sealed class CoopCampaignMapReplicaInfoVM : ViewModel
     {
         private bool _isVisible;
-        private Vec2 _position;
+        private float _positionX;
+        private float _positionY;
         private string _title = string.Empty;
         private string _typeText = string.Empty;
         private string _detailsText = string.Empty;
         private string _interactionText = string.Empty;
+        private readonly Action _followHost;
+        private string _cameraModeText = "Камера хоста";
+
+        internal string DisplayedEntityId { get; private set; }
+
+        public CoopCampaignMapReplicaInfoVM(Action followHost)
+        {
+            _followHost = followHost;
+        }
+
+        [DataSourceProperty]
+        public string CameraModeText
+        {
+            get => _cameraModeText;
+            private set => SetField(ref _cameraModeText, value, nameof(CameraModeText));
+        }
+
+        [DataSourceProperty]
+        public string FollowHostText => "До камери хоста";
+
+        public void ExecuteFollowHost() => _followHost?.Invoke();
+
+        internal void SetCameraMode(bool isFollowingHost)
+        {
+            CameraModeText = isFollowingHost ? "Камера хоста" : "Самостійний огляд";
+        }
 
         [DataSourceProperty]
         public bool IsVisible
@@ -21,17 +48,26 @@ namespace CoopSpectator.UI
         }
 
         [DataSourceProperty]
-        public Vec2 Position
+        public float PositionX
         {
-            get => _position;
-            private set
-            {
-                if (_position == value)
-                    return;
-                _position = value;
-                OnPropertyChangedWithValue(value, nameof(Position));
-            }
+            get => _positionX;
+            private set => SetField(ref _positionX, value, nameof(PositionX));
         }
+
+        [DataSourceProperty]
+        public float PositionY
+        {
+            get => _positionY;
+            private set => SetField(ref _positionY, value, nameof(PositionY));
+        }
+
+        [DataSourceProperty]
+        public float PanelWidth =>
+            (float)CoopCampaignMapPrototypeInteractionPolicy.InformationPanelWidth;
+
+        [DataSourceProperty]
+        public float PanelHeight =>
+            (float)CoopCampaignMapPrototypeInteractionPolicy.InformationPanelHeight;
 
         [DataSourceProperty]
         public string Title
@@ -74,7 +110,8 @@ namespace CoopSpectator.UI
             Vec2 anchor,
             bool pinned,
             float screenWidth,
-            float screenHeight)
+            float screenHeight,
+            float uiScale)
         {
             if (catalog == null || dynamicState == null)
             {
@@ -82,12 +119,13 @@ namespace CoopSpectator.UI
                 return;
             }
 
-            Position = pinned
-                ? new Vec2(Math.Max(20f, screenWidth - 390f), 90f)
-                : new Vec2(
-                    Math.Max(20f, Math.Min(screenWidth - 390f, anchor.x + 24f)),
-                    Math.Max(20f, Math.Min(screenHeight - 260f, anchor.y + 24f)));
+            CoopCampaignMapPrototypeInteractionPolicy.ResolveInformationPanelPosition(
+                anchor.x, anchor.y, pinned, screenWidth, screenHeight, uiScale,
+                out double x, out double y);
+            PositionX = (float)x;
+            PositionY = (float)y;
             Title = catalog.DisplayName ?? string.Empty;
+            DisplayedEntityId = catalog.EntityId;
             TypeText = ResolveTypeText(catalog);
             DetailsText = BuildDetails(catalog, dynamicState);
             InteractionText = pinned
@@ -99,6 +137,7 @@ namespace CoopSpectator.UI
         internal void Hide()
         {
             IsVisible = false;
+            DisplayedEntityId = null;
         }
 
         private static string ResolveTypeText(
@@ -138,7 +177,8 @@ namespace CoopSpectator.UI
         {
             var lines = new System.Collections.Generic.List<string>();
             if (catalog.Kind != CoopCampaignMapPrototypeEntityKind.Settlement)
-                lines.Add("Чисельність: " + dynamicState.PartySize);
+                lines.Add("Чисельність: " + (dynamicState.IsPartyInformationHidden
+                    ? "?" : dynamicState.PartySize.ToString()));
             if (!string.IsNullOrWhiteSpace(catalog.LeaderName))
                 lines.Add("Ватажок: " + catalog.LeaderName);
             if (!string.IsNullOrWhiteSpace(catalog.OwnerName))
@@ -148,18 +188,29 @@ namespace CoopSpectator.UI
             if (!string.IsNullOrWhiteSpace(catalog.ArmyName))
             {
                 lines.Add("Армія: " + catalog.ArmyName);
-                if (dynamicState.ArmyPartyCount > 0)
+                if (!dynamicState.IsPartyInformationHidden && dynamicState.ArmyPartyCount > 0)
                     lines.Add("Загонів в армії: " + dynamicState.ArmyPartyCount);
-                if (dynamicState.ArmyTotalSize > 0)
+                if (!dynamicState.IsPartyInformationHidden && dynamicState.ArmyTotalSize > 0)
                     lines.Add("Воїнів в армії: " + dynamicState.ArmyTotalSize);
-                lines.Add(
-                    "Згуртованість: " +
-                    Math.Round(
-                        CoopCampaignMapPrototypeContract.DequantizeUnit(
-                            dynamicState.ArmyCohesion) * 100d) +
-                    "%");
+                if (!dynamicState.IsPartyInformationHidden)
+                {
+                    lines.Add(
+                        "Згуртованість: " +
+                        Math.Round(
+                            CoopCampaignMapPrototypeContract.DequantizeUnit(
+                                dynamicState.ArmyCohesion) * 100d) +
+                        "%");
+                }
             }
             return string.Join("\n", lines);
+        }
+
+        private void SetField(ref float field, float value, string name)
+        {
+            if (field == value)
+                return;
+            field = value;
+            OnPropertyChangedWithValue(value, name);
         }
 
         private void SetField(ref bool field, bool value, string name)

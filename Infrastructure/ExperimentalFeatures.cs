@@ -30,6 +30,10 @@ namespace CoopSpectator.Infrastructure
         public static readonly bool EnableCampaignMapPrototype =
             IsEnvironmentFlagEnabledCore("COOPSPECTATOR_CAMPAIGN_MAP_PROTOTYPE");
 
+        // Separate rollout gate until native map/battle/map acceptance is complete.
+        public static readonly bool EnableAutomaticCampaignMissions = EnableCampaignMapPrototype &&
+            IsEnvironmentFlagEnabledCore("COOPSPECTATOR_AUTOMATIC_CAMPAIGN_MISSIONS");
+
         /// <summary>
         /// Stable baseline: use vanilla TeamDeathmatch in listed flow and keep the
         /// custom TdmClone game-mode path disabled until reintroduced deliberately.

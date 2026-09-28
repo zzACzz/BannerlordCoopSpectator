@@ -144,12 +144,16 @@ namespace CoopSpectator.Patches
         }
 
         public static void OpenNew_Postfix(
+            Mission __result,
             string missionName,
             MissionInitializerRecord rec,
             InitializeMissionBehaviorsDelegate handler,
             bool addDefaultMissionBehaviors,
             bool needsMemoryCleanup)
         {
+#if COOPSPECTATOR_DEDICATED
+            CoopSpectator.DedicatedServer.CoopCampaignMissionServer.ObserveNativeOpening(__result);
+#endif
             ModLogger.Info("MissionState.OpenNew EXIT missionName=" + (missionName ?? "") + " (original method returned).");
         }
 

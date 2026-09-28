@@ -1,5 +1,127 @@
 # Build, Test, and Debug Guide
 
+Tooltip network cmp-b32/b33 and presenter cmp-b34 isolated builds passed;
+cmp-c32/c33/c34 all 24 projects passed (345 chunk/network assertions plus presenter
+ownership/lifecycle tests). cmp-b35/b36 both builds and cmp-c35/c36 all 24 projects
+passed; evidence copied to artifacts/verification. Native map-tooltip-r1-20260928
+has now staged cmp-b36 with exact preimages; acceptance/cleanup pending. Protocol
+27/22/7 requires coherent campaign/client/server deployment; installed cmp-b19
+previously used 26/22/7. Build/test evidence is not native acceptance.
+See [current verification boundary](CAMPAIGN_MAP_RESUME_2026-09-26.md#tooltip-stock-presenter-candidate-2026-09-28-not-native-verified).
+
+Tooltip relay cmp-b30/b31 both isolated builds and cmp-c30/c31 all 24 projects
+passed, installed inventories unchanged; final map suite includes 910 relay checks.
+Evidence: artifacts/verification/cmp-{b,c}{30,31}.
+Tests create only a fresh GUID-owned temporary directory and remove its
+three fixed files/empty directory; no game/native formatter launch. See
+[relay acceptance boundary](CAMPAIGN_MAP_RESUME_2026-09-26.md#launcher-owned-tooltip-relay-2026-09-28-source-candidate).
+
+Tooltip envelopes: cmp-b28 both builds/cmp-c28 all 24 projects passed, including
+1974 wire/handshake assertions. No installed mutation or product launch. Host
+published-target entry cmp-b29 both builds/cmp-c29 all 24 projects passed, including
+549 target-admission assertions. Evidence: artifacts/verification/cmp-{b,c}{28,29}.
+Installed inventories remain unchanged. See
+[candidate and acceptance boundary](CAMPAIGN_MAP_RESUME_2026-09-26.md#tooltip-semantic-envelopes-and-host-lookup-2026-09-28-unwired).
+
+Tooltip language isolation: cmp-b24/b25 both builds and cmp-c24/c25 all 24 projects
+pass, installed inventories unchanged. Nine real installed language processors
+passed isolated managed state restoration; NOT native tooltip/UI acceptance.
+Request-policy cmp-b26/b27 both builds and cmp-c26/c27 all 24 projects passed;
+final assertions include 3612 client-interest and 2505 server-gate checks. Evidence
+is under artifacts/verification/cmp-{b,c}{24,25,26,27}. No product process launched.
+Installed cmp-b19 is retained. See [probe and boundaries](CAMPAIGN_MAP_RESUME_2026-09-26.md#tooltip-language-state-isolation-2026-09-28-source-and-managed-probe).
+
+Host-tooltip capture adapter is unwired: cmp-b22 compiled both roles; cmp-c22
+exposed a test assertion incorrectly using the dictionary's case-insensitive
+Contains for key-spelling verification. Final cmp-b23 both builds/cmp-c23 all
+24 projects pass (520 transaction assertions), without installed changes or
+product launch. Evidence: artifacts/verification/cmp-{b,c}{22,23}. Installed cmp-b19
+remains; native isolation/visual gates are open. See
+[candidate and limitations](CAMPAIGN_MAP_RESUME_2026-09-26.md#host-native-tooltip-capture-candidate-2026-09-28-unwired).
+
+Detached tooltip foundation: cmp-b20 built both roles with installed inventories
+unchanged; cmp-c20 passed 23/24 projects and exposed an uncaught malformed-payload
+InvalidDataException. The decoder now rejects it; corrected cmp-b21 built both
+roles without installed changes and cmp-c21 passed all 24 projects (907 tooltip
+assertions). Evidence: artifacts/verification/cmp-{b,c}{20,21}. This is not
+installed or connected to runtime; installed cmp-b19 remains. See
+[foundation and acceptance boundaries](CAMPAIGN_MAP_RESUME_2026-09-26.md#tooltip-provider-isolation-and-detached-payload-foundation-2026-09-28).
+
+Deferred reconciliation: body assertions 656 pass; cmp-b19 both isolated builds
+and cmp-c19 all 24 contract projects pass. Native map-body-r2 passed two settlement
+entry/exit cycles, body reappearance, pinned-party invalidation and camera checks.
+All 24 exact-owned identities are absent, seven configs match, no new configs or
+product processes; coherently installed cmp-b19 is retained. Full parity and
+battle-return regression remain open. See
+[ordering defect and candidate](CAMPAIGN_MAP_RESUME_2026-09-26.md#deferred-reconciliation-ordering-correction-2026-09-28).
+
+Mobile-body correction: intermediate cmp-b17 builds/cmp-c17 all 24 contracts pass;
+final focus-aware info invalidation passed cmp-b18 both builds/cmp-c18 all 24
+contracts. Fresh map-body-r1-20260928 loaded cmp-b18 in all three roles.
+Entry hiding/pinned-panel invalidation and camera detach/return passed, but exit
+reappearance FAILED. All 22 owned identities exited, seven configs match, no new
+configs/products; all five module preimages (cmp-b16) restored. See
+[source and native acceptance gate](CAMPAIGN_MAP_RESUME_2026-09-26.md#mobile-body-admission-correction-2026-09-28).
+
+Settlement badge candidate: cmp-b13 isolated builds and cmp-c14 all 24 projects
+passed after cmp-b12/cmp-c13 were denied sandbox access to NuGet.Config before
+compilation. Final allocation/test refinements passed cmp-b14 both roles and
+cmp-c15 all 24 projects. Actual host UI list capture then required an explicit
+client-only Core.ViewModelCollection reference (cmp-b15 CS0012). Corrected
+cmp-b16 built both roles; cmp-c16 passed all 24 projects. Evidence retained in
+artifacts/verification/<run-id>.
+Native map-badges-r1-20260928 loaded cmp-b16 in all three roles. Bounded ordinary/
+lord badge and departure checks plus camera detach/return passed. All 22 owned
+identities absent, seven configs restored, no new configs/products; cmp-b16 retained.
+Mixed badge ordering, dialogue/battle re-entry and full parity are not accepted.
+See [scope and transport routing](CAMPAIGN_MAP_RESUME_2026-09-26.md#settlement-occupant-badge-candidate-2026-09-28).
+
+cmp-b11 both isolated builds and cmp-c12 all 24 contracts passed for nameplate
+banner color preservation; build-time installed inventories unchanged. Candidate
+passed bounded native color/camera checks in map-banner-r1-20260928. All 22 owned
+identities absent, seven configs restored/no new configs/products; cmp-b11 retained.
+Dialogue/battle re-entry was not repeated in this narrow run.
+See [evidence and scope](CAMPAIGN_MAP_RESUME_2026-09-26.md#banner-color-preservation-candidate-2026-09-28).
+
+cmp-b10 both isolated builds/cmp-c11 all 24 projects passed. Native wall/preparation
+run passed bounded geometry/camera/map-dialogue checks. All 23 recorded PIDs absent,
+seven configs match/no new configs/products; cmp-b10 retained and hash-verified.
+The successful standalone postflight is authoritative; a preceding combined
+diagnostic had exit 1 because its trailing Get-Process found no owned PIDs.
+See [evidence and limits](CAMPAIGN_MAP_RESUME_2026-09-26.md#wall-and-siege-preparation-candidate-2026-09-27).
+
+cmp-b9 both isolated builds and cmp-c10 all 24 projects passed for fortification
+helper cleanup; installed inventories unchanged/no product launch. Installed cmp-b8
+remains; candidate native verification pending. See [evidence](CAMPAIGN_MAP_RESUME_2026-09-26.md#fortification-authoring-helper-candidate-2026-09-27).
+
+cmp-b8 builds both roles without installed mutation/product launch; cmp-c9 passes
+24/24 after the documented compile/source-test corrections. Coherent 24/20/5
+native run map-level-r1-20260927 passed bounded village variants/camera/dialogue;
+Vostrum extras remain. All 22 owned identities absent, seven configs match, no new
+configs/products; cmp-b8 retained. No full parity or battle regression acceptance.
+See [evidence](CAMPAIGN_MAP_RESUME_2026-09-26.md#host-selected-settlement-levels-2026-09-27-bounded-native-result).
+
+cmp-b5/cmp-c6: both isolated builds and all 24 projects pass for root admission plus
+circle cleanup. Installed inventories unchanged at build. map-geometry-r1-20260927
+then loaded cmp-b5 in all three roles: bounded map/camera/map-dialogue passed,
+building variants failed comparison and companion-mission dialogue was absent.
+All owned product processes exited; seven configs match, no new configs remain;
+cmp-b5 stays installed. This is not full native acceptance.
+See [candidate and limits](CAMPAIGN_MAP_RESUME_2026-09-26.md#static-settlement-geometry-admission-2026-09-27).
+
+Historical scene-helper candidate (2026-09-27): cmp-b4 built both roles without
+deployment/product launch and cmp-c5 passed all 24 projects. Native authoring-circle
+removal is source/build-verified only; installed cmp-b3 remains unchanged.
+See [evidence and geometry gaps](CAMPAIGN_MAP_RESUME_2026-09-26.md#settlement-scene-presentation-investigation-2026-09-27).
+
+Map follow/presentation candidate (2026-09-27): cmp-c4 passed all 24 projects;
+cmp-b3 built both roles with unchanged installed inventories. Protocol 23/bridge
+19/catalog 4. Installed cmp-b3 now passed bounded native tracked-edge/zoom,
+detach/return and dialogue wheel-input/close camera checks. Independent postflight
+confirmed seven configs restored, no new configs/owned/product processes and
+retained cmp-b3 hashes. Evidence: `artifacts/runtime/map-edge-r1-20260927`; see
+[canonical scope](CAMPAIGN_MAP_RESUME_2026-09-26.md#host-camera-following-and-settlement-presentation-2026-09-27).
+
 Current M4 boundary (2026-09-10): clean published `438b434` passed `m4zclive-c1` (24/24, including 432 focused assertions and exact native clock-IL metadata) and `m4zclive-b1` (both CompileOnly builds, 77/49 warnings, zero errors, unchanged installed inventories). The self-tested `m4zclive-s1` DeployWithRestore transaction staged only the two dedicated CoopSpectator DLLs and preserved five existing crash dumps. `m4zclive-l1-01` loaded the exact candidate but ended `Timeout/NoHeartbeat` before control readiness/bootstrap; the second attempt was Not Run. Automatic bounded timeout evidence, graceful dedicated cleanup, free resources and complete module/dump restoration passed. Investigate the role-health decision/read evidence before another live attempt; a later fresh heartbeat does not prove what the failing read saw. See [live evidence and next boundary](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#26-clean-zero-client-live-attempt-stops-before-bootstrap-2026-09-10). Mission progression and native-crash finalization remain unverified; `DeployPersistent` remains separately unimplemented.
 
 Latest scoreboard dependency source verification (2026-09-09): published `a6fe74f` adds a pure dependency contract plus a minimal server bridge and inserts it immediately before the scoreboard only when a direct CoopBattle or full TdmClone server stack lacks any `MissionMultiplayerGameModeBaseClient`. Hideout wrappers retain their established bridge; siege and other safe modes are unchanged. No engine lifecycle suppression or default-on hot-path diagnostics were added. Focused tests passed, `m4sd-c1` passed 24/24, and `m4sd-b1` built client `A517CED3...80C371` and dedicated `74B03C00...2BD4B7` with 77/49 warnings, zero errors and unchanged installed inventories. This is not native proof; controlled staging and one bounded live attempt require separate approval. [Implementation and evidence](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#19-scoreboard-server-dependency-source-and-contract-closure-2026-09-09).
@@ -107,6 +229,13 @@ This table records current project/script behavior, not a guarantee that an arbi
 ## Build profiles
 
 ### Client/campaign
+
+Campaign-map source dependency added 2026-09-26: both client reference profiles
+use installed `Modules/SandBox/bin/Win64_Shipping_Client/SandBox.ViewModelCollection.dll`
+with `Private=false` for public host-side nameplate helpers. It is not copied to
+the dedicated install or added to the dedicated reference graph. `cmr-b7` built
+both roles without installed mutation; native helper loading and text/packet
+behavior still require the matching fresh runtime candidate.
 
 - Project: `CoopSpectator.csproj`
 - Framework: `.NET Framework 4.7.2`
@@ -698,6 +827,74 @@ COOPSPECTATOR_CAMPAIGN_MAP_PROTOTYPE=1
 This enables an experimental feature, not merely logging. Keep it separate from diagnostic runs unless the prototype is the subject.
 
 ### Master diagnostic gate
+
+Campaign-map dialogue load investigation (2026-09-26, source candidate):
+`CoopCampaignMapConversationTableauView` snapshots
+`COOPSPECTATOR_VERBOSE_DIAGNOSTICS` when opening each visual attempt. When true,
+it logs fixed load-stage names with elapsed milliseconds (scene read, atmosphere,
+actors, tableau target attachment, first readiness check and readiness completion).
+The 2026-09-27 candidate removes full-scene preload and scene-readiness calls
+from the terrain-disabled dialogue scene; map readiness remains unchanged.
+That experiment reproduced shader errors in dialogue-terrain-r1-20260927.
+The off-screen TableauView candidate also reproduced both shader errors in
+dialogue-texture-r1-20260927; cleanup completed. The next narrow source candidate
+removes Scene.CheckResources from the terrain-disabled dialogue scene, leaving
+native texture drawing plus bounded view/actor readiness. In dialogue-request-r1,
+three actors/background rendered without observed shader errors but View=False
+removed the target at 15 seconds. The new source replaces this world-view flag
+with owned-target configuration and loaded texture draw submission, retaining
+all actor resource checks and the deadline. This is operational readiness, not
+pixel or 1:1 acceptance. cmt-b18 visibly drew actors then timed out with
+TargetConfigured=False; cmt-b19 records the already-successful synchronous
+configuration and uses registration epochs for optional callbacks. Both builds
+and all 24 cmt-c17 contracts passed. dialogue-configured-r1-20260927 reached
+readiness in 63/50 ms, retained both scenes beyond 50 seconds and closed to map;
+visual framing/appearance parity remains open. All owned roles exited and seven
+configs were restored; see the canonical cmt-b19 result in the resume document.
+cmt-b20 subsequently corrected physical viewport sizing and passed repeated
+48/49 ms native readiness with retention beyond one minute; face/animation/HUD
+parity remains open. Its exact-owned processes/configurations were cleaned up.
+See the cmt-b20 native viewport result in the same resume document.
+
+cmt-b22 uses bounded immediate face preparation for the three owned actors.
+Both builds/all 24 cmt-c20 projects passed; native first/repeated readiness 42/51 ms,
+face scar/age details, retention, read-only answers and both closes passed in
+`artifacts/runtime/dialogue-face-r1-20260927`. All eleven owned identities exited;
+seven configs match, no new configs/product processes, original Steam preserved.
+Installed candidate/test saves remain. Native logs are not error-free; distinguish
+absence of X3129/X4008 from FMOD/guarded intermission/optional assembly warnings.
+No full 1:1 or battle-regression acceptance follows from this bounded run.
+
+Body-pose candidate cmt-b25 (protocol 22/bridge 18) compiled both roles with
+installed inventories unchanged. All 24 cmt-c23 projects passed, including 719
+pose assertions. cmt-c21 found an uncaught corrupt-input InvalidDataException;
+cmt-c22 found an overbroad source assertion, both corrected before final runs.
+Explicit staging retained five module/seven config preimages in
+`artifacts/runtime/dialogue-pose-r1-20260927`. Native transport/first dialogue/text
+update/close passed, but smoothness FAILED (user-observed jerking actors). All
+twelve owned identities exited, seven configs match, no new config/product
+processes, Steam preserved, and all five cmt-b22 module preimages restored.
+Repeat dialogue was not completed. Only explicit verbose mode records the first applied pose per
+dialogue revision, using admitted managed values with no extra native queries.
+Target callback errors defer to the owning tick.
+Rate-steering correction: cmt-c24/cmt-b26 failed before compilation because the
+sandbox denied NuGet.Config reads. Permission-reviewed cmt-c25 passed all 24
+projects (4,331 pose/playback assertions) and cmt-b27 built both roles with installed
+inventories unchanged. Fresh dialogue-smooth-r1-20260927 loaded cmt-b27 in all three
+roles. The user confirmed smooth first-dialogue body motion; first/repeated readiness
+46/53 ms, retention, read-only/text update/both closes passed. Seven configs match,
+all twelve owned identities are gone, no new configs/product processes, original
+Steam/test saves preserved. Independent postflight 08:40:39 UTC confirms all five
+installed cmt-b27 files; no rollback. Protocol 22/bridge 18 unchanged. Full parity
+and battle regression are not claimed; see the canonical cmt-b27 native result.
+A failure adds only cached target configuration/submission booleans and an at-most-three-bit
+actor resource mask. No actor identity, dialogue content, extra native scan,
+per-frame log, timer extension or forced shader recompilation is added. Default
+normal execution emits none of these diagnostics. Native scene/resource calls
+remain runtime-sensitive and may block outside the managed readiness deadline.
+Enable the environment variable only for an explicitly scoped child process and
+retain the launch/config audit; do not persist it globally. Current motivation
+and evidence are in [the cmt-b7 report](CAMPAIGN_MAP_RESUME_2026-09-26.md#cmt-b7-native-dialogue-failure-and-restoration).
 
 Most verbose probes require:
 

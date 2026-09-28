@@ -932,6 +932,8 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                 ApplySharedLaunchEnvironment(moddedOfficialStartInfo);
                 try
                 {
+                    CoopSpectator.Campaign.CoopCampaignMissionHost.Prepare(moddedOfficialStartInfo);
+                    CoopSpectator.Campaign.CoopCampaignMapTooltipHost.Prepare(moddedOfficialStartInfo);
                     Process p = Process.Start(moddedOfficialStartInfo);
                     if (p == null) { ModLogger.Error("DedicatedHelper: Process.Start returned null.", null); return "ERROR: Failed to start process."; }
                     _dedicatedProcess = p;
@@ -941,6 +943,8 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                     TrySwitchToChildProcessIfAny(p.Id);
                     HostSelfJoinRedirectState.PersistHostSession(launchSettings, port);
                     Process current = _dedicatedProcess;
+                    CoopSpectator.Campaign.CoopCampaignMissionHost.Attach(current);
+                    CoopSpectator.Campaign.CoopCampaignMapTooltipHost.Attach(current);
                     if (current != null && current.Id != p.Id)
                         ModLogger.Info("DedicatedHelper [ModdedOfficial] Child PID=" + current.Id);
                     string loadedHint = Path.Combine(tempDir, "CoopSpectatorDedicated_loaded.txt");
@@ -1070,6 +1074,9 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         {
             if (startInfo == null)
                 return;
+
+            // Only the supported campaign-owned launch path may establish a fresh session.
+            startInfo.EnvironmentVariables.Remove(CoopCampaignMissionChannel.SessionEnvironment);
 
             try
             {

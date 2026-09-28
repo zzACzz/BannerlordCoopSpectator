@@ -91,6 +91,11 @@
       <HintPath>$(BannerlordBinDir)\TaleWorlds.Core.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- Read the host's existing banner identifier; never copy game assemblies. -->
+    <Reference Include="TaleWorlds.Core.ViewModelCollection">
+      <HintPath>$(BannerlordBinDir)\TaleWorlds.Core.ViewModelCollection.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <!-- Базова бібліотека TaleWorlds (Vec2, Debug.Print, ViewModel, тощо) -->
     <Reference Include="TaleWorlds.Library">
       <HintPath>$(BannerlordBinDir)\TaleWorlds.Library.dll</HintPath>
@@ -156,6 +161,10 @@
     </Reference>
     <Reference Include="SandBox.View" Condition="Exists('$(BannerlordRootDir)\Modules\SandBox\bin\Win64_Shipping_Client\SandBox.View.dll')">
       <HintPath>$(BannerlordRootDir)\Modules\SandBox\bin\Win64_Shipping_Client\SandBox.View.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SandBox.ViewModelCollection" Condition="Exists('$(BannerlordRootDir)\Modules\SandBox\bin\Win64_Shipping_Client\SandBox.ViewModelCollection.dll')">
+      <HintPath>$(BannerlordRootDir)\Modules\SandBox\bin\Win64_Shipping_Client\SandBox.ViewModelCollection.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <!-- Campaign API (Campaign, MobileParty, тощо) -->
@@ -257,6 +266,10 @@
     </Reference>
     <Reference Include="SandBox.View" Condition="Exists('$(BannerlordRootDir)\Modules\SandBox\bin\Win64_Shipping_Client\SandBox.View.dll')">
       <HintPath>$(BannerlordRootDir)\Modules\SandBox\bin\Win64_Shipping_Client\SandBox.View.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SandBox.ViewModelCollection" Condition="Exists('$(BannerlordRootDir)\Modules\SandBox\bin\Win64_Shipping_Client\SandBox.ViewModelCollection.dll')">
+      <HintPath>$(BannerlordRootDir)\Modules\SandBox\bin\Win64_Shipping_Client\SandBox.ViewModelCollection.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <!-- Campaign API (Campaign, MobileParty, тощо) -->

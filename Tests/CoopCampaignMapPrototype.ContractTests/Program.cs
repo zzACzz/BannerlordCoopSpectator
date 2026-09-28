@@ -10,10 +10,41 @@ internal static class Program
         try
         {
             ValidateProtocolVersion();
+            ValidatePartyNameplateColor();
+            ValidateHostBannerColorPreservation();
+            ValidateHiddenPartyInformation();
+            ValidateNativePartyLabelText();
+            ValidateNativePartyPresentation();
+            PartyBodyTests.Run();
+            PickResolverTests.Run();
+            TooltipPayloadTests.Run();
+            TooltipInterestTests.Run();
+            TooltipPeerGateTests.Run();
+            TooltipWireTests.Run();
+            TooltipTargetTests.Run();
+            TooltipRelayTests.Run();
+            TooltipChunkTests.Run();
+            TooltipPresenterTests.Run();
+            TooltipTextTransactionTests.Run();
+            TooltipThreadStateTests.Run();
+            ValidateReplicaStateProjection();
+            ValidateSettlementPresentation();
+            ReplicaCameraTests.Run();
+            SettlementGeometryTests.Run();
+            SettlementPartyBadgeTests.Run();
+            ValidateSettlementLevels();
             ValidateConversationContract();
+            ConversationTableauTests.Run();
+            ConversationPayloadTests.Run();
+            ConversationVisualLifetimeTests.Run();
+            ConversationPoseTests.Run();
+            MissionLifecycleTests.Run();
+            MissionOpeningTests.Run();
+            MissionChannelTests.Run();
             ValidateConversationSnapshotAssembler();
             ValidateVisibilityPolicy();
             ValidateInteractionPolicy();
+            ValidateInformationPanelPosition();
             ValidateDynamicBatchTransportPolicy();
             ValidateDynamicDeltaPolicy();
             ValidateCatalogDeltaPolicy();
@@ -112,10 +143,718 @@ internal static class Program
     private static void ValidateProtocolVersion()
     {
         Assert(
-            CoopCampaignMapPrototypeContract.ProtocolVersion == 16 &&
-            CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion == 12 &&
-            CoopCampaignMapCatalogBinarySerializer.SchemaVersion == 2,
-            "Campaign-map dialogue replication requires protocol 16, bridge schema 12 and binary catalog schema 2.");
+            CoopCampaignMapPrototypeContract.ProtocolVersion == 27 &&
+            CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion == 22 &&
+            CoopCampaignMapCatalogBinarySerializer.SchemaVersion == 7,
+            "Tooltip networking requires protocol 27; settlement bridge/catalog remain schema 22/7.");
+    }
+
+    private static void ValidateSettlementLevels()
+    {
+        var host = CreateHostSnapshot(DateTime.UtcNow);
+        var settlement = host.VisibleEntities.Find(e => e.Kind == CoopCampaignMapPrototypeEntityKind.Settlement);
+        Assert(settlement != null, "Settlement fixture required.");
+        var catalogEntity = new CoopCampaignMapPrototypeCatalogEntityState {
+            EntityId = settlement.EntityId, DisplayName = settlement.DisplayName,
+            Kind = settlement.Kind, SettlementNameplateSize = settlement.SettlementNameplateSize,
+            SettlementKind = CoopCampaignMapPrototypeSettlementKind.Town,
+            BannerCode = "", VisualCharacterId = "", CultureId = "",
+            FactionId = "", FactionName = "", OwnerName = "", LeaderName = "", ArmyId = "", ArmyName = ""
+        };
+        var catalog = new CoopCampaignMapPrototypeCatalogSnapshot {
+            SchemaVersion = CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion,
+            SessionId = host.SessionId, Revision = 3, UpdatedUtc = host.UpdatedUtc,
+            Entities = new List<CoopCampaignMapPrototypeCatalogEntityState> { catalogEntity }
+        };
+        foreach (int flags in new[] { 0, 1, 9, 10, 12, 17, 18, 20, 33, 34, 36 })
+        {
+            settlement.SettlementLevelFlags = flags;
+            catalogEntity.SettlementLevelFlags = flags;
+            Assert(settlement.Clone().SettlementLevelFlags == flags && catalogEntity.Clone().SettlementLevelFlags == flags,
+                "Both clones must retain level flags.");
+            Assert(CoopCampaignMapPrototypeBridgeCodec.TryParse(
+                CoopCampaignMapPrototypeBridgeCodec.Serialize(host), out var parsedHost, out var reason) &&
+                parsedHost.VisibleEntities.Find(e => e.EntityId == settlement.EntityId).SettlementLevelFlags == flags,
+                "Visible bridge must retain level flags: " + reason);
+            Assert(CoopCampaignMapPrototypeBridgeCodec.TryParseCatalog(
+                CoopCampaignMapPrototypeBridgeCodec.SerializeCatalog(catalog), out var parsedCatalog, out reason) &&
+                parsedCatalog.Entities[0].SettlementLevelFlags == flags,
+                "Catalog bridge must retain level flags: " + reason);
+            Assert(CoopCampaignMapCatalogBinarySerializer.TrySerialize(3, catalog.Entities, out var bytes, out reason) &&
+                CoopCampaignMapCatalogBinarySerializer.TryDeserialize(bytes, out _, out var parsedBinary, out reason) &&
+                parsedBinary[0].SettlementLevelFlags == flags, "Binary catalog round trip: " + reason);
+            var dynamicEntity = new CoopCampaignMapPrototypeDynamicEntityState { EntityId = settlement.EntityId, IsVisible = true };
+            Assert(CoopCampaignMapReplicaStateProjection.Merge(catalogEntity, dynamicEntity).SettlementLevelFlags == flags,
+                "Full/late-join/delta projection must retain flags.");
+            var changed = catalogEntity.Clone();
+            changed.SettlementLevelFlags = flags == 9 ? 10 : 9;
+            Assert(CoopCampaignMapPrototypeCatalogDeltaPolicy.BuildDelta(new[] { catalogEntity }, new[] { changed }).Count == 1,
+                "Level-only changes must emit a catalog delta.");
+            Array.Copy(BitConverter.GetBytes(5), 0, bytes, 4, 4);
+            Assert(!CoopCampaignMapCatalogBinarySerializer.TryDeserialize(bytes, out _, out _, out reason),
+                "Old schema must not be parsed as the new layout.");
+        }
+        var missing = new List<string>(CoopCampaignMapPrototypeBridgeCodec.SerializeCatalog(catalog));
+        missing.RemoveAll(line => line.StartsWith("Entity.0.SettlementLevelFlags=", StringComparison.Ordinal));
+        Assert(!CoopCampaignMapPrototypeBridgeCodec.TryParseCatalog(missing, out _, out _), "Missing catalog flags must fail closed.");
+        foreach (string walls in new[] { "", "0", "01", "10", "11", new string('1', 32) })
+        foreach (int preparation in new[] { 0, 1, 2 })
+        {
+            settlement.SettlementWallStates = catalogEntity.SettlementWallStates = walls;
+            settlement.SettlementPreparationState = catalogEntity.SettlementPreparationState = preparation;
+            Assert(settlement.Clone().SettlementWallStates == walls && catalogEntity.Clone().SettlementWallStates == walls &&
+                settlement.Clone().SettlementPreparationState == preparation && catalogEntity.Clone().SettlementPreparationState == preparation,
+                "Presentation clones must be exact.");
+            Assert(CoopCampaignMapPrototypeBridgeCodec.TryParse(CoopCampaignMapPrototypeBridgeCodec.Serialize(host),
+                out var parsedHost, out _) && parsedHost.VisibleEntities.Find(e => e.EntityId == settlement.EntityId).SettlementWallStates == walls &&
+                parsedHost.VisibleEntities.Find(e => e.EntityId == settlement.EntityId).SettlementPreparationState == preparation,
+                "Full bridge must preserve wall/preparation states.");
+            Assert(CoopCampaignMapPrototypeBridgeCodec.TryParseCatalog(CoopCampaignMapPrototypeBridgeCodec.SerializeCatalog(catalog),
+                out var parsedCatalog, out _) && parsedCatalog.Entities[0].SettlementWallStates == walls &&
+                parsedCatalog.Entities[0].SettlementPreparationState == preparation, "Catalog bridge presentation round trip.");
+            Assert(CoopCampaignMapCatalogBinarySerializer.TrySerialize(3, catalog.Entities, out var data, out _) &&
+                CoopCampaignMapCatalogBinarySerializer.TryDeserialize(data, out _, out var parsedBinary, out _) &&
+                parsedBinary[0].SettlementWallStates == walls && parsedBinary[0].SettlementPreparationState == preparation,
+                "Bounded binary presentation round trip.");
+            var merged = CoopCampaignMapReplicaStateProjection.Merge(catalogEntity,
+                new CoopCampaignMapPrototypeDynamicEntityState { EntityId = settlement.EntityId, IsVisible = true });
+            Assert(merged.SettlementWallStates == walls && merged.SettlementPreparationState == preparation,
+                "Late-join/incremental projection preserves presentation.");
+            var changed = catalogEntity.Clone();
+            changed.SettlementPreparationState = (preparation + 1) % 3;
+            Assert(CoopCampaignMapPrototypeCatalogDeltaPolicy.BuildDelta(new[] { catalogEntity }, new[] { changed }).Count == 1,
+                "Preparation-only transition emits delta.");
+            changed = catalogEntity.Clone();
+            changed.SettlementWallStates = walls == "01" ? "10" : "01";
+            Assert(CoopCampaignMapPrototypeCatalogDeltaPolicy.BuildDelta(new[] { catalogEntity }, new[] { changed }).Count == 1,
+                "Wall-only transition emits delta.");
+        }
+        foreach (string field in new[] { "SettlementWallStates", "SettlementPreparationState" })
+        {
+            missing = new List<string>(CoopCampaignMapPrototypeBridgeCodec.SerializeCatalog(catalog));
+            missing.RemoveAll(line => line.StartsWith("Entity.0." + field + "=", StringComparison.Ordinal));
+            Assert(!CoopCampaignMapPrototypeBridgeCodec.TryParseCatalog(missing, out _, out _), "Required presentation field missing.");
+        }
+        foreach (string walls in new[] { null, "2", "0 1", "-1", new string('0', 33) })
+        {
+            settlement.SettlementWallStates = catalogEntity.SettlementWallStates = walls;
+            Assert(!CoopCampaignMapPrototypeContract.IsValidVisibleEntity(settlement) &&
+                !CoopCampaignMapPrototypeContract.IsValidCatalogEntity(catalogEntity), "Malformed walls must be rejected.");
+        }
+        settlement.SettlementWallStates = catalogEntity.SettlementWallStates = "01";
+        foreach (int preparation in new[] { -1, 3, int.MaxValue })
+        {
+            settlement.SettlementPreparationState = catalogEntity.SettlementPreparationState = preparation;
+            Assert(!CoopCampaignMapPrototypeContract.IsValidVisibleEntity(settlement) &&
+                !CoopCampaignMapPrototypeContract.IsValidCatalogEntity(catalogEntity), "Malformed preparation must be rejected.");
+        }
+        settlement.SettlementPreparationState = catalogEntity.SettlementPreparationState = 1;
+        foreach (int flags in new[] { -1, 2, 3, 4, 8, 16, 32, 63, 64, int.MaxValue })
+        {
+            catalogEntity.SettlementLevelFlags = flags;
+            settlement.SettlementLevelFlags = flags;
+            Assert(!CoopCampaignMapPrototypeContract.IsValidCatalogEntity(catalogEntity) &&
+                !CoopCampaignMapPrototypeContract.IsValidVisibleEntity(settlement), "Invalid flag combination must be rejected.");
+        }
+        var party = CreateCatalogParty(0);
+        party.SettlementLevelFlags = 9;
+        Assert(!CoopCampaignMapPrototypeContract.IsValidCatalogEntity(party), "Parties cannot carry settlement geometry.");
+        party.SettlementLevelFlags = 0;
+        party.SettlementWallStates = "0";
+        Assert(!CoopCampaignMapPrototypeContract.IsValidCatalogEntity(party), "Party wall state rejected.");
+        party.SettlementWallStates = "";
+        party.SettlementPreparationState = 1;
+        Assert(!CoopCampaignMapPrototypeContract.IsValidCatalogEntity(party), "Party preparation state rejected.");
+        foreach (string file in new[] { "CoopCampaignMapPrototypeNetworkMessages.cs", "CoopCampaignMapReplicaNetworkMessages.cs" })
+        {
+            string wire = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "Network", "Messages", file));
+            Assert(wire.Contains("SettlementLevelFlags = ReadIntFromPacket(UnitCompression, ref valid)") &&
+                wire.Contains(".SettlementLevelFlags, UnitCompression)"), "Both wire paths must preserve flags: " + file);
+            Assert(wire.Contains("SettlementWallStates = ReadStringFromPacket(ref valid)") &&
+                wire.Contains(".SettlementWallStates ?? string.Empty)") &&
+                wire.Contains("SettlementPreparationState = ReadIntFromPacket(UnitCompression, ref valid)") &&
+                wire.Contains(".SettlementPreparationState, UnitCompression)"), "Both native wire paths preserve presentation: " + file);
+        }
+    }
+
+    private static void ValidateNativePartyPresentation()
+    {
+        for (int mask = 0; mask < 64; mask++)
+        {
+            Assert(CoopCampaignMapPartyLabelPolicy.ResolveFlags(
+                (mask & 1) != 0, (mask & 2) != 0, (mask & 4) != 0,
+                (mask & 8) != 0, (mask & 16) != 0, (mask & 32) != 0) == mask,
+                "Each native presentation flag must survive independently: " + mask);
+            foreach (bool main in new[] { false, true })
+                Assert(CoopCampaignMapPartyLabelPolicy.ShouldShowNameplate(main, mask) ==
+                    ((mask & 6) == 0 && (main || (mask & 32) == 0)),
+                    "Native attached/settlement/raft label visibility differs: " + mask);
+        }
+        Assert(CoopCampaignMapPartyLabelPolicy.ResolveName(true, "Army", "Leader", "Party") == "Army" &&
+               CoopCampaignMapPartyLabelPolicy.ResolveName(false, "Army", "Leader", "Party") == "Leader" &&
+               CoopCampaignMapPartyLabelPolicy.ResolveName(false, "Army", null, "Party") == "Party",
+            "Native name precedence must distinguish attached army, leader and unnamed-leader party.");
+        Assert(!CoopCampaignMapPrototypeContract.IsValidPartyPresentation(64, "4.8") &&
+               !CoopCampaignMapPrototypeContract.IsValidPartyPresentation(-1, "4.8") &&
+               !CoopCampaignMapPrototypeContract.IsValidPartyPresentation(0, "4\n8") &&
+               !CoopCampaignMapPrototypeContract.IsValidPartyPresentation(0, new string('я', 17)) &&
+               CoopCampaignMapPrototypeContract.IsValidPartyPresentation(63, "4,8"),
+            "Presentation flags and localized speed must be bounded.");
+
+        var host = CreateHostSnapshot(DateTime.UtcNow);
+        var party = host.VisibleEntities[0];
+        party.PartyNameplateNameText = "Армія ватажка";
+        party.PartyMovementSpeedText = "4,8";
+        party.PartyNameplateFlags = 25;
+        Assert(CoopCampaignMapPrototypeBridgeCodec.TryParse(
+            CoopCampaignMapPrototypeBridgeCodec.Serialize(host), out var decodedHost, out var reason) &&
+            decodedHost.VisibleEntities[0].PartyNameplateNameText == party.PartyNameplateNameText &&
+            decodedHost.VisibleEntities[0].PartyMovementSpeedText == "4,8" &&
+            decodedHost.VisibleEntities[0].PartyNameplateFlags == 25 &&
+            party.Clone().PartyNameplateFlags == 25,
+            "Visible presentation must round-trip and clone. Reason=" + reason);
+        var catalogParty = CreateCatalogParty(1);
+        catalogParty.PartyNameplateNameText = party.PartyNameplateNameText;
+        var catalog = new CoopCampaignMapPrototypeCatalogSnapshot {
+            SchemaVersion = CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion,
+            SessionId = host.SessionId, Revision = 1, UpdatedUtc = host.UpdatedUtc,
+            Entities = new List<CoopCampaignMapPrototypeCatalogEntityState> { catalogParty }
+        };
+        Assert(CoopCampaignMapPrototypeBridgeCodec.TryParseCatalog(
+            CoopCampaignMapPrototypeBridgeCodec.SerializeCatalog(catalog), out var decodedCatalog, out reason) &&
+            decodedCatalog.Entities[0].PartyNameplateNameText == party.PartyNameplateNameText &&
+            CoopCampaignMapCatalogBinarySerializer.TrySerialize(1, catalog.Entities, out var bytes, out reason) &&
+            CoopCampaignMapCatalogBinarySerializer.TryDeserialize(bytes, out _, out var decodedBinary, out reason) &&
+            decodedBinary[0].PartyNameplateNameText == party.PartyNameplateNameText,
+            "Native caption must cross both catalog formats. Reason=" + reason);
+        var renamed = catalogParty.Clone();
+        renamed.PartyNameplateNameText = "Other leader";
+        Assert(CoopCampaignMapPrototypeCatalogDeltaPolicy.BuildDelta(new[] { catalogParty }, new[] { renamed }).Count == 1,
+            "Caption-only changes must invalidate the catalog.");
+
+        var dynamicState = new CoopCampaignMapPrototypeDynamicEntityState {
+            EntityId = catalogParty.EntityId, IsVisible = true,
+            PartyMovementSpeedText = "4,8", PartyNameplateFlags = 25
+        };
+        var dynamicSnapshot = new CoopCampaignMapPrototypeDynamicSnapshot {
+            SchemaVersion = CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion,
+            SessionId = host.SessionId, Revision = 1, UpdatedUtc = host.UpdatedUtc,
+            Entities = new List<CoopCampaignMapPrototypeDynamicEntityState> { dynamicState }
+        };
+        var lines = CoopCampaignMapPrototypeBridgeCodec.SerializeDynamic(dynamicSnapshot);
+        Assert(CoopCampaignMapPrototypeBridgeCodec.TryParseDynamic(lines, out var decodedDynamic, out reason) &&
+            decodedDynamic.Entities[0].PartyNameplateFlags == 25 &&
+            decodedDynamic.Entities[0].PartyMovementSpeedText == "4,8",
+            "Dynamic presentation must round-trip. Reason=" + reason);
+        foreach (string name in new[] { "PartyMovementSpeedText", "PartyNameplateFlags" })
+        {
+            var missing = new List<string>(lines);
+            missing.RemoveAll(line => line.StartsWith("Entity.0." + name + "=", StringComparison.Ordinal));
+            Assert(!CoopCampaignMapPrototypeBridgeCodec.TryParseDynamic(missing, out _, out _),
+                "Missing presentation data must fail admission: " + name);
+        }
+        var changed = dynamicState.Clone();
+        changed.PartyMovementSpeedText = "4,9";
+        Assert(CoopCampaignMapPrototypeDynamicDeltaPolicy.BuildDelta(new[] { dynamicState }, new[] { changed }).Count == 1,
+            "Speed-only changes must propagate.");
+        for (int bit = 1; bit <= 32; bit <<= 1)
+        {
+            changed = dynamicState.Clone();
+            changed.PartyNameplateFlags ^= bit;
+            Assert(CoopCampaignMapPrototypeDynamicDeltaPolicy.BuildDelta(new[] { dynamicState }, new[] { changed }).Count == 1,
+                "Each status change must propagate: " + bit);
+        }
+        string root = FindRepositoryRoot();
+        string overlay = File.ReadAllText(Path.Combine(root, "UI", "CoopCampaignMapPrototypeEntityOverlayVM.cs"));
+        Assert(overlay.Contains("FullName = isSettlement ?") && overlay.Contains("entity.PartyNameplateNameText") &&
+               overlay.Contains("MovementSpeedText = entity.PartyMovementSpeedText") &&
+               overlay.Contains("ShouldShowNameplate(_isMainParty, _partyNameplateFlags)") &&
+               overlay.Contains("IsVisibleOnMap = modelVisible &&") &&
+               overlay.Contains("return modelVisible;") &&
+               !overlay.Contains("public bool IsArmy => false") &&
+               !overlay.Contains("public bool IsDisorganized => false") &&
+               !overlay.Contains("public bool IsCurrentlyAtSea => false"),
+            "The native widget must receive caption/speed/status and correct label visibility.");
+        Assert(overlay.Contains("DistanceToCamera = worldPosition.Distance(camera.Position);") &&
+               !overlay.Contains("DistanceToCamera = depth;"),
+            "Native party label scaling must use spatial distance, not camera projection depth.");
+        string missionView = File.ReadAllText(Path.Combine(root, "UI", "CoopCampaignMapPrototypeMissionView.cs"));
+        Assert(missionView.Contains("private const float PartyNameplateHeadHeight = 0.8f;") &&
+               missionView.Contains("replica.WorldPosition + Vec3.Up * PartyNameplateHeadHeight;") &&
+               !missionView.Contains("Vec3.Up * (markerScale * 1.2f)"),
+            "Party head anchors must keep the native 0.8-world-unit offset independently of map bounds.");
+        foreach (string file in new[] { "CoopCampaignMapPrototypeNetworkMessages.cs", "CoopCampaignMapReplicaNetworkMessages.cs" })
+        {
+            string wire = File.ReadAllText(Path.Combine(root, "Network", "Messages", file));
+            Assert(wire.Contains("PartyMovementSpeedText = ReadStringFromPacket(ref valid)") &&
+                   wire.Contains("PartyNameplateFlags = ReadIntFromPacket(PartyFlagsCompression, ref valid)") &&
+                   wire.Contains("PartyMovementSpeedText ?? string.Empty)") &&
+                   wire.Contains("PartyFlagsCompression);"),
+                "Presentation must cross both wire directions: " + file);
+        }
+    }
+
+    private static void ValidateNativePartyLabelText()
+    {
+        Assert(CoopCampaignMapPartyLabelPolicy.ResolveCountText(false, 0) == "0" &&
+               CoopCampaignMapPartyLabelPolicy.ResolveCountText(false, 73) == "73" &&
+               CoopCampaignMapPartyLabelPolicy.ResolveCountText(true, 73) == "?",
+            "Native healthy labels show known zero explicitly and redact hidden counts.");
+        for (int mask = 0; mask < 8; mask++)
+        {
+            bool hidden = (mask & 1) != 0;
+            int wounded = (mask & 2) == 0 ? 0 : 7;
+            int prisoners = (mask & 4) == 0 ? 0 : 13;
+            int formatted = 0;
+            string actual = CoopCampaignMapPartyLabelPolicy.ResolveExtraInfoText(
+                hidden, wounded, prisoners,
+                n => { formatted++; return "+" + n + "поран."; },
+                n => { formatted++; return "+" + n + "полон."; });
+            string expected = (wounded == 0 ? "" : hidden ? "?" : "+7поран.") +
+                (prisoners == 0 ? "" : hidden ? "?" : "+13полон.");
+            Assert(actual == expected && (!hidden || formatted == 0),
+                "Host-localized suffixes and hidden-presence markers must match native: " + mask);
+        }
+        Assert(!CoopCampaignMapPrototypeContract.IsValidPartyNameplateText(true, "73", "") &&
+               !CoopCampaignMapPrototypeContract.IsValidPartyNameplateText(true, "?", "+7w") &&
+               CoopCampaignMapPrototypeContract.IsValidPartyNameplateText(true, "?", "??") &&
+               !CoopCampaignMapPrototypeContract.IsValidPartyNameplateText(false, "-1", "") &&
+               !CoopCampaignMapPrototypeContract.IsValidPartyNameplateText(false, "<b>1</b>", "") &&
+               !CoopCampaignMapPrototypeContract.IsValidPartyNameplateText(false, "1", "line\nbreak") &&
+               !CoopCampaignMapPrototypeContract.IsValidPartyNameplateText(false, "1", new string('я', 65)) &&
+               CoopCampaignMapPrototypeContract.IsValidPartyNameplateText(false, "1", new string('я', 64)),
+            "Labels must reject hidden numbers, malformed counts and excessive UTF-8 bytes.");
+
+        var host = CreateHostSnapshot(DateTime.UtcNow);
+        var party = host.VisibleEntities[0];
+        party.PartyNameplateCountText = "73";
+        party.PartyNameplateExtraInfoText = "+7поран.+13полон.";
+        Assert(CoopCampaignMapPrototypeBridgeCodec.TryParse(
+            CoopCampaignMapPrototypeBridgeCodec.Serialize(host), out var decodedHost, out var reason) &&
+            decodedHost.VisibleEntities[0].PartyNameplateCountText == "73" &&
+            decodedHost.VisibleEntities[0].PartyNameplateExtraInfoText == party.PartyNameplateExtraInfoText &&
+            party.Clone().PartyNameplateExtraInfoText == party.PartyNameplateExtraInfoText,
+            "Visible bridge and clone must preserve host-localized labels. Reason=" + reason);
+
+        var state = new CoopCampaignMapPrototypeDynamicEntityState {
+            EntityId = party.EntityId, IsVisible = true,
+            PartyNameplateCountText = party.PartyNameplateCountText,
+            PartyNameplateExtraInfoText = party.PartyNameplateExtraInfoText
+        };
+        var snapshot = new CoopCampaignMapPrototypeDynamicSnapshot {
+            SchemaVersion = CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion,
+            SessionId = host.SessionId, Revision = 1, UpdatedUtc = host.UpdatedUtc,
+            Entities = new List<CoopCampaignMapPrototypeDynamicEntityState> { state }
+        };
+        var lines = CoopCampaignMapPrototypeBridgeCodec.SerializeDynamic(snapshot);
+        Assert(CoopCampaignMapPrototypeBridgeCodec.TryParseDynamic(lines, out var decoded, out reason) &&
+            decoded.Entities[0].PartyNameplateCountText == "73" &&
+            decoded.Entities[0].PartyNameplateExtraInfoText == state.PartyNameplateExtraInfoText,
+            "Dynamic bridge must preserve localized labels. Reason=" + reason);
+        foreach (string field in new[] { "PartyNameplateCountText", "PartyNameplateExtraInfoText" })
+        {
+            var missing = new List<string>(lines);
+            missing.RemoveAll(line => line.StartsWith("Entity.0." + field + "=", StringComparison.Ordinal));
+            Assert(!CoopCampaignMapPrototypeBridgeCodec.TryParseDynamic(missing, out _, out _),
+                "Missing nameplate field must not silently fall back: " + field);
+        }
+        var changed = state.Clone();
+        changed.PartyNameplateCountText = "74";
+        Assert(CoopCampaignMapPrototypeDynamicDeltaPolicy.BuildDelta(new[] { state }, new[] { changed }).Count == 1,
+            "A healthy-count-only change must propagate even if total size is unchanged.");
+        changed = state.Clone();
+        changed.PartyNameplateExtraInfoText = "";
+        Assert(CoopCampaignMapPrototypeDynamicDeltaPolicy.BuildDelta(new[] { state }, new[] { changed }).Count == 1,
+            "Removed wounded/prisoner suffixes must produce a delta.");
+        changed.IsPartyInformationHidden = true;
+        Assert(!CoopCampaignMapPrototypeContract.IsValidDynamicEntity(changed),
+            "Hidden dynamic labels must not carry a numeric count.");
+
+        string root = FindRepositoryRoot();
+        string publisher = File.ReadAllText(Path.Combine(root, "Campaign", "CoopCampaignMapPrototypePublisherBehavior.cs"));
+        string overlay = File.ReadAllText(Path.Combine(root, "UI", "CoopCampaignMapPrototypeEntityOverlayVM.cs"));
+        Assert(publisher.Contains("SandBoxUIHelper.GetPartyHealthyCount(party)") &&
+               publisher.Contains("SandBoxUIHelper.GetAllWoundedMembersAmount(party)") &&
+               publisher.Contains("SandBoxUIHelper.GetAllPrisonerMembersAmount(party)") &&
+               publisher.Contains("SandBoxUIHelper.GetPartyWoundedText") &&
+               publisher.Contains("SandBoxUIHelper.GetPartyPrisonerText"),
+            "Capture must use native attached-army aggregation and host localization helpers.");
+        Assert(overlay.Contains("entity.PartyNameplateCountText") &&
+               overlay.Contains("entity.PartyNameplateExtraInfoText") &&
+               !overlay.Contains("entity.PartySize.ToString()"),
+            "The nameplate must consume resolved host text, not total members.");
+        foreach (string file in new[] { "CoopCampaignMapPrototypeNetworkMessages.cs", "CoopCampaignMapReplicaNetworkMessages.cs" })
+        {
+            string wire = File.ReadAllText(Path.Combine(root, "Network", "Messages", file));
+            Assert(wire.Contains("PartyNameplateCountText = ReadStringFromPacket(ref valid)") &&
+                   wire.Contains("PartyNameplateExtraInfoText = ReadStringFromPacket(ref valid)") &&
+                   wire.Contains("PartyNameplateCountText ?? string.Empty)") &&
+                   wire.Contains("PartyNameplateExtraInfoText ?? string.Empty)"),
+                "Both nameplate fields must cross both wire directions: " + file);
+        }
+    }
+
+    private static void ValidateHiddenPartyInformation()
+    {
+        Assert(CoopCampaignMapPartyLabelPolicy.ResolvePublishedCount(true, 12345) == 0 &&
+               CoopCampaignMapPartyLabelPolicy.ResolvePublishedCount(true, int.MaxValue) == 0 &&
+               CoopCampaignMapPartyLabelPolicy.ResolvePublishedCount(false, 12345) == 12345 &&
+               CoopCampaignMapPartyLabelPolicy.ResolvePublishedCount(false, -1) == 0 &&
+               CoopCampaignMapPartyLabelPolicy.ResolvePublishedCount(false, int.MaxValue) ==
+                   CoopCampaignMapPrototypeContract.MaximumPartySize,
+            "Only host-known bounded counts may enter the map projection.");
+
+        var host = CreateHostSnapshot(DateTime.UtcNow);
+        var visible = host.VisibleEntities[0];
+        visible.IsPartyInformationHidden = true;
+        visible.PartySize = 0;
+        Assert(CoopCampaignMapPrototypeContract.IsValidVisibleEntity(visible) &&
+               visible.Clone().IsPartyInformationHidden,
+            "A redacted visible party and its clone must retain the hidden flag.");
+        Assert(CoopCampaignMapPrototypeBridgeCodec.TryParse(
+            CoopCampaignMapPrototypeBridgeCodec.Serialize(host), out var hostRoundTrip, out var reason) &&
+            hostRoundTrip.VisibleEntities[0].IsPartyInformationHidden &&
+            hostRoundTrip.VisibleEntities[0].PartySize == 0,
+            "Host bridge must preserve redaction. Reason=" + reason);
+        visible.PartySize = 1;
+        Assert(!CoopCampaignMapPrototypeContract.IsValidVisibleEntity(visible) &&
+            !CoopCampaignMapPrototypeBridgeCodec.TryParse(
+                CoopCampaignMapPrototypeBridgeCodec.Serialize(host), out _, out _),
+            "A hidden party with a real count must be rejected, not relayed.");
+
+        var hidden = new CoopCampaignMapPrototypeDynamicEntityState {
+            EntityId = "party:hidden", IsVisible = true,
+            IsPartyInformationHidden = true
+        };
+        Assert(CoopCampaignMapPrototypeContract.IsValidDynamicEntity(hidden) &&
+               hidden.Clone().IsPartyInformationHidden,
+            "Redacted dynamic party state must validate and clone.");
+        var known = hidden.Clone();
+        known.IsPartyInformationHidden = false;
+        Assert(!CoopCampaignMapPrototypeDynamicDeltaPolicy.AreEquivalent(hidden, known) &&
+               CoopCampaignMapPrototypeDynamicDeltaPolicy.BuildDelta(new[] { known }, new[] { hidden }).Count == 1 &&
+               CoopCampaignMapPrototypeDynamicDeltaPolicy.BuildDelta(new[] { hidden }, new[] { known }).Count == 1,
+            "Hiding or revealing even a zero count must produce a dynamic delta.");
+        for (int field = 0; field < 4; field++)
+        {
+            var invalid = hidden.Clone();
+            if (field == 0) invalid.PartySize = 1;
+            if (field == 1) invalid.ArmyPartyCount = 1;
+            if (field == 2) invalid.ArmyTotalSize = 1;
+            if (field == 3) invalid.ArmyCohesion = 1;
+            Assert(!CoopCampaignMapPrototypeContract.IsValidDynamicEntity(invalid),
+                "Hidden numeric field must fail admission: " + field);
+        }
+        var dynamic = new CoopCampaignMapPrototypeDynamicSnapshot {
+            SchemaVersion = CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion,
+            SessionId = host.SessionId, Revision = 1, UpdatedUtc = host.UpdatedUtc,
+            Entities = new List<CoopCampaignMapPrototypeDynamicEntityState> { hidden }
+        };
+        string[] lines = CoopCampaignMapPrototypeBridgeCodec.SerializeDynamic(dynamic);
+        Assert(CoopCampaignMapPrototypeBridgeCodec.TryParseDynamic(lines, out var decoded, out reason) &&
+               decoded.Entities[0].IsPartyInformationHidden && decoded.Entities[0].PartySize == 0,
+            "Dynamic bridge must preserve redaction. Reason=" + reason);
+        var missing = new List<string>(lines);
+        missing.RemoveAll(line => line.StartsWith("Entity.0.IsPartyInformationHidden=", StringComparison.Ordinal));
+        Assert(!CoopCampaignMapPrototypeBridgeCodec.TryParseDynamic(missing, out _, out _),
+            "Missing visibility permission must fail closed.");
+
+        string root = FindRepositoryRoot();
+        string publisher = File.ReadAllText(Path.Combine(root, "Campaign", "CoopCampaignMapPrototypePublisherBehavior.cs"));
+        string overlay = File.ReadAllText(Path.Combine(root, "UI", "CoopCampaignMapPrototypeEntityOverlayVM.cs"));
+        string info = File.ReadAllText(Path.Combine(root, "UI", "CoopCampaignMapReplicaInfoVM.cs"));
+        string view = File.ReadAllText(Path.Combine(root, "UI", "CoopCampaignMapPrototypeMissionView.cs"));
+        string wire = File.ReadAllText(Path.Combine(root, "Network", "Messages", "CoopCampaignMapReplicaNetworkMessages.cs"));
+        Assert(publisher.Contains("party.IsInfoHidden, party.Party.NumberOfAllMembers") &&
+               publisher.Contains("entity.IsPartyInformationHidden = party.IsInfoHidden") &&
+               publisher.Contains("ArmyTotalSize = entity.IsPartyInformationHidden") &&
+               view.Contains("CoopCampaignMapReplicaStateProjection.Merge("),
+            "The authoritative host-hidden permission and redacted values must reach the replica.");
+        Assert(overlay.Contains("entity.IsPartyInformationHidden ? \"?\"") &&
+               info.Contains("dynamicState.IsPartyInformationHidden") &&
+               info.Contains("!dynamicState.IsPartyInformationHidden && dynamicState.ArmyTotalSize"),
+            "Nameplate and details must not present redaction zeroes as known counts.");
+        Assert(wire.Contains("IsPartyInformationHidden = ReadBoolFromPacket(ref valid)") &&
+               wire.Contains("WriteBoolToPacket(entity?.IsPartyInformationHidden ?? false)"),
+            "Dynamic wire format must carry the visibility permission symmetrically.");
+    }
+
+    private static void ValidatePartyNameplateColor()
+    {
+        // Native PartyNameplateVM palette: regular / army-leader pairs.
+        uint[,] expected = {
+            { 4291877096u, 4294573055u }, // Neutral
+            { 4279460044u, 4279476684u }, // Alliance
+            { 4285650500u, 4288804731u }, // Same faction
+            { 4292232774u, 4294931829u }, // War
+            { 4287421380u, 4289593317u }  // Main party / attached peer
+        };
+        for (int mask = 0; mask < 32; mask++)
+        {
+            bool main = (mask & 1) != 0;
+            bool war = (mask & 2) != 0;
+            bool same = (mask & 4) != 0;
+            bool allied = (mask & 8) != 0;
+            bool leader = (mask & 16) != 0;
+            int row = main ? 4 : war ? 3 : same ? 2 : allied ? 1 : 0;
+            Assert(
+                CoopCampaignMapPartyLabelPolicy.ResolveColor(
+                    main, war, same, allied, leader) == expected[row, leader ? 1 : 0],
+                "Party label palette/precedence differs from native for mask " + mask);
+        }
+
+        var party = CreateCatalogParty(0);
+        party.NameplateColor = expected[3, 0];
+        var clone = party.Clone();
+        Assert(clone.NameplateColor == party.NameplateColor,
+            "Catalog cloning must preserve label color independently of cloth colors.");
+        clone.NameplateColor = expected[0, 0];
+        Assert(!CoopCampaignMapPrototypeCatalogDeltaPolicy.AreEquivalent(party, clone),
+            "A diplomacy-only label color change must invalidate the catalog entry.");
+        Assert(CoopCampaignMapPrototypeCatalogDeltaPolicy.BuildDelta(
+            new[] { party }, new[] { clone }).Count == 1,
+            "A label color change must produce one catalog delta.");
+
+        var host = CreateHostSnapshot(DateTime.UtcNow);
+        host.VisibleEntities[0].NameplateColor = expected[3, 0];
+        Assert(host.VisibleEntities[0].Clone().NameplateColor == expected[3, 0],
+            "Visible-entity cloning must preserve the host's label color.");
+        string[] lines = CoopCampaignMapPrototypeBridgeCodec.Serialize(host);
+        Assert(CoopCampaignMapPrototypeBridgeCodec.TryParse(lines, out var parsed, out var reason) &&
+               parsed.VisibleEntities[0].NameplateColor == expected[3, 0],
+            "Host bridge must retain non-banner label color. Reason=" + reason);
+        var missingColor = new List<string>(lines);
+        missingColor.RemoveAll(line => line.StartsWith("VisibleEntity.0.NameplateColor=", StringComparison.Ordinal));
+        Assert(!CoopCampaignMapPrototypeBridgeCodec.TryParse(missingColor, out parsed, out reason),
+            "Missing label color must not silently reuse banner color.");
+
+        var catalog = new CoopCampaignMapPrototypeCatalogSnapshot {
+            SchemaVersion = CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion,
+            SessionId = host.SessionId, Revision = 1,
+            Entities = new List<CoopCampaignMapPrototypeCatalogEntityState> { party },
+            UpdatedUtc = host.UpdatedUtc
+        };
+        Assert(CoopCampaignMapPrototypeBridgeCodec.TryParseCatalog(
+            CoopCampaignMapPrototypeBridgeCodec.SerializeCatalog(catalog), out var decodedCatalog, out reason) &&
+            decodedCatalog.Entities[0].NameplateColor == expected[3, 0],
+            "Catalog bridge must retain label color. Reason=" + reason);
+        Assert(CoopCampaignMapCatalogBinarySerializer.TrySerialize(1, catalog.Entities, out var bytes, out reason) &&
+            CoopCampaignMapCatalogBinarySerializer.TryDeserialize(bytes, out _, out var decoded, out reason) &&
+            decoded[0].NameplateColor == expected[3, 0],
+            "Binary catalog must retain label color. Reason=" + reason);
+        Array.Copy(BitConverter.GetBytes(3), 0, bytes, 4, 4);
+        Assert(!CoopCampaignMapCatalogBinarySerializer.TryDeserialize(bytes, out _, out _, out reason) && reason == "schema",
+            "Older binary catalogs must fail before reading the changed layout.");
+
+        string root = FindRepositoryRoot();
+        string overlay = File.ReadAllText(Path.Combine(root, "UI", "CoopCampaignMapPrototypeEntityOverlayVM.cs"));
+        string view = File.ReadAllText(Path.Combine(root, "UI", "CoopCampaignMapPrototypeMissionView.cs"));
+        string wire = File.ReadAllText(Path.Combine(root, "Network", "Messages", "CoopCampaignMapPrototypeNetworkMessages.cs"));
+        Assert(overlay.Contains("FactionColor = Color.FromUint(entity.NameplateColor)") &&
+               !overlay.Contains("FactionColor = Color.FromUint(primaryColor)") &&
+               view.Contains("CoopCampaignMapReplicaStateProjection.Merge("),
+            "Client label color must come from the host, separately from banner/cloth color.");
+        Assert(wire.Contains("NameplateColor = ReadUintFromPacket(") &&
+               wire.Contains("WriteUintToPacket(safeEntity.NameplateColor, ColorCompression)"),
+            "Legacy visible-entity wire messages must carry the new field in both directions.");
+    }
+
+    private static void ValidateReplicaStateProjection()
+    {
+        var catalog = CreateCatalogParty(3);
+        catalog.NameplateColor = 4292232774u;
+        catalog.PartyNameplateNameText = "Resolved native caption";
+        catalog.CaravanMountVisual = CreateMountVisualState("campaign_mule", "campaign_pack");
+        catalog.SettlementProductionIconId = "grain";
+        catalog.SettlementNameplateSize = CoopCampaignMapPrototypeSettlementNameplateSize.Large;
+        var dynamicState = new CoopCampaignMapPrototypeDynamicEntityState {
+            EntityId = catalog.EntityId, IsVisible = true,
+            NormalizedX = 1234, NormalizedY = 5678, Heading = 910,
+            PartySize = 73, QuestMarkerFlags = 17, SettlementEventFlags = 65,
+            IsSettlementTracked = true, IsSettlementInRange = true,
+            PartyNameplateCountText = "65", PartyNameplateExtraInfoText = "+8w+3p",
+            PartyNameplateFlags = 25, PartyMovementSpeedText = "4.8"
+        };
+
+        // Deliberately populate every projected field, including fields normally
+        // mutually exclusive in admitted party/settlement input. This is a pure
+        // mapping test, not a transport-admission fixture.
+        var dynamicFields = new HashSet<string>(StringComparer.Ordinal) {
+            "NormalizedX", "NormalizedY", "Heading", "PartySize",
+            "IsPartyInformationHidden", "QuestMarkerFlags", "SettlementEventFlags",
+            "IsSettlementTracked", "IsSettlementInRange",
+            "PartyNameplateCountText", "PartyNameplateExtraInfoText",
+            "PartyNameplateFlags", "PartyMovementSpeedText"
+        };
+        var merged = CoopCampaignMapReplicaStateProjection.Merge(catalog, dynamicState);
+        Assert(merged != null, "Matching visible entities must merge.");
+        foreach (var field in typeof(CoopCampaignMapPrototypeEntityState).GetProperties())
+        {
+            object source = dynamicFields.Contains(field.Name) ? (object)dynamicState : catalog;
+            var sourceField = source.GetType().GetProperty(field.Name);
+            Assert(sourceField != null, "Every projected field needs a declared source: " + field.Name);
+            object expected = sourceField.GetValue(source);
+            object actual = field.GetValue(merged);
+            if (expected is CoopCampaignMapPrototypeAgentVisualState visual)
+            {
+                var clone = actual as CoopCampaignMapPrototypeAgentVisualState;
+                Assert(clone != null && !ReferenceEquals(visual, clone) &&
+                       !ReferenceEquals(visual.EquipmentItemIds, clone.EquipmentItemIds),
+                    "Visual and equipment arrays must be detached: " + field.Name);
+                foreach (var visualField in typeof(CoopCampaignMapPrototypeAgentVisualState).GetProperties())
+                {
+                    object left = visualField.GetValue(visual);
+                    object right = visualField.GetValue(clone);
+                    Assert(left is string[] items
+                        ? System.Linq.Enumerable.SequenceEqual(items, (string[])right)
+                        : Equals(left, right),
+                        "Visual projection mismatch: " + field.Name + "." + visualField.Name);
+                }
+                clone.EquipmentItemIds[0] = "changed_after_merge";
+                Assert(visual.EquipmentItemIds[0] != "changed_after_merge",
+                    "Projection mutations must not corrupt the source catalog.");
+            }
+            else
+                Assert(Equals(expected, actual), "Projection field mismatch: " + field.Name);
+        }
+
+        dynamicState.IsPartyInformationHidden = true;
+        dynamicState.PartySize = 0;
+        dynamicState.QuestMarkerFlags = 0;
+        dynamicState.SettlementEventFlags = 0;
+        dynamicState.IsSettlementTracked = false;
+        dynamicState.IsSettlementInRange = false;
+        catalog.SettlementProductionIconId = string.Empty;
+        catalog.NameplateColor = 4279460044u;
+        var updated = CoopCampaignMapReplicaStateProjection.Merge(catalog, dynamicState);
+        Assert(updated.IsPartyInformationHidden && updated.PartySize == 0 &&
+               updated.QuestMarkerFlags == 0 && updated.SettlementEventFlags == 0 &&
+               !updated.IsSettlementTracked && !updated.IsSettlementInRange &&
+               updated.SettlementProductionIconId == string.Empty &&
+               updated.NameplateColor == catalog.NameplateColor && merged.PartySize == 73,
+            "Updates must clear old markers, preserve redaction/color and not mutate earlier snapshots.");
+        dynamicState.IsPartyInformationHidden = false;
+        Assert(!CoopCampaignMapReplicaStateProjection.Merge(catalog, dynamicState).IsPartyInformationHidden,
+            "Revealing a known zero must clear the hidden bit.");
+        dynamicState.IsVisible = false;
+        Assert(CoopCampaignMapReplicaStateProjection.Merge(catalog, dynamicState) == null,
+            "Hidden entities must not produce a visible projection.");
+        dynamicState.IsVisible = true;
+        dynamicState.EntityId = catalog.EntityId.ToUpperInvariant();
+        Assert(CoopCampaignMapReplicaStateProjection.Merge(catalog, dynamicState) != null,
+            "Identity matching remains case insensitive.");
+        dynamicState.EntityId = "party:other";
+        Assert(CoopCampaignMapReplicaStateProjection.Merge(catalog, dynamicState) == null &&
+               CoopCampaignMapReplicaStateProjection.Merge(null, dynamicState) == null &&
+               CoopCampaignMapReplicaStateProjection.Merge(catalog, null) == null,
+            "Missing or mismatched entities must fail closed.");
+        catalog.EntityId = dynamicState.EntityId = string.Empty;
+        Assert(CoopCampaignMapReplicaStateProjection.Merge(catalog, dynamicState) == null,
+            "Empty identities must not form a replica.");
+
+        string root = FindRepositoryRoot();
+        foreach (string path in new[] {
+            Path.Combine(root, "Mission", "CoopCampaignMapPrototypeNetworkController.cs"),
+            Path.Combine(root, "UI", "CoopCampaignMapPrototypeMissionView.cs") })
+        {
+            string source = File.ReadAllText(path);
+            Assert(source.Contains("CoopCampaignMapReplicaStateProjection.Merge(") &&
+                   !source.Contains("new CoopCampaignMapPrototypeEntityState\r") &&
+                   !source.Contains("new CoopCampaignMapPrototypeEntityState\n"),
+                "Full and incremental consumers must use the same tested projection: " + path);
+        }
+    }
+
+    private static void ValidateSettlementPresentation()
+    {
+        for (int mask = 0; mask < 4; mask++)
+        {
+            bool tracked = (mask & 1) != 0;
+            bool inspected = (mask & 2) != 0;
+            var host = CreateHostSnapshot(DateTime.UtcNow);
+            var settlement = host.VisibleEntities[1];
+            settlement.IsSettlementTracked = tracked;
+            settlement.IsSettlementInRange = inspected;
+            Assert(CoopCampaignMapPrototypeContract.IsValidVisibleEntity(settlement),
+                "All host settlement presentation combinations must validate.");
+            var clone = settlement.Clone();
+            Assert(clone.IsSettlementTracked == tracked && clone.IsSettlementInRange == inspected,
+                "Full entity cloning must preserve host presentation.");
+            string[] lines = CoopCampaignMapPrototypeBridgeCodec.Serialize(host);
+            Assert(CoopCampaignMapPrototypeBridgeCodec.TryParse(lines, out var decoded, out string reason) &&
+                   VisibleEntitiesEqual(host.VisibleEntities, decoded.VisibleEntities),
+                "Full bridge must preserve settlement presentation: " + reason);
+
+            var state = new CoopCampaignMapPrototypeDynamicEntityState {
+                EntityId = settlement.EntityId, IsVisible = true,
+                IsSettlementTracked = tracked, IsSettlementInRange = inspected
+            };
+            var dynamicSnapshot = new CoopCampaignMapPrototypeDynamicSnapshot {
+                SchemaVersion = CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion,
+                SessionId = host.SessionId, Revision = 1, UpdatedUtc = host.UpdatedUtc,
+                Entities = new List<CoopCampaignMapPrototypeDynamicEntityState> { state }
+            };
+            string[] dynamicLines = CoopCampaignMapPrototypeBridgeCodec.SerializeDynamic(dynamicSnapshot);
+            Assert(CoopCampaignMapPrototypeBridgeCodec.TryParseDynamic(dynamicLines, out var parsed, out reason) &&
+                   CoopCampaignMapPrototypeDynamicDeltaPolicy.AreEquivalent(state, parsed.Entities[0]),
+                "Dynamic bridge must preserve settlement presentation: " + reason);
+            foreach (string field in new[] { "IsSettlementTracked", "IsSettlementInRange" })
+            {
+                var changed = state.Clone();
+                var property = typeof(CoopCampaignMapPrototypeDynamicEntityState).GetProperty(field);
+                property.SetValue(changed, !(bool)property.GetValue(state));
+                var delta = CoopCampaignMapPrototypeDynamicDeltaPolicy.BuildDelta(new[] { state }, new[] { changed });
+                Assert(delta.Count == 1 && CoopCampaignMapPrototypeDynamicDeltaPolicy.AreEquivalent(changed, delta[0]),
+                    "A presentation-only change must cross the delta channel: " + field);
+                foreach (bool missing in new[] { false, true })
+                {
+                    var malformed = new List<string>();
+                    foreach (string line in dynamicLines)
+                    {
+                        if (!line.Contains("." + field + "=")) malformed.Add(line);
+                        else if (!missing) malformed.Add(line.Substring(0, line.IndexOf('=') + 1) + "invalid");
+                    }
+                    Assert(!CoopCampaignMapPrototypeBridgeCodec.TryParseDynamic(malformed, out _, out _),
+                        "Missing/malformed dynamic presentation must fail closed: " + field);
+                    malformed.Clear();
+                    foreach (string line in lines)
+                    {
+                        if (!line.Contains("." + field + "=")) malformed.Add(line);
+                        else if (!missing) malformed.Add(line.Substring(0, line.IndexOf('=') + 1) + "invalid");
+                    }
+                    Assert(!CoopCampaignMapPrototypeBridgeCodec.TryParse(malformed, out _, out _),
+                        "Missing/malformed full presentation must fail closed: " + field);
+                }
+            }
+            var hidden = CoopCampaignMapPrototypeDynamicDeltaPolicy.BuildDelta(new[] { state },
+                Array.Empty<CoopCampaignMapPrototypeDynamicEntityState>());
+            Assert(hidden.Count == 1 && !hidden[0].IsVisible &&
+                   !hidden[0].IsSettlementTracked && !hidden[0].IsSettlementInRange,
+                "Removed entities must clear presentation in the hidden delta.");
+        }
+        var party = CreateVisibleEntities()[0];
+        party.IsSettlementTracked = true;
+        Assert(!CoopCampaignMapPrototypeContract.IsValidVisibleEntity(party),
+            "Party input cannot carry settlement tracking.");
+        party.IsSettlementTracked = false;
+        party.IsSettlementInRange = true;
+        Assert(!CoopCampaignMapPrototypeContract.IsValidVisibleEntity(party),
+            "Party input cannot carry settlement inspection.");
+
+        string root = FindRepositoryRoot();
+        foreach (string path in new[] { "CoopCampaignMapPrototypeNetworkMessages.cs", "CoopCampaignMapReplicaNetworkMessages.cs" })
+        {
+            string wire = File.ReadAllText(Path.Combine(root, "Network", "Messages", path));
+            foreach (string field in new[] { "IsSettlementTracked", "IsSettlementInRange" })
+                Assert(wire.Contains(field + " = ReadBoolFromPacket(ref valid)") &&
+                       (wire.Contains("WriteBoolToPacket(safeEntity." + field + ")") ||
+                        wire.Contains("WriteBoolToPacket(entity?." + field + " ?? false)")),
+                    "Both network channels must read/write presentation: " + path + " / " + field);
+        }
+        string overlay = File.ReadAllText(Path.Combine(root, "UI", "CoopCampaignMapPrototypeSettlementOverlayVM.cs"));
+        Assert(overlay.Contains("IsTracked = entity.IsSettlementTracked") &&
+               overlay.Contains("IsInRange = entity.IsSettlementInRange"),
+            "Stock settlement widget bindings must consume host state, not fixed false values.");
     }
 
     private static void ValidateConversationContract()
@@ -352,6 +1091,48 @@ internal static class Program
                 isInFront: false,
                 isInsideViewport: true),
             "A settlement behind the camera must be hidden.");
+
+        foreach (var size in new[] {
+                     CoopCampaignMapPrototypeSettlementNameplateSize.Small,
+                     CoopCampaignMapPrototypeSettlementNameplateSize.Medium,
+                     CoopCampaignMapPrototypeSettlementNameplateSize.Large })
+        foreach (double height in new[] { 50d, 200d, 201d, 400d, 401d })
+        foreach (bool inFront in new[] { false, true })
+        foreach (bool inside in new[] { false, true })
+        {
+            Assert(CoopCampaignMapPrototypeVisibilityPolicy.ShouldShowSettlement(
+                    size, height, 10000d, inFront, inside, isTracked: true),
+                "A host-admitted tracked settlement keeps its native edge marker at every zoom.");
+            if (!inFront || !inside)
+                Assert(!CoopCampaignMapPrototypeVisibilityPolicy.ShouldShowSettlement(
+                        size, height, 10000d, inFront, inside, isTracked: false),
+                    "Removing tracking restores ordinary off-screen culling.");
+        }
+        foreach (double invalid in new[] { double.NaN, double.PositiveInfinity, double.NegativeInfinity })
+        {
+            Assert(!CoopCampaignMapPrototypeVisibilityPolicy.ShouldShowSettlement(
+                    CoopCampaignMapPrototypeSettlementNameplateSize.Large,
+                    invalid, 10d, true, true, true), "Tracking cannot admit an invalid camera.");
+            Assert(!CoopCampaignMapPrototypeVisibilityPolicy.ShouldShowSettlement(
+                    CoopCampaignMapPrototypeSettlementNameplateSize.Large,
+                    10d, invalid, true, true, true), "Tracking cannot admit an invalid projection distance.");
+        }
+        Assert(!CoopCampaignMapPrototypeVisibilityPolicy.ShouldShowSettlement(
+                CoopCampaignMapPrototypeSettlementNameplateSize.None,
+                10d, 10d, true, true, true), "Tracking cannot invent an absent settlement nameplate.");
+        string root = FindRepositoryRoot();
+        string view = File.ReadAllText(Path.Combine(root, "UI", "CoopCampaignMapPrototypeMissionView.cs"));
+        string overlay = File.ReadAllText(Path.Combine(root, "UI", "CoopCampaignMapPrototypeSettlementOverlayVM.cs"));
+        Assert(view.Contains("_camera,\r\n                                target.IsSettlementTracked") ||
+               view.Contains("_camera,\n                                target.IsSettlementTracked"),
+            "Projection prefilter must receive the admitted host tracking bit.");
+        Assert(view.Contains("isTracked: isTracked"), "Prefilter and final projection must share the tracking policy.");
+        Assert(overlay.Contains("Position = IsVisibleOnMap") &&
+               !overlay.Contains("Position = isInFront && isInside"),
+            "Native widget must retain original tracked off-screen coordinates, not a fabricated direction.");
+        Assert(overlay.Contains("isInside,\r\n                            IsTracked") ||
+               overlay.Contains("isInside,\n                            IsTracked"),
+            "Final projection visibility must also honor host tracking.");
     }
 
     private static void ValidateInteractionPolicy()
@@ -437,6 +1218,40 @@ internal static class Program
         Assert(
             CoopCampaignMapPrototypeInteractionPolicy.SelectionRadiusPixels >= 70d,
             "Replica selection must retain a practical screen-space radius.");
+    }
+
+    private static void ValidateInformationPanelPosition()
+    {
+        CoopCampaignMapPrototypeInteractionPolicy.ResolveInformationPanelPosition(
+            100d, 200d, false, 1920d, 1080d, 1d, out double x, out double y);
+        AssertNearlyEqual(124d, x, "Hover panel must follow the cursor in physical pixels.");
+        AssertNearlyEqual(224d, y, "Hover panel must retain its vertical cursor gap.");
+
+        CoopCampaignMapPrototypeInteractionPolicy.ResolveInformationPanelPosition(
+            1910d, 1070d, false, 1920d, 1080d, 1.5d, out x, out y);
+        AssertNearlyEqual(1350d, x, "Right-edge clamp must include scaled panel width.");
+        AssertNearlyEqual(720d, y, "Bottom-edge clamp must include scaled panel height.");
+
+        CoopCampaignMapPrototypeInteractionPolicy.ResolveInformationPanelPosition(
+            0d, 0d, true, 1920d, 1080d, 1.5d, out x, out y);
+        AssertNearlyEqual(1350d, x, "Pinned panel must remain on the right inside the viewport.");
+        AssertNearlyEqual(135d, y, "Pinned top margin must respect UI scaling.");
+
+        CoopCampaignMapPrototypeInteractionPolicy.ResolveInformationPanelPosition(
+            -100d, -100d, false, 1920d, 1080d, 1d, out x, out y);
+        AssertNearlyEqual(20d, x, "Hover panel must clamp negative cursor X.");
+        AssertNearlyEqual(20d, y, "Hover panel must clamp negative cursor Y.");
+
+        CoopCampaignMapPrototypeInteractionPolicy.ResolveInformationPanelPosition(
+            100d, 100d, true, 100d, 100d, 2d, out x, out y);
+        AssertNearlyEqual(0d, x, "An undersized viewport must not produce a negative origin.");
+        AssertNearlyEqual(0d, y, "An undersized viewport must keep the panel origin visible.");
+
+        CoopCampaignMapPrototypeInteractionPolicy.ResolveInformationPanelPosition(
+            double.NaN, double.PositiveInfinity, false,
+            double.NaN, -1d, double.NaN, out x, out y);
+        AssertNearlyEqual(0d, x, "Invalid viewport/input values must produce finite positions.");
+        AssertNearlyEqual(0d, y, "Invalid viewport/input values must not reach Gauntlet.");
     }
 
     private static void ValidateCatalogBinaryChunkTransport()
@@ -782,8 +1597,8 @@ internal static class Program
             CoopCampaignMapPrototypeContract.DynamicBatchCompressionMaximum == 32,
             "The dynamic batch wire range must remain compatible with protocol 10 readers.");
         Assert(
-            CoopCampaignMapPrototypeContract.MaxDynamicBatchSize == 8,
-            "The Bannerlord 1.4.8 packet writer requires batches of at most eight dynamic entities.");
+            CoopCampaignMapPrototypeContract.MaxDynamicBatchSize == 2,
+            "Localized labels require a conservative two-entity batch limit.");
         Assert(
             CoopCampaignMapPrototypeContract.MaxDynamicBatchSize <
             CoopCampaignMapPrototypeContract.DynamicBatchCompressionMaximum,
@@ -798,8 +1613,8 @@ internal static class Program
             observedReplicaEntityCount %
             CoopCampaignMapPrototypeContract.MaxDynamicBatchSize;
         Assert(
-            batchCount == 148 && finalBatchSize == 4,
-            "The observed 1180-entity replica must split into 148 bounded batches without loss.");
+            batchCount == 590 && finalBatchSize == 0,
+            "The observed 1180-entity replica must split into 590 bounded batches without loss.");
     }
 
     private static void ValidateDynamicDeltaPolicy()
@@ -1843,7 +2658,7 @@ internal static class Program
         }
     }
 
-    private static CoopCampaignMapPrototypeHostSnapshot CreateHostSnapshot(
+    internal static CoopCampaignMapPrototypeHostSnapshot CreateHostSnapshot(
         DateTime updatedUtc)
     {
         return new CoopCampaignMapPrototypeHostSnapshot
@@ -1956,6 +2771,7 @@ internal static class Program
                 leftEntity.SettlementKind != rightEntity.SettlementKind ||
                 leftEntity.PrimaryColor != rightEntity.PrimaryColor ||
                 leftEntity.SecondaryColor != rightEntity.SecondaryColor ||
+                leftEntity.NameplateColor != rightEntity.NameplateColor ||
                 leftEntity.BannerCode != rightEntity.BannerCode ||
                 leftEntity.VisualCharacterId !=
                     rightEntity.VisualCharacterId ||
@@ -2079,8 +2895,12 @@ internal static class Program
                 leftEntity.NormalizedY != rightEntity.NormalizedY ||
                 leftEntity.Heading != rightEntity.Heading ||
                 leftEntity.PartySize != rightEntity.PartySize ||
+                leftEntity.IsPartyInformationHidden != rightEntity.IsPartyInformationHidden ||
+                leftEntity.IsSettlementTracked != rightEntity.IsSettlementTracked ||
+                leftEntity.IsSettlementInRange != rightEntity.IsSettlementInRange ||
                 leftEntity.PrimaryColor != rightEntity.PrimaryColor ||
                 leftEntity.SecondaryColor != rightEntity.SecondaryColor ||
+                leftEntity.NameplateColor != rightEntity.NameplateColor ||
                 leftEntity.BannerCode != rightEntity.BannerCode ||
                 leftEntity.VisualCharacterId !=
                     rightEntity.VisualCharacterId ||
@@ -2305,6 +3125,32 @@ internal static class Program
             visualTick > sceneOptimize,
             "The isolated Main_map client must load native atmosphere data " +
             "after Scene.Read and before optimization or visual ticking.");
+
+        int circleCleanup = source.IndexOf(
+            "RemoveSettlementAuthoringCircles();", StringComparison.Ordinal);
+        int createLayer = source.IndexOf(
+            "_sceneLayer = new PassiveSceneLayer(", StringComparison.Ordinal);
+        Assert(circleCleanup > sceneRead && circleCleanup < atmosphereLoad &&
+               circleCleanup < createLayer &&
+               source.LastIndexOf("RemoveSettlementAuthoringCircles();",
+                   StringComparison.Ordinal) == circleCleanup,
+            "Native settlement authoring circles must be cleaned once, after " +
+            "isolated scene read and before rendering; never each map tick.");
+        int cleanupMethod = source.IndexOf(
+            "private void RemoveSettlementAuthoringCircles()", StringComparison.Ordinal);
+        int nextMethod = source.IndexOf(
+            "private void CreateSettlementOverlayLayer()", cleanupMethod,
+            StringComparison.Ordinal);
+        string cleanup = source.Substring(cleanupMethod, nextMethod - cleanupMethod);
+        Assert(cleanup.Contains("new List<GameEntity>(") &&
+               cleanup.Contains("_mapScene.FindEntitiesWithTag(\"map_settlement_circle\")") &&
+               cleanup.Contains("circle.SetVisibilityExcludeParents(false)") &&
+               cleanup.Contains("circle.Remove(112)") &&
+               !cleanup.Contains("Mission.Scene") &&
+               !cleanup.Contains("Campaign.Current") &&
+               !cleanup.Contains("decal_siege"),
+            "Circle cleanup must snapshot exact-tag helpers from the owned " +
+            "replica scene, not mutate campaign/battle scenes or siege decals.");
     }
 
     private static void ValidateClientInteractionSourceContract()
@@ -2318,6 +3164,22 @@ internal static class Program
             repositoryRoot,
             "UI",
             "CoopCampaignMapReplicaInfoVM.cs"));
+        string infoPrefab = File.ReadAllText(Path.Combine(
+            repositoryRoot, "Module", "CoopSpectator", "GUI", "Prefabs",
+            "CoopCampaignMapReplicaInfo.xml"));
+
+        Assert(
+            infoPrefab.Contains("ScaledPositionXOffset=\"@PositionX\"") &&
+            infoPrefab.Contains("ScaledPositionYOffset=\"@PositionY\"") &&
+            !infoPrefab.Contains("Position=\"@Position\"") &&
+            infoPrefab.Contains("SuggestedWidth=\"@PanelWidth\"") &&
+            infoPrefab.Contains("SuggestedHeight=\"@PanelHeight\"") &&
+            infoViewModel.Contains("public float PositionX") &&
+            infoViewModel.Contains("public float PositionY") &&
+            infoViewModel.Contains("ResolveInformationPanelPosition(") &&
+            missionView.Contains("_replicaInfoLayer?.UIContext?.CustomScale"),
+            "Generic Widget has no Position property: replica info must bind physical-pixel " +
+            "offsets and clamp with the same scaled dimensions used by Gauntlet.");
 
         Assert(
             missionView.Contains(
@@ -2341,10 +3203,10 @@ internal static class Program
         Assert(
             missionView.Contains(
                 "CoopCampaignMapPrototypeInteractionPolicy") &&
-            missionView.Contains(".SelectionRadiusPixels") &&
+            missionView.Contains("ResolveNativeHoveredReplica()") &&
             infoViewModel.Contains("коліщатко — масштаб") &&
             infoViewModel.Contains("ЛКМ — відомості"),
-            "Selection radius and discoverable interaction guidance must remain wired.");
+            "Native picking and discoverable interaction guidance must remain wired.");
     }
 
     private static void ValidateMarkerReplicationSourceContract()
@@ -2396,9 +3258,7 @@ internal static class Program
             replicaMessages.Contains("QuestMarkerCompression") &&
             replicaMessages.Contains("SettlementEventCompression") &&
             networkController.Contains(
-                "QuestMarkerFlags = dynamicState.QuestMarkerFlags") &&
-            networkController.Contains(
-                "SettlementProductionIconId ="),
+                "CoopCampaignMapReplicaStateProjection.Merge("),
             "Every marker field must cross bridge, network and client merge boundaries.");
         Assert(
             partyOverlay.Contains(
@@ -2511,9 +3371,41 @@ internal static class Program
             "UI",
             "CoopHideoutBossCinematicView.cs"));
         Assert(
+            view.Contains("MBInformationManager.HideInformations();") &&
+            viewModel.Contains("new CoopCampaignMapConversationEmptyPersuasionVM()") &&
+            viewModel.Contains("bool IsABlockingOption => false") &&
+            viewModel.Contains("bool IsAProgressingOption => false") &&
+            viewModel.Contains("int PersuasionResultIndex => -1") &&
+            !viewModel.Contains("Only the campaign host can choose this response.") &&
+            !viewModel.Contains("PersuasionItem => null"),
+            "Ordinary read-only answers must not invent persuasion icons or leave " +
+            "a dialogue hint alive after its layer closes.");
+        Assert(
             hideoutView.Contains("CoopHideoutBossConversationVM") &&
             hideoutView.Contains("SendHostChoiceWithConfirmation"),
             "The map-dialogue feature must not replace the adjacent hideout host-choice path.");
+    }
+
+    private static void ValidateHostBannerColorPreservation()
+    {
+        string repositoryRoot = FindRepositoryRoot();
+        foreach (string file in new[] {
+            "CoopCampaignMapPrototypeEntityOverlayVM.cs",
+            "CoopCampaignMapPrototypeSettlementOverlayVM.cs" })
+        {
+            string source = File.ReadAllText(Path.Combine(repositoryRoot, "UI", file));
+            int start = source.IndexOf("private void UpdateBanner(", StringComparison.Ordinal);
+            int end = source.IndexOf("catch", start, StringComparison.Ordinal);
+            string factory = source.Substring(start, end - start);
+            Assert(factory.Contains(": new Banner(bannerCode)"),
+                file + " preserves encoded host banner colors without faction overrides");
+            Assert(factory.Contains("string.IsNullOrWhiteSpace(bannerCode)") &&
+                   factory.Contains("? new Banner(FallbackBannerCode, primaryColor, secondaryColor)"),
+                file + " confines faction recoloring to the pre-existing missing-banner fallback");
+            Assert(!factory.Contains("new Banner(\n                        safeBannerCode,") &&
+                   !factory.Contains("new Banner(\r\n                        safeBannerCode,"),
+                file + " must not recolor a supplied host banner");
+        }
     }
 
     private static string FindRepositoryRoot()

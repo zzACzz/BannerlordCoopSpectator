@@ -1,5 +1,159 @@
 # Invariants and Risks
 
+Map picking candidate must use only the owned replica scene, never Mission.Scene
+or a campaign scene. Known collision handles do not grant disclosure: current
+dynamic visibility, body admission and parent-inclusive geometry visibility must
+all pass. Remove owned mobile pick bodies before their scene, clear static handle
+references and hit arrays, and never dereference stale/unknown handles. Native
+query/body calls require live verification; no radius fallback may hide a failed
+native implementation. See [candidate boundary](CAMPAIGN_MAP_RESUME_2026-09-26.md#native-scene-picking-candidate-2026-09-28-not-runtime-verified).
+
+Current native handlers enforce exact peer/lease/session/age/disclosure and bounded
+per-peer/aggregate chunk budgets before submitting to the local relay. The
+presenter may show only the current hover/mode response, must clear on map input
+loss, and must never hide another component's global tooltip. No campaign provider
+is invoked on MP. Earlier unwired descriptions are historical; native capture/
+relay/render safety and parity remain unverified. See [network boundary](CAMPAIGN_MAP_RESUME_2026-09-26.md#tooltip-native-network-candidate-2026-09-28-source-only)
+and [presentation boundary](CAMPAIGN_MAP_RESUME_2026-09-26.md#tooltip-stock-presenter-candidate-2026-09-28-not-native-verified).
+
+Local tooltip frames require exact launcher-owned run/process identity and bounded
+age/round/request correlation. Same-user files are not a security boundary against
+that user's other processes. Remote clients never select paths or process IDs.
+Track three fixed run-owned relay files in future native cleanup. Host formatting
+is runtime-sensitive and not native-verified; no MP handler submits requests yet.
+See [ownership and acceptance boundary](CAMPAIGN_MAP_RESUME_2026-09-26.md#launcher-owned-tooltip-relay-2026-09-28-source-candidate).
+
+Tooltip grants must echo the current client challenge; reset challenge and interest
+together at lifecycle loss. Enforce message direction in actual native handlers.
+Successful decoding/correlation never grants access. Host tooltip lookup requires
+fresh successful publication; failed/partial publication invalidates prior proof.
+The source entry is not live yet and native restoration/visual acceptance remain
+open. See [host-entry boundary](CAMPAIGN_MAP_RESUME_2026-09-26.md#tooltip-semantic-envelopes-and-host-lookup-2026-09-28-unwired).
+
+The unwired native-tooltip adapter restores global text-variable entries, idle
+parser stacks and audited thread-local grammar state; it rejects shared-empty
+writable templates. It does not clone arbitrary nested TextObjects or guarantee
+replacement models are side-effect-free. No native capture success is established
+by pure tests, compilation or the isolated installed-library grammar probe. See
+[candidate and remaining gates](CAMPAIGN_MAP_RESUME_2026-09-26.md#host-native-tooltip-capture-candidate-2026-09-28-unwired).
+
+Tooltip lease grants must be authenticated and scoped to the current exact peer,
+map and host session. Neither session ID alone nor a reused peer index establishes
+that lifetime. Every render/send rechecks current disclosure; request-age bounds
+must not be renewed by transit time. The new policy helpers remain unwired. See
+[request lifetime and integration obligations](CAMPAIGN_MAP_RESUME_2026-09-26.md#tooltip-request-lifetime-boundary-2026-09-28-candidate).
+
+Detached tooltip correlation is not authorization: host visibility, peer/mission
+ownership and freshness must be admitted separately before sending or displaying
+rows. Never use menu-context provider arguments or force IsInspected. Native
+provider calls can replace process-global text variables; do not treat them as
+side-effect-free, invoke the host's visible tooltip, or call global ClearAll for
+cleanup. The payload helper has no live callers yet. See
+[isolation audit and remaining gates](CAMPAIGN_MAP_RESUME_2026-09-26.md#tooltip-provider-isolation-and-detached-payload-foundation-2026-09-28).
+
+Deferred map reconciliation must consume latest admitted stores, not an older
+merged payload. Stale replay can resurrect hidden entities as well as suppress
+party reappearance. Reconcile membership and overlays together; never repair
+only the main party or bypass host visibility. See
+[ordering correction](CAMPAIGN_MAP_RESUME_2026-09-26.md#deferred-reconciliation-ordering-correction-2026-09-28).
+
+Mobile-body correction: logical MainParty admission is not permission to draw its
+body in a settlement. Hide only owned mobile body/fallbacks; preserve camera and
+settlement occupant metadata. Label projection does not imply body visibility.
+Pinned UI focus must not prevent host-update invalidation. Settlement 3D banners
+and naval/tent variants remain separate gaps. See
+[source correction / gates](CAMPAIGN_MAP_RESUME_2026-09-26.md#mobile-body-admission-correction-2026-09-28).
+
+Settlement occupant badge candidate (26/22/7): do not enumerate/publish occupants
+unless the settlement passed disclosure and the host's native in-range gate.
+Apply native garrison/militia/disguise/army exclusions; transmit only badge kind,
+bandit flag and already admitted clan heraldry. Never infer client parties or
+replace absent banners. Range loss must suppress retained catalog badges. Large
+lists require chunking before a native direct header, bounded allocation and
+complete-revision admission. Capture/sort temporal parity, transition cost,
+remote peers and battle re-entry still require native evidence.
+See [candidate](CAMPAIGN_MAP_RESUME_2026-09-26.md#settlement-occupant-badge-candidate-2026-09-28).
+
+cmp-b10 improves observed Vostrum geometry but does not establish full parity.
+Wall/preparation state must be validated and applied after level visibility while
+the owned root is hidden. Capture mirrors installed native inputs, not actual
+post-refresh child visibility; game-version compatibility, active siege/damage,
+live banners, remote peers and adjacent battle lifecycle gates remain open.
+See [native result and acceptance boundary](CAMPAIGN_MAP_RESUME_2026-09-26.md#wall-and-siege-preparation-candidate-2026-09-27).
+
+cmp-b9 native helper removal must never touch live replacement banners or siege
+anchors. Snapshot/ancestry validation precedes all removals; native acceptance
+pending. See [candidate and limits](CAMPAIGN_MAP_RESUME_2026-09-26.md#fortification-authoring-helper-candidate-2026-09-27).
+
+cmp-b8 level-only candidate passed bounded Avalyps/Lavenia native comparison, not
+full parity: Vostrum geometry extras remain. Private
+host field versioning and owned native child lifetime/visibility are sensitive.
+Unknown state must hide; never infer a civilian level. Wall/preparation/banner
+overrides and companion-mission dialogue remain open.
+See [scope](CAMPAIGN_MAP_RESUME_2026-09-26.md#host-selected-settlement-levels-2026-09-27-bounded-native-result).
+
+cmp-b5 root admission passed source/build/tests and bounded visible-map use only;
+native hide/reappearance transitions remain unverified. Missing/ambiguous roots
+remain hidden; discard references before native destruction. Stock tag coverage
+does not establish arbitrary-map coverage, variant parity or reveal readiness.
+Native Avalyps/Lavenia comparison failed building-variant parity. Party-menu
+companion Conversation is not captured; do not generalize map-dialogue success.
+See [candidate and limits](CAMPAIGN_MAP_RESUME_2026-09-26.md#static-settlement-geometry-admission-2026-09-27).
+
+Settlement geometry gap (2026-09-27 source audit): hidden nameplate removal does
+not hide stock Main_map settlement geometry. Do not claim host-only geometry
+disclosure until roots and variant visibility are bound to host state. The cmp-b4
+authoring-circle correction is confined to owned map scene setup; native entity
+removal remains runtime-sensitive and requires fresh visual/lifetime verification.
+See [investigation](CAMPAIGN_MAP_RESUME_2026-09-26.md#settlement-scene-presentation-investigation-2026-09-27).
+
+Map camera/presentation (2026-09-27 candidate): manual view freedom must never
+expand host visibility or mutate campaign state. Return-button clicks must not
+select objects behind UI; dialogue blocks map input. Hidden deltas clear settlement
+tracked/inspected bits. Protocol 23/bridge 19 requires coherent roles. Contract tests
+do not prove native camera smoothness, button hit-testing or multi-peer behavior.
+Tracked edge labels may bypass camera culling only after host disclosure admission.
+Preserve actual projected coordinates and WSign for native edge placement; a
+(-1000,-1000) sentinel would lose the tracked object's direction. cmp-b3 corrects
+the native cmp-b2 Tevea failure; cmp-b3 passed bounded native left-edge/zoom
+comparison and attached-camera dialogue wheel/close checks. Behind-camera labels,
+untracking, native pan/rotation and detached-dialogue preservation remain open.
+See [candidate and open gates](CAMPAIGN_MAP_RESUME_2026-09-26.md#host-camera-following-and-settlement-presentation-2026-09-27).
+
+Dialogue motion invariant (2026-09-27, source candidate): live phase must not enter
+immutable tableau/text equality or restart their chunk transfer. Only exact
+descriptor hash + dialogue revision + increasing sequence + matching 1-3 actor
+count admits a pose. Future/stale samples do not create or reopen a scene. Motion
+has a 512-byte cap, finite bounded fields, one latest pending client sample with
+0.5-second local expiry, and yields to unfinished text transfers. Native body
+reads/writes are potentially runtime-sensitive despite being visual-only; resolve
+all actor actions before mutation and never affect physical battle agents. No new
+hot-path diagnostics. Native cmt-b25 transport/retention passed but smoothness
+FAILED: user-observed jerking actors. Direct repeated phase writes can create
+discontinuities; double ticking remains unproven. cmt-b22 modules were restored.
+This is not facial-channel or full visual parity evidence.
+Correction candidate: same-action packets steer bounded playback speed rather than
+seeking phase; native cyclic flags/duration determine wrapping, not string names.
+First pose/action replacement may seed phase. Expired samples stop correcting after
+0.5 seconds, and resource replacement clears playback. The user confirmed smooth
+body motion in the inspected cmt-b27 dialogue; first/repeat retention and both
+closes passed, with b27 retained after exact cleanup. This does not establish
+facial/HUD parity, exact remote phase timing or adjacent battle regression.
+See [bounded native acceptance](CAMPAIGN_MAP_RESUME_2026-09-26.md#cmt-b27-native-rate-steering-result).
+
+Automatic mission adapter risk boundary (2026-09-26, source-only): its separate
+default-off gate must remain until native acceptance. Session input requires exact
+live process/campaign identity and fresh monotonic heartbeat. A successful command
+is never mission readiness. Only the exact synchronously opened native Mission is
+owned, and only an owned map may be ended by this adapter. Battle teardown requires
+the authoritative result-publication callback; map return additionally requires
+matching applied aftermath, final stage and actual host MapState. No host HTTP
+fallback, foreign mission adoption, retry loop or inter-stage map is permitted.
+Native-sensitive operations are the ListedServer reflection surface, option
+selection, pre-open topology publication and Mission identity/state observation;
+they require field, siege/lords-hall, hideout and abort/retreat runtime evidence.
+See [lifecycle acceptance checklist](CAMPAIGN_MAP_AUTOMATIC_LIFECYCLE.md).
+
 Current field verification boundary (2026-09-10): `m4zclive-l1-01` returned `Timeout/NoHeartbeat` before control readiness/bootstrap although the later retained role-status snapshot has a recent heartbeat. That historical run did not retain the failed read/decision; do not assert a dead server, a proven false alarm, a mission failure or a dependency-load root cause. The subsequent source/contract correction retains the rejected observation separately from later finalization snapshots; it does not recover historical data or establish native progression. Automatic bounded timeout finalization, graceful exact cleanup, full temporary-install restoration and preservation of all five dumps passed for the historical run. Native-crash handling and mission progression remain unverified. [Live evidence](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#26-clean-zero-client-live-attempt-stops-before-bootstrap-2026-09-10), [focused correction](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#27-exact-role-health-rejection-source-and-contract-correction-2026-09-10).
 
 Role-health evidence invariant (2026-09-10): preserve the rejected read and its classifier UTC before finalization; a later readable/fresh status MUST NOT replace that observation or justify retroactive acceptance. Missing/not-visible, read/parse failure and a stale timestamp remain distinct evidence even when their existing outcome is `NoHeartbeat`. Keep identity/capability/schema rejection and the five-second heartbeat/180-second progress defaults unchanged. Diagnostic projection must remain bounded, detached and failure-only, and its own failure MUST NOT supersede the primary rejection. [Canonical field contract, activation, cost and limitations](BUILD_TEST_DEBUG.md#exact-role-health-rejection-evidence-2026-09-10).
@@ -28,7 +182,15 @@ Last dedicated/client-control runtime verification: **2026-09-02** (`m2b3a-live-
 
 ## Non-negotiable runtime invariants
 
+Campaign-map merge invariant (2026-09-26): full and incremental consumers MUST use the same tested `CoopCampaignMapReplicaStateProjection.Merge`. Do not reintroduce per-consumer field lists: previous copies independently omitted markers or label-color/hidden-information fields. Transport/clone tests alone do not prove end-to-end projection. Every visible-state property must have a tested source; visual equipment arrays must remain detached. The matching `cmr-b10` candidate now has bounded live movement/dialogue evidence, not exhaustive per-field visual parity proof.
+
+Campaign-map nameplate distinction (2026-09-26 source candidate): party count/name text uses the host-relative native diplomacy/army palette, not faction banner or cloth color. Keep transported `NameplateColor` separate; clients must not reconstruct campaign diplomacy. Current source is wire 22/bridge 18/catalog 4 (atomic dialogue/tableau payload plus native nameplate projection; the live-tested `cmr-b10` used 20/16/4). Coherent `cmr-b10` passed bounded live startup, selection, zoom, movement and read-only dialogue lifecycle without an observed crash; this is not exhaustive visual/performance proof. Exact-owned cleanup and 64-file config/save preservation passed; the candidate remains installed. Attached/settlement/raft label suppression MUST NOT drive model visibility: the overlay's return value is model projection eligibility, while `IsVisibleOnMap` includes label-specific suppression. Label distance is spatial camera distance, not projected depth; the party head anchor is a fixed 0.8 world units. Event-position and main-party portrait/navigator parity remain incomplete.
+
+Hidden-number boundary: `IsPartyInformationHidden` requires zero transmitted party/army count, size and cohesion fields; clients display `?` and suppress those army numeric rows. Native nameplate count/extra strings cannot contain hidden numbers, but preserve native `?` suffix presence. Masking only the UI while sending the true number is not acceptable. Hide/reveal must invalidate the dynamic projection even when both numeric values are zero. Host helper healthy/attached-army formatting is implemented but not live-verified. Native tooltip visibility, remaining main-party-specific presentation and broader catalog information remain pending parity checks. Do not claim complete no-leak or native-tooltip parity from this numerical guard alone. New strings are bounded, but reduced two-entity batches increase initial snapshot message count; measure transfer/performance in the next coherent native run.
+
 ### 1. One physical agent spawner
+
+Map-dialogue tableau contract (2026-09-26, source-wired but not deployed): validate a maximum of three visible actors and 64 KiB before allocating/decompressing the visual transfer. Camera/actor frames must be finite, orthonormal and right-handed; separate scale is bounded. Identifiers cannot carry filesystem paths. Missing native readiness/fields must leave the optional visual capture unavailable, not query a hidden roster. Close/invalidation must discard delayed earlier chunks, and a mission reset must clear revision state. The renderer resolves installed resources and owns its scene lifecycle; structural descriptor validity does not prove native resource safety. Native map-tableau calls are runtime-sensitive even when read-only. Host capture is now called only during the opt-in map publisher's active dialogue; native capture is not runtime-verified. The client renderer is now source-wired but not deployed/runtime-verified. Its 15-second monotonic readiness limit does not preempt Scene.Read or individual native calls. No unbounded resource wait or hot-path diagnostic is added; one failure/cleanup summary per attempt is permitted.
 
 Native server mission logic is the only owner allowed to create physical battle agents. Cooperative code may:
 
@@ -218,6 +380,8 @@ The campaign host remains the only dialogue authority. Capture may read only the
 The local bridge and dedicated network messages must bound every string and option count. The dedicated process assigns a mission-local monotonic revision, sends only server-to-client messages, and includes the current complete revision for late join. The client must not publish a partial or mixed revision, and its `SPConversation` commands must remain no-op. Voting, progression, market/inventory reservation, hero-edit locking, and all campaign mutation require separate contracts and are outside this milestone.
 
 This path is isolated from hideout boss dialogue. A correction to map-dialogue capture, transport, or presentation must not be applied to hideout, settlement, battle, or other conversation types without their own contract and runtime verification.
+
+The 2026-09-26 baseline live run verified text/option lifecycle and read-only client actions, not full visual parity: dialogue tableau/characters/banner and actual persuasion/relation projection remain incomplete. The map-only ordinary-answer correction supplies inert native binding defaults, not fabricated persuasion state. Adjacent hideout null-persuasion and battle-control/hideout-stealth generic Position bindings are latent review findings, not verified regressions or fixed behavior. See [current evidence and UI correction limits](CAMPAIGN_MAP_RESUME_2026-09-26.md).
 
 ## Known current limitations and unverified areas
 

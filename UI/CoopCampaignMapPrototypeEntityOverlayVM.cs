@@ -191,6 +191,10 @@ namespace CoopSpectator.UI
         private bool _isVisibleOnMap;
         private bool _isBehind;
         private string _count = string.Empty;
+        private string _extraInfoText = string.Empty;
+        private string _movementSpeedText = string.Empty;
+        private int _partyNameplateFlags;
+        private bool _isMainParty;
         private string _fullName = string.Empty;
         private string _factionColor = string.Empty;
         private bool _shouldShowFullName;
@@ -307,22 +311,30 @@ namespace CoopSpectator.UI
         }
 
         [DataSourceProperty]
-        public string ExtraInfoText => string.Empty;
+        public string ExtraInfoText
+        {
+            get => _extraInfoText;
+            private set => SetField(ref _extraInfoText, value, nameof(ExtraInfoText));
+        }
 
         [DataSourceProperty]
-        public string MovementSpeedText => string.Empty;
+        public string MovementSpeedText
+        {
+            get => _movementSpeedText;
+            private set => SetField(ref _movementSpeedText, value, nameof(MovementSpeedText));
+        }
 
         [DataSourceProperty]
-        public bool IsArmy => false;
+        public bool IsArmy => HasFlag(CoopCampaignMapPartyNameplateFlags.ArmyLeader);
 
         [DataSourceProperty]
         public bool IsHigh => false;
 
         [DataSourceProperty]
-        public bool IsInArmy => false;
+        public bool IsInArmy => HasFlag(CoopCampaignMapPartyNameplateFlags.AttachedToArmy);
 
         [DataSourceProperty]
-        public bool IsInSettlement => false;
+        public bool IsInSettlement => HasFlag(CoopCampaignMapPartyNameplateFlags.InSettlement);
 
         [DataSourceProperty]
         public bool IsTargetedByTutorial => false;
@@ -331,10 +343,10 @@ namespace CoopSpectator.UI
         public bool CanParley => false;
 
         [DataSourceProperty]
-        public bool IsDisorganized => false;
+        public bool IsDisorganized => HasFlag(CoopCampaignMapPartyNameplateFlags.Disorganized);
 
         [DataSourceProperty]
-        public bool IsCurrentlyAtSea => false;
+        public bool IsCurrentlyAtSea => HasFlag(CoopCampaignMapPartyNameplateFlags.AtSea);
 
         [DataSourceProperty]
         public double Scale => 1d;
@@ -355,10 +367,22 @@ namespace CoopSpectator.UI
 
             bool isSettlement =
                 entity.Kind == CoopCampaignMapPrototypeEntityKind.Settlement;
-            Count = isSettlement || entity.PartySize <= 0
-                ? string.Empty
-                : entity.PartySize.ToString();
-            FullName = entity.DisplayName ?? string.Empty;
+            Count = isSettlement ? string.Empty
+                : entity.IsPartyInformationHidden ? "?"
+                : entity.PartyNameplateCountText;
+            ExtraInfoText = isSettlement ? string.Empty : entity.PartyNameplateExtraInfoText;
+            FullName = isSettlement ? entity.DisplayName ?? string.Empty : entity.PartyNameplateNameText;
+            MovementSpeedText = entity.PartyMovementSpeedText;
+            _isMainParty = entity.Kind == CoopCampaignMapPrototypeEntityKind.MainParty;
+            if (_partyNameplateFlags != entity.PartyNameplateFlags)
+            {
+                _partyNameplateFlags = entity.PartyNameplateFlags;
+                OnPropertyChangedWithValue(IsArmy, nameof(IsArmy));
+                OnPropertyChangedWithValue(IsInArmy, nameof(IsInArmy));
+                OnPropertyChangedWithValue(IsInSettlement, nameof(IsInSettlement));
+                OnPropertyChangedWithValue(IsDisorganized, nameof(IsDisorganized));
+                OnPropertyChangedWithValue(IsCurrentlyAtSea, nameof(IsCurrentlyAtSea));
+            }
             ShouldShowFullName = isSettlement;
             uint primaryColor = entity.PrimaryColor == 0u
                 ? FallbackPrimaryColor
@@ -366,9 +390,14 @@ namespace CoopSpectator.UI
             uint secondaryColor = entity.SecondaryColor == 0u
                 ? FallbackSecondaryColor
                 : entity.SecondaryColor;
-            FactionColor = Color.FromUint(primaryColor).ToString();
+            FactionColor = Color.FromUint(entity.NameplateColor).ToString();
             UpdateBanner(entity.BannerCode, primaryColor, secondaryColor);
             SynchronizeQuestMarkers(entity.QuestMarkerFlags);
+        }
+
+        private bool HasFlag(CoopCampaignMapPartyNameplateFlags flag)
+        {
+            return (_partyNameplateFlags & (int)flag) != 0;
         }
 
         internal bool UpdatePosition(
@@ -422,18 +451,24 @@ namespace CoopSpectator.UI
 
                 Position = new Vec2(x, y);
                 HeadPosition = new Vec2(headX, headY);
-                DistanceToCamera = depth;
+                // Native PartyNameplateVM uses spatial distance for widget
+                // scaling; projected depth is only a projection/visibility input.
+                DistanceToCamera = worldPosition.Distance(camera.Position);
                 bool isInsideViewport =
                     x >= -180f &&
                     x <= Screen.RealScreenResolutionWidth + 180f &&
                     y >= -120f &&
                     y <= Screen.RealScreenResolutionHeight + 120f;
-                IsVisibleOnMap =
+                bool modelVisible =
                     CoopCampaignMapPrototypeVisibilityPolicy.ShouldShowParty(
                         camera.Position.z,
                         depth,
                         isInsideViewport);
-                return IsVisibleOnMap;
+                IsVisibleOnMap = modelVisible &&
+                    CoopCampaignMapPartyLabelPolicy.ShouldShowNameplate(_isMainParty, _partyNameplateFlags);
+                // The mission view uses this return value to gate the model,
+                // not the label. Native label-only suppression must not hide it.
+                return modelVisible;
             }
             catch
             {
@@ -479,10 +514,13 @@ namespace CoopSpectator.UI
             try
             {
                 identifier = new CoopCampaignMapPrototypeBannerIdentifierVM(
-                    new Banner(
-                        safeBannerCode,
-                        primaryColor,
-                        secondaryColor));
+                    // The host banner code already includes its colors. The
+                    // three-argument constructor overwrites them with faction
+                    // colors, unlike native PartyNameplateVM. Recolor only the
+                    // existing fallback when no host banner was supplied.
+                    string.IsNullOrWhiteSpace(bannerCode)
+                        ? new Banner(FallbackBannerCode, primaryColor, secondaryColor)
+                        : new Banner(bannerCode));
             }
             catch
             {

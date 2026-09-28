@@ -34,6 +34,8 @@ namespace CoopSpectator.Campaign
         /// <summary>Повертає повний шлях до файлу battle_roster.json (спільний для хост і дедик на одному ПК).</summary>
         public static string GetRosterFilePath()
         {
+            if (ExperimentalFeatures.EnableAutomaticCampaignMissions && CoopCampaignMissionChannel.RosterPath != null)
+                return CoopCampaignMissionChannel.RosterPath;
             string folder = CoopAutomationRuntimeBridge.ResolveCoopFolderPath();
             return Path.Combine(folder, RosterFileName);
         }
@@ -65,7 +67,10 @@ namespace CoopSpectator.Campaign
                     Snapshot = snapshot
                 };
                 string json = JsonConvert.SerializeObject(dto, Formatting.Indented);
-                File.WriteAllText(path, json);
+                if (ExperimentalFeatures.EnableAutomaticCampaignMissions && !string.IsNullOrEmpty(CoopCampaignMissionChannel.ActiveSession))
+                    CoopCampaignMissionChannel.WriteAtomic(path, System.Text.Encoding.UTF8.GetBytes(json));
+                else
+                    File.WriteAllText(path, json);
                 if (!CoopAutomationFixtureRecorder.TryRecordCampaignRoster(
                         path,
                         snapshot,

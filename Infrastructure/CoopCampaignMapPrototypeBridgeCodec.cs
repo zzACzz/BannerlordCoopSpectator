@@ -7,6 +7,46 @@ namespace CoopSpectator.Infrastructure
 {
     public static class CoopCampaignMapPrototypeBridgeCodec
     {
+        private static string EncodePose(CoopCampaignMapConversationPose pose)
+        {
+            if (pose == null) return string.Empty;
+            if (!CoopCampaignMapConversationPoseCodec.TrySerialize(pose, out var bytes))
+                throw new ArgumentException("Invalid conversation pose.");
+            return Convert.ToBase64String(bytes);
+        }
+
+        private static bool TryReadPose(Dictionary<string, string> values, out CoopCampaignMapConversationPose pose)
+        {
+            pose = null;
+            if (!values.TryGetValue("ConversationPose", out var encoded) || encoded.Length > 684) return false;
+            if (encoded.Length == 0) return true;
+            try { return CoopCampaignMapConversationPoseCodec.TryDeserialize(Convert.FromBase64String(encoded), out pose); }
+            catch (FormatException) { return false; }
+        }
+
+        private static string EncodeTableau(CoopCampaignMapConversationTableauState tableau)
+        {
+            if (tableau == null) return string.Empty;
+            if (!CoopCampaignMapConversationTableauCodec.TrySerialize(tableau, out byte[] bytes))
+                throw new ArgumentException("Invalid conversation tableau.");
+            return Convert.ToBase64String(bytes);
+        }
+
+        private static bool TryReadTableau(Dictionary<string, string> values,
+            out CoopCampaignMapConversationTableauState tableau)
+        {
+            tableau = null;
+            if (!values.TryGetValue("ConversationTableau", out string encoded) ||
+                encoded.Length > ((CoopCampaignMapConversationTableauCodec.MaxPayloadBytes + 2) / 3) * 4)
+                return false;
+            if (encoded.Length == 0) return true;
+            try
+            {
+                return CoopCampaignMapConversationTableauCodec.TryDeserialize(Convert.FromBase64String(encoded), out tableau);
+            }
+            catch (FormatException) { return false; }
+        }
+
         public static string[] Serialize(
             CoopCampaignMapPrototypeHostSnapshot snapshot)
         {
@@ -54,7 +94,9 @@ namespace CoopSpectator.Infrastructure
                 "ConversationDialogText=" + EncodeText(conversation.DialogText),
                 "ConversationGoldText=" + EncodeText(conversation.GoldText),
                 "ConversationContinueText=" + EncodeText(conversation.ContinueText),
-                "ConversationOptionCount=" + conversationOptionCount.ToString(CultureInfo.InvariantCulture)
+                "ConversationOptionCount=" + conversationOptionCount.ToString(CultureInfo.InvariantCulture),
+                "ConversationTableau=" + EncodeTableau(conversation.Tableau),
+                "ConversationPose=" + EncodePose(snapshot.ConversationPose)
             };
 
             for (int index = 0; index < conversationOptionCount; index++)
@@ -89,20 +131,33 @@ namespace CoopSpectator.Infrastructure
                                 index.ToString(CultureInfo.InvariantCulture) + ".";
                 lines.Add(prefix + "EntityId=" + EncodeText(entity?.EntityId));
                 lines.Add(prefix + "DisplayName=" + EncodeText(entity?.DisplayName));
+                lines.Add(prefix + "PartyNameplateNameText=" + EncodeText(entity?.PartyNameplateNameText));
                 lines.Add(prefix + "Kind=" + (entity != null ? (int)entity.Kind : 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "SettlementNameplateSize=" + (entity != null ? (int)entity.SettlementNameplateSize : 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "NormalizedX=" + (entity?.NormalizedX ?? 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "NormalizedY=" + (entity?.NormalizedY ?? 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "Heading=" + (entity?.Heading ?? 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "PartySize=" + (entity?.PartySize ?? 0).ToString(CultureInfo.InvariantCulture));
+                lines.Add(prefix + "IsPartyInformationHidden=" + (entity?.IsPartyInformationHidden ?? false));
+                lines.Add(prefix + "IsSettlementTracked=" + (entity?.IsSettlementTracked ?? false));
+                lines.Add(prefix + "IsSettlementInRange=" + (entity?.IsSettlementInRange ?? false));
+                lines.Add(prefix + "PartyNameplateCountText=" + EncodeText(entity?.PartyNameplateCountText));
+                lines.Add(prefix + "PartyNameplateExtraInfoText=" + EncodeText(entity?.PartyNameplateExtraInfoText));
+                lines.Add(prefix + "PartyMovementSpeedText=" + EncodeText(entity?.PartyMovementSpeedText));
+                lines.Add(prefix + "PartyNameplateFlags=" + (entity?.PartyNameplateFlags ?? 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "PrimaryColor=" + (entity?.PrimaryColor ?? 0u).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "SecondaryColor=" + (entity?.SecondaryColor ?? 0u).ToString(CultureInfo.InvariantCulture));
+                lines.Add(prefix + "NameplateColor=" + (entity?.NameplateColor ?? uint.MaxValue).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "BannerCode=" + EncodeText(entity?.BannerCode));
                 lines.Add(prefix + "VisualCharacterId=" + EncodeText(entity?.VisualCharacterId));
                 lines.Add(prefix + "CultureId=" + EncodeText(entity?.CultureId));
                 lines.Add(prefix + "PartyVisualKind=" + (entity != null ? (int)entity.PartyVisualKind : 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "QuestMarkerFlags=" + (entity?.QuestMarkerFlags ?? 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "SettlementEventFlags=" + (entity?.SettlementEventFlags ?? 0).ToString(CultureInfo.InvariantCulture));
+                lines.Add(prefix + "SettlementLevelFlags=" + (entity?.SettlementLevelFlags ?? 0).ToString(CultureInfo.InvariantCulture));
+                lines.Add(prefix + "SettlementWallStates=" + EncodeText(entity?.SettlementWallStates));
+                lines.Add(prefix + "SettlementPartyBadges=" + EncodeText(entity?.SettlementPartyBadges));
+                lines.Add(prefix + "SettlementPreparationState=" + (entity?.SettlementPreparationState ?? 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "SettlementProductionIconId=" + EncodeText(entity?.SettlementProductionIconId));
                 SerializeAgentVisual(
                     lines,
@@ -176,6 +231,8 @@ namespace CoopSpectator.Infrastructure
                 !TryReadText(values, "ConversationGoldText", out string conversationGoldText) ||
                 !TryReadText(values, "ConversationContinueText", out string conversationContinueText) ||
                 !TryReadInt(values, "ConversationOptionCount", out int conversationOptionCount) ||
+                !TryReadTableau(values, out var conversationTableau) ||
+                !TryReadPose(values, out var conversationPose) ||
                 !TryReadDateTime(values, "UpdatedUtc", out DateTime updatedUtc))
             {
                 return Fail("malformed", out reason);
@@ -198,7 +255,8 @@ namespace CoopSpectator.Infrastructure
                 SpeakerName = conversationSpeakerName,
                 DialogText = conversationDialogText,
                 GoldText = conversationGoldText,
-                ContinueText = conversationContinueText
+                ContinueText = conversationContinueText,
+                Tableau = conversationTableau
             };
             for (int index = 0; index < conversationOptionCount; index++)
             {
@@ -224,6 +282,9 @@ namespace CoopSpectator.Infrastructure
             {
                 return false;
             }
+            if (conversationPose != null &&
+                (!CoopCampaignMapConversationPoseCodec.Matches(conversationPose, conversation) ||
+                 conversationPose.Sequence != revision)) return Fail("conversation-pose-binding", out reason);
 
             CoopCampaignMapPrototypeCameraState camera = null;
             if (hasCamera)
@@ -269,14 +330,21 @@ namespace CoopSpectator.Infrastructure
                     !values.TryGetValue(prefix + "DisplayName", out string encodedDisplayName) ||
                     !TryDecodeText(encodedEntityId, out string entityId) ||
                     !TryDecodeText(encodedDisplayName, out string displayName) ||
+                    !TryReadText(values, prefix + "PartyNameplateNameText", out string nameplateName) ||
                     !TryReadInt(values, prefix + "Kind", out int kind) ||
                     !TryReadInt(values, prefix + "SettlementNameplateSize", out int settlementNameplateSize) ||
                     !TryReadInt(values, prefix + "NormalizedX", out int entityX) ||
                     !TryReadInt(values, prefix + "NormalizedY", out int entityY) ||
                     !TryReadInt(values, prefix + "Heading", out int entityHeading) ||
                     !TryReadInt(values, prefix + "PartySize", out int partySize) ||
+                    !TryReadBool(values, prefix + "IsPartyInformationHidden", out bool informationHidden) ||
+                    !TryReadText(values, prefix + "PartyNameplateCountText", out string nameplateCount) ||
+                    !TryReadText(values, prefix + "PartyNameplateExtraInfoText", out string nameplateExtra) ||
+                    !TryReadText(values, prefix + "PartyMovementSpeedText", out string speedText) ||
+                    !TryReadInt(values, prefix + "PartyNameplateFlags", out int nameplateFlags) ||
                     !TryReadUInt(values, prefix + "PrimaryColor", out uint primaryColor) ||
                     !TryReadUInt(values, prefix + "SecondaryColor", out uint secondaryColor) ||
+                    !TryReadUInt(values, prefix + "NameplateColor", out uint nameplateColor) ||
                     !values.TryGetValue(prefix + "BannerCode", out string encodedBannerCode) ||
                     !TryDecodeText(encodedBannerCode, out string bannerCode) ||
                     !values.TryGetValue(prefix + "VisualCharacterId", out string encodedVisualCharacterId) ||
@@ -285,7 +353,13 @@ namespace CoopSpectator.Infrastructure
                     !TryDecodeText(encodedCultureId, out string cultureId) ||
                     !TryReadInt(values, prefix + "PartyVisualKind", out int partyVisualKind) ||
                     !TryReadInt(values, prefix + "QuestMarkerFlags", out int questMarkerFlags) ||
+                    !TryReadBool(values, prefix + "IsSettlementTracked", out bool settlementTracked) ||
+                    !TryReadBool(values, prefix + "IsSettlementInRange", out bool settlementInRange) ||
                     !TryReadInt(values, prefix + "SettlementEventFlags", out int settlementEventFlags) ||
+                    !TryReadInt(values, prefix + "SettlementLevelFlags", out int settlementLevelFlags) ||
+                    !TryReadText(values, prefix + "SettlementWallStates", out string settlementWallStates) ||
+                    !TryReadText(values, prefix + "SettlementPartyBadges", out string settlementPartyBadges) ||
+                    !TryReadInt(values, prefix + "SettlementPreparationState", out int settlementPreparationState) ||
                     !TryReadText(values, prefix + "SettlementProductionIconId", out string settlementProductionIconId) ||
                     !TryParseAgentVisual(
                         values,
@@ -307,6 +381,7 @@ namespace CoopSpectator.Infrastructure
                 {
                     EntityId = entityId,
                     DisplayName = displayName,
+                    PartyNameplateNameText = nameplateName,
                     Kind = (CoopCampaignMapPrototypeEntityKind)kind,
                     SettlementNameplateSize =
                         (CoopCampaignMapPrototypeSettlementNameplateSize)
@@ -315,8 +390,14 @@ namespace CoopSpectator.Infrastructure
                     NormalizedY = entityY,
                     Heading = entityHeading,
                     PartySize = partySize,
+                    IsPartyInformationHidden = informationHidden,
+                    PartyNameplateCountText = nameplateCount,
+                    PartyNameplateExtraInfoText = nameplateExtra,
+                    PartyMovementSpeedText = speedText,
+                    PartyNameplateFlags = nameplateFlags,
                     PrimaryColor = primaryColor,
                     SecondaryColor = secondaryColor,
+                    NameplateColor = nameplateColor,
                     BannerCode = bannerCode,
                     VisualCharacterId = visualCharacterId,
                     CultureId = cultureId,
@@ -324,6 +405,12 @@ namespace CoopSpectator.Infrastructure
                         (CoopCampaignMapPrototypePartyVisualKind)partyVisualKind,
                     QuestMarkerFlags = questMarkerFlags,
                     SettlementEventFlags = settlementEventFlags,
+                    SettlementLevelFlags = settlementLevelFlags,
+                    SettlementWallStates = settlementWallStates,
+                    SettlementPartyBadges = settlementPartyBadges,
+                    SettlementPreparationState = settlementPreparationState,
+                    IsSettlementTracked = settlementTracked,
+                    IsSettlementInRange = settlementInRange,
                     SettlementProductionIconId = settlementProductionIconId,
                     HumanVisual = humanVisual,
                     MountVisual = mountVisual,
@@ -360,6 +447,7 @@ namespace CoopSpectator.Infrastructure
                 VisibleEntities = visibleEntities,
                 Camera = camera,
                 Conversation = conversation,
+                ConversationPose = conversationPose,
                 UpdatedUtc = updatedUtc
             };
             return true;
@@ -393,11 +481,13 @@ namespace CoopSpectator.Infrastructure
                                 index.ToString(CultureInfo.InvariantCulture) + ".";
                 lines.Add(prefix + "EntityId=" + EncodeText(entity?.EntityId));
                 lines.Add(prefix + "DisplayName=" + EncodeText(entity?.DisplayName));
+                lines.Add(prefix + "PartyNameplateNameText=" + EncodeText(entity?.PartyNameplateNameText));
                 lines.Add(prefix + "Kind=" + (entity != null ? (int)entity.Kind : 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "SettlementNameplateSize=" + (entity != null ? (int)entity.SettlementNameplateSize : 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "SettlementKind=" + (entity != null ? (int)entity.SettlementKind : 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "PrimaryColor=" + (entity?.PrimaryColor ?? 0u).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "SecondaryColor=" + (entity?.SecondaryColor ?? 0u).ToString(CultureInfo.InvariantCulture));
+                lines.Add(prefix + "NameplateColor=" + (entity?.NameplateColor ?? uint.MaxValue).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "BannerCode=" + EncodeText(entity?.BannerCode));
                 lines.Add(prefix + "VisualCharacterId=" + EncodeText(entity?.VisualCharacterId));
                 lines.Add(prefix + "CultureId=" + EncodeText(entity?.CultureId));
@@ -410,6 +500,10 @@ namespace CoopSpectator.Infrastructure
                 lines.Add(prefix + "ArmyName=" + EncodeText(entity?.ArmyName));
                 lines.Add(prefix + "IsArmyLeader=" + (entity?.IsArmyLeader ?? false));
                 lines.Add(prefix + "SelectionRadius=" + (entity?.SelectionRadius ?? 0).ToString(CultureInfo.InvariantCulture));
+                lines.Add(prefix + "SettlementLevelFlags=" + (entity?.SettlementLevelFlags ?? 0).ToString(CultureInfo.InvariantCulture));
+                lines.Add(prefix + "SettlementWallStates=" + EncodeText(entity?.SettlementWallStates));
+                lines.Add(prefix + "SettlementPartyBadges=" + EncodeText(entity?.SettlementPartyBadges));
+                lines.Add(prefix + "SettlementPreparationState=" + (entity?.SettlementPreparationState ?? 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "SettlementProductionIconId=" + EncodeText(entity?.SettlementProductionIconId));
                 SerializeAgentVisual(lines, prefix + "HumanVisual.", entity?.HumanVisual);
                 SerializeAgentVisual(lines, prefix + "MountVisual.", entity?.MountVisual);
@@ -444,11 +538,13 @@ namespace CoopSpectator.Infrastructure
                 string prefix = "Entity." + index.ToString(CultureInfo.InvariantCulture) + ".";
                 if (!TryReadText(values, prefix + "EntityId", out string entityId) ||
                     !TryReadText(values, prefix + "DisplayName", out string displayName) ||
+                    !TryReadText(values, prefix + "PartyNameplateNameText", out string nameplateName) ||
                     !TryReadInt(values, prefix + "Kind", out int kind) ||
                     !TryReadInt(values, prefix + "SettlementNameplateSize", out int nameplateSize) ||
                     !TryReadInt(values, prefix + "SettlementKind", out int settlementKind) ||
                     !TryReadUInt(values, prefix + "PrimaryColor", out uint primaryColor) ||
                     !TryReadUInt(values, prefix + "SecondaryColor", out uint secondaryColor) ||
+                    !TryReadUInt(values, prefix + "NameplateColor", out uint nameplateColor) ||
                     !TryReadText(values, prefix + "BannerCode", out string bannerCode) ||
                     !TryReadText(values, prefix + "VisualCharacterId", out string characterId) ||
                     !TryReadText(values, prefix + "CultureId", out string cultureId) ||
@@ -461,6 +557,10 @@ namespace CoopSpectator.Infrastructure
                     !TryReadText(values, prefix + "ArmyName", out string armyName) ||
                     !TryReadBool(values, prefix + "IsArmyLeader", out bool isArmyLeader) ||
                     !TryReadInt(values, prefix + "SelectionRadius", out int selectionRadius) ||
+                    !TryReadInt(values, prefix + "SettlementLevelFlags", out int settlementLevelFlags) ||
+                    !TryReadText(values, prefix + "SettlementWallStates", out string settlementWallStates) ||
+                    !TryReadText(values, prefix + "SettlementPartyBadges", out string settlementPartyBadges) ||
+                    !TryReadInt(values, prefix + "SettlementPreparationState", out int settlementPreparationState) ||
                     !TryReadText(values, prefix + "SettlementProductionIconId", out string settlementProductionIconId) ||
                     !TryParseAgentVisual(values, prefix + "HumanVisual.", out CoopCampaignMapPrototypeAgentVisualState humanVisual) ||
                     !TryParseAgentVisual(values, prefix + "MountVisual.", out CoopCampaignMapPrototypeAgentVisualState mountVisual) ||
@@ -473,11 +573,13 @@ namespace CoopSpectator.Infrastructure
                 {
                     EntityId = entityId,
                     DisplayName = displayName,
+                    PartyNameplateNameText = nameplateName,
                     Kind = (CoopCampaignMapPrototypeEntityKind)kind,
                     SettlementNameplateSize = (CoopCampaignMapPrototypeSettlementNameplateSize)nameplateSize,
                     SettlementKind = (CoopCampaignMapPrototypeSettlementKind)settlementKind,
                     PrimaryColor = primaryColor,
                     SecondaryColor = secondaryColor,
+                    NameplateColor = nameplateColor,
                     BannerCode = bannerCode,
                     VisualCharacterId = characterId,
                     CultureId = cultureId,
@@ -490,6 +592,10 @@ namespace CoopSpectator.Infrastructure
                     ArmyName = armyName,
                     IsArmyLeader = isArmyLeader,
                     SelectionRadius = selectionRadius,
+                    SettlementLevelFlags = settlementLevelFlags,
+                    SettlementWallStates = settlementWallStates,
+                    SettlementPartyBadges = settlementPartyBadges,
+                    SettlementPreparationState = settlementPreparationState,
                     SettlementProductionIconId = settlementProductionIconId,
                     HumanVisual = humanVisual,
                     MountVisual = mountVisual,
@@ -538,7 +644,14 @@ namespace CoopSpectator.Infrastructure
                 lines.Add(prefix + "NormalizedY=" + (entity?.NormalizedY ?? 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "Heading=" + (entity?.Heading ?? 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "PartySize=" + (entity?.PartySize ?? 0).ToString(CultureInfo.InvariantCulture));
+                lines.Add(prefix + "IsPartyInformationHidden=" + (entity?.IsPartyInformationHidden ?? false));
+                lines.Add(prefix + "PartyNameplateCountText=" + EncodeText(entity?.PartyNameplateCountText));
+                lines.Add(prefix + "PartyNameplateExtraInfoText=" + EncodeText(entity?.PartyNameplateExtraInfoText));
+                lines.Add(prefix + "PartyMovementSpeedText=" + EncodeText(entity?.PartyMovementSpeedText));
+                lines.Add(prefix + "PartyNameplateFlags=" + (entity?.PartyNameplateFlags ?? 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "IsVisible=" + (entity?.IsVisible ?? false));
+                lines.Add(prefix + "IsSettlementTracked=" + (entity?.IsSettlementTracked ?? false));
+                lines.Add(prefix + "IsSettlementInRange=" + (entity?.IsSettlementInRange ?? false));
                 lines.Add(prefix + "IsMoving=" + (entity?.IsMoving ?? false));
                 lines.Add(prefix + "ArmyPartyCount=" + (entity?.ArmyPartyCount ?? 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "ArmyTotalSize=" + (entity?.ArmyTotalSize ?? 0).ToString(CultureInfo.InvariantCulture));
@@ -579,6 +692,11 @@ namespace CoopSpectator.Infrastructure
                     !TryReadInt(values, prefix + "NormalizedY", out int normalizedY) ||
                     !TryReadInt(values, prefix + "Heading", out int heading) ||
                     !TryReadInt(values, prefix + "PartySize", out int partySize) ||
+                    !TryReadBool(values, prefix + "IsPartyInformationHidden", out bool informationHidden) ||
+                    !TryReadText(values, prefix + "PartyNameplateCountText", out string nameplateCount) ||
+                    !TryReadText(values, prefix + "PartyNameplateExtraInfoText", out string nameplateExtra) ||
+                    !TryReadText(values, prefix + "PartyMovementSpeedText", out string speedText) ||
+                    !TryReadInt(values, prefix + "PartyNameplateFlags", out int nameplateFlags) ||
                     !TryReadBool(values, prefix + "IsVisible", out bool isVisible) ||
                     !TryReadBool(values, prefix + "IsMoving", out bool isMoving) ||
                     !TryReadInt(values, prefix + "ArmyPartyCount", out int armyPartyCount) ||
@@ -587,6 +705,8 @@ namespace CoopSpectator.Infrastructure
                     !TryReadInt(values, prefix + "AppearanceRevision", out int appearanceRevision) ||
                     !TryReadInt(values, prefix + "InformationRevision", out int informationRevision) ||
                     !TryReadInt(values, prefix + "QuestMarkerFlags", out int questMarkerFlags) ||
+                    !TryReadBool(values, prefix + "IsSettlementTracked", out bool settlementTracked) ||
+                    !TryReadBool(values, prefix + "IsSettlementInRange", out bool settlementInRange) ||
                     !TryReadInt(values, prefix + "SettlementEventFlags", out int settlementEventFlags))
                 {
                     return Fail("malformed-dynamic-entity", out reason);
@@ -599,6 +719,11 @@ namespace CoopSpectator.Infrastructure
                     NormalizedY = normalizedY,
                     Heading = heading,
                     PartySize = partySize,
+                    IsPartyInformationHidden = informationHidden,
+                    PartyNameplateCountText = nameplateCount,
+                    PartyNameplateExtraInfoText = nameplateExtra,
+                    PartyMovementSpeedText = speedText,
+                    PartyNameplateFlags = nameplateFlags,
                     IsVisible = isVisible,
                     IsMoving = isMoving,
                     ArmyPartyCount = armyPartyCount,
@@ -607,7 +732,9 @@ namespace CoopSpectator.Infrastructure
                     AppearanceRevision = appearanceRevision,
                     InformationRevision = informationRevision,
                     QuestMarkerFlags = questMarkerFlags,
-                    SettlementEventFlags = settlementEventFlags
+                    SettlementEventFlags = settlementEventFlags,
+                    IsSettlementTracked = settlementTracked,
+                    IsSettlementInRange = settlementInRange
                 };
                 if (!CoopCampaignMapPrototypeContract.IsValidDynamicEntity(entity))
                     return Fail("invalid-dynamic-entity", out reason);

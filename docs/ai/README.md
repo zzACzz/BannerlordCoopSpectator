@@ -1,5 +1,299 @@
 # AI Knowledge Base
 
+Published checkpoint overview: [2026-09-28 scope, verification and remaining work](CAMPAIGN_MAP_CHECKPOINT_2026-09-28.md).
+Raw artifacts/ evidence is local-only and is intentionally not included in Git.
+
+Native scene picking cmp-b39 passed bounded ordinary-land hover, second zoom,
+camera return, read-only dialogue lifecycle and settlement entry/exit checks.
+Both builds/all 24 cmp-c41 projects passed. All 22 test-owned identities are absent,
+seven configs match, no new configs; cmp-b39 retained with module preimages.
+Hover gold ring, army/prisoner/raft semantics and battle-return/rejoin remain open.
+See [result and limits](../../artifacts/runtime/map-picking-r1-20260928/RESULT.md).
+The cmp-b37 tooltip result below is historical evidence, not cmp-b39 acceptance.
+
+Latest tooltip correction: cmp-b37 / map-tooltip-r2-20260928 received user
+confirmation that flicker is gone. Bounded village retention, party switch and
+hover-exit clearing passed; 305 requests, zero Denied control messages. Both
+builds/all 24 cmp-c39 projects passed. All owned/product processes are absent,
+seven configs match, no new configs; cmp-b37 retained. See [result and limits](../../artifacts/runtime/map-tooltip-r2-20260928/RESULT.md).
+Battle-return/rejoin, dialogue/camera regression and full parity remain open.
+Earlier live/preparation statements below are historical.
+
+Latest tooltip native result: cmp-b36 / map-tooltip-r1-20260928 matched the observed
+normal party/village native cards and user-confirmed Alt expansion, but FAILED
+stability (continuous flicker). All 22 owned identities are absent, seven configs
+match and five cmp-b19 module preimages are restored. See [result](../../artifacts/runtime/map-tooltip-r1-20260928/RESULT.md).
+Source follow-up adds terminal-receipt request pacing and non-disruptive native
+card refresh; cmp-b37 both builds and all 24 cmp-c39 contracts passed. The fresh
+map-tooltip-r2-20260928 run is live with all three loaded identities verified;
+MP awaits user Login. Native correction acceptance and cleanup are pending.
+Earlier IN PROGRESS notes below are historical.
+
+Tooltip native run map-tooltip-r1-20260928 is now IN PROGRESS on staged cmp-b36,
+with five cmp-b19 module preimages and seven config preimages. Both final builds
+and all 24 cmp-c36 projects passed. Native acceptance/cleanup are pending; this
+supersedes installed-cmp-b19 statements below. See [live preparation](../../artifacts/runtime/map-tooltip-r1-20260928/README.md).
+
+Latest tooltip source connects native peer messages, launcher-owned relay,
+host capture and the stock tooltip presenter (27/22/7). cmp-b33/b34 both builds and
+cmp-c33/c34 all 24 projects passed. Installed cmp-b19 is unchanged; native tooltip
+acceptance NOT RUN. Earlier foundation entries below describe historical
+integration boundaries, not current wiring. See [network](CAMPAIGN_MAP_RESUME_2026-09-26.md#tooltip-native-network-candidate-2026-09-28-source-only)
+and [stock presenter](CAMPAIGN_MAP_RESUME_2026-09-26.md#tooltip-stock-presenter-candidate-2026-09-28-not-native-verified).
+
+Tooltip local relay now has source launcher ownership hooks and a host tick; its
+dedicated endpoint has no native MP producer yet. Final cmp-b31 both builds and
+cmp-c31 all 24 projects passed (910 relay assertions). Native tooltip/UI/relay acceptance NOT
+RUN, installed cmp-b19 unchanged. See [candidate and remaining work](CAMPAIGN_MAP_RESUME_2026-09-26.md#launcher-owned-tooltip-relay-2026-09-28-source-candidate).
+
+Tooltip continuation adds challenge-bound semantic envelopes and a host-only
+published-target lookup entry; still NO live relay or native packet/UI integration.
+cmp-b28 both builds/cmp-c28 all 24 projects passed (1974 wire/handshake assertions).
+Host-entry cmp-b29 both builds/cmp-c29 all 24 projects passed (549 admission assertions). Installed cmp-b19 is
+unchanged. See [candidate and next integration gate](CAMPAIGN_MAP_RESUME_2026-09-26.md#tooltip-semantic-envelopes-and-host-lookup-2026-09-28-unwired).
+
+Tooltip source follow-up now includes bounded language-state restoration, a
+writable-template guard, and unwired client-interest/per-peer request policies.
+cmp-b25 both builds/cmp-c25 all 24 projects passed; isolated installed-library
+restoration passed for all nine processors. Final cmp-b27 both builds/cmp-c27 all
+24 projects passed (3612 client-interest/2505 server-gate assertions).
+Native capture/relay/stock rendering are NOT integrated or accepted;
+installed cmp-b19 is unchanged. See [isolation](CAMPAIGN_MAP_RESUME_2026-09-26.md#tooltip-language-state-isolation-2026-09-28-source-and-managed-probe)
+and [request lifetime](CAMPAIGN_MAP_RESUME_2026-09-26.md#tooltip-request-lifetime-boundary-2026-09-28-candidate).
+
+Tooltip follow-up is source-only: a detached native-row payload/strict bounded
+codec exists, but has no runtime callers. Host capture, semantic per-peer
+transport and stock rendering remain open. cmp-b21 both builds and cmp-c21 all
+24 contract projects pass (907 tooltip assertions). Installed cmp-b19 is unchanged. See
+[foundation and provider-isolation audit](CAMPAIGN_MAP_RESUME_2026-09-26.md#tooltip-provider-isolation-and-detached-payload-foundation-2026-09-28).
+
+Current source corrects a stale deferred map reconciliation: a queued catalog
+projection could overwrite a newer dynamic state on the next frame. The drain
+now projects the latest admitted stores, including visibility and membership.
+All 656 body assertions pass; cmp-b19 both builds and cmp-c19 all 24 projects pass.
+Native map-body-r2 passed two settlement entry/exit cycles, body reappearance,
+pinned-party invalidation and camera detach/return. All 24 owned identities are
+absent, seven configs match, no new configs/products; cmp-b19 is retained. Full
+hover fidelity and battle-return regression remain open. See
+[ordering correction](CAMPAIGN_MAP_RESUME_2026-09-26.md#deferred-reconciliation-ordering-correction-2026-09-28).
+
+Current source corrects the extra mobile body inside settlements while retaining
+the logical host/camera anchor and occupant badges. Intermediate cmp-b17/cmp-c17
+passed; final focus-aware panel invalidation passed cmp-b18 both builds and
+cmp-c18 all 24 projects. Fresh map-body-r1-20260928 loaded cmp-b18 in all three
+roles. Entry hiding/pinned-panel invalidation and camera detach/return passed,
+but the body did NOT reappear after exit: native acceptance FAILED. All 22 owned
+identities exited, seven configs match, no new configs/products, and all five
+module preimages (cmp-b16) were restored. See
+[body admission and remaining gates](CAMPAIGN_MAP_RESUME_2026-09-26.md#mobile-body-admission-correction-2026-09-28).
+
+Current cmp-b16 (26/22/7) passed bounded native settlement occupant badge checks:
+ordinary occupant, departure clear, and the host lord banner on entry to Avalyps.
+Both builds/all 24 cmp-c16 contracts passed; all three loaded identities verified.
+Camera detach/return passed. All 22 owned identities absent, seven configs match,
+no new configs/products; cmp-b16 retained. Mixed ordering, dialogue/battle re-entry
+and full parity remain open. A mounted party visual remains incorrectly visible
+inside the village; native hover tooltips also remain unimplemented.
+See [candidate and remaining gates](CAMPAIGN_MAP_RESUME_2026-09-26.md#settlement-occupant-badge-candidate-2026-09-28).
+
+Current source follow-up preserves supplied host banner colors in party/settlement
+nameplates instead of overriding them with faction colors. Both cmp-b11 builds
+and all 24 cmp-c12 contracts passed. Native map-banner-r1-20260928 passed bounded
+party/settlement color comparison and camera detach/return. All 22 owned identities
+are absent, seven configs match, no new configs/products; cmp-b11 retained.
+Separate 3D fortification flags
+remain unimplemented. See [banner audit and scope](CAMPAIGN_MAP_RESUME_2026-09-26.md#banner-color-preservation-candidate-2026-09-28).
+The previously empty settlement occupant badge list now has the source candidate
+above; host admission and native verification gates are recorded canonically.
+
+Current cmp-b10 wall/preparation transport and owned visibility overrides use
+25/21/6. Both builds/all 24 cmp-c11 tests passed. Native map-wall-r1-20260927
+passed bounded Vostrum geometry, host zoom, camera detach/return and read-only
+dialogue update/close. All 23 recorded PIDs absent, seven configs restored, no new
+configs/products; cmp-b10 retained. Full parity/siege/battle regressions remain open.
+See [implementation and live-run boundary](CAMPAIGN_MAP_RESUME_2026-09-26.md#wall-and-siege-preparation-candidate-2026-09-27).
+
+Historical source cmp-b9 removes stock fortification gate/banner authoring helpers from
+the owned replica scene before binding/rendering. Both builds/all 24 cmp-c10
+contracts pass; no deployment/native verification. Installed cmp-b8 remains.
+Wall/preparation/live banner and full parity work remain open.
+See [candidate and next gates](CAMPAIGN_MAP_RESUME_2026-09-26.md#fortification-authoring-helper-candidate-2026-09-27).
+
+Latest source candidate cmp-b8: host-selected settlement level/state variants cross
+protocol 24/bridge 20/catalog 5 and apply to owned scene descendants before reveal.
+Both builds/all 24 cmp-c9 projects passed. Native Avalyps/Lavenia variants now match
+the observed host footprint; Vostrum extras/full parity remain open. Camera detach/
+return and read-only dialogue/update/close passed. All 22 owned identities absent,
+seven configs match, no new configs/products; installed cmp-b8 retained.
+See [implementation and remaining geometry gaps](CAMPAIGN_MAP_RESUME_2026-09-26.md#host-selected-settlement-levels-2026-09-27-bounded-native-result).
+
+Latest cmp-b5 bounded native result: automatic map, detach/explicit return and
+map-overlay dialogue passed; extra settlement building variants remain visible.
+Party-menu companion Conversation is a separate unsupported dialogue path.
+Both builds/all 24 cmp-c6 projects passed. All test-owned product processes exited,
+seven configs were restored, no new configs remain; installed cmp-b5 is retained.
+Root hide/reappearance transitions and full visual parity are not accepted.
+See [candidate and limits](CAMPAIGN_MAP_RESUME_2026-09-26.md#static-settlement-geometry-admission-2026-09-27).
+
+Historical source step (2026-09-27): cmp-b4 removes native authoring settlement circles
+only from the owned replica scene. Both builds and all 24 cmp-c5 contracts passed,
+installed cmp-b3 unchanged; correction not deployed/native-verified. Investigation
+also confirms missing host binding for settlement geometry/visual variants,
+including hidden-root admission: nameplate parity is not geometry disclosure proof.
+See [native investigation and next gates](CAMPAIGN_MAP_RESUME_2026-09-26.md#settlement-scene-presentation-investigation-2026-09-27).
+
+Historical map stage (2026-09-27): installed cmp-b3 passed bounded tracked Tevea
+left-edge/host-zoom comparison, local detach/explicit return and attached-camera
+preservation after dialogue wheel input/close. Read-only Tristania dialogue and
+text update passed; visual readiness 44 ms. All 24 cmp-c4 projects and both cmp-b3
+builds passed before deployment. Protocol 23/bridge 19/catalog 4.
+Run `map-edge-r1-20260927` postflight confirms no owned/product processes, seven
+configs restored, no new configs and retained cmp-b3 hashes. Test-owned Steam was
+removed; test saves remain. Full parity and broader regression remain open.
+See [behavior and acceptance boundary](CAMPAIGN_MAP_RESUME_2026-09-26.md#host-camera-following-and-settlement-presentation-2026-09-27).
+
+Current correction (2026-09-27): same-action body poses now steer bounded playback
+rate instead of repeatedly seeking phase. cmt-b27 built both roles without installed
+changes; all 24 cmt-c25 projects passed (4,331 pose/playback assertions). The user
+confirmed smooth body motion like campaign on cmt-b27. First/repeated readiness
+46/53 ms, retention, read-only answers, text update and both closes passed.
+All twelve owned identities are gone; seven configs match, no new configs/product
+processes, original Steam/test saves preserved. Installed cmt-b27 retained and
+independently hash-verified. No full facial/HUD/map 1:1 or battle regression claim.
+See [native result and remaining gates](CAMPAIGN_MAP_RESUME_2026-09-26.md#cmt-b27-native-rate-steering-result).
+
+Historical native result (2026-09-27): cmt-b25 body-pose transport/first dialogue/text
+transition/close passed, but the user observed jerking actors versus smooth host
+motion. Animation acceptance FAILED; repeat opening was not completed. All twelve
+owned identities exited, seven configs match, no new config/product processes,
+original Steam preserved, and all five cmt-b22 module preimages restored. Source
+at that point contained b25; the newer b27 result above supersedes that state. Evidence:
+artifacts/runtime/dialogue-pose-r1-20260927. See the canonical candidate below.
+
+Historical candidate preparation (2026-09-27): separate live body-pose transport is wired
+from initialized host tableau to ready owned client actors. Protocol 22/bridge 18;
+cmt-b25 is now installed for a fresh native run. Pose-only changes preserve text/UI
+and scene identity, with exact descriptor/revision/sequence binding. cmt-b23 builds
+passed; cmt-c21 exposed a corrupt-input decoder exception (23/24), now corrected.
+After the decoder correction, cmt-b24 built successfully; cmt-c22 exposed an
+overbroad source assertion matching ActionIndexCache.Create as scene creation.
+That assertion now targets actual scene/actor allocation. Final cmt-b25 builds
+and all 24 cmt-c23 projects passed (719 pose assertions). Campaign/menu-owned
+server/shortcut MP loaded identities are verified; map start was automatic.
+The native failure and cleanup above supersede this preparation status.
+See [pose candidate and limits](CAMPAIGN_MAP_RESUME_2026-09-26.md#live-body-pose-channel-candidate-2026-09-27).
+
+Latest native result (2026-09-27): cmt-b22 restored visible scar/age face details
+in first/repeated dialogue; readiness 42/51 ms and retention beyond one minute
+each passed, as did read-only answers, text updates and both closes to map.
+Both builds/all 24 cmt-c20 projects passed. All eleven exact-owned identities
+exited; seven configs match, no new configs/product processes, original Steam
+preserved. Test saves and installed cmt-b22 retained. Facial animation, poses,
+top HUD and map parity remain open; no 1:1 acceptance. Evidence:
+artifacts/runtime/dialogue-face-r1-20260927. See
+[candidate](CAMPAIGN_MAP_RESUME_2026-09-26.md#bounded-face-preparation-candidate).
+
+Current native result (2026-09-27): cmt-b20 removes gross dialogue-image scaling
+and displacement; background framing matches the host. First/repeated readiness
+48/49 ms, three actors retained beyond one minute each, read-only answers/text
+update/both closes passed. Faces/animation/top HUD and map camera still differ;
+no 1:1 acceptance. Both builds/all 24 cmt-c18 projects passed. All eleven owned
+identities exited, seven configs match, zero new configs/product processes,
+original Steam preserved; test saves/installed cmt-b20 retained. See
+[viewport native result](CAMPAIGN_MAP_RESUME_2026-09-26.md#cmt-b20-native-viewport-result).
+
+Previous native result (2026-09-27): cmt-b19 passed first/repeated dialogue operational
+readiness (63/50 ms), stayed visible beyond 50 seconds each, and returned to the
+map on both closes. Read-only client answer handling was verified. Framing,
+appearance and HUD still differ; no 1:1 acceptance. Both builds and all 24 cmt-c17
+contracts passed. All eleven owned identities exited, seven configs match, no new
+configs/product processes remain, original Steam preserved; installed cmt-b19 and
+test saves retained. Evidence: `artifacts/runtime/dialogue-configured-r1-20260927`.
+See [current dialogue result](CAMPAIGN_MAP_RESUME_2026-09-26.md#cmt-b19-native-result).
+
+Historical follow-up (2026-09-27): cmt-b18 also timed out twice, including after
+visible actors/background. TargetConfigured=False while loaded submission and
+all three actors were ready. All eleven owned identities exited, seven configs
+match, no new configs/product processes remain, Steam is preserved. Evidence:
+`artifacts/runtime/dialogue-ready-r1-20260927`. Source now admits successful
+synchronous owned-target configuration rather than awaiting PaintNeeded, with
+epoch-bound stale callback rejection. The newer verification is recorded above.
+No 1:1 dialogue or overall goal acceptance is claimed.
+
+Earlier source correction (2026-09-27): tableau readiness now uses the exact native
+target callback, loaded-target draw submission and all actor resources, not the
+world-view flag. cmt-b18 built both roles and cmt-c16 passed all 24 projects;
+installed for a fresh `dialogue-ready-r1-20260927` run (native acceptance/cleanup
+PENDING). cmt-b16 displayed three dialogue actors/background on the second opening without
+terrain shader errors, but the false view-ready flag removed them after 15 seconds.
+Framing differs: no 1:1 pass. Map/text worked. All eleven owned identities exited,
+seven configs match, no new configs/product processes remain, Steam is preserved.
+Evidence: `artifacts/runtime/dialogue-request-r1-20260927`. Test saves remain.
+See [resource isolation](CAMPAIGN_MAP_RESUME_2026-09-26.md#scene-wide-resource-request-isolation-2026-09-27).
+
+Historical candidate (2026-09-27): cmt-b14 replaces the independent
+dialogue world SceneLayer with an off-screen TableauView texture beneath the
+read-only SPConversation UI. Both isolated builds and all 24 cmt-c13 contracts
+passed. Native 3D dialogue FAILED with the same terrain shader errors; the
+texture target does not eliminate reproduction. Map join, text fallback/update/
+close worked. All eleven owned identities exited, seven config preimages match,
+no new configs/product processes remain and original Steam is preserved.
+Evidence: `artifacts/runtime/dialogue-texture-r1-20260927`. Test saves and installed
+cmt-b14 remain; do not reuse ended PIDs or infer shader acceptance from contracts.
+See [texture candidate](CAMPAIGN_MAP_RESUME_2026-09-26.md#off-screen-dialogue-target-candidate-2026-09-27).
+
+Latest dialogue run (2026-09-27): cmt-b11 reproduced both terrain shader errors
+despite removing full-scene preload/readiness calls. It is NOT a native fix.
+Both role builds and all 24 cmt-c11 contracts passed. Native map join and dialogue
+text fallback/update/close worked; independent 3D rendering failed. All eleven
+owned identities exited, seven configuration preimages match, no new config
+files exist and Steam is preserved. Test saves and installed cmt-b11 remain.
+Evidence: `artifacts/runtime/dialogue-terrain-r1-20260927`. See
+[candidate evidence](CAMPAIGN_MAP_RESUME_2026-09-26.md#terrain-disabled-tableau-investigation-2026-09-27).
+
+Previous lifecycle run (2026-09-27): cml-b6 passed one automatic map -> field battle
+-> map cycle with the same connected MP client and no console command. Host
+movement/daylight and read-only dialogue text replicated. User assisted Login,
+the H hotkeys and the attack order. The server's Attacker victory was applied
+to the campaign before StartMap command=4; returned MP rendering was ready at
+06:44:21.430. The dialogue terrain-shader failure reproduced and visual parity,
+repeat/adjacent scenarios and the native MP Draw end-screen mismatch remain open.
+All exact-owned product/support processes exited; all seven configuration
+preimages match, no new config files were found, test saves remain. Steam and
+installed cml-b6 are retained. Evidence: `artifacts/runtime/campaign-lifecycle-r2-20260927`.
+cml-c5 passed all 24 projects. See [lifecycle acceptance boundary](CAMPAIGN_MAP_AUTOMATIC_LIFECYCLE.md).
+
+Native lifecycle attempt (2026-09-27): coherent cml-b5 campaign and menu-owned
+server loaded; automatic map opening was dispatched without a console command,
+but the adapter faulted because it read Mission.Current before native Initialize.
+No multiplayer was launched. Exact-owned product/support processes are gone and
+all seven configuration preimages match; test saves remain. Steam is retained for
+the corrected follow-up run. Source correction captures the exact OpenNew return
+inside the synchronous dispatch, without adopting a later same-kind mission.
+See [lifecycle correction and acceptance boundary](CAMPAIGN_MAP_AUTOMATIC_LIFECYCLE.md)
+and `artifacts/runtime/campaign-lifecycle-20260927/README.md`.
+
+Automatic mission lifecycle (2026-09-26): host/server main-thread adapters,
+session-bound binary intent, pinned battle roster, exact native opening and
+applied-result gates are now wired in source behind the separate default-off
+`COOPSPECTATOR_AUTOMATIC_CAMPAIGN_MISSIONS` gate. Native map -> battle -> map
+acceptance remains NOT RUN; installed cmt-b7 is unchanged. Initial cml-b4 compiled
+both roles; final cml-b5 built both with installed inventories unchanged and
+cml-c4 passed all 24 projects (305 channel / 4,305 lifecycle assertions).
+See [current implementation and native acceptance boundary](CAMPAIGN_MAP_AUTOMATIC_LIFECYCLE.md).
+The active campaign is user-designated test-only: future test autosaves may remain;
+continue preserving unrelated saves and restoring temporary configuration.
+
+Latest native evidence (2026-09-26, `cmt-b7`): **map mission ran; read-only dialogue text/open/update/close passed, but independent 3D dialogue failed twice.** Both attempts raised `pbr_terrain`/`pbr_terrain_gbuffer` shader compiler errors (X3129/X4008) and ended in visual readiness timeout; no rendered-actor parity is claimed. All exact-owned test processes are now gone, all 64 configuration/save preimages match, and Steam is preserved. This supersedes the earlier awaiting-command/live-process notes below. See [native failure and restoration](CAMPAIGN_MAP_RESUME_2026-09-26.md#cmt-b7-native-dialogue-failure-and-restoration).
+
+Latest source-only follow-up: `cmt-b9` includes the resolved actor-scale correction, independent native readiness checks, and default-off load-stage diagnostics. Both isolated builds and all 24 `cmt-c9` contracts passed; it is not deployed or native-verified. The installed candidate remains `cmt-b7`, with no test roles running. See [source investigation](CAMPAIGN_MAP_RESUME_2026-09-26.md#post-run-readiness-investigation-source-only). Automatic map -> battle -> map is now a requested but [not-yet-implemented lifecycle](CAMPAIGN_MAP_AUTOMATIC_LIFECYCLE.md).
+
+Latest native continuation (2026-09-26): **cmt-b7 is coherently installed and loaded in campaign, dedicated and multiplayer; dialogue rendering is still unverified.** The campaign menu started the server, the prescribed desktop shortcut started multiplayer, and Safe Mode No was selected. User-assisted Login succeeded; AC_COOP join succeeded at 17:16:51 and the client awaits mission start. Literal console input still needs user assistance after direct and on-screen-keyboard attempts. Three owned roles remain alive; cleanup is not executed. See [live continuation](CAMPAIGN_MAP_RESUME_2026-09-26.md#dialogue-candidate-native-run-started-2026-09-26). This supersedes earlier installed-candidate statements below, not their historical evidence.
+
+Current source follow-up: **2026-09-26, independent 3D dialogue scene and atomic transport are implemented in source, not deployed or live-verified.** Protocol 21/bridge 17 carries the host-visible actor/camera/atmosphere descriptor; the client owns a separate passive scene, preserves it across text updates and explicitly cleans it up on close. `cmt-b7` compiled both roles without installed changes; `cmt-c7` passed all 24 contracts, including descriptor, payload and visual-lifetime checks. Installed/live behavior remains `cmr-b10` (20/16/4) below. Fresh native rendering/cleanup proof and animation/HUD parity remain pending. See [implementation boundary](CAMPAIGN_MAP_RESUME_2026-09-26.md#independent-client-dialogue-scene-source-implementation).
+
+Current campaign-map candidate: **2026-09-26, `cmr-b10` partial live pass after both isolated builds and 24/24 `cmr-c10` contract projects passed.** Wire 20/bridge 16/catalog 4 is coherently installed and its loaded identities verified across campaign, dedicated and multiplayer. The user-assisted literal campaign command opened the replica mission; city selection, zoom, later host movement and read-only dialogue open/update/close were observed without a crash during this approximately eight-minute mission. A client answer click did not advance the host dialogue. The initial 397-entity catalog transferred, but comprehensive native packet/performance and visual 1:1 acceptance remain open. All exact-owned test processes were removed, all 64 configuration/save preimages match, no new config/save files exist, and Steam was preserved. The user closed OSK. The candidate remains installed intentionally. Main-party portrait/navigation, dialogue 3D tableau, settlement icons and banner/marker differences remain incomplete. See [resume evidence and remaining gates](CAMPAIGN_MAP_RESUME_2026-09-26.md).
+
 Latest campaign-map prototype runtime verification: **2026-09-25, partial live pass.** The corrected host/dedicated/client run loaded the isolated `Main_map` scene without a crash, preserved host-visible marker parity, synchronized later party movement, passed all 24 contracts and both CompileOnly builds, and completed exact test-process/configuration cleanup. Literal RGL console input and client camera/selection interaction remain open. See [runtime evidence and next gate](CAMPAIGN_MAP_PROTOTYPE_RUNTIME_2026-09-25.md).
 
 Current field automation stage: **Milestone 3 complete; Milestone 4 remains open. Published `438b434` passed clean 24/24 contracts (including 432 focused assertions and exact clock-IL inspection) and both CompileOnly builds. The fresh native child loaded the exact candidate but returned `Timeout/NoHeartbeat` while waiting for dedicated control readiness; no bootstrap or mission opened, and attempt two was Not Run.** Automatic timeout evidence/cleanup and full temporary-install restoration passed. The retained final role status contains a recent heartbeat, so missing/read-failed versus stale data at the original decision remains unresolved. See [live evidence and next boundary](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#26-clean-zero-client-live-attempt-stops-before-bootstrap-2026-09-10). The mode/clock/initial-peer corrections remain unverified inside a Bannerlord mission; no L2 pass is claimed.

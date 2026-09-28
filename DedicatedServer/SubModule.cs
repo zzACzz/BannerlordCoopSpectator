@@ -55,6 +55,7 @@ namespace CoopSpectator
             base.OnApplicationTick(dt);
 
             CoopAutomationDedicatedControlBridge.Tick();
+            CoopCampaignMissionServer.Tick();
 
             if (ExperimentalFeatures.EnableTdmCloneExperiment)
                 return;

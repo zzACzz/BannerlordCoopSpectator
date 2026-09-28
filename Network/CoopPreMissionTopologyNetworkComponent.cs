@@ -304,27 +304,40 @@ namespace CoopSpectator.Network
             }
         }
 
-        private void TrySendServerContract(
+        // The automatic lifecycle has already pinned and installed the exact next
+        // snapshot. Publish before native LoadMission, including its next wrapped
+        // wire index; the index is never used as lifecycle ownership identity.
+        internal bool TryPublishPreparedMission(int nextBattleIndex)
+        {
+            if (!GameNetwork.IsServer || Mission.Current != null || nextBattleIndex < 0 || nextBattleIndex > 10 ||
+                CoopPreMissionTopologyRuntimeState.TryBuildServerMessage(nextBattleIndex, out _) == null) return false;
+            foreach (NetworkCommunicator peer in GameNetwork.NetworkPeers)
+                if (!TrySendServerContract(peer, "automatic-mission-pre-open", true, nextBattleIndex)) return false;
+            return true;
+        }
+
+        private bool TrySendServerContract(
             NetworkCommunicator peer,
             string source,
-            bool force)
+            bool force,
+            int? preparedBattleIndex = null)
         {
             if (peer == null ||
                 peer.IsServerPeer ||
                 !peer.IsConnectionActive)
             {
-                return;
+                return true;
             }
 
             int battleIndex =
-                GameNetwork.GetNetworkComponent<BaseNetworkComponentData>()?
+                preparedBattleIndex ?? GameNetwork.GetNetworkComponent<BaseNetworkComponentData>()?
                     .CurrentBattleIndex ?? -1;
             CoopPreMissionTopologyContractMessage message =
                 CoopPreMissionTopologyRuntimeState.TryBuildServerMessage(
                     battleIndex,
                     out string contractDiagnostics);
             if (message == null)
-                return;
+                return false;
 
             string contractKey =
                 message.BattleIndex + "|" +
@@ -339,7 +352,7 @@ namespace CoopSpectator.Network
                     contractKey,
                     StringComparison.Ordinal))
             {
-                return;
+                return true;
             }
 
             if (GameNetwork.IsServer && Mission.Current == null)
@@ -396,6 +409,7 @@ namespace CoopSpectator.Network
                     "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
                     " Source=" + (source ?? "unknown") +
                     " Contract={" + contractDiagnostics + "}.");
+                return true;
             }
             catch (Exception ex)
             {
@@ -404,6 +418,7 @@ namespace CoopSpectator.Network
                     "Peer=" + (peer.UserName ?? peer.Index.ToString()) +
                     " Source=" + (source ?? "unknown") +
                     " Exception=" + ex.GetType().Name + ":" + ex.Message);
+                return false;
             }
         }
 

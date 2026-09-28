@@ -413,9 +413,7 @@ namespace CoopSpectator.Infrastructure
                                0,
                                buffer.Length)) > 0)
                     {
-                        if (output.Length + bytesRead >
-                            CoopCampaignMapPrototypeContract
-                                .MaxCatalogLogicalBytes)
+                        if (output.Length + bytesRead > LogicalByteCount)
                         {
                             reason = "logical-size";
                             return false;

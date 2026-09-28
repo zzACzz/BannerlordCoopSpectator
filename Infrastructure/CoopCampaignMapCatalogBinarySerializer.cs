@@ -8,7 +8,7 @@ namespace CoopSpectator.Infrastructure
     public static class CoopCampaignMapCatalogBinarySerializer
     {
         private const int Magic = 0x434D4331; // "CMC1"
-        public const int SchemaVersion = 2;
+        public const int SchemaVersion = 7;
         private static readonly Encoding StrictUtf8 =
             new UTF8Encoding(false, true);
 
@@ -52,7 +52,16 @@ namespace CoopSpectator.Infrastructure
                     writer.Write(revision);
                     writer.Write(count);
                     for (int index = 0; index < count; index++)
+                    {
                         WriteEntity(writer, entities[index]);
+                        // Bound allocation while writing too, not only after a full
+                        // catalog of individually valid large occupant lists exists.
+                        if (stream.Length > CoopCampaignMapPrototypeContract.MaxCatalogLogicalBytes)
+                        {
+                            reason = "logical-size";
+                            return false;
+                        }
+                    }
                     writer.Flush();
                     if (stream.Length <= 0 ||
                         stream.Length >
@@ -163,11 +172,13 @@ namespace CoopSpectator.Infrastructure
         {
             WriteString(writer, entity.EntityId);
             WriteString(writer, entity.DisplayName);
+            WriteString(writer, entity.PartyNameplateNameText);
             writer.Write((byte)entity.Kind);
             writer.Write((byte)entity.SettlementNameplateSize);
             writer.Write((byte)entity.SettlementKind);
             writer.Write(entity.PrimaryColor);
             writer.Write(entity.SecondaryColor);
+            writer.Write(entity.NameplateColor);
             WriteString(writer, entity.BannerCode);
             WriteString(writer, entity.VisualCharacterId);
             WriteString(writer, entity.CultureId);
@@ -183,7 +194,11 @@ namespace CoopSpectator.Infrastructure
             WriteString(writer, entity.ArmyName);
             writer.Write(entity.IsArmyLeader);
             writer.Write(entity.SelectionRadius);
+            writer.Write((byte)entity.SettlementLevelFlags);
+            WriteString(writer, entity.SettlementWallStates);
+            writer.Write((byte)entity.SettlementPreparationState);
             WriteString(writer, entity.SettlementProductionIconId);
+            WriteString(writer, entity.SettlementPartyBadges);
         }
 
         private static CoopCampaignMapPrototypeCatalogEntityState ReadEntity(
@@ -197,6 +212,8 @@ namespace CoopSpectator.Infrastructure
                 DisplayName = ReadString(
                     reader,
                     CoopCampaignMapPrototypeContract.MaxEntityNameCharacters),
+                PartyNameplateNameText = ReadString(
+                    reader, CoopCampaignMapPrototypeContract.MaxPartyNameplateNameCharacters),
                 Kind = (CoopCampaignMapPrototypeEntityKind)reader.ReadByte(),
                 SettlementNameplateSize =
                     (CoopCampaignMapPrototypeSettlementNameplateSize)
@@ -205,6 +222,7 @@ namespace CoopSpectator.Infrastructure
                     (CoopCampaignMapPrototypeSettlementKind)reader.ReadByte(),
                 PrimaryColor = reader.ReadUInt32(),
                 SecondaryColor = reader.ReadUInt32(),
+                NameplateColor = reader.ReadUInt32(),
                 BannerCode = ReadString(
                     reader,
                     CoopCampaignMapPrototypeContract.MaxBannerCodeCharacters),
@@ -246,10 +264,14 @@ namespace CoopSpectator.Infrastructure
                         .MaxInformationTextCharacters),
                 IsArmyLeader = reader.ReadBoolean(),
                 SelectionRadius = reader.ReadInt32(),
+                SettlementLevelFlags = reader.ReadByte(),
+                SettlementWallStates = ReadString(reader, CoopCampaignMapSettlementPresentationPolicy.MaxWallSections),
+                SettlementPreparationState = reader.ReadByte(),
                 SettlementProductionIconId = ReadString(
                     reader,
                     CoopCampaignMapPrototypeContract
-                        .MaxProductionIconIdCharacters)
+                        .MaxProductionIconIdCharacters),
+                SettlementPartyBadges = ReadString(reader, CoopCampaignMapSettlementPartyBadgePolicy.MaxEncodedCharacters)
             };
         }
 

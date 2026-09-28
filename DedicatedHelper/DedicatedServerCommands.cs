@@ -27,6 +27,7 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
         /// <returns>true якщо команду прийнято (stdin записано або HTTP успіх), false інакше.</returns>
         public static bool SendCommand(string command)
         {
+            if (CoopCampaignMissionHost.OwnsCommands) return false;
             if (string.IsNullOrWhiteSpace(command))
             {
                 ModLogger.Info("DedicatedServerCommands: SendCommand skipped (empty).");
@@ -156,6 +157,7 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
         /// <summary>Зручні обгортки для бойового циклу. GameType задається в конфігу дедика (rotation); тут лише лог для перевірки узгодження ID.</summary>
         public static bool SendStartMission()
         {
+            if (CoopCampaignMissionHost.OwnsCommands) return CoopCampaignMissionHost.QueueBattle();
             TryLogAvailableServerOptionsViaHttp();
             if (!TryApplySceneAwareMissionSelectionFromBattleRoster())
             {
@@ -169,6 +171,7 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
 
         public static bool SendStartHeroCreatorMission()
         {
+            if (CoopCampaignMissionHost.OwnsCommands) return false;
             const string creatorScene = "mp_tdm_map_001";
             const string creatorGameType = "CoopHeroCreator";
             try
@@ -209,6 +212,9 @@ namespace CoopSpectator.DedicatedHelper // IPC до Dedicated Helper: start_miss
 
         public static bool SendStartCampaignMapPrototypeMission()
         {
+            // Automatic mode follows authoritative campaign state; a console request
+            // cannot interrupt an owned battle or bypass pending aftermath.
+            if (CoopCampaignMissionHost.OwnsCommands) { CoopCampaignMissionHost.Tick(); return true; }
             if (!ExperimentalFeatures.EnableCampaignMapPrototype)
             {
                 ModLogger.Info(

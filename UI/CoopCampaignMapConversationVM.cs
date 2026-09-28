@@ -173,8 +173,10 @@ namespace CoopSpectator.UI
             ItemText = option?.Text ?? string.Empty;
             IsEnabled = option?.IsEnabled ?? false;
             IsSpecial = option?.IsSpecial ?? false;
-            OptionHint = new CoopCampaignMapConversationHintVM(
-                new TextObject("{=!}Only the campaign host can choose this response."));
+            OptionHint = new CoopCampaignMapConversationHintVM();
+            // Native ConversationItem binds the nested fields even for ordinary
+            // answers. Null leaves its blocking/progress widgets visible by default.
+            PersuasionItem = new CoopCampaignMapConversationEmptyPersuasionVM();
         }
 
         [DataSourceProperty]
@@ -196,7 +198,7 @@ namespace CoopSpectator.UI
         public CoopCampaignMapConversationHintVM OptionHint { get; }
 
         [DataSourceProperty]
-        public ViewModel PersuasionItem => null;
+        public CoopCampaignMapConversationEmptyPersuasionVM PersuasionItem { get; }
 
         public void ExecuteAction()
         {
@@ -208,6 +210,75 @@ namespace CoopSpectator.UI
         }
 
         public void ResetCurrentAnswer()
+        {
+        }
+    }
+
+    // Display-only baseline for non-persuasion answers. Actual persuasion state
+    // is not yet transported; this must not be presented as persuasion parity.
+    public sealed class CoopCampaignMapConversationEmptyPersuasionVM : ViewModel
+    {
+        [DataSourceProperty]
+        public bool IsPersuasionResultReady => false;
+
+        [DataSourceProperty]
+        public int PersuasionResultIndex => -1;
+
+        [DataSourceProperty]
+        public bool IsABlockingOption => false;
+
+        [DataSourceProperty]
+        public bool IsAProgressingOption => false;
+
+        [DataSourceProperty]
+        public int CritFailChance => 0;
+
+        [DataSourceProperty]
+        public int FailChance => 0;
+
+        [DataSourceProperty]
+        public int SuccessChance => 0;
+
+        [DataSourceProperty]
+        public int CritSuccessChance => 0;
+
+        [DataSourceProperty]
+        public string CritFailChanceText => string.Empty;
+
+        [DataSourceProperty]
+        public string FailChanceText => string.Empty;
+
+        [DataSourceProperty]
+        public string SuccessChanceText => string.Empty;
+
+        [DataSourceProperty]
+        public string CritSuccessChanceText => string.Empty;
+
+        [DataSourceProperty]
+        public CoopCampaignMapConversationHintVM CritFailHint { get; } =
+            new CoopCampaignMapConversationHintVM();
+
+        [DataSourceProperty]
+        public CoopCampaignMapConversationHintVM FailHint { get; } =
+            new CoopCampaignMapConversationHintVM();
+
+        [DataSourceProperty]
+        public CoopCampaignMapConversationHintVM SuccessHint { get; } =
+            new CoopCampaignMapConversationHintVM();
+
+        [DataSourceProperty]
+        public CoopCampaignMapConversationHintVM CritSuccessHint { get; } =
+            new CoopCampaignMapConversationHintVM();
+
+        [DataSourceProperty]
+        public CoopCampaignMapConversationHintVM BlockingOptionHint { get; } =
+            new CoopCampaignMapConversationHintVM();
+
+        [DataSourceProperty]
+        public CoopCampaignMapConversationHintVM ProgressingOptionHint { get; } =
+            new CoopCampaignMapConversationHintVM();
+
+        public void ExecuteReadyToContinue()
         {
         }
     }

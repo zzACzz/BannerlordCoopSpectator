@@ -26897,6 +26897,8 @@ namespace CoopSpectator.MissionBehaviors
                 return;
             }
 
+            CoopCampaignMissionChannel.ResultPublished?.Invoke(mission, snapshot.CampaignId, snapshot.BattleId, snapshot.BattleInstanceId);
+
             ModLogger.Info(
                 "CoopMissionSpawnLogic: battle result snapshot written. " +
                 "BattleId=" + (snapshot.BattleId ?? "null") +

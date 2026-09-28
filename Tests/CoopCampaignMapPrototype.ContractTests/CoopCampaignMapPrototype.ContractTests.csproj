@@ -6,6 +6,49 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="ReplicaCameraTests.cs" />
+    <Compile Include="SettlementGeometryTests.cs" />
+    <Compile Include="SettlementPartyBadgeTests.cs" />
+    <Compile Include="PartyBodyTests.cs" />
+    <Compile Include="PickResolverTests.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapPickResolver.cs" Link="CoopCampaignMapPickResolver.cs" />
+    <Compile Include="TooltipPayloadTests.cs" />
+    <Compile Include="TooltipInterestTests.cs" />
+    <Compile Include="TooltipPeerGateTests.cs" />
+    <Compile Include="TooltipWireTests.cs" />
+    <Compile Include="TooltipTargetTests.cs" />
+    <Compile Include="TooltipRelayTests.cs" />
+    <Compile Include="TooltipChunkTests.cs" />
+    <Compile Include="TooltipPresenterTests.cs" />
+    <Compile Include="..\..\UI\CoopCampaignMapTooltipPresenter.cs" Link="CoopCampaignMapTooltipPresenter.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapTooltipChunks.cs" Link="CoopCampaignMapTooltipChunks.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapTooltipRelay.cs" Link="CoopCampaignMapTooltipRelay.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapTooltipRelayClient.cs" Link="CoopCampaignMapTooltipRelayClient.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapTooltipTargetAdmission.cs" Link="CoopCampaignMapTooltipTargetAdmission.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapTooltipWireCodec.cs" Link="CoopCampaignMapTooltipWireCodec.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapTooltipPeerGate.cs" Link="CoopCampaignMapTooltipPeerGate.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapTooltipInterest.cs" Link="CoopCampaignMapTooltipInterest.cs" />
+    <Compile Include="TooltipTextTransactionTests.cs" />
+    <Compile Include="TooltipThreadStateTests.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapTooltipThreadStateScope.cs" Link="CoopCampaignMapTooltipThreadStateScope.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapTooltipTextTransaction.cs" Link="CoopCampaignMapTooltipTextTransaction.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapTooltipPayload.cs" Link="CoopCampaignMapTooltipPayload.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapSettlementGeometryAdmission.cs" Link="CoopCampaignMapSettlementGeometryAdmission.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapReplicaCameraPolicy.cs" Link="CoopCampaignMapReplicaCameraPolicy.cs" />
+    <Compile Include="ConversationTableauTests.cs" />
+    <Compile Include="ConversationPayloadTests.cs" />
+    <Compile Include="ConversationVisualLifetimeTests.cs" />
+    <Compile Include="ConversationPoseTests.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapConversationPose.cs" Link="CoopCampaignMapConversationPose.cs" />
+    <Compile Include="MissionLifecycleTests.cs" />
+    <Compile Include="MissionOpeningTests.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMissionOpening.cs" Link="CoopCampaignMissionOpening.cs" />
+    <Compile Include="MissionChannelTests.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMissionChannel.cs" Link="CoopCampaignMissionChannel.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMissionLifecycle.cs" Link="CoopCampaignMissionLifecycle.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapConversationVisualLifetime.cs" Link="CoopCampaignMapConversationVisualLifetime.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapConversationPayloadCodec.cs" Link="CoopCampaignMapConversationPayloadCodec.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapConversationTableauState.cs" Link="CoopCampaignMapConversationTableauState.cs" />
     <Compile Include="..\..\Infrastructure\CoopCampaignMapPrototypeContract.cs" Link="CoopCampaignMapPrototypeContract.cs" />
     <Compile Include="..\..\Infrastructure\CoopCampaignMapPrototypeBridgeCodec.cs" Link="CoopCampaignMapPrototypeBridgeCodec.cs" />
     <Compile Include="..\..\Infrastructure\CoopCampaignMapPrototypeBridgeFile.cs" Link="CoopCampaignMapPrototypeBridgeFile.cs" />

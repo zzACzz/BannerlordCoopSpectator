@@ -1,5 +1,93 @@
 # Runtime Flows
 
+Tooltip source path: menu launcher Prepare -> exact child Attach -> run binding;
+host application tick after map publication -> bounded fresh owned request batch
+-> published target admission/native capture -> correlated rows/denial response.
+MP hover -> current challenge grant -> request -> exact-peer admission -> bounded
+dedicated relay batch -> host capture -> correlated per-peer chunks -> current
+client interest -> stock tooltip rows. Focus/dialogue/hover loss clears display;
+map/session loss revokes grant. Source integration exists, end-to-end native
+acceptance does not. See [network flow](CAMPAIGN_MAP_RESUME_2026-09-26.md#tooltip-native-network-candidate-2026-09-28-source-only)
+and [UI flow](CAMPAIGN_MAP_RESUME_2026-09-26.md#tooltip-stock-presenter-candidate-2026-09-28-not-native-verified).
+
+Catalog merge notification -> queued reconciliation; dynamic updates may apply
+before the next frame -> drain rebuilds from current catalog/dynamic stores ->
+upsert/remove bodies and synchronize overlays from that one latest projection.
+Never replay the older queued merged payload over the newer dynamic state. See
+[ordering correction](CAMPAIGN_MAP_RESUME_2026-09-26.md#deferred-reconciliation-ordering-correction-2026-09-28).
+
+Map body entry: existing host InSettlement bit -> unchanged dynamic merge ->
+body admission false -> hide body/fallbacks and invalidate matching info panel.
+Logical anchor/camera/badges remain. Exit clears the bit and re-admits the body.
+See [source correction / native gate](CAMPAIGN_MAP_RESUME_2026-09-26.md#mobile-body-admission-correction-2026-09-28).
+
+cmp-b10: host disclosure -> wall/preparation capture -> 25/21/6 transport -> hide
+owned root -> level selection -> native-order wall override -> preparation override
+-> reveal only on success. Bounded automatic map, geometry comparison, camera
+detach/return and read-only dialogue/update/close passed; test cleanup verified.
+See [native result and remaining gates](CAMPAIGN_MAP_RESUME_2026-09-26.md#wall-and-siege-preparation-candidate-2026-09-27).
+
+cmp-b9 initialization: Scene.Read -> circle cleanup -> fortification helper snapshot
+and topmost removal plan -> remove -> hidden geometry registration -> render layers.
+Build/contracts passed, native pending. See [candidate](CAMPAIGN_MAP_RESUME_2026-09-26.md#fortification-authoring-helper-candidate-2026-09-27).
+
+cmp-b8: admitted host visual mask -> semantic catalog flag -> existing authoritative
+catalog/delta/late-join transport -> local mask -> descendant visibility before root
+reveal. Unknown/failure hides; changed choice and reappearance reapply. 24/20/5.
+Native automatic map/camera detach-return/read-only dialogue-close passed; Vostrum
+geometry extras remain. See [bounded result](CAMPAIGN_MAP_RESUME_2026-09-26.md#host-selected-settlement-levels-2026-09-27-bounded-native-result).
+
+cmp-b5 geometry: Scene.Read -> circle cleanup -> hidden root registration -> layer
+-> admitted full/dynamic upsert -> reveal; removal -> hide; release -> clear before
+native destruction. Protocol unchanged. cmp-b5 bounded map/camera/map-dialogue
+passed; hide/reappearance proof remains pending. Menu companion Conversation
+does not use MapConversationView and currently produces no replicated dialogue.
+See [candidate and limits](CAMPAIGN_MAP_RESUME_2026-09-26.md#static-settlement-geometry-admission-2026-09-27).
+
+Map camera (2026-09-27 candidate): first valid host frame snaps, later frames follow;
+manual movement detaches until explicit return. Scene release resets. Dialogue,
+foreign focus and interactive UI block underlying map input. Dynamic settlement
+tracking/inspection crosses protocol 23/bridge 19. See
+[candidate and native gate](CAMPAIGN_MAP_RESUME_2026-09-26.md#host-camera-following-and-settlement-presentation-2026-09-27).
+
+Live dialogue body-pose flow (2026-09-27, bounded cmt-b27 native pass): initialized host
+tableau skeleton channel 0 -> separate bridge-18 pose -> server remaps dialogue
+revision and publication sequence -> one bounded protocol-22 message per fresh
+sample/ready peer -> exact descriptor/revision/sequence receiver -> owning screen
+tick -> already-ready client visuals. Busy text transfers take priority; motion
+is skipped, never queued or used to supersede the text/scene payload. Pose-only
+updates do not rebuild UI or scene. Close/reopen/replacement and mission reset
+reject old motion. Facial channel semantics/native timing remain open. Historically,
+cmt-b22 (21/17) was restored after cmt-b25 transport/first-close passed but
+the user observed jerking motion. Direct 0.2-second phase correction is not smooth
+animation acceptance. See the [canonical candidate](CAMPAIGN_MAP_RESUME_2026-09-26.md#live-body-pose-channel-candidate-2026-09-27).
+
+Source correction after that run: the same-action sample sets a managed target;
+each owning screen tick rate-steers the ready skeleton with bounded slew instead
+of seeking phase on packet arrival. Native duration/cyclic flags define projection;
+stale correction expires after 0.5 seconds. First pose/action change seeds phase,
+scene release clears all playback. Native scene ticking is unchanged. On cmt-b27,
+the user confirmed smooth first-dialogue body motion; first/repeated readiness,
+retention, read-only text and both closes passed. Installed b27 retained after exact
+cleanup. Full facial/HUD/map parity and battle regressions are not implied; see the
+[bounded native result](CAMPAIGN_MAP_RESUME_2026-09-26.md#cmt-b27-native-rate-steering-result).
+
+Automatic campaign mission flow (2026-09-26, source only, separate default-off
+gate): campaign menu launch -> new inherited session -> exact launcher-owned
+process attachment -> bounded fresh host Map intent -> native registered/playing
+idle intermission -> one native map start -> exact opened Mission -> Continuing.
+Opening identity is captured from the OpenNew return inside that exact dispatch;
+Mission.Current is assigned later by Initialize, not by the constructor.
+BattleDetector publishes a validated roster before queuing Battle intent -> end
+only the owned map -> observed teardown -> pin exact roster/scene identity ->
+publish required pre-mission topology -> native battle start. Existing battle
+logic writes the result and ends the battle; the adapter observes that exact
+publication and teardown. Campaign journal success proves matching applied
+aftermath. A next stage may start after prior-stage application without a map;
+only final-stage application plus host MapState admits map return. Stale/foreign
+inputs and faults cannot fall back to the legacy HTTP command path.
+See [implementation and runtime checklist](CAMPAIGN_MAP_AUTOMATIC_LIFECYCLE.md).
+
 Latest scoreboard dependency flow (2026-09-09, source/L1): direct CoopBattle or full TdmClone server behavior list → detect first `MissionScoreboardComponent` → detect any existing `MissionMultiplayerGameModeBaseClient` → pure contract requests insertion only when the server dependency is missing → insert one minimal bridge immediately before the scoreboard → assert invariant → allow native `AfterStart`, `OnClearScene`, and `OnRemoveBehavior` without suppression. Scoreboard-free minimal TdmClone does nothing. Reusable hideout construction defers generic insertion so its day/night wrappers retain the existing `MissionMultiplayerCoopBattleClient`; siege and other safe paths are unchanged. Published `a6fe74f`, focused tests, 24/24 and both CompileOnly builds passed with installed inventories unchanged. No native process exercised the corrected flow yet. [Source/L1 closure](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#19-scoreboard-server-dependency-source-and-contract-closure-2026-09-09).
 
 Latest resolved failure flow (2026-09-09, recovered dump): CoopBattle battle-map dedicated stack → `MissionScoreboardComponent` present, no `MissionMultiplayerGameModeBaseClient` → `Mission.AfterStart` → scoreboard resolves `_mpGameModeBase=null` → server/recorder branch dereferences `_mpGameModeBase.RoundComponent` → managed `System.NullReferenceException` on OS thread `0x20f0` → outer WER APPCRASH `0xc0000005` → full dump written to `C:\dumps`. Field/land/village/sally-out append to the same server stack; full TdmClone server has the latent same dependency. Hideout wrappers and siege/other listed modes already provide or avoid the dependency. No unchanged rerun occurred after recovery of the existing dump. [Exact managed stack, object fields and cross-mode audit](BATTLE_TEST_AUTOMATION_M4_FIELD_SPAWN_SMOKE.md#18-recovered-full-dump-and-exact-managed-failure-diagnosis-2026-09-09).
@@ -324,6 +412,35 @@ Campaignless conversation safety is independent of battle subtype. The client an
 
 ### Campaign-map replica mission and synchronous dialogue
 
+Settlement badge source flow (2026-09-28): host settlement disclosure + native
+IsInRange/admission rules -> ordered bounded descriptors -> catalog revision ->
+binary7 reliable chunks (wire26/bridge22) -> complete catalog -> shared projection
+gated by dynamic IsSettlementInRange -> native lower party grid. Empty departure
+updates may use the direct catalog path; nonempty updates never do. No native
+badge run yet. This changes presentation only, not battle/command authority.
+
+Requested lifecycle extension (2026-09-26, not yet implemented): campaign-owned
+server startup should open the map automatically, battle intent should replace
+it with the existing exact scenario mission, and final aftermath completion
+should permit map return. Preserve native teardown/readiness and multi-stage
+battle gates; see [design and acceptance checklist](CAMPAIGN_MAP_AUTOMATIC_LIFECYCLE.md).
+
+Nameplate source update (2026-09-26): admitted host-visible party → native
+healthy/attached-army and wounded/prisoner helpers → bounded host-localized
+count/extra/speed strings and six presentation flags → bridge schema 17 → dynamic
+protocol 21 batches (two entities maximum) → shared full/incremental merge →
+native `PartyNameplate` properties. The host-resolved caption separately travels
+through binary catalog schema 4. Label-only suppression does not suppress the
+3D model. Hidden numeric details remain redacted; native presence-only `?`
+suffixes are preserved. All roles
+must be restarted with a coherent candidate; never replace DLLs under the live
+older roles. The historical coherent `cmr-b10` (20/16/4) loaded in campaign, dedicated and multiplayer;
+AC_COOP connection and the user-assisted literal command opened the map mission.
+City selection, zoom, host movement and read-only dialogue open/update/close
+passed the bounded live run. Exact-owned cleanup and 64-file config/save
+preservation passed; the candidate stays installed. Dialogue 3D tableau and
+full visual parity remain open. See [source/build and live boundaries](CAMPAIGN_MAP_RESUME_2026-09-26.md).
+
 Primary owners:
 
 - `Campaign/CoopCampaignMapPrototypePublisherBehavior.cs`
@@ -336,15 +453,28 @@ Primary owners:
 Sequence:
 
 1. The campaign host publishes the bounded host-visible map snapshot through the existing local prototype bridge.
-2. While a native map conversation is active, the publisher reads the already formatted speaker, line, gold/continue labels, and answer rows from `MapConversationVM.DialogController`; it never invokes native continuation or answer actions.
+2. While a native map conversation is active, the publisher reads the already formatted speaker, line, gold/continue labels, and answer rows from `MapConversationVM.DialogController`; it never invokes native continuation or answer actions. It optionally detaches the initialized native tableau's camera/atmosphere/visible actors. Unavailable visuals retain text-only dialogue.
 3. A content change increments the host dialogue revision. Barter, absent native view state, and invalid capture project as inactive rather than exposing partial or guessed state.
-4. The dedicated process reads the bridge, converts a changed host revision to its own mission-local network revision, and broadcasts one header plus the declared answer records.
+4. The dedicated process reads bridge schema 17, converts a changed host revision to its own mission-local network revision, and prepares one integrity-checked binary dialogue payload (1 MiB total cap, nested tableau 64 KiB). It queues 256-byte chunks over the native reliable server-only channel, at most two per peer per tick. A newer revision replaces unfinished sends; missing/stale host bridge state closes an active dialogue at a newer network revision.
 5. A joining peer receives the current dialogue after the current map state, catalog, and dynamic projection.
-6. The client assembler publishes a dialogue only when every declared option for one revision is present and valid. Stale or mixed revisions are rejected.
-7. `CoopCampaignMapConversationView` opens the native `SPConversation` movie, reproduces the host-formatted strings and enabled/special answer presentation, and restores the prior mission-layer focus when the host dialogue closes.
+6. The client assembler publishes text/options/tableau atomically only after complete protocol 21 payload reassembly, hash, bounded decompression, embedded revision and content validation. Stale or mixed revisions are rejected. A complete newer inactive state prevents delayed older scene chunks from reopening dialogue. Native reconnect/packet timing remains unverified for this source candidate.
+7. `CoopCampaignMapConversationView` opens the native `SPConversation` movie and applies the optional tableau to its independent scene owner. The 2026-09-27 source candidate uses an off-screen native TableauView target, drawn by an instance-local noninteractive Gauntlet widget at order 4 below the conversation at order 5, rather than a second world SceneLayer. Equal descriptors preserve actors across text updates; changed descriptors replace them. Texture resize preserves actors but restarts bounded readiness; it cannot resurrect a failed attempt. View/actor readiness is polled with a 15-second wall-clock limit, retaining text on failure. Render callback/draw errors are deferred to the owning mission tick. Cleanup detaches the widget texture, disables/clears the native view and releases the target before destroying actors/controller/camera/scene. Close restores prior map-layer focus. This texture rendering flow is not yet runtime-verified; the preceding SceneLayer candidate reproduced shader errors.
 8. Client answer and continue commands perform no action and send no message. During this milestone only the campaign host can advance or choose a response; the resulting next host revision is then projected to all clients.
 
 This flow does not grant campaign authority to the dedicated process or multiplayer clients. Voting, inventory/market reservation, hero-edit locks, progression, and barter remain outside this milestone.
+
+2026-09-27 verification update (supersedes the view-readiness condition above):
+cmt-b16 without dialogue Scene.CheckResources showed three actors/background
+without observed terrain shader errors, but View=False removed the rendered
+target after 15 seconds. cmt-b18 also drew actors then timed out because its
+callback-configured flag remained false. The current source condition is successful
+synchronous owned-target configuration + loaded texture submitted by the widget
++ all actor resources ready. Optional callbacks are bound to a registration epoch,
+invalidated before release; managed Texture wrapper reference identity is not required.
+This admits bounded ticking, not pixel/parity acceptance. Resize resets both
+target signals. The deadline/text fallback remains. Main-map resource preparation
+and battle renderers remain unchanged. Native correction verification pending;
+see the resource-request isolation section of CAMPAIGN_MAP_RESUME_2026-09-26.md.
 
 ## Flow 5: dedicated mission stabilization and bootstrap
 

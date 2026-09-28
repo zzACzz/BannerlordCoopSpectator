@@ -755,6 +755,7 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
             try // ÐžÐ±Ð³Ð¾Ñ€Ñ‚Ð°Ñ”Ð¼Ð¾ cleanup Ð² try-catch, Ñ‰Ð¾Ð± Ð½Ðµ ÐºÑ€Ð°ÑˆÐ½ÑƒÑ‚Ð¸ Ð³Ñ€Ñƒ Ð¿Ñ€Ð¸ Ð²Ð¸Ð²Ð°Ð½Ñ‚Ð°Ð¶ÐµÐ½Ð½Ñ–
             { // ÐŸÐ¾Ñ‡Ð¸Ð½Ð°Ñ”Ð¼Ð¾ Ð±Ð»Ð¾Ðº try
                 CoopCampaignMapPrototypePublisherBehavior.ResetApplicationTickPublisher();
+                CoopCampaignMapTooltipHost.Reset();
 
                 if (EnableCoopRuntimeStartup && CoopRuntime.Network != null) // ÐŸÐµÑ€ÐµÐ²Ñ–Ñ€ÑÑ”Ð¼Ð¾ Ñ‰Ð¾ NetworkManager Ñ–ÑÐ½ÑƒÑ”
                 { // ÐŸÐ¾Ñ‡Ð¸Ð½Ð°Ñ”Ð¼Ð¾ Ð±Ð»Ð¾Ðº if
@@ -782,7 +783,9 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
             base.OnApplicationTick(dt); // Ð’Ð¸ÐºÐ»Ð¸ÐºÐ°Ñ”Ð¼Ð¾ Ð±Ð°Ð·Ð¾Ð²Ñƒ Ñ€ÐµÐ°Ð»Ñ–Ð·Ð°Ñ†Ñ–ÑŽ
 
             CoopCampaignMapPrototypePublisherBehavior.PumpApplicationTick(dt);
+            CoopCampaignMapTooltipHost.Tick();
             CoopLobbyAutomationController.PumpApplicationTick();
+            CoopCampaignMissionHost.Tick();
 
             if (EnableCoopRuntimeStartup)
             {

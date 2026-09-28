@@ -167,6 +167,9 @@ namespace CoopSpectator.Network.Messages
                 MountVisual = ReadAgentVisual(ref valid),
                 CaravanMountVisual = ReadAgentVisual(ref valid)
             };
+            entity.SettlementLevelFlags = ReadIntFromPacket(UnitCompression, ref valid);
+            entity.SettlementWallStates = ReadStringFromPacket(ref valid) ?? string.Empty;
+            entity.SettlementPreparationState = ReadIntFromPacket(UnitCompression, ref valid);
             Entity = entity;
             return valid && ExpectedCount > 0 && Index < ExpectedCount &&
                    CoopCampaignMapPrototypeContract.IsValidCatalogEntity(entity);
@@ -176,6 +179,8 @@ namespace CoopSpectator.Network.Messages
         {
             CoopCampaignMapPrototypeCatalogEntityState entity =
                 Entity ?? CreateInvalidCatalogEntity();
+            if (!string.IsNullOrEmpty(entity.SettlementPartyBadges))
+                throw new InvalidOperationException("Settlement badges require chunked catalog transport.");
             WriteIntToPacket(ProtocolVersion, ProtocolCompression);
             WriteIntToPacket(Math.Max(0, Revision), RevisionCompression);
             WriteIntToPacket(Math.Max(0, Math.Min(
@@ -210,6 +215,9 @@ namespace CoopSpectator.Network.Messages
             WriteAgentVisual(entity.HumanVisual);
             WriteAgentVisual(entity.MountVisual);
             WriteAgentVisual(entity.CaravanMountVisual);
+            WriteIntToPacket(entity.SettlementLevelFlags, UnitCompression);
+            WriteStringToPacket(entity.SettlementWallStates ?? string.Empty);
+            WriteIntToPacket(entity.SettlementPreparationState, UnitCompression);
         }
 
         protected override MultiplayerMessageFilter OnGetLogFilter() =>
@@ -790,6 +798,7 @@ namespace CoopSpectator.Network.Messages
         private static readonly CompressionInfo.Integer SizeCompression = new CompressionInfo.Integer(0, CoopCampaignMapPrototypeContract.MaximumPartySize, true);
         private static readonly CompressionInfo.Integer QuestMarkerCompression = new CompressionInfo.Integer(0, CoopCampaignMapPrototypeContract.MaxQuestMarkerFlags, true);
         private static readonly CompressionInfo.Integer SettlementEventCompression = new CompressionInfo.Integer(0, CoopCampaignMapPrototypeContract.MaxSettlementEventFlags, true);
+        private static readonly CompressionInfo.Integer PartyFlagsCompression = new CompressionInfo.Integer(0, CoopCampaignMapPrototypeContract.MaxPartyNameplateFlags, true);
 
         public CoopCampaignMapDynamicBatchMessage(
             int revision,
@@ -843,6 +852,11 @@ namespace CoopSpectator.Network.Messages
                     NormalizedY = ReadIntFromPacket(UnitCompression, ref valid),
                     Heading = ReadIntFromPacket(UnitCompression, ref valid),
                     PartySize = ReadIntFromPacket(SizeCompression, ref valid),
+                    IsPartyInformationHidden = ReadBoolFromPacket(ref valid),
+                    PartyNameplateCountText = ReadStringFromPacket(ref valid) ?? string.Empty,
+                    PartyNameplateExtraInfoText = ReadStringFromPacket(ref valid) ?? string.Empty,
+                    PartyMovementSpeedText = ReadStringFromPacket(ref valid) ?? string.Empty,
+                    PartyNameplateFlags = ReadIntFromPacket(PartyFlagsCompression, ref valid),
                     IsVisible = ReadBoolFromPacket(ref valid),
                     IsMoving = ReadBoolFromPacket(ref valid),
                     ArmyPartyCount = ReadIntFromPacket(SizeCompression, ref valid),
@@ -851,7 +865,9 @@ namespace CoopSpectator.Network.Messages
                     AppearanceRevision = ReadIntFromPacket(RevisionCompression, ref valid),
                     InformationRevision = ReadIntFromPacket(RevisionCompression, ref valid),
                     QuestMarkerFlags = ReadIntFromPacket(QuestMarkerCompression, ref valid),
-                    SettlementEventFlags = ReadIntFromPacket(SettlementEventCompression, ref valid)
+                    SettlementEventFlags = ReadIntFromPacket(SettlementEventCompression, ref valid),
+                    IsSettlementTracked = ReadBoolFromPacket(ref valid),
+                    IsSettlementInRange = ReadBoolFromPacket(ref valid)
                 };
                 valid = valid && CoopCampaignMapPrototypeContract.IsValidDynamicEntity(entity);
                 entities.Add(entity);
@@ -877,6 +893,11 @@ namespace CoopSpectator.Network.Messages
                 WriteIntToPacket(ClampUnit(entity?.NormalizedY ?? 0), UnitCompression);
                 WriteIntToPacket(ClampUnit(entity?.Heading ?? 0), UnitCompression);
                 WriteIntToPacket(ClampSize(entity?.PartySize ?? 0), SizeCompression);
+                WriteBoolToPacket(entity?.IsPartyInformationHidden ?? false);
+                WriteStringToPacket(entity?.PartyNameplateCountText ?? string.Empty);
+                WriteStringToPacket(entity?.PartyNameplateExtraInfoText ?? string.Empty);
+                WriteStringToPacket(entity?.PartyMovementSpeedText ?? string.Empty);
+                WriteIntToPacket(entity?.PartyNameplateFlags ?? 0, PartyFlagsCompression);
                 WriteBoolToPacket(entity?.IsVisible ?? false);
                 WriteBoolToPacket(entity?.IsMoving ?? false);
                 WriteIntToPacket(ClampSize(entity?.ArmyPartyCount ?? 0), SizeCompression);
@@ -894,6 +915,8 @@ namespace CoopSpectator.Network.Messages
                         entity?.SettlementEventFlags ?? 0,
                         CoopCampaignMapPrototypeContract.MaxSettlementEventFlags),
                     SettlementEventCompression);
+                WriteBoolToPacket(entity?.IsSettlementTracked ?? false);
+                WriteBoolToPacket(entity?.IsSettlementInRange ?? false);
             }
         }
 

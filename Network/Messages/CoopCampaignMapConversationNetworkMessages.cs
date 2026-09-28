@@ -6,277 +6,111 @@ using TaleWorlds.MountAndBlade.Network.Messages;
 namespace CoopSpectator.Network.Messages
 {
     [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromServer)]
-    public sealed class CoopCampaignMapConversationSnapshotMessage :
-        GameNetworkMessage
+    public sealed class CoopCampaignMapConversationPoseMessage : GameNetworkMessage
     {
-        private static readonly CompressionInfo.Integer ProtocolCompression =
-            new CompressionInfo.Integer(0, 31, true);
-        private static readonly CompressionInfo.Integer RevisionCompression =
-            new CompressionInfo.Integer(0, int.MaxValue, true);
-        private static readonly CompressionInfo.Integer CountCompression =
-            new CompressionInfo.Integer(
-                0,
-                CoopCampaignMapPrototypeContract.MaxConversationOptions,
-                true);
-
-        public CoopCampaignMapConversationSnapshotMessage(
-            CoopCampaignMapConversationState state)
+        private static readonly CompressionInfo.Integer ProtocolCompression = new CompressionInfo.Integer(0, 31, true);
+        public int ProtocolVersion { get; private set; }
+        public CoopCampaignMapConversationPose Pose { get; private set; }
+        private byte[] _bytes = Array.Empty<byte>();
+        public CoopCampaignMapConversationPoseMessage() { }
+        public CoopCampaignMapConversationPoseMessage(CoopCampaignMapConversationPose pose)
         {
             ProtocolVersion = CoopCampaignMapPrototypeContract.ProtocolVersion;
-            Revision = Math.Max(0, state?.Revision ?? 0);
-            IsActive = state?.IsActive ?? false;
-            SpeakerName = IsActive
-                ? Bound(
-                    state?.SpeakerName,
-                    CoopCampaignMapPrototypeContract
-                        .MaxConversationSpeakerCharacters)
-                : string.Empty;
-            DialogText = IsActive
-                ? Bound(
-                    state?.DialogText,
-                    CoopCampaignMapPrototypeContract
-                        .MaxConversationDialogCharacters)
-                : string.Empty;
-            GoldText = IsActive
-                ? Bound(
-                    state?.GoldText,
-                    CoopCampaignMapPrototypeContract
-                        .MaxConversationGoldCharacters)
-                : string.Empty;
-            ContinueText = IsActive
-                ? Bound(
-                    state?.ContinueText,
-                    CoopCampaignMapPrototypeContract
-                        .MaxConversationContinueCharacters)
-                : string.Empty;
-            OptionCount = IsActive
-                ? Math.Max(
-                    0,
-                    Math.Min(
-                        CoopCampaignMapPrototypeContract.MaxConversationOptions,
-                        state?.Options?.Count ?? 0))
-                : 0;
+            if (!CoopCampaignMapConversationPoseCodec.TrySerialize(pose, out _bytes))
+                throw new ArgumentException("Invalid dialogue pose.", nameof(pose));
+            Pose = pose.Clone();
         }
-
-        public CoopCampaignMapConversationSnapshotMessage()
-        {
-        }
-
-        public int ProtocolVersion { get; private set; }
-
-        public int Revision { get; private set; }
-
-        public bool IsActive { get; private set; }
-
-        public string SpeakerName { get; private set; } = string.Empty;
-
-        public string DialogText { get; private set; } = string.Empty;
-
-        public string GoldText { get; private set; } = string.Empty;
-
-        public string ContinueText { get; private set; } = string.Empty;
-
-        public int OptionCount { get; private set; }
-
-        public CoopCampaignMapConversationState ToState()
-        {
-            return new CoopCampaignMapConversationState
-            {
-                Revision = Revision,
-                IsActive = IsActive,
-                SpeakerName = SpeakerName ?? string.Empty,
-                DialogText = DialogText ?? string.Empty,
-                GoldText = GoldText ?? string.Empty,
-                ContinueText = ContinueText ?? string.Empty
-            };
-        }
-
         protected override bool OnRead()
         {
             bool valid = true;
             ProtocolVersion = ReadIntFromPacket(ProtocolCompression, ref valid);
-            Revision = ReadIntFromPacket(RevisionCompression, ref valid);
-            IsActive = ReadBoolFromPacket(ref valid);
-            SpeakerName = ReadStringFromPacket(ref valid) ?? string.Empty;
-            DialogText = ReadStringFromPacket(ref valid) ?? string.Empty;
-            GoldText = ReadStringFromPacket(ref valid) ?? string.Empty;
-            ContinueText = ReadStringFromPacket(ref valid) ?? string.Empty;
-            OptionCount = ReadIntFromPacket(CountCompression, ref valid);
-            return valid &&
-                   CoopCampaignMapPrototypeContract.TryValidateConversationHeader(
-                       ToState(),
-                       OptionCount,
-                       out _);
+            var buffer = new byte[CoopCampaignMapConversationPoseCodec.MaxPayloadBytes];
+            int length = ReadByteArrayFromPacket(buffer, 0, buffer.Length, ref valid);
+            if (!valid || ProtocolVersion != CoopCampaignMapPrototypeContract.ProtocolVersion || length <= 0 || length > buffer.Length) return false;
+            _bytes = new byte[length];
+            Buffer.BlockCopy(buffer, 0, _bytes, 0, length);
+            if (!CoopCampaignMapConversationPoseCodec.TryDeserialize(_bytes, out var pose)) return false;
+            Pose = pose;
+            return true;
         }
-
         protected override void OnWrite()
         {
             WriteIntToPacket(ProtocolVersion, ProtocolCompression);
-            WriteIntToPacket(Math.Max(0, Revision), RevisionCompression);
-            WriteBoolToPacket(IsActive);
-            WriteStringToPacket(Bound(
-                SpeakerName,
-                CoopCampaignMapPrototypeContract
-                    .MaxConversationSpeakerCharacters));
-            WriteStringToPacket(Bound(
-                DialogText,
-                CoopCampaignMapPrototypeContract
-                    .MaxConversationDialogCharacters));
-            WriteStringToPacket(Bound(
-                GoldText,
-                CoopCampaignMapPrototypeContract
-                    .MaxConversationGoldCharacters));
-            WriteStringToPacket(Bound(
-                ContinueText,
-                CoopCampaignMapPrototypeContract
-                    .MaxConversationContinueCharacters));
-            WriteIntToPacket(
-                Math.Max(
-                    0,
-                    Math.Min(
-                        CoopCampaignMapPrototypeContract.MaxConversationOptions,
-                        OptionCount)),
-                CountCompression);
+            WriteByteArrayToPacket(_bytes, 0, _bytes.Length);
         }
-
-        protected override MultiplayerMessageFilter OnGetLogFilter() =>
-            MultiplayerMessageFilter.Mission;
-
-        protected override string OnGetLogFormat() =>
-            "CoopCampaignMapConversationSnapshot Revision=" + Revision +
-            " Active=" + IsActive +
-            " Options=" + OptionCount;
-
-        private static string Bound(string value, int maximumCharacters)
-        {
-            return CoopCampaignMapPrototypeContract.BoundConversationText(
-                value,
-                maximumCharacters);
-        }
+        protected override MultiplayerMessageFilter OnGetLogFilter() => MultiplayerMessageFilter.Mission;
+        protected override string OnGetLogFormat() => "CoopCampaignMapConversationPose";
     }
 
     [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromServer)]
-    public sealed class CoopCampaignMapConversationOptionMessage :
-        GameNetworkMessage
+    public sealed class CoopCampaignMapConversationChunkMessage : GameNetworkMessage
     {
-        private static readonly CompressionInfo.Integer ProtocolCompression =
-            new CompressionInfo.Integer(0, 31, true);
-        private static readonly CompressionInfo.Integer RevisionCompression =
-            new CompressionInfo.Integer(0, int.MaxValue, true);
-        private static readonly CompressionInfo.Integer CountCompression =
-            new CompressionInfo.Integer(
-                0,
-                CoopCampaignMapPrototypeContract.MaxConversationOptions,
-                true);
-        private static readonly CompressionInfo.Integer IndexCompression =
-            new CompressionInfo.Integer(
-                0,
-                CoopCampaignMapPrototypeContract.MaxConversationOptions - 1,
-                true);
+        private static readonly CompressionInfo.Integer ProtocolCompression = new CompressionInfo.Integer(0, 31, true);
+        private static readonly CompressionInfo.Integer RevisionCompression = new CompressionInfo.Integer(0, int.MaxValue, true);
+        private static readonly CompressionInfo.Integer SizeCompression = new CompressionInfo.Integer(0, CoopCampaignMapConversationPayloadCodec.MaxPayloadBytes, true);
+        private static readonly CompressionInfo.Integer CountCompression = new CompressionInfo.Integer(0, CoopCampaignMapConversationPayloadCodec.MaxChunks, true);
+        private static readonly CompressionInfo.Integer KindCompression = new CompressionInfo.Integer(0, 1, true);
 
-        public CoopCampaignMapConversationOptionMessage(
-            int revision,
-            int index,
-            int expectedCount,
-            CoopCampaignMapConversationOptionState option)
+        public CoopCampaignMapConversationChunkMessage() { }
+        public CoopCampaignMapConversationChunkMessage(int revision, CoopCampaignMapCatalogChunkedPayload payload, int index)
         {
             ProtocolVersion = CoopCampaignMapPrototypeContract.ProtocolVersion;
-            Revision = Math.Max(0, revision);
-            Index = Math.Max(
-                0,
-                Math.Min(
-                    CoopCampaignMapPrototypeContract.MaxConversationOptions - 1,
-                    index));
-            ExpectedCount = Math.Max(
-                0,
-                Math.Min(
-                    CoopCampaignMapPrototypeContract.MaxConversationOptions,
-                    expectedCount));
-            Text = CoopCampaignMapPrototypeContract.BoundConversationText(
-                option?.Text,
-                CoopCampaignMapPrototypeContract.MaxConversationOptionCharacters);
-            IsEnabled = option?.IsEnabled ?? false;
-            IsSpecial = option?.IsSpecial ?? false;
-        }
-
-        public CoopCampaignMapConversationOptionMessage()
-        {
+            Revision = revision;
+            LogicalBytes = payload.LogicalByteCount;
+            WireBytes = payload.WireByteCount;
+            ChunkCount = payload.ChunkCount;
+            Compression = payload.CompressionKind;
+            PayloadHash = payload.PayloadHash;
+            ChunkIndex = index;
+            PayloadBytes = payload.Chunks[index];
         }
 
         public int ProtocolVersion { get; private set; }
-
         public int Revision { get; private set; }
-
-        public int Index { get; private set; }
-
-        public int ExpectedCount { get; private set; }
-
-        public string Text { get; private set; } = string.Empty;
-
-        public bool IsEnabled { get; private set; }
-
-        public bool IsSpecial { get; private set; }
-
-        public CoopCampaignMapConversationOptionState ToOption()
-        {
-            return new CoopCampaignMapConversationOptionState
-            {
-                Text = Text ?? string.Empty,
-                IsEnabled = IsEnabled,
-                IsSpecial = IsSpecial
-            };
-        }
+        public int LogicalBytes { get; private set; }
+        public int WireBytes { get; private set; }
+        public int ChunkCount { get; private set; }
+        public CoopCampaignMapCatalogCompressionKind Compression { get; private set; }
+        public string PayloadHash { get; private set; } = string.Empty;
+        public int ChunkIndex { get; private set; }
+        public byte[] PayloadBytes { get; private set; } = Array.Empty<byte>();
 
         protected override bool OnRead()
         {
             bool valid = true;
             ProtocolVersion = ReadIntFromPacket(ProtocolCompression, ref valid);
             Revision = ReadIntFromPacket(RevisionCompression, ref valid);
-            Index = ReadIntFromPacket(IndexCompression, ref valid);
-            ExpectedCount = ReadIntFromPacket(CountCompression, ref valid);
-            Text = ReadStringFromPacket(ref valid) ?? string.Empty;
-            IsEnabled = ReadBoolFromPacket(ref valid);
-            IsSpecial = ReadBoolFromPacket(ref valid);
-            return valid &&
-                   ExpectedCount > 0 &&
-                   Index < ExpectedCount &&
-                   CoopCampaignMapPrototypeContract.IsValidConversationOption(
-                       ToOption());
+            LogicalBytes = ReadIntFromPacket(SizeCompression, ref valid);
+            WireBytes = ReadIntFromPacket(SizeCompression, ref valid);
+            ChunkCount = ReadIntFromPacket(CountCompression, ref valid);
+            Compression = (CoopCampaignMapCatalogCompressionKind)ReadIntFromPacket(KindCompression, ref valid);
+            PayloadHash = ReadStringFromPacket(ref valid) ?? string.Empty;
+            ChunkIndex = ReadIntFromPacket(CountCompression, ref valid);
+            var buffer = new byte[CoopCampaignMapCatalogChunkCodec.MaxChunkBytes];
+            int length = ReadByteArrayFromPacket(buffer, 0, buffer.Length, ref valid);
+            if (length <= 0 || length > buffer.Length) return false;
+            PayloadBytes = new byte[length];
+            Buffer.BlockCopy(buffer, 0, PayloadBytes, 0, length);
+            return valid && ProtocolVersion == CoopCampaignMapPrototypeContract.ProtocolVersion &&
+                CoopCampaignMapConversationPayloadCodec.IsValidEnvelope(Revision, LogicalBytes,
+                    WireBytes, ChunkCount, Compression, PayloadHash, ChunkIndex, PayloadBytes);
         }
 
         protected override void OnWrite()
         {
             WriteIntToPacket(ProtocolVersion, ProtocolCompression);
-            WriteIntToPacket(Math.Max(0, Revision), RevisionCompression);
-            WriteIntToPacket(
-                Math.Max(
-                    0,
-                    Math.Min(
-                        CoopCampaignMapPrototypeContract.MaxConversationOptions - 1,
-                        Index)),
-                IndexCompression);
-            WriteIntToPacket(
-                Math.Max(
-                    0,
-                    Math.Min(
-                        CoopCampaignMapPrototypeContract.MaxConversationOptions,
-                        ExpectedCount)),
-                CountCompression);
-            WriteStringToPacket(
-                CoopCampaignMapPrototypeContract.BoundConversationText(
-                    Text,
-                    CoopCampaignMapPrototypeContract
-                        .MaxConversationOptionCharacters));
-            WriteBoolToPacket(IsEnabled);
-            WriteBoolToPacket(IsSpecial);
+            WriteIntToPacket(Revision, RevisionCompression);
+            WriteIntToPacket(LogicalBytes, SizeCompression);
+            WriteIntToPacket(WireBytes, SizeCompression);
+            WriteIntToPacket(ChunkCount, CountCompression);
+            WriteIntToPacket((int)Compression, KindCompression);
+            WriteStringToPacket(PayloadHash);
+            WriteIntToPacket(ChunkIndex, CountCompression);
+            WriteByteArrayToPacket(PayloadBytes, 0, PayloadBytes.Length);
         }
 
-        protected override MultiplayerMessageFilter OnGetLogFilter() =>
-            MultiplayerMessageFilter.Mission;
-
+        protected override MultiplayerMessageFilter OnGetLogFilter() => MultiplayerMessageFilter.Mission;
         protected override string OnGetLogFormat() =>
-            "CoopCampaignMapConversationOption Revision=" + Revision +
-            " Index=" + Index +
-            " Count=" + ExpectedCount;
+            "CoopCampaignMapConversationChunk Revision=" + Revision + " Index=" + ChunkIndex + " Count=" + ChunkCount;
     }
 }

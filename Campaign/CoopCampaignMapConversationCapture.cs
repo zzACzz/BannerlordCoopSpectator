@@ -21,9 +21,11 @@ namespace CoopSpectator.Campaign
 
         public static bool TryCapture(
             out CoopCampaignMapConversationState state,
+            out CoopCampaignMapConversationPose pose,
             out string reason)
         {
             state = CoopCampaignMapPrototypeContract.CreateInactiveConversation();
+            pose = null;
             reason = null;
             try
             {
@@ -106,6 +108,11 @@ namespace CoopSpectator.Campaign
                         });
                 }
 
+                // Optional visual projection: unavailable native presentation does
+                // not suppress the already valid read-only text dialogue.
+                if (CoopCampaignMapConversationTableauCapture.TryCapture(conversationView, out var tableau, out pose))
+                    captured.Tableau = tableau;
+
                 if (!CoopCampaignMapPrototypeContract.TryValidateConversationState(
                         captured,
                         out reason))
@@ -120,6 +127,7 @@ namespace CoopSpectator.Campaign
             {
                 reason = ex.GetType().Name + ":" + ex.Message;
                 state = CoopCampaignMapPrototypeContract.CreateInactiveConversation();
+                pose = null;
                 return false;
             }
         }
