@@ -1,5 +1,123 @@
 # AI Knowledge Base
 
+Start here after reboot/model handoff: [2026-10-09 checkpoint](CAMPAIGN_MAP_HANDOFF_2026-10-09.md)
+and [agent test runbook](CAMPAIGN_MAP_TEST_RUNBOOK.md). They summarize the latest
+evidence and supersede older chronological "current/running/pending" notes below.
+No native run is assumed alive after shutdown. Full Goal acceptance remains open.
+Fresh 2026-10-09 checkpoint checks: cmp-b74 both isolated builds and cmp-c79 all
+24 contract projects passed, installed inventories unchanged, no product launch.
+
+New mission-dialogue 3D source candidate uses protocol33/bridge28/catalog8 with
+tableau2/pose2: bounded land scene, host camera/visible actors/climate and separate
+frame/animation updates. Native capture is connected, but NOT deployed or native-
+verified; full lighting, mounts/crowds and visual parity remain open. Final cmp-b73
+passed both isolated builds; cmp-c78 passed all 24 contract projects. See
+[candidate and limits](CAMPAIGN_MAP_MISSION_DIALOGUE.md).
+
+Companion mission dialogue: cmp-b65 reproduced the known Party/Talk gap. Source
+now binds an exact standalone land-conversation mission to a successful map
+publication and reads its prepared native text/HUD. Failure/close clears the
+mission dialogue; no client choice, battle-lifecycle or map-visual reads are added.
+The subsequent bounded 3D source candidate is connected but not native-verified,
+so this is NOT 1:1 acceptance. See [integration and next gates](CAMPAIGN_MAP_MISSION_DIALOGUE.md).
+cmp-b70 passed both isolated builds with installed inventories unchanged;
+cmp-c75 passed all24 projects (96 lease/integration checks). Nothing newly
+deployed/native-verified; installed cmp-b65 remains.
+
+Ordered settlement markers are now integrated in source (protocol32/bridge27/catalog8):
+existing host UI lists, full/dynamic transport, order-only deltas, removal clearing
+and ordered client lists. cmp-b65 both isolated builds and cmp-c69 all24 contract
+projects pass (126313 order /87 transport assertions); earlier test defects are documented.
+Fresh map-markers-r1-20260929 staged cmp-b65 (32/27/8), preserving seven module
+and seven configuration preimages. All three loaded identities match; native AC_COOP
+join and automatic map entry passed. Paired initial markers and Ethemisa production-
+then-issue reveal passed (evidence02-07), as did user-assisted camera return.
+Companion mission dialogue remains absent (known gap). Run closed: seven configs
+match, no owned/product processes/new configs, installed cmp-b65 retained.
+Other native regression gates remain open.
+See [integration and native gates](CAMPAIGN_MAP_EVENT_DISCLOSURE.md#ordered-marker-integration-2026-09-29-source-candidate).
+
+Dialogue HUD candidate adds host-prepared upper powers/portraits/party counts,
+quest markers and speaker banner (31/26/8). cmp-b60 both isolated builds and
+cmp-c61 all24 contract projects passed. Native r2 restores the defender portrait,
+but the host remains a silhouette: full parity is NOT accepted. All three HUD runs
+are closed; seven configs and five cmp-b57 module preimages restored, no owned
+products remain. cmp-b61/r3 confirms rejection of missing dragon_banner; the narrow
+static StoryMode supplement passed cmp-b62 both builds/cmp-c63 all24 projects.
+Fresh r4 passed bounded gates on cmp-b62 with identical client/dedicated mirror
+catalogs and seven module/config preimages. Both portraits now render in the paired
+hostile greeting (29/22); read-only answer, text update, dialogue close and map
+zoom/camera-return checks passed. Host dialogue open/close under MP Options and
+map/input recovery also passed. Native Quit/rejoin and post-rejoin map input passed;
+automatic village battle/victory/map return and post-return zoom passed. User-assisted
+host-camera return passed. r4 is closed: seven config preimages match, no owned
+processes remain, and cmp-b62 modules are retained. Full parity remains open. See
+[canonical source, native investigation and verification gates](CAMPAIGN_MAP_CONVERSATION_HUD.md).
+
+cmp-b55 dedicated stability FAILED after rejoin: recovered dump proves the
+stock Playing match-timeout path dereferences the map's absent SpawnComponent.
+The map-only lifetime candidate passed cmp-b57 both builds/cmp-c58 all 24 contract
+projects. Its fresh native run survived 1839.988 mission seconds in the original
+mission, with post-threshold dialogue/map/camera/tooltip checks. Native Quit/rejoin
+also passed in the same original mission (05:51:49 rejoin, post-rejoin tooltip).
+One native field-victory map/battle/map cycle also passed with post-return input.
+Controlled host dialogue open/close under Options and map/input recovery also passed.
+The run is closed: all 23 recorded identities absent, seven configs match, no new
+configs/products; cmp-b57 and permitted test saves retained. Full acceptance is open. See
+[dump diagnosis, scoped correction and native gates](CAMPAIGN_MAP_LOBBY_LIFETIME.md).
+The prior live/menu progress below is historical and is not stability acceptance.
+
+Settlement event disclosure candidate filters uninspected issue/tournament icons
+before publication/display. [Native rules and gates](CAMPAIGN_MAP_EVENT_DISCLOSURE.md).
+Not yet native-verified.
+
+cmp-b51 user confirmed physical Escape opens the replica map menu; retention and
+wheel isolation passed, but Options closed the menu without opening settings.
+Newer source adds the missing native options view, forwards dialogue-layer Escape,
+and defers host dialogue reconstruction during local modals, including same-screen
+options. cmp-b51 run is closed with actual Quit/rejoin, camera return and main-party
+tooltip rendering verified; seven configs restored and owned products absent.
+cmp-b55/cmp-c56 passed both builds/all 24 projects, and a fresh options/modal run
+is in progress on staged cmp-b55. Full menu/dialogue acceptance remains open. See
+[input ownership and evidence](CAMPAIGN_MAP_ESCAPE_INPUT.md).
+
+Settlement-nameplate relation correction is source/build/contract verified:
+cmp-b50 both isolated builds, cmp-c51 all 24 projects (164 relation assertions).
+Protocol 30 / bridge 25 / catalog 8 transports host-owned diplomacy through dynamic
+state and stock Relation binding. cmp-b50 bounded enemy village/castle, dialogue
+return and camera checks passed; run closed with configs restored and 24 owned
+identities absent. Rejoin failed to start because Escape was unresponsive; full
+native acceptance remains pending. See
+[evidence, shared-scenario scope and native gates](CAMPAIGN_MAP_SETTLEMENT_RELATION.md).
+
+Movement-target source candidate now connects host capture, state transport,
+disclosure/readiness gates and owned replica decals (29/24/8). cmp-b48 passed both
+isolated builds; cmp-c49 passed all 24 projects (237 layout/408 transport checks).
+Native run map-movement-target-r1-20260928 closed with bounded point/village/fort,
+camera/dialogue and automatic field-victory map-return evidence. User confirmed
+post-return tooltips. None of 22 owned identities remain; seven configs match,
+no new configs/products; cmp-b48 retained with module preimages. Enemy settlement
+nameplate backgrounds remain neutral (Relation is hardcoded zero); pursuit-ring
+alignment, reconnect and other battle types remain unverified. Full acceptance
+is open. See local [run result](../../artifacts/runtime/map-movement-target-r1-20260928/RESULT.md) and
+[native rules, tests and integration gates](CAMPAIGN_MAP_MOVEMENT_TARGETS.md).
+
+Hover-ring source candidate now transports host-native frame/diplomatic color
+and renders owned stock decals (protocol 28/bridge 23/catalog 8). cmp-b42 both
+isolated builds and cmp-c43 all 24 projects passed. Final cmp-b43/cmp-c44 also
+passed. cmp-b43 bounded native village/town/party hover, second zoom, camera return
+and dialogue/map restoration checks passed. All 24 owned identities are absent,
+seven configs match; cmp-b43 retained with recoverable module preimages. Full
+native acceptance, battle-return/rejoin and host movement-target indicators remain
+open. Dialogue speaker-banner parity also remains open. See
+[implementation and required verification](CAMPAIGN_MAP_HOVER_DECALS.md).
+
+Post-checkpoint ordinary picking refinement: non-main raft exclusion now applies
+to client hover/pinned info, shared tooltip target admission and live host capture.
+State invalidation clears stale hover/payload. cmp-b40 both isolated builds and
+cmp-c42 all 24 projects passed; installed cmp-b39 unchanged. Native raft acceptance
+NOT RUN. See [refinement](CAMPAIGN_MAP_RESUME_2026-09-26.md#raft-hover-admission-refinement-2026-09-28-source-only).
+
 Published checkpoint overview: [2026-09-28 scope, verification and remaining work](CAMPAIGN_MAP_CHECKPOINT_2026-09-28.md).
 Raw artifacts/ evidence is local-only and is intentionally not included in Git.
 

@@ -164,6 +164,7 @@ namespace CoopSpectator.Campaign
             }
             MobileParty party = target.MobileParty;
             return target.IsMobile && party != null && party.IsActive && party.CurrentSettlement == null &&
+                (party.IsMainParty || !party.IsInRaftState) &&
                 entityId == "party:" + party.StringId &&
                 CoopCampaignMapPrototypeVisibilityPolicy.ShouldReplicateMobileParty(
                     party == MobileParty.MainParty, party.IsActive, party.IsGarrison, party.IsMilitia,

@@ -77,7 +77,7 @@ namespace CoopSpectator.UI
             return _entityReplicas.TryGetValue(id, out EntityReplica replica) &&
                 replica.Target != null && _dynamicById.TryGetValue(id, out var dynamicState) &&
                 dynamicState.IsVisible && (replica.Target.Kind == CoopCampaignMapPrototypeEntityKind.Settlement ||
-                    CoopCampaignMapPartyBodyPolicy.ShouldRenderBody(replica.Target.Kind, dynamicState.PartyNameplateFlags));
+                    CoopCampaignMapPartyPickPolicy.ShouldAllowPick(replica.Target.Kind, dynamicState.PartyNameplateFlags));
         }
 
         private bool IsPickGeometryVisible(UIntPtr handle) =>

@@ -7,7 +7,7 @@ namespace CoopSpectator.Network.Messages
 {
     public abstract class CoopCampaignMapTooltipControlBase : GameNetworkMessage
     {
-        private static readonly CompressionInfo.Integer Protocol = new CompressionInfo.Integer(0, 31, true);
+        private static readonly CompressionInfo.Integer Protocol = new CompressionInfo.Integer(0, CoopCampaignMapPrototypeContract.ProtocolCompressionMaximum, true);
         private byte[] _bytes = Array.Empty<byte>();
         protected abstract bool FromClient { get; }
         public CoopCampaignMapTooltipWireMessage Message { get; private set; }
@@ -25,6 +25,7 @@ namespace CoopSpectator.Network.Messages
         {
             bool valid = true;
             int protocol = ReadIntFromPacket(Protocol, ref valid);
+            if (!valid || protocol != CoopCampaignMapPrototypeContract.ProtocolVersion) return false;
             var buffer = new byte[CoopCampaignMapTooltipWireCodec.MaxControlBytes];
             int length = ReadByteArrayFromPacket(buffer, 0, buffer.Length, ref valid);
             if (!valid || protocol != CoopCampaignMapPrototypeContract.ProtocolVersion || length < 1 || length > buffer.Length) return false;
@@ -54,7 +55,7 @@ namespace CoopSpectator.Network.Messages
     [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromServer)]
     public sealed class CoopCampaignMapTooltipChunkMessage : GameNetworkMessage
     {
-        private static readonly CompressionInfo.Integer Protocol = new CompressionInfo.Integer(0, 31, true);
+        private static readonly CompressionInfo.Integer Protocol = new CompressionInfo.Integer(0, CoopCampaignMapPrototypeContract.ProtocolCompressionMaximum, true);
         private byte[] _bytes = Array.Empty<byte>();
         public CoopCampaignMapTooltipChunk Chunk { get; private set; }
         public CoopCampaignMapTooltipChunkMessage() { }
@@ -67,6 +68,7 @@ namespace CoopSpectator.Network.Messages
         {
             bool valid = true;
             int protocol = ReadIntFromPacket(Protocol, ref valid);
+            if (!valid || protocol != CoopCampaignMapPrototypeContract.ProtocolVersion) return false;
             var buffer = new byte[CoopCampaignMapTooltipChunks.MaxPacketBytes];
             int length = ReadByteArrayFromPacket(buffer, 0, buffer.Length, ref valid);
             if (!valid || protocol != CoopCampaignMapPrototypeContract.ProtocolVersion || length < 1 || length > buffer.Length) return false;

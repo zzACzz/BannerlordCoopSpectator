@@ -28,6 +28,10 @@ namespace CoopSpectator.GameMode
                 return;
             }
 
+            // Fail before opening if the passive map's lifetime guard cannot bind.
+            if (GameNetwork.IsServer)
+                CoopCampaignMapLobbyLifetimePatch.EnsureApplied();
+
             ModLogger.Info(
                 "CoopCampaignMapPrototype: opening isolated network mission. BootstrapScene=" +
                 (scene ?? string.Empty) + ".");
@@ -82,6 +86,10 @@ namespace CoopSpectator.GameMode
 #if !COOPSPECTATOR_DEDICATED
             if (!GameNetwork.IsServer)
             {
+                // This isolated mission name does not receive the stock battle
+                // view factory, so wire the native options subscriber explicitly.
+                AddIfNotNull(list,
+                    TaleWorlds.MountAndBlade.View.ViewCreator.CreateOptionsUIHandler());
                 list.Add(new CoopSpectator.UI.CoopCampaignMapPrototypeMissionView());
                 list.Add(new CoopSpectator.UI.CoopCampaignMapConversationView());
             }

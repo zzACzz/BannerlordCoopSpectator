@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Items>
-	<!--Generated campaign mirror items for CoopSpectator campaign_mirror_all. Do not hand-edit; regenerate from campaign item XML sources.-->
+	<!--Generated campaign mirror items for CoopSpectator campaign_mirror_all. Preserve the documented StoryMode supplement at the end when regenerating the base catalog.-->
 	<Item id="cs_mirror_guarded_padded_vambrace_a9ff5a74" name="{=whvMZZba}Guarded Padded Vambraces" mesh="padded_vambrace_a_handguard" culture="Culture.aserai" weight="0.6" difficulty="0" appearance="1" Type="HandArmor" multiplayer_item="true">
 		<ItemComponent>
 			<Armor arm_armor="9" stealth_factor="10" modifier_group="cloth" material_type="Cloth" />
@@ -9528,4 +9528,13 @@
 			<Piece id="aserai_noble_pommel_1" Type="Pommel" scale_factor="100" />
 		</Pieces>
 	</CraftedItem>
+	<!--StoryMode supplement: exact dragon_banner from StoryMode/ModuleData/story_mode_items.xml.
+	    Only id and multiplayer_item differ. Append-only to preserve existing catalog order.
+	    See docs/ai/CAMPAIGN_MAP_CONVERSATION_HUD.md; do not omit during regeneration.-->
+	<Item id="cs_mirror_dragon_banner_a60398b5" name="{=A1QabTDA}Dragon Banner" is_merchandise="false" body_name="bo_mace_a" recalculate_body="true" mesh="dragon_banner_weapon" prefab="dragon_banner_weapon" culture="Culture.empire" using_tableau="true" value="4" weight="0.2" Type="Banner" item_holsters="abdomen_left" multiplayer_item="true">
+		<ItemComponent>
+			<Banner banner_level="1" effect="IncreasedMeleeDamageAgainstMountedTroops" weapon_class="Banner" weapon_balance="100" thrust_speed="78" speed_rating="97" missile_speed="0" weapon_length="150" swing_damage="6" swing_damage_type="Blunt" item_usage="banner" physics_material="metal_weapon" position="0.0, 0.0, -0.8" />
+		</ItemComponent>
+		<Flags DropOnWeaponChange="true" ForceAttachOffHandPrimaryItemBone="true" HeldInOffHand="true" HasToBeHeldUp="true" CanBePickedUpFromCorpse="false" />
+	</Item>
 </Items>

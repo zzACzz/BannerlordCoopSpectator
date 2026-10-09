@@ -153,6 +153,8 @@ namespace CoopSpectator.Patches
         {
 #if COOPSPECTATOR_DEDICATED
             CoopSpectator.DedicatedServer.CoopCampaignMissionServer.ObserveNativeOpening(__result);
+#else
+            CoopSpectator.Campaign.CoopCampaignMapPrototypePublisherBehavior.ObserveNativeOpening(__result, missionName);
 #endif
             ModLogger.Info("MissionState.OpenNew EXIT missionName=" + (missionName ?? "") + " (original method returned).");
         }

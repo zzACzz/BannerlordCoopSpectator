@@ -7,6 +7,22 @@ namespace CoopSpectator.Infrastructure
 {
     public static class CoopCampaignMapPrototypeBridgeCodec
     {
+        private static string EncodeHud(CoopCampaignMapConversationHud hud)
+        {
+            if (!CoopConversationHudCodec.TrySerialize(hud, out var bytes))
+                throw new ArgumentException("Invalid conversation HUD.");
+            return Convert.ToBase64String(bytes);
+        }
+
+        private static bool TryReadHud(Dictionary<string, string> values, out CoopCampaignMapConversationHud hud)
+        {
+            hud = null;
+            if (!values.TryGetValue("ConversationHud", out var encoded) ||
+                encoded.Length > ((CoopConversationHudCodec.MaxPayloadBytes + 2) / 3) * 4) return false;
+            try { return CoopConversationHudCodec.TryDeserialize(Convert.FromBase64String(encoded), out hud); }
+            catch (FormatException) { return false; }
+        }
+
         private static string EncodePose(CoopCampaignMapConversationPose pose)
         {
             if (pose == null) return string.Empty;
@@ -84,6 +100,7 @@ namespace CoopSpectator.Infrastructure
                 "IsMoving=" + snapshot.IsMoving,
                 "IsActive=" + snapshot.IsActive,
                 "HasCamera=" + (snapshot.Camera != null),
+                "MovementTarget=" + snapshot.MovementTarget,
                 "VisibleEntitiesRevision=" + snapshot.VisibleEntitiesRevision.ToString(CultureInfo.InvariantCulture),
                 "CatalogRevision=" + snapshot.CatalogRevision.ToString(CultureInfo.InvariantCulture),
                 "DynamicRevision=" + snapshot.DynamicRevision.ToString(CultureInfo.InvariantCulture),
@@ -96,6 +113,7 @@ namespace CoopSpectator.Infrastructure
                 "ConversationContinueText=" + EncodeText(conversation.ContinueText),
                 "ConversationOptionCount=" + conversationOptionCount.ToString(CultureInfo.InvariantCulture),
                 "ConversationTableau=" + EncodeTableau(conversation.Tableau),
+                "ConversationHud=" + EncodeHud(conversation.Hud),
                 "ConversationPose=" + EncodePose(snapshot.ConversationPose)
             };
 
@@ -140,6 +158,7 @@ namespace CoopSpectator.Infrastructure
                 lines.Add(prefix + "PartySize=" + (entity?.PartySize ?? 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "IsPartyInformationHidden=" + (entity?.IsPartyInformationHidden ?? false));
                 lines.Add(prefix + "IsSettlementTracked=" + (entity?.IsSettlementTracked ?? false));
+                lines.Add(prefix + "SettlementRelation=" + (entity?.SettlementRelation ?? 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "IsSettlementInRange=" + (entity?.IsSettlementInRange ?? false));
                 lines.Add(prefix + "PartyNameplateCountText=" + EncodeText(entity?.PartyNameplateCountText));
                 lines.Add(prefix + "PartyNameplateExtraInfoText=" + EncodeText(entity?.PartyNameplateExtraInfoText));
@@ -154,9 +173,12 @@ namespace CoopSpectator.Infrastructure
                 lines.Add(prefix + "PartyVisualKind=" + (entity != null ? (int)entity.PartyVisualKind : 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "QuestMarkerFlags=" + (entity?.QuestMarkerFlags ?? 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "SettlementEventFlags=" + (entity?.SettlementEventFlags ?? 0).ToString(CultureInfo.InvariantCulture));
+                lines.Add(prefix + "SettlementEventOrder=" + (entity?.SettlementEventOrder ?? 0).ToString(CultureInfo.InvariantCulture));
+                lines.Add(prefix + "SettlementQuestOrder=" + (entity?.SettlementQuestOrder ?? 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "SettlementLevelFlags=" + (entity?.SettlementLevelFlags ?? 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "SettlementWallStates=" + EncodeText(entity?.SettlementWallStates));
                 lines.Add(prefix + "SettlementPartyBadges=" + EncodeText(entity?.SettlementPartyBadges));
+                lines.Add(prefix + "HoverDecal=" + EncodeText(entity?.HoverDecal));
                 lines.Add(prefix + "SettlementPreparationState=" + (entity?.SettlementPreparationState ?? 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "SettlementProductionIconId=" + EncodeText(entity?.SettlementProductionIconId));
                 SerializeAgentVisual(
@@ -220,6 +242,8 @@ namespace CoopSpectator.Infrastructure
                 !TryReadBool(values, "IsMoving", out bool isMoving) ||
                 !TryReadBool(values, "IsActive", out bool isActive) ||
                 !TryReadBool(values, "HasCamera", out bool hasCamera) ||
+                !values.TryGetValue("MovementTarget", out string movementTarget) ||
+                !CoopCampaignMapMovementTargetCodec.TryDecode(movementTarget, out _) ||
                 !TryReadInt(values, "VisibleEntitiesRevision", out int visibleEntitiesRevision) ||
                 !TryReadInt(values, "CatalogRevision", out int catalogRevision) ||
                 !TryReadInt(values, "DynamicRevision", out int dynamicRevision) ||
@@ -232,6 +256,7 @@ namespace CoopSpectator.Infrastructure
                 !TryReadText(values, "ConversationContinueText", out string conversationContinueText) ||
                 !TryReadInt(values, "ConversationOptionCount", out int conversationOptionCount) ||
                 !TryReadTableau(values, out var conversationTableau) ||
+                !TryReadHud(values, out var conversationHud) ||
                 !TryReadPose(values, out var conversationPose) ||
                 !TryReadDateTime(values, "UpdatedUtc", out DateTime updatedUtc))
             {
@@ -256,7 +281,8 @@ namespace CoopSpectator.Infrastructure
                 DialogText = conversationDialogText,
                 GoldText = conversationGoldText,
                 ContinueText = conversationContinueText,
-                Tableau = conversationTableau
+                Tableau = conversationTableau,
+                Hud = conversationHud
             };
             for (int index = 0; index < conversationOptionCount; index++)
             {
@@ -354,11 +380,15 @@ namespace CoopSpectator.Infrastructure
                     !TryReadInt(values, prefix + "PartyVisualKind", out int partyVisualKind) ||
                     !TryReadInt(values, prefix + "QuestMarkerFlags", out int questMarkerFlags) ||
                     !TryReadBool(values, prefix + "IsSettlementTracked", out bool settlementTracked) ||
+                    !TryReadInt(values, prefix + "SettlementRelation", out int settlementRelation) ||
                     !TryReadBool(values, prefix + "IsSettlementInRange", out bool settlementInRange) ||
                     !TryReadInt(values, prefix + "SettlementEventFlags", out int settlementEventFlags) ||
+                    !TryReadInt(values, prefix + "SettlementEventOrder", out int settlementEventOrder) ||
+                    !TryReadInt(values, prefix + "SettlementQuestOrder", out int settlementQuestOrder) ||
                     !TryReadInt(values, prefix + "SettlementLevelFlags", out int settlementLevelFlags) ||
                     !TryReadText(values, prefix + "SettlementWallStates", out string settlementWallStates) ||
                     !TryReadText(values, prefix + "SettlementPartyBadges", out string settlementPartyBadges) ||
+                    !TryReadText(values, prefix + "HoverDecal", out string hoverDecal) ||
                     !TryReadInt(values, prefix + "SettlementPreparationState", out int settlementPreparationState) ||
                     !TryReadText(values, prefix + "SettlementProductionIconId", out string settlementProductionIconId) ||
                     !TryParseAgentVisual(
@@ -405,11 +435,15 @@ namespace CoopSpectator.Infrastructure
                         (CoopCampaignMapPrototypePartyVisualKind)partyVisualKind,
                     QuestMarkerFlags = questMarkerFlags,
                     SettlementEventFlags = settlementEventFlags,
+                    SettlementEventOrder = settlementEventOrder,
+                    SettlementQuestOrder = settlementQuestOrder,
                     SettlementLevelFlags = settlementLevelFlags,
                     SettlementWallStates = settlementWallStates,
                     SettlementPartyBadges = settlementPartyBadges,
+                    HoverDecal = hoverDecal,
                     SettlementPreparationState = settlementPreparationState,
                     IsSettlementTracked = settlementTracked,
+                    SettlementRelation = settlementRelation,
                     IsSettlementInRange = settlementInRange,
                     SettlementProductionIconId = settlementProductionIconId,
                     HumanVisual = humanVisual,
@@ -446,6 +480,7 @@ namespace CoopSpectator.Infrastructure
                 DynamicRevision = dynamicRevision,
                 VisibleEntities = visibleEntities,
                 Camera = camera,
+                MovementTarget = movementTarget,
                 Conversation = conversation,
                 ConversationPose = conversationPose,
                 UpdatedUtc = updatedUtc
@@ -503,6 +538,7 @@ namespace CoopSpectator.Infrastructure
                 lines.Add(prefix + "SettlementLevelFlags=" + (entity?.SettlementLevelFlags ?? 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "SettlementWallStates=" + EncodeText(entity?.SettlementWallStates));
                 lines.Add(prefix + "SettlementPartyBadges=" + EncodeText(entity?.SettlementPartyBadges));
+                lines.Add(prefix + "HoverDecal=" + EncodeText(entity?.HoverDecal));
                 lines.Add(prefix + "SettlementPreparationState=" + (entity?.SettlementPreparationState ?? 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "SettlementProductionIconId=" + EncodeText(entity?.SettlementProductionIconId));
                 SerializeAgentVisual(lines, prefix + "HumanVisual.", entity?.HumanVisual);
@@ -560,6 +596,7 @@ namespace CoopSpectator.Infrastructure
                     !TryReadInt(values, prefix + "SettlementLevelFlags", out int settlementLevelFlags) ||
                     !TryReadText(values, prefix + "SettlementWallStates", out string settlementWallStates) ||
                     !TryReadText(values, prefix + "SettlementPartyBadges", out string settlementPartyBadges) ||
+                    !TryReadText(values, prefix + "HoverDecal", out string hoverDecal) ||
                     !TryReadInt(values, prefix + "SettlementPreparationState", out int settlementPreparationState) ||
                     !TryReadText(values, prefix + "SettlementProductionIconId", out string settlementProductionIconId) ||
                     !TryParseAgentVisual(values, prefix + "HumanVisual.", out CoopCampaignMapPrototypeAgentVisualState humanVisual) ||
@@ -595,6 +632,7 @@ namespace CoopSpectator.Infrastructure
                     SettlementLevelFlags = settlementLevelFlags,
                     SettlementWallStates = settlementWallStates,
                     SettlementPartyBadges = settlementPartyBadges,
+                    HoverDecal = hoverDecal,
                     SettlementPreparationState = settlementPreparationState,
                     SettlementProductionIconId = settlementProductionIconId,
                     HumanVisual = humanVisual,
@@ -651,6 +689,7 @@ namespace CoopSpectator.Infrastructure
                 lines.Add(prefix + "PartyNameplateFlags=" + (entity?.PartyNameplateFlags ?? 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "IsVisible=" + (entity?.IsVisible ?? false));
                 lines.Add(prefix + "IsSettlementTracked=" + (entity?.IsSettlementTracked ?? false));
+                lines.Add(prefix + "SettlementRelation=" + (entity?.SettlementRelation ?? 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "IsSettlementInRange=" + (entity?.IsSettlementInRange ?? false));
                 lines.Add(prefix + "IsMoving=" + (entity?.IsMoving ?? false));
                 lines.Add(prefix + "ArmyPartyCount=" + (entity?.ArmyPartyCount ?? 0).ToString(CultureInfo.InvariantCulture));
@@ -660,6 +699,8 @@ namespace CoopSpectator.Infrastructure
                 lines.Add(prefix + "InformationRevision=" + (entity?.InformationRevision ?? 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "QuestMarkerFlags=" + (entity?.QuestMarkerFlags ?? 0).ToString(CultureInfo.InvariantCulture));
                 lines.Add(prefix + "SettlementEventFlags=" + (entity?.SettlementEventFlags ?? 0).ToString(CultureInfo.InvariantCulture));
+                lines.Add(prefix + "SettlementEventOrder=" + (entity?.SettlementEventOrder ?? 0).ToString(CultureInfo.InvariantCulture));
+                lines.Add(prefix + "SettlementQuestOrder=" + (entity?.SettlementQuestOrder ?? 0).ToString(CultureInfo.InvariantCulture));
             }
             lines.Add("UpdatedUtc=" + snapshot.UpdatedUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
             return lines.ToArray();
@@ -706,8 +747,11 @@ namespace CoopSpectator.Infrastructure
                     !TryReadInt(values, prefix + "InformationRevision", out int informationRevision) ||
                     !TryReadInt(values, prefix + "QuestMarkerFlags", out int questMarkerFlags) ||
                     !TryReadBool(values, prefix + "IsSettlementTracked", out bool settlementTracked) ||
+                    !TryReadInt(values, prefix + "SettlementRelation", out int settlementRelation) ||
                     !TryReadBool(values, prefix + "IsSettlementInRange", out bool settlementInRange) ||
-                    !TryReadInt(values, prefix + "SettlementEventFlags", out int settlementEventFlags))
+                    !TryReadInt(values, prefix + "SettlementEventFlags", out int settlementEventFlags) ||
+                    !TryReadInt(values, prefix + "SettlementEventOrder", out int settlementEventOrder) ||
+                    !TryReadInt(values, prefix + "SettlementQuestOrder", out int settlementQuestOrder))
                 {
                     return Fail("malformed-dynamic-entity", out reason);
                 }
@@ -733,7 +777,10 @@ namespace CoopSpectator.Infrastructure
                     InformationRevision = informationRevision,
                     QuestMarkerFlags = questMarkerFlags,
                     SettlementEventFlags = settlementEventFlags,
+                    SettlementEventOrder = settlementEventOrder,
+                    SettlementQuestOrder = settlementQuestOrder,
                     IsSettlementTracked = settlementTracked,
+                    SettlementRelation = settlementRelation,
                     IsSettlementInRange = settlementInRange
                 };
                 if (!CoopCampaignMapPrototypeContract.IsValidDynamicEntity(entity))

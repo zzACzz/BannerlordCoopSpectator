@@ -8,7 +8,7 @@ namespace CoopSpectator.Network.Messages
     [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromServer)]
     public sealed class CoopCampaignMapConversationPoseMessage : GameNetworkMessage
     {
-        private static readonly CompressionInfo.Integer ProtocolCompression = new CompressionInfo.Integer(0, 31, true);
+        private static readonly CompressionInfo.Integer ProtocolCompression = new CompressionInfo.Integer(0, CoopCampaignMapPrototypeContract.ProtocolCompressionMaximum, true);
         public int ProtocolVersion { get; private set; }
         public CoopCampaignMapConversationPose Pose { get; private set; }
         private byte[] _bytes = Array.Empty<byte>();
@@ -24,6 +24,7 @@ namespace CoopSpectator.Network.Messages
         {
             bool valid = true;
             ProtocolVersion = ReadIntFromPacket(ProtocolCompression, ref valid);
+            if (!valid || ProtocolVersion != CoopCampaignMapPrototypeContract.ProtocolVersion) return false;
             var buffer = new byte[CoopCampaignMapConversationPoseCodec.MaxPayloadBytes];
             int length = ReadByteArrayFromPacket(buffer, 0, buffer.Length, ref valid);
             if (!valid || ProtocolVersion != CoopCampaignMapPrototypeContract.ProtocolVersion || length <= 0 || length > buffer.Length) return false;
@@ -45,7 +46,7 @@ namespace CoopSpectator.Network.Messages
     [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromServer)]
     public sealed class CoopCampaignMapConversationChunkMessage : GameNetworkMessage
     {
-        private static readonly CompressionInfo.Integer ProtocolCompression = new CompressionInfo.Integer(0, 31, true);
+        private static readonly CompressionInfo.Integer ProtocolCompression = new CompressionInfo.Integer(0, CoopCampaignMapPrototypeContract.ProtocolCompressionMaximum, true);
         private static readonly CompressionInfo.Integer RevisionCompression = new CompressionInfo.Integer(0, int.MaxValue, true);
         private static readonly CompressionInfo.Integer SizeCompression = new CompressionInfo.Integer(0, CoopCampaignMapConversationPayloadCodec.MaxPayloadBytes, true);
         private static readonly CompressionInfo.Integer CountCompression = new CompressionInfo.Integer(0, CoopCampaignMapConversationPayloadCodec.MaxChunks, true);
@@ -79,6 +80,7 @@ namespace CoopSpectator.Network.Messages
         {
             bool valid = true;
             ProtocolVersion = ReadIntFromPacket(ProtocolCompression, ref valid);
+            if (!valid || ProtocolVersion != CoopCampaignMapPrototypeContract.ProtocolVersion) return false;
             Revision = ReadIntFromPacket(RevisionCompression, ref valid);
             LogicalBytes = ReadIntFromPacket(SizeCompression, ref valid);
             WireBytes = ReadIntFromPacket(SizeCompression, ref valid);

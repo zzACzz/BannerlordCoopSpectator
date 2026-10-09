@@ -11,6 +11,7 @@ namespace CoopSpectator.Infrastructure
         public string AtmosphereName { get; set; } = string.Empty;
         public bool IsRaining { get; set; }
         public bool IsSnowing { get; set; }
+        public CoopCampaignMapConversationMissionScene MissionScene { get; set; }
         // s, f, u, origin; four consecutive xyz vectors in native frame order.
         public float[] CameraFrame { get; set; }
         public float BaseCameraHorizontalFov { get; set; }
@@ -21,6 +22,7 @@ namespace CoopSpectator.Infrastructure
         {
             var copy = (CoopCampaignMapConversationTableauState)MemberwiseClone();
             copy.CameraFrame = CameraFrame == null ? null : (float[])CameraFrame.Clone();
+            copy.MissionScene = MissionScene?.Clone();
             copy.Actors = Actors == null ? null : new List<CoopCampaignMapConversationActorState>();
             if (Actors != null)
                 foreach (var actor in Actors) copy.Actors.Add(actor?.Clone());
@@ -116,7 +118,7 @@ namespace CoopSpectator.Infrastructure
 
     public static class CoopCampaignMapConversationTableauCodec
     {
-        public const int SchemaVersion = 1;
+        public const int SchemaVersion = 2;
         public const int MaxActors = 3;
         public const int MaxPayloadBytes = 65536;
         public const int MaxIdentifierCharacters = 128;
@@ -127,7 +129,9 @@ namespace CoopSpectator.Infrastructure
         public static bool IsValid(CoopCampaignMapConversationTableauState state)
         {
             if (state == null || !IsIdentifier(state.AtmosphereName, false) ||
-                !state.AtmosphereName.StartsWith("conv_", StringComparison.Ordinal) ||
+                (state.MissionScene == null
+                    ? !state.AtmosphereName.StartsWith("conv_", StringComparison.Ordinal)
+                    : !CoopCampaignMapConversationMissionScene.IsValid(state.MissionScene)) ||
                 !IsFrame(state.CameraFrame) || !InRange(state.BaseCameraHorizontalFov, 0.1f, 3f) ||
                 state.Actors == null || state.Actors.Count < 1 || state.Actors.Count > MaxActors)
                 return false;
@@ -160,6 +164,7 @@ namespace CoopSpectator.Infrastructure
                 {
                     writer.Write(Magic);
                     writer.Write(SchemaVersion);
+                    CoopCampaignMapConversationMissionScene.Write(writer, state.MissionScene);
                     WriteText(writer, state.AtmosphereName);
                     writer.Write(state.IsRaining);
                     writer.Write(state.IsSnowing);
@@ -207,6 +212,7 @@ namespace CoopSpectator.Infrastructure
                     if (reader.ReadInt32() != Magic || reader.ReadInt32() != SchemaVersion) return false;
                     var decoded = new CoopCampaignMapConversationTableauState
                     {
+                        MissionScene = CoopCampaignMapConversationMissionScene.Read(reader),
                         AtmosphereName = ReadText(reader, MaxIdentifierCharacters),
                         IsRaining = ReadBoolean(reader),
                         IsSnowing = ReadBoolean(reader),
@@ -280,7 +286,7 @@ namespace CoopSpectator.Infrastructure
         private static bool InRange(float value, float min, float max) =>
             !float.IsNaN(value) && !float.IsInfinity(value) && value >= min && value <= max;
 
-        private static bool IsFrame(float[] frame)
+        internal static bool IsFrame(float[] frame)
         {
             if (frame == null || frame.Length != 12) return false;
             for (int i = 0; i < 12; i++) if (!InRange(frame[i], i < 9 ? -1.02f : -10000f, i < 9 ? 1.02f : 10000f)) return false;
@@ -303,9 +309,9 @@ namespace CoopSpectator.Infrastructure
             return determinant > 0.94d && determinant < 1.06d;
         }
 
-        private static void WriteFrame(BinaryWriter writer, float[] frame)
+        internal static void WriteFrame(BinaryWriter writer, float[] frame)
         { foreach (float value in frame) writer.Write(value); }
-        private static float[] ReadFrame(BinaryReader reader)
+        internal static float[] ReadFrame(BinaryReader reader)
         {
             var frame = new float[12];
             for (int i = 0; i < frame.Length; i++) frame[i] = reader.ReadSingle();

@@ -256,6 +256,29 @@ the lifecycle has native acceptance evidence; rollout/default changes are separa
 
 ## Acceptance checklist
 
+Additional bounded native coverage (2026-09-29): cmp-b57 run
+map-lifetime-r1-20260929 survived the original map's former timeout boundary,
+passed native Quit/rejoin, then completed one 29-versus-11 field victory on
+battle_terrain_biome_093b. EndMap command 2 / StartBattle command 3 preserved
+native ending; result writeback preceded StartMap command 4 at 06:05:30.785.
+The same MP connection rendered the returned map, native tooltip and camera;
+controlled host dialogue open/close under Options also passed. All 23 recorded
+identities are absent, seven configs match, no new configs/products; cmp-b57
+retained. Defeated-Looter missing-reference audit caveats remain recorded.
+This does not close adjacent battle, retreat/abort, multi-peer or full parity
+gates. See [result](../../artifacts/runtime/map-lifetime-r1-20260929/RESULT.md).
+
+Additional bounded native coverage (2026-09-28): cmp-b48 run
+map-movement-target-r1-20260928 repeated automatic startup and one normal field
+victory on battle_terrain_029, 30 vs 15. Authoritative victory at 17:03:50.506,
+campaign final aftermath committed at 17:03:51.212, StartMap command 4 at
+17:07:34.862 after prisoner/loot closure. Same MP connection rendered the returned
+map with 29 members and no defeated patrol; user confirmed working tooltips.
+All 22 exact-owned identities absent, seven configs match, no new configs/products;
+cmp-b48 retained. This is a separate fresh run, not consecutive-battle/rejoin or
+siege/hideout/retreat acceptance. Historical Draw UI was not retested. See
+[full local result and limits](../../artifacts/runtime/map-movement-target-r1-20260928/RESULT.md).
+
 | Requirement | Status |
 |---|---|
 | Map starts after server readiness without a console command | Satisfied for cml-b6 first startup and later client join; repeat/scenario coverage remains open |

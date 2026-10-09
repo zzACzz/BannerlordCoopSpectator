@@ -67,7 +67,7 @@ internal static class ConversationVisualLifetimeTests
         Check(!tableau.Contains("ForceLoadResources(") && !tableau.Contains("while (") &&
             tableau.Contains("_lifetime.Advance(") && tableau.Contains("_lifetime.IsFailed"), "no unbounded readiness loop");
         Check(tableau.Contains("CoopCampaignMapConversationTableauCodec.SceneName") &&
-            tableau.Contains("GameNetwork.IsClient") && tableau.Contains("ResolveSceneOwner()"), "local known-scene admission");
+            tableau.Contains("GameNetwork.IsClient") && tableau.Contains("ResolveSceneOwner(sceneName)"), "local known-scene admission");
         Check(!tableau.Contains("atmosphereFound") && tableau.Contains("GetCameraParamsFromCameraScript") &&
             tableau.Contains("Stopwatch") && tableau.Contains("Elapsed.TotalSeconds"), "native outdoor/camera and wall-clock readiness");
         Check(tableau.Contains("oldTexture?.Release()") && tableau.Contains("_scene?.ClearAll()") &&

@@ -93,6 +93,18 @@ namespace CoopSpectator.MissionBehaviors
 
         public static CoopCampaignMapPrototypeState CurrentClientState { get; private set; }
 
+        private static readonly System.Diagnostics.Stopwatch StateReceiptClock = System.Diagnostics.Stopwatch.StartNew();
+        private static double _clientStateReceivedAt = -1;
+
+        internal static bool TryGetMovementTargetState(out CoopCampaignMapPrototypeState state, out double ageSeconds)
+        {
+            state = CurrentClientState;
+            ageSeconds = StateReceiptClock.Elapsed.TotalSeconds - _clientStateReceivedAt;
+            return state != null && _clientStateReceivedAt >= 0 &&
+                CoopCampaignMapMovementTargetCodec.IsFreshAndReady(ageSeconds, state.CatalogRevision, state.DynamicRevision,
+                    _clientCatalogCompletedRevision, _clientDynamicCompletedRevision);
+        }
+
         public static IReadOnlyList<CoopCampaignMapPrototypeEntityState>
             CurrentClientVisibleEntities { get; private set; } =
                 new List<CoopCampaignMapPrototypeEntityState>();
@@ -406,6 +418,11 @@ namespace CoopSpectator.MissionBehaviors
             _serverState.VisibleEntitiesRevision = _networkDynamicRevision;
             _serverState.CatalogRevision = _networkCatalogRevision;
             _serverState.DynamicRevision = _networkDynamicRevision;
+            if (!CoopCampaignMapMovementTargetCodec.TryDecode(_serverState.MovementTarget, out var movementTarget) ||
+                _serverConversation.IsActive || !CoopCampaignMapMovementTargetCodec.IsAdmitted(movementTarget,
+                    movementTarget?.EntityId == null ? null : _serverCatalog.Find(x => x.EntityId == movementTarget.EntityId),
+                    movementTarget?.EntityId == null ? null : _serverDynamic.Find(x => x.EntityId == movementTarget.EntityId)))
+                _serverState.MovementTarget = string.Empty;
 
             LogAvailabilityTransition(
                 "authoritative:session=" + snapshot.SessionId);
@@ -535,6 +552,7 @@ namespace CoopSpectator.MissionBehaviors
             }
 
             CurrentClientState = state;
+            _clientStateReceivedAt = StateReceiptClock.Elapsed.TotalSeconds;
             _tooltipClientStateAt = TooltipNow;
             try
             {
@@ -1676,10 +1694,11 @@ namespace CoopSpectator.MissionBehaviors
             if (count <= 0)
                 return true;
 
-            // Occupant lists can exceed a native single-message budget. Admission
+            // Occupant lists plus hover frames can exceed a native single-message budget. Admission
             // must happen before the header: queue the bounded binary transfer instead.
             for (int index = 0; index < count; index++)
-                if (!string.IsNullOrEmpty(entities[index]?.SettlementPartyBadges)) return false;
+                if (!string.IsNullOrEmpty(entities[index]?.SettlementPartyBadges) ||
+                    !string.IsNullOrEmpty(entities[index]?.HoverDecal)) return false;
 
             try
             {

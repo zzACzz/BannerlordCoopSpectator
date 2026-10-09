@@ -60,6 +60,9 @@
     <Compile Include="..\GameMode\MissionMultiplayerCoopHeroCreatorClient.cs" Link="GameMode\MissionMultiplayerCoopHeroCreatorClient.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopCampaignMapPrototypeMode.cs" Link="GameMode\MissionMultiplayerCoopCampaignMapPrototypeMode.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopCampaignMapPrototype.cs" Link="GameMode\MissionMultiplayerCoopCampaignMapPrototype.cs" />
+    <Compile Include="..\GameMode\CoopCampaignMapLobbyLifetimePatch.cs" Link="GameMode\CoopCampaignMapLobbyLifetimePatch.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapLobbyLifetimePolicy.cs" Link="Infrastructure\CoopCampaignMapLobbyLifetimePolicy.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapSettlementMarkerOrder.cs" Link="Infrastructure\CoopCampaignMapSettlementMarkerOrder.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopCampaignMapPrototypeClient.cs" Link="GameMode\MissionMultiplayerCoopCampaignMapPrototypeClient.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopHideoutDayMode.cs" Link="GameMode\MissionMultiplayerCoopHideoutDayMode.cs" />
     <Compile Include="..\GameMode\MissionMultiplayerCoopHideoutNightMode.cs" Link="GameMode\MissionMultiplayerCoopHideoutNightMode.cs" />
@@ -175,13 +178,18 @@
     <Compile Include="..\Infrastructure\CoopBattlePowerContract.cs" Link="Infrastructure\CoopBattlePowerContract.cs" />
     <Compile Include="..\Infrastructure\CoopMaterializedAgentEntrySnapshotContract.cs" Link="Infrastructure\CoopMaterializedAgentEntrySnapshotContract.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMapPrototypeContract.cs" Link="Infrastructure\CoopCampaignMapPrototypeContract.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapHoverDecal.cs" Link="Infrastructure\CoopCampaignMapHoverDecal.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapMovementTarget.cs" Link="Infrastructure\CoopCampaignMapMovementTarget.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapMovementTargetCodec.cs" Link="Infrastructure\CoopCampaignMapMovementTargetCodec.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMapSettlementGeometryAdmission.cs" Link="Infrastructure\CoopCampaignMapSettlementGeometryAdmission.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMissionLifecycle.cs" Link="Infrastructure\CoopCampaignMissionLifecycle.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMissionOpening.cs" Link="Infrastructure\CoopCampaignMissionOpening.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMissionChannel.cs" Link="Infrastructure\CoopCampaignMissionChannel.cs" />
     <Compile Include="CoopCampaignMissionServer.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMapConversationTableauState.cs" Link="Infrastructure\CoopCampaignMapConversationTableauState.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapConversationMissionScene.cs" Link="Infrastructure\CoopCampaignMapConversationMissionScene.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMapConversationPayloadCodec.cs" Link="Infrastructure\CoopCampaignMapConversationPayloadCodec.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapConversationHud.cs" Link="Infrastructure\CoopCampaignMapConversationHud.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMapTooltipPayload.cs" Link="Infrastructure\CoopCampaignMapTooltipPayload.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMapTooltipInterest.cs" Link="Infrastructure\CoopCampaignMapTooltipInterest.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMapTooltipPeerGate.cs" Link="Infrastructure\CoopCampaignMapTooltipPeerGate.cs" />

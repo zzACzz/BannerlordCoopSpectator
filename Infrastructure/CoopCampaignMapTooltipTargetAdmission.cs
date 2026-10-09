@@ -17,7 +17,7 @@ namespace CoopSpectator.Infrastructure
                 !string.Equals(dynamicState.EntityId, request.EntityId, StringComparison.Ordinal) || !dynamicState.IsVisible) return false;
             string prefix;
             if (catalog.Kind == CoopCampaignMapPrototypeEntityKind.Settlement) prefix = "settlement:";
-            else if (CoopCampaignMapPartyBodyPolicy.ShouldRenderBody(catalog.Kind, dynamicState.PartyNameplateFlags)) prefix = "party:";
+            else if (CoopCampaignMapPartyPickPolicy.ShouldAllowPick(catalog.Kind, dynamicState.PartyNameplateFlags)) prefix = "party:";
             else return false;
             return request.EntityId.StartsWith(prefix, StringComparison.Ordinal) && request.EntityId.Length > prefix.Length;
         }

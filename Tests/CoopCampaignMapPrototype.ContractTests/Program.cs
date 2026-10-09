@@ -17,6 +17,9 @@ internal static class Program
             ValidateNativePartyPresentation();
             PartyBodyTests.Run();
             PickResolverTests.Run();
+            HoverDecalTests.Run();
+            MovementTargetTests.Run();
+            MovementTargetTransportTests.Run();
             TooltipPayloadTests.Run();
             TooltipInterestTests.Run();
             TooltipPeerGateTests.Run();
@@ -29,13 +32,22 @@ internal static class Program
             TooltipThreadStateTests.Run();
             ValidateReplicaStateProjection();
             ValidateSettlementPresentation();
+            SettlementRelationTests.Run();
             ReplicaCameraTests.Run();
+            EscapeInputTests.Run();
+            LobbyLifetimeTests.Run();
+            SettlementEventDisclosureTests.Run();
+            SettlementMarkerOrderTests.Run();
+            SettlementMarkerTransportTests.Run();
             SettlementGeometryTests.Run();
             SettlementPartyBadgeTests.Run();
             ValidateSettlementLevels();
             ValidateConversationContract();
             ConversationTableauTests.Run();
+            ConversationMissionSceneTests.Run();
+            ConversationPublicationLeaseTests.Run();
             ConversationPayloadTests.Run();
+            ConversationHudTests.Run();
             ConversationVisualLifetimeTests.Run();
             ConversationPoseTests.Run();
             MissionLifecycleTests.Run();
@@ -143,10 +155,10 @@ internal static class Program
     private static void ValidateProtocolVersion()
     {
         Assert(
-            CoopCampaignMapPrototypeContract.ProtocolVersion == 27 &&
-            CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion == 22 &&
-            CoopCampaignMapCatalogBinarySerializer.SchemaVersion == 7,
-            "Tooltip networking requires protocol 27; settlement bridge/catalog remain schema 22/7.");
+            CoopCampaignMapPrototypeContract.ProtocolVersion == 33 &&
+            CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion == 28 &&
+            CoopCampaignMapCatalogBinarySerializer.SchemaVersion == 8,
+            "Ordered markers require coherent protocol/bridge/catalog schema 32/27/8.");
     }
 
     private static void ValidateSettlementLevels()
@@ -671,6 +683,7 @@ internal static class Program
             EntityId = catalog.EntityId, IsVisible = true,
             NormalizedX = 1234, NormalizedY = 5678, Heading = 910,
             PartySize = 73, QuestMarkerFlags = 17, SettlementEventFlags = 65,
+            SettlementEventOrder = 15, SettlementQuestOrder = 41,
             IsSettlementTracked = true, IsSettlementInRange = true,
             PartyNameplateCountText = "65", PartyNameplateExtraInfoText = "+8w+3p",
             PartyNameplateFlags = 25, PartyMovementSpeedText = "4.8"
@@ -682,6 +695,8 @@ internal static class Program
         var dynamicFields = new HashSet<string>(StringComparer.Ordinal) {
             "NormalizedX", "NormalizedY", "Heading", "PartySize",
             "IsPartyInformationHidden", "QuestMarkerFlags", "SettlementEventFlags",
+            "SettlementEventOrder", "SettlementQuestOrder",
+            "SettlementRelation",
             "IsSettlementTracked", "IsSettlementInRange",
             "PartyNameplateCountText", "PartyNameplateExtraInfoText",
             "PartyNameplateFlags", "PartyMovementSpeedText"
@@ -722,6 +737,8 @@ internal static class Program
         dynamicState.PartySize = 0;
         dynamicState.QuestMarkerFlags = 0;
         dynamicState.SettlementEventFlags = 0;
+        dynamicState.SettlementEventOrder = 0;
+        dynamicState.SettlementQuestOrder = 0;
         dynamicState.IsSettlementTracked = false;
         dynamicState.IsSettlementInRange = false;
         catalog.SettlementProductionIconId = string.Empty;
@@ -2164,7 +2181,7 @@ internal static class Program
             {
                 new CoopCampaignMapPrototypeDynamicEntityState
                 {
-                    EntityId = "party:main",
+                    EntityId = "settlement:codec_fixture",
                     NormalizedX = 123000,
                     NormalizedY = 456000,
                     Heading = 789000,
@@ -2176,6 +2193,8 @@ internal static class Program
                     ArmyCohesion = 750000,
                     AppearanceRevision = 2,
                     InformationRevision = 3,
+                    SettlementEventOrder = 2,
+                    SettlementQuestOrder = 4,
                     QuestMarkerFlags =
                         (int)CoopCampaignMapPrototypeQuestMarkerFlags
                             .TrackedIssue,
@@ -2867,6 +2886,8 @@ internal static class Program
                 QuestMarkerFlags =
                     (int)CoopCampaignMapPrototypeQuestMarkerFlags
                         .TrackedIssue,
+                SettlementEventOrder = 2,
+                SettlementQuestOrder = 4,
                 SettlementEventFlags =
                     (int)CoopCampaignMapPrototypeSettlementEventFlags
                         .AvailableIssue
@@ -2897,6 +2918,7 @@ internal static class Program
                 leftEntity.PartySize != rightEntity.PartySize ||
                 leftEntity.IsPartyInformationHidden != rightEntity.IsPartyInformationHidden ||
                 leftEntity.IsSettlementTracked != rightEntity.IsSettlementTracked ||
+                leftEntity.SettlementRelation != rightEntity.SettlementRelation ||
                 leftEntity.IsSettlementInRange != rightEntity.IsSettlementInRange ||
                 leftEntity.PrimaryColor != rightEntity.PrimaryColor ||
                 leftEntity.SecondaryColor != rightEntity.SecondaryColor ||
@@ -2907,6 +2929,8 @@ internal static class Program
                 leftEntity.CultureId != rightEntity.CultureId ||
                 leftEntity.PartyVisualKind != rightEntity.PartyVisualKind ||
                 leftEntity.QuestMarkerFlags != rightEntity.QuestMarkerFlags ||
+                leftEntity.SettlementEventOrder != rightEntity.SettlementEventOrder ||
+                leftEntity.SettlementQuestOrder != rightEntity.SettlementQuestOrder ||
                 leftEntity.SettlementEventFlags !=
                     rightEntity.SettlementEventFlags ||
                 leftEntity.SettlementProductionIconId !=
@@ -3240,17 +3264,16 @@ internal static class Program
 
         Assert(
             publisher.Contains("CampaignUIHelper.GetQuestsRelatedToParty") &&
-            publisher.Contains("CampaignUIHelper.GetQuestsRelatedToSettlement") &&
-            publisher.Contains("GetNumOfActiveIssuesInSettlement") &&
-            publisher.Contains("GetNumOfAvailableIssuesInSettlement") &&
-            publisher.Contains("GetTournamentGame") &&
+            publisher.Contains("nameplate?.SettlementEvents?.EventsList") &&
+            publisher.Contains("nameplate?.SettlementEvents?.TrackQuests") &&
+            publisher.Contains("item.AdditionalParameters") &&
             publisher.IndexOf(
                 ".ShouldReplicateSettlement(",
                 StringComparison.Ordinal) <
             publisher.IndexOf(
-                "CaptureSettlementInformation(settlement)",
+                "CaptureSettlementInformation(settlement, settlementNameplates)",
                 StringComparison.Ordinal),
-            "Marker capture must use native campaign quest/issue APIs only after host visibility filtering.");
+            "Settlement markers must read existing host lists only after visibility filtering; party quest capture is unchanged.");
         Assert(
             bridgeCodec.Contains("QuestMarkerFlags") &&
             bridgeCodec.Contains("SettlementEventFlags") &&
@@ -3343,8 +3366,10 @@ internal static class Program
             !capture.Contains("ContinueConversation(") &&
             captureFailureReturn > captureFailureLog &&
             captureFailureReturn < conversationEquivalence &&
-            !conversationUpdate.Contains("captured ="),
-            "Host capture must read the native formatted map-dialogue VM without advancing it.");
+            conversationUpdate.Contains("if (!_clearConversationOnCaptureFailure) return;") &&
+            conversationUpdate.Contains("captured = CoopCampaignMapPrototypeContract.CreateInactiveConversation();") &&
+            conversationUpdate.Contains("pose = null;"),
+            "Host capture must read prepared native text without advancing; only the mission/return boundary clears failed capture.");
         Assert(
             bridgeCodec.Contains("ConversationRevision") &&
             bridgeCodec.Contains("ConversationOptionCount") &&

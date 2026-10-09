@@ -739,6 +739,28 @@ prisoner/raft rules, naval/siege targets and battle-return/rejoin remain open.
 All 22 owned identities are absent, seven configs restored, no new configs;
 cmp-b39 retained. See [bounded result and evidence](../../artifacts/runtime/map-picking-r1-20260928/RESULT.md).
 
+### Raft hover admission refinement (2026-09-28, source only)
+
+After published checkpoint c85c586, CoopCampaignMapPartyPickPolicy adds the audited
+non-main InRaft exclusion without altering body rendering, nameplate rules,
+collision geometry or the wire format. The main-party exception is retained.
+Current dynamic flags gate picking and pinned info; shared host/server tooltip
+target admission applies the same rule. Host capture also rechecks live native
+IsInRaftState so an older published land snapshot cannot authorize a raft read.
+Upsert invalidates hover/payload/pin on disallowed states; entity removal clears
+hover/payload independently of overlay update intent. This affects only prototype
+map UI/tooltip adapters, not field/village/siege/hideout battle physics. Each
+battle-return/rejoin still needs native regression; no broader DLC support claim.
+
+Independent kind/flag matrices and 100 land/raft/land resolver cycles cover
+settlement fallthrough, no nearby fallback, retained bodies and fresh land return.
+cmp-b40 both isolated builds passed with unchanged installed inventories;
+cmp-c42 passed all 24 projects. Native raft case NOT RUN; cmp-b39 remains installed.
+Attached-army redirect and main-hero-prisoner hover exclusion remain separate
+gaps. Native scene picking details below describe the original cmp-b39 candidate.
+
+#### Original cmp-b39 implementation and audit
+
 The former UpdateReplicaInformation picked the nearest projected origin within
 96 physical pixels. It could select empty space and misidentify adjacent objects;
 native-looking tooltip rows did not imply native hit-region parity.

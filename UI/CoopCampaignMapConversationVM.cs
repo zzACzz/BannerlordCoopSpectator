@@ -18,14 +18,26 @@ namespace CoopSpectator.UI
             ContinueText = safe.ContinueText ?? string.Empty;
             GoldHint = new CoopCampaignMapConversationHintVM(
                 new TextObject("{=o5G8A8ZH}Your Denars"));
-            FactionHint = new CoopCampaignMapConversationHintVM();
+            FactionHint = new CoopCampaignMapConversationHintVM(new TextObject("{=!}" + (safe.Hud?.FactionHint ?? string.Empty)));
             RelationHint = new CoopCampaignMapConversationHintVM();
             AnswerList =
                 new MBBindingList<CoopCampaignMapConversationOptionVM>();
             AttackerParties =
-                new MBBindingList<CoopCampaignMapConversationOptionVM>();
+                new MBBindingList<CoopConversationHudPartyVM>();
             DefenderParties =
-                new MBBindingList<CoopCampaignMapConversationOptionVM>();
+                new MBBindingList<CoopConversationHudPartyVM>();
+            var hud = safe.IsActive && CoopConversationHudCodec.IsValid(safe.Hud) ? safe.Hud : null;
+            IsAggressive = hud?.IsAggressive ?? false;
+            IsBannerEnabled = hud?.IsBannerEnabled ?? false;
+            if (IsAggressive)
+            {
+                AttackerLeader = new CoopConversationHudPartyVM(hud.AttackerLeader);
+                DefenderLeader = new CoopConversationHudPartyVM(hud.DefenderLeader);
+                PowerComparer = new CoopConversationHudPowerVM(hud);
+                foreach (var party in hud.AttackerParties) AttackerParties.Add(new CoopConversationHudPartyVM(party));
+                foreach (var party in hud.DefenderParties) DefenderParties.Add(new CoopConversationHudPartyVM(party));
+            }
+            if (IsBannerEnabled) ConversedHeroBanner = new CoopConversationHudImageVM(hud.BannerCode, true, hud.BannerNineGrid);
             if (safe.Options != null)
             {
                 foreach (CoopCampaignMapConversationOptionState option in
@@ -89,39 +101,39 @@ namespace CoopSpectator.UI
         }
 
         [DataSourceProperty]
-        public MBBindingList<CoopCampaignMapConversationOptionVM>
+        public MBBindingList<CoopConversationHudPartyVM>
             AttackerParties { get; }
 
         [DataSourceProperty]
-        public MBBindingList<CoopCampaignMapConversationOptionVM>
+        public MBBindingList<CoopConversationHudPartyVM>
             DefenderParties { get; }
 
         [DataSourceProperty]
-        public ViewModel AttackerLeader => null;
+        public CoopConversationHudPartyVM AttackerLeader { get; }
 
         [DataSourceProperty]
-        public ViewModel DefenderLeader => null;
+        public CoopConversationHudPartyVM DefenderLeader { get; }
 
         [DataSourceProperty]
-        public ViewModel PowerComparer => null;
+        public CoopConversationHudPowerVM PowerComparer { get; }
 
         [DataSourceProperty]
         public ViewModel Persuasion => null;
 
         [DataSourceProperty]
-        public ViewModel ConversedHeroBanner => null;
+        public CoopConversationHudImageVM ConversedHeroBanner { get; }
 
         [DataSourceProperty]
         public ViewModel CurrentSelectedAnswer => null;
 
         [DataSourceProperty]
-        public bool IsAggressive => false;
+        public bool IsAggressive { get; }
 
         [DataSourceProperty]
         public bool IsPersuading => false;
 
         [DataSourceProperty]
-        public bool IsBannerEnabled => false;
+        public bool IsBannerEnabled { get; }
 
         [DataSourceProperty]
         public bool IsRelationEnabled => false;
@@ -161,6 +173,12 @@ namespace CoopSpectator.UI
             foreach (CoopCampaignMapConversationOptionVM option in AnswerList)
                 option?.OnFinalize();
             AnswerList.Clear();
+            foreach (var party in AttackerParties) party.OnFinalize();
+            foreach (var party in DefenderParties) party.OnFinalize();
+            AttackerParties.Clear(); DefenderParties.Clear();
+            AttackerLeader?.OnFinalize(); DefenderLeader?.OnFinalize();
+            PowerComparer?.OnFinalize(); ConversedHeroBanner?.OnFinalize();
+            FactionHint.OnFinalize();
             base.OnFinalize();
         }
     }

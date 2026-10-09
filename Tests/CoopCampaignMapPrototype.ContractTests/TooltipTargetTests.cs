@@ -22,8 +22,11 @@ internal static class TooltipTargetTests
                 foreach (bool visible in new[] { false, true })
                 {
                     dynamicState.IsVisible = visible;
-                    bool expected = visible && (kind == CoopCampaignMapPrototypeEntityKind.Settlement ||
-                        CoopCampaignMapPartyBodyPolicy.ShouldRenderBody(kind, flags));
+                    bool main = kind == CoopCampaignMapPrototypeEntityKind.MainParty;
+                    bool mobile = main || kind == CoopCampaignMapPrototypeEntityKind.MobileParty;
+                    bool pickable = mobile && flags >= 0 && flags <= 63 && (flags & 4) == 0 &&
+                        (main || (flags & 32) == 0);
+                    bool expected = visible && (kind == CoopCampaignMapPrototypeEntityKind.Settlement || pickable);
                     Check(CoopCampaignMapTooltipTargetAdmission.IsAdmitted(session, request, catalog, dynamicState) == expected, "kind/body/visibility matrix");
                 }
             }
@@ -49,6 +52,9 @@ internal static class TooltipTargetTests
 
         string root = Environment.GetEnvironmentVariable("COOPSPECTATOR_REPOSITORY_ROOT");
         string publisher = File.ReadAllText(Path.Combine(root, "Campaign", "CoopCampaignMapPrototypePublisherBehavior.cs"));
+        string capture = File.ReadAllText(Path.Combine(root, "Campaign", "CoopCampaignMapTooltipCapture.cs"));
+        Check(capture.Contains("(party.IsMainParty || !party.IsInRaftState)"),
+            "Host rechecks current native raft state rather than trusting last published flags");
         int method = publisher.IndexOf("internal static bool TryCapturePublishedTooltip", StringComparison.Ordinal);
         int lookup = publisher.IndexOf("foreach (Settlement settlement in Settlement.All)", method, StringComparison.Ordinal);
         Check(method >= 0 && publisher.IndexOf("CoopCampaignMapTooltipTargetAdmission.IsAdmitted", method, StringComparison.Ordinal) < lookup,

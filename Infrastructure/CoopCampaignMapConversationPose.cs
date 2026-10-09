@@ -12,12 +12,14 @@ namespace CoopSpectator.Infrastructure
         public int ConversationRevision { get; set; }
         public int Sequence { get; set; }
         public string TableauHash { get; set; } = string.Empty;
+        public float[] CameraFrame { get; set; }
         public List<CoopCampaignMapConversationActorPose> Actors { get; set; } =
             new List<CoopCampaignMapConversationActorPose>();
 
         public CoopCampaignMapConversationPose Clone()
         {
             var copy = (CoopCampaignMapConversationPose)MemberwiseClone();
+            copy.CameraFrame = CameraFrame == null ? null : (float[])CameraFrame.Clone();
             copy.Actors = Actors == null ? null : new List<CoopCampaignMapConversationActorPose>();
             if (Actors != null) foreach (var actor in Actors) copy.Actors.Add(actor?.Clone());
             return copy;
@@ -29,14 +31,19 @@ namespace CoopSpectator.Infrastructure
         public string ActionName { get; set; } = string.Empty;
         public float Progress { get; set; }
         public float Speed { get; set; } = 1f;
-        public CoopCampaignMapConversationActorPose Clone() =>
-            (CoopCampaignMapConversationActorPose)MemberwiseClone();
+        public float[] Frame { get; set; }
+        public CoopCampaignMapConversationActorPose Clone()
+        {
+            var copy = (CoopCampaignMapConversationActorPose)MemberwiseClone();
+            copy.Frame = Frame == null ? null : (float[])Frame.Clone();
+            return copy;
+        }
     }
 
     public static class CoopCampaignMapConversationPoseCodec
     {
-        public const int MaxPayloadBytes = 512;
-        public const int SchemaVersion = 1;
+        public const int MaxPayloadBytes = 768;
+        public const int SchemaVersion = 2;
         private const int Magic = 0x43504F31;
 
         public static string Hash(CoopCampaignMapConversationTableauState tableau)
@@ -51,15 +58,18 @@ namespace CoopSpectator.Infrastructure
             if (pose == null || pose.ConversationRevision < 0 || pose.Sequence < 0 ||
                 !IsHash(pose.TableauHash) || pose.Actors == null || pose.Actors.Count < 1 ||
                 pose.Actors.Count > CoopCampaignMapConversationTableauCodec.MaxActors) return false;
+            if (pose.CameraFrame != null && !CoopCampaignMapConversationTableauCodec.IsFrame(pose.CameraFrame)) return false;
             foreach (var actor in pose.Actors)
                 if (actor == null || !IsAction(actor.ActionName) || !InRange(actor.Progress, 0f, 1f) ||
-                    !InRange(actor.Speed, 0f, 10f)) return false;
+                    !InRange(actor.Speed, 0f, 10f) ||
+                    (pose.CameraFrame == null ? actor.Frame != null : !CoopCampaignMapConversationTableauCodec.IsFrame(actor.Frame))) return false;
             return true;
         }
 
         public static bool Matches(CoopCampaignMapConversationPose pose, CoopCampaignMapConversationState conversation) =>
             IsValid(pose) && conversation != null && conversation.IsActive &&
             pose.ConversationRevision == conversation.Revision && conversation.Tableau != null &&
+            (pose.CameraFrame != null) == (conversation.Tableau.MissionScene != null) &&
             pose.Actors.Count == conversation.Tableau.Actors?.Count &&
             string.Equals(pose.TableauHash, Hash(conversation.Tableau), StringComparison.Ordinal);
 
@@ -75,12 +85,15 @@ namespace CoopSpectator.Infrastructure
                 writer.Write(pose.ConversationRevision);
                 writer.Write(pose.Sequence);
                 for (int i = 0; i < 64; i += 2) writer.Write(Convert.ToByte(pose.TableauHash.Substring(i, 2), 16));
+                writer.Write(pose.CameraFrame != null);
+                if (pose.CameraFrame != null) CoopCampaignMapConversationTableauCodec.WriteFrame(writer, pose.CameraFrame);
                 writer.Write(pose.Actors.Count);
                 foreach (var actor in pose.Actors)
                 {
                     CoopCampaignMapConversationTableauCodec.WriteText(writer, actor.ActionName);
                     writer.Write(actor.Progress);
                     writer.Write(actor.Speed);
+                    if (pose.CameraFrame != null) CoopCampaignMapConversationTableauCodec.WriteFrame(writer, actor.Frame);
                 }
                 writer.Flush();
                 if (stream.Length > MaxPayloadBytes) return false;
@@ -104,12 +117,15 @@ namespace CoopSpectator.Infrastructure
                         ConversationRevision = reader.ReadInt32(), Sequence = reader.ReadInt32(),
                         TableauHash = BitConverter.ToString(reader.ReadBytes(32)).Replace("-", "").ToLowerInvariant()
                     };
+                    bool hasFrames = CoopCampaignMapConversationTableauCodec.ReadBoolean(reader);
+                    if (hasFrames) result.CameraFrame = CoopCampaignMapConversationTableauCodec.ReadFrame(reader);
                     int count = reader.ReadInt32();
                     if (count < 1 || count > CoopCampaignMapConversationTableauCodec.MaxActors) return false;
                     for (int i = 0; i < count; i++) result.Actors.Add(new CoopCampaignMapConversationActorPose
                     {
                         ActionName = CoopCampaignMapConversationTableauCodec.ReadText(reader, 128),
-                        Progress = reader.ReadSingle(), Speed = reader.ReadSingle()
+                        Progress = reader.ReadSingle(), Speed = reader.ReadSingle(),
+                        Frame = hasFrames ? CoopCampaignMapConversationTableauCodec.ReadFrame(reader) : null
                     });
                     if (stream.Position != stream.Length || !IsValid(result)) return false;
                     pose = result;
@@ -194,6 +210,7 @@ namespace CoopSpectator.Infrastructure
         private int _sequence = -1;
         private string _hash;
         private int _count;
+        private bool _missionFrames;
 
         public void Bind(CoopCampaignMapConversationState state)
         {
@@ -202,6 +219,7 @@ namespace CoopSpectator.Infrastructure
             _sequence = -1;
             _hash = state.IsActive ? CoopCampaignMapConversationPoseCodec.Hash(state.Tableau) : null;
             _count = _hash == null ? 0 : state.Tableau.Actors.Count;
+            _missionFrames = _hash != null && state.Tableau.MissionScene != null;
         }
 
         public bool TryAccept(CoopCampaignMapConversationPose pose, out CoopCampaignMapConversationPose accepted)
@@ -209,12 +227,13 @@ namespace CoopSpectator.Infrastructure
             accepted = null;
             if (!CoopCampaignMapConversationPoseCodec.IsValid(pose) || _hash == null ||
                 pose.ConversationRevision != _revision || pose.Sequence <= _sequence ||
-                pose.Actors.Count != _count || !string.Equals(pose.TableauHash, _hash, StringComparison.Ordinal)) return false;
+                pose.Actors.Count != _count || (pose.CameraFrame != null) != _missionFrames ||
+                !string.Equals(pose.TableauHash, _hash, StringComparison.Ordinal)) return false;
             _sequence = pose.Sequence;
             accepted = pose.Clone();
             return true;
         }
 
-        public void Reset() { _revision = -1; _sequence = -1; _hash = null; _count = 0; }
+        public void Reset() { _revision = -1; _sequence = -1; _hash = null; _count = 0; _missionFrames = false; }
     }
 }

@@ -22,7 +22,7 @@ internal static class ConversationPoseTests
         var maximal = pose.Clone();
         foreach (var actor in maximal.Actors) actor.ActionName = "act_" + new string('a', 124);
         Check(CoopCampaignMapConversationPoseCodec.TrySerialize(maximal, out var maximum) &&
-            maximum.Length == 472 && maximum.Length <= 512, "maximum fits one bounded message");
+            maximum.Length == 473 && maximum.Length <= 512, "map pose maximum still fits original bounded message");
         var invalid = new List<Action<CoopCampaignMapConversationPose>>
         {
             p => p.ConversationRevision = -1, p => p.Sequence = -1,

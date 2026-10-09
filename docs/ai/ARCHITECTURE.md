@@ -1,5 +1,32 @@
 # Architecture
 
+Standalone land-conversation source extension: an exact native opening binds a
+successful same-campaign map anchor. Only that mission's existing dialogue VM
+can supply text/HUD; map native visuals are not read during the mission and no
+client choice authority is added. Bounded mission scene/visible actor/camera
+capture and owned rendering are connected in source, not native-verified.
+See [ownership and verification limits](CAMPAIGN_MAP_MISSION_DIALOGUE.md).
+
+Dialogue HUD candidate copies host-prepared display values, including native
+hidden-strength substitutions and hidden-hero silhouettes. MP creates detached
+presentation VMs only; stock widgets own thumbnails. No campaign-party object or
+choice authority crosses the boundary. See [scope](CAMPAIGN_MAP_CONVERSATION_HUD.md).
+
+The passive replica map is not a timed match. Its new lifetime guard keeps stock
+match expiry from acquiring battle-end authority; campaign lifecycle or explicit
+native mission ending still owns teardown. No transport or battle authority was
+changed. See [candidate and evidence boundary](CAMPAIGN_MAP_LOBBY_LIFETIME.md).
+
+Map hover presentation now has a detached host-authoritative frame/color record
+(protocol 28/bridge 23/catalog 8). Clients own only the two decal entities in their
+isolated replica scene, never native host visuals or battle-scene objects. Current
+local pick admission controls display; catalog possession alone does not grant it.
+Movement-target source now has a separate host recipe on the ordered state path
+(29/24/8), repeated current-disclosure admission, fresh-revision gates and four
+owned replica decal slots. Installed cmp-b43/native acceptance has not changed.
+See [movement ownership](CAMPAIGN_MAP_MOVEMENT_TARGETS.md) and
+[hover ownership and verification boundary](CAMPAIGN_MAP_HOVER_DECALS.md).
+
 Tooltip local relay source now has a distinct launcher-inherited run GUID, exact
 host/dedicated PID/start/path binding and fixed run-local files. It does not borrow
 AutomaticCampaignMissions authority. The host polls on its owner thread; the

@@ -233,6 +233,7 @@ namespace CoopSpectator.UI
         private bool _isInside;
         private bool _isTracked;
         private bool _isInRange;
+        private int _relation;
         private int _wSign = -1;
         private float _wPos = -1f;
         private float _distanceToCamera;
@@ -362,7 +363,11 @@ namespace CoopSpectator.UI
         }
 
         [DataSourceProperty]
-        public int Relation => 0;
+        public int Relation
+        {
+            get => _relation;
+            private set => SetField(ref _relation, value, nameof(Relation));
+        }
 
         [DataSourceProperty]
         public bool IsTracked
@@ -431,6 +436,7 @@ namespace CoopSpectator.UI
 
             Size = entity.SettlementNameplateSize;
             IsTracked = entity.IsSettlementTracked;
+            Relation = entity.SettlementRelation;
             IsInRange = entity.IsSettlementInRange;
             Name = entity.DisplayName ?? string.Empty;
             uint primaryColor = entity.PrimaryColor == 0u
@@ -444,7 +450,8 @@ namespace CoopSpectator.UI
             SettlementEvents.Synchronize(
                 entity.SettlementEventFlags,
                 entity.SettlementProductionIconId,
-                entity.QuestMarkerFlags);
+                entity.QuestMarkerFlags, entity.SettlementEventOrder,
+                entity.SettlementQuestOrder, entity.IsSettlementInRange);
             SettlementParties.Synchronize(entity.SettlementPartyBadges, entity.IsSettlementInRange);
         }
 
@@ -681,71 +688,42 @@ namespace CoopSpectator.UI
         public MBBindingList<CoopCampaignMapPrototypeQuestMarkerVM>
             TrackQuests { get; }
 
-        internal void Synchronize(
-            int eventFlags,
-            string productionIconId,
-            int questMarkerFlags)
-        {
-            int safeEventFlags = eventFlags &
-                CoopCampaignMapPrototypeContract.MaxSettlementEventFlags;
-            int existingEventFlags = 0;
-            foreach (CoopCampaignMapPrototypeSettlementEventItemVM item in
-                     EventsList)
-            {
-                existingEventFlags |= 1 << item.Type;
-            }
-            if (existingEventFlags != safeEventFlags ||
-                !ProductionIconMatches(productionIconId))
-            {
-                EventsList.Clear();
-                for (int eventType = 0; eventType <= 6; eventType++)
-                {
-                    if ((safeEventFlags & (1 << eventType)) == 0)
-                        continue;
-                    EventsList.Add(
-                        new CoopCampaignMapPrototypeSettlementEventItemVM(
-                            eventType,
-                            eventType == 6
-                                ? productionIconId
-                                : string.Empty));
-                }
-            }
+        private int _eventOrder = -1;
+        private int _questOrder = -1;
+        private int _eventFlags = -1;
+        private int _questFlags = -1;
+        private bool _inRange;
+        private string _productionIcon;
 
-            int safeQuestMarkerFlags = questMarkerFlags &
-                CoopCampaignMapPrototypeContract.MaxQuestMarkerFlags;
-            int existingQuestMarkerFlags = 0;
-            foreach (CoopCampaignMapPrototypeQuestMarkerVM marker in TrackQuests)
-                existingQuestMarkerFlags |= marker.QuestMarkerType;
-            if (existingQuestMarkerFlags == safeQuestMarkerFlags)
+        internal void Synchronize(int eventFlags, string productionIconId,
+            int questMarkerFlags, int eventOrder, int questOrder, bool inRange)
+        {
+            string icon = productionIconId ?? string.Empty;
+            if (_eventOrder == eventOrder && _questOrder == questOrder &&
+                _eventFlags == eventFlags && _questFlags == questMarkerFlags &&
+                _inRange == inRange && string.Equals(_productionIcon, icon, StringComparison.Ordinal))
                 return;
 
+            EventsList.Clear();
             TrackQuests.Clear();
-            int[] markerTypes = { 1, 2, 4, 8, 16 };
-            foreach (int markerType in markerTypes)
+            // Decode exact source order, then apply the host range gate. Never sort.
+            if (CoopCampaignMapSettlementMarkerOrder.TryDecodeEvents(
+                    eventOrder, eventFlags, inRange, out int[] types) &&
+                CoopCampaignMapSettlementMarkerOrder.TryDecodeQuests(
+                    questOrder, questMarkerFlags, inRange, out int[] quests))
             {
-                if ((safeQuestMarkerFlags & markerType) != 0)
-                {
-                    TrackQuests.Add(
-                        new CoopCampaignMapPrototypeQuestMarkerVM(markerType));
-                }
+                foreach (int type in types)
+                    EventsList.Add(new CoopCampaignMapPrototypeSettlementEventItemVM(
+                        type, type == 6 ? icon : string.Empty));
+                foreach (int quest in quests)
+                    TrackQuests.Add(new CoopCampaignMapPrototypeQuestMarkerVM(quest));
             }
-        }
-
-        private bool ProductionIconMatches(string productionIconId)
-        {
-            string expected = productionIconId ?? string.Empty;
-            foreach (CoopCampaignMapPrototypeSettlementEventItemVM item in
-                     EventsList)
-            {
-                if (item.Type == 6)
-                {
-                    return string.Equals(
-                        item.AdditionalParameters,
-                        expected,
-                        StringComparison.Ordinal);
-                }
-            }
-            return string.IsNullOrEmpty(expected);
+            _eventOrder = eventOrder;
+            _questOrder = questOrder;
+            _eventFlags = eventFlags;
+            _questFlags = questMarkerFlags;
+            _inRange = inRange;
+            _productionIcon = icon;
         }
 
         public override void OnFinalize()

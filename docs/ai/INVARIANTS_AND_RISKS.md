@@ -1,5 +1,64 @@
 # Invariants and Risks
 
+Standalone mission-dialogue source exception is limited to exact land
+Conversation opening/behavior/view ownership. MissionMode.Conversation alone
+must never admit hideout/settlement/battle paths. Only a successful same-campaign
+map publication can anchor the overlay; failure/close must not keep an old line
+alive. Never run host camera/agent update methods to capture their presentation,
+or claim the fixed map tableau reproduces a full terrain conversation scene.
+Bounded scene capture must remain read-only, reject unsupported visible actors,
+and bind framed poses to the matching descriptor. Builds do not establish native
+terrain/lighting or packet safety. See [scope and remaining 3D gates](CAMPAIGN_MAP_MISSION_DIALOGUE.md).
+
+Replica conversation HUD must never recompute hidden strength, discover additional
+parties/quests or resolve hidden hero identities. Copy the host's visible native
+VM, reject stale hidden payload and validate image codes/resources before stock
+thumbnail work. Thumbnail generation is runtime-sensitive; isolated contracts do
+not prove visual safety/parity. See [gates](CAMPAIGN_MAP_CONVERSATION_HUD.md).
+The static StoryMode dragon_banner supplement is shared MP catalog data: deploy
+identical client/dedicated XML before fresh startup. Never remove portrait slot4
+to hide an unavailable item; preserve fail-closed resource validation. Existing
+field/village/siege/hideout loadout selection and base catalog order stay unchanged.
+
+A replica map has no battle spawn session: stock match expiry must not own its
+ending. The lifetime candidate excludes only the server map's Playing lobby tick;
+native waiting, client inactivity and explicit Ending/UDP processing stay intact.
+Shared-method patching requires native expiration and map/battle transition proof.
+See [confirmed dump and remaining gates](CAMPAIGN_MAP_LOBBY_LIFETIME.md).
+
+Replica dialogue reconstruction must not deactivate or steal focus from a local
+escape menu, options screen or inquiry. Native options live on the same
+MissionScreen: TopScreen equality alone
+does not establish dialogue ownership; the active MissionOptions layer blocks
+reconstruction. The options view is added only to the isolated map client, not
+globally to stock battle view stacks. Deferred Escape belongs to a single input
+layer and is cancelled on focus loss/replacement/teardown. The stock menu remains
+the owner of disconnect and its confirmations; no remote dialogue answer is sent.
+See [source policy and outstanding native gates](CAMPAIGN_MAP_ESCAPE_INPUT.md).
+
+Movement-target source integration must not be mistaken for native acceptance.
+Host capture, server and client enforce current disclosure; ordered empty states
+clear cancellation and a two-second monotonic receipt limit hides stale targets.
+Catalog/dynamic synchronization must reach the sample's revisions before display.
+Client hover or detached camera cannot author host movement. Native decal handles
+belong only to the replica scene and must be released before it; all battle-return
+paths still need regression. See [integration gates](CAMPAIGN_MAP_MOVEMENT_TARGETS.md).
+
+Hover decals must use admitted host-native frames/diplomatic colors, never guessed
+banner/nameplate colors or restored authoring helpers. Native entities belong only
+to the replica scene and are released before scene teardown. Invalid/absent frames,
+hidden targets or lost input must not retain a visible ring. Native material/frame
+calls remain runtime-sensitive: source/codec tests do not prove rendered parity.
+Map return from every battle path remains a regression surface. See
+[candidate, transport versions and open gates](CAMPAIGN_MAP_HOVER_DECALS.md).
+
+Body visibility does not imply pick admission. Non-main raft parties remain
+renderable but must not receive ordinary hover/pinned information. Recheck the
+current native raft state before host tooltip capture; stale publication cannot
+authorize it. State transitions and removal clear hover payloads even when map
+input is yielding to another UI. Main-party exemption is retained; prisoner and
+army redirection rules are still pending.
+
 Map picking candidate must use only the owned replica scene, never Mission.Scene
 or a campaign scene. Known collision handles do not grant disclosure: current
 dynamic visibility, body admission and parent-inclusive geometry visibility must

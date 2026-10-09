@@ -44,6 +44,8 @@ namespace CoopSpectator.UI
                 new List<MissionLayerActivationSnapshot>();
         private ScreenLayer _focusedLayerBeforeConversation;
         private bool _missionLayerStateCaptured;
+        private readonly CoopCampaignMapEscapeInputPolicy _escapeInput =
+            new CoopCampaignMapEscapeInputPolicy();
 
         public override void OnBehaviorInitialize()
         {
@@ -73,6 +75,18 @@ namespace CoopSpectator.UI
 
             _tableau?.Tick(dt);
 
+            // Keep only the latest host revision queued while a local modal owns
+            // the screen. Rebuilding dialogue here would deactivate its layer and
+            // steal focus from the stock escape menu/options/confirmation.
+            if (!ReferenceEquals(ScreenManager.TopScreen, MissionScreen) ||
+                Mission?.GetMissionBehavior<MissionEscapeMenuView>()?.IsActive == true ||
+                HasActiveOptionsLayer() ||
+                InformationManager.IsAnyInquiryActive())
+            {
+                _escapeInput.Reset();
+                return;
+            }
+
             CoopCampaignMapConversationState pending = _pendingState;
             if (pending != null && pending.Revision > _appliedRevision)
             {
@@ -89,6 +103,31 @@ namespace CoopSpectator.UI
                     _tableau.ApplyPose(_pendingPose))
                     _pendingPose = null;
             }
+            HandleConversationEscapeInput();
+        }
+
+        private bool HasActiveOptionsLayer()
+        {
+            // Native options use a layer on this MissionScreen, not a new top
+            // screen. Keep pending host changes queued even in keybind popups.
+            foreach (ScreenLayer layer in MissionScreen.Layers)
+            {
+                if (layer != null && !layer.IsFinalized && layer.IsActive &&
+                    string.Equals(layer.Name, "MissionOptions", StringComparison.Ordinal))
+                    return true;
+            }
+            return false;
+        }
+
+        private void HandleConversationEscapeInput()
+        {
+            bool ownsInput = _conversationLayer != null && _conversationLayer.IsActive &&
+                (ScreenManager.FocusedLayer == null ||
+                 ReferenceEquals(ScreenManager.FocusedLayer, _conversationLayer));
+            bool released = ownsInput &&
+                _conversationLayer.Input.IsHotKeyReleased("ToggleEscapeMenu");
+            if (_escapeInput.Tick(ownsInput, released))
+                MissionScreen.OnEscape();
         }
 
         public override void OnMissionScreenFinalize()
@@ -173,6 +212,7 @@ namespace CoopSpectator.UI
 
         private void CloseConversation(bool releaseTableau = true)
         {
+            _escapeInput.Reset();
             if (releaseTableau)
             {
                 _pendingPose = null;

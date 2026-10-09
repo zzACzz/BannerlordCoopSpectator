@@ -156,6 +156,8 @@ namespace CoopSpectator.UI
         private bool _hasDisplayedCamera;
         private readonly CoopCampaignMapReplicaCameraPolicy _cameraPolicy =
             new CoopCampaignMapReplicaCameraPolicy();
+        private readonly CoopCampaignMapEscapeInputPolicy _escapeInput =
+            new CoopCampaignMapEscapeInputPolicy();
         private Vec3 _displayedCameraOrigin;
         private Vec3 _displayedCameraDirection;
         private Vec3 _displayedCameraUp;
@@ -201,8 +203,9 @@ namespace CoopSpectator.UI
         public override void OnMissionScreenTick(float dt)
         {
             base.OnMissionScreenTick(dt);
+            HandleReplicaEscapeInput();
             if (!GameNetwork.IsClient || !ExperimentalFeatures.EnableCampaignMapPrototype)
-            { _tooltipPresenter?.Clear(); return; }
+            { HideNativeHoverDecals(); _tooltipPresenter?.Clear(); return; }
 
             if (_sceneLayer == null && !_loadAttempted)
             {
@@ -213,11 +216,11 @@ namespace CoopSpectator.UI
             }
 
             if (_sceneLayer == null)
-            { _tooltipPresenter?.Clear(); return; }
+            { HideNativeMovementTargets(); HideNativeHoverDecals(); _tooltipPresenter?.Clear(); return; }
 
             UpdateRenderReadiness(dt);
             if (_hostMarker == null)
-            { _tooltipPresenter?.Clear(); return; }
+            { HideNativeMovementTargets(); HideNativeHoverDecals(); _tooltipPresenter?.Clear(); return; }
 
             ApplyPendingVisibleEntities();
             CoopCampaignMapPrototypeState current =
@@ -250,6 +253,8 @@ namespace CoopSpectator.UI
             _replicaInfoViewModel?.SetCameraMode(_cameraPolicy.IsFollowingHost);
             UpdateMarkerAndCamera();
             UpdateReplicaInformation(dt);
+            UpdateNativeMovementTargets();
+            UpdateNativeHoverDecal();
             _tooltipPresenter?.Tick(dt, _hoveredReplicaId);
         }
 
@@ -645,6 +650,8 @@ namespace CoopSpectator.UI
                 true,
                 InputUsageMask.All);
             _replicaInfoLayer.InputRestrictions.SetMouseVisibility(true);
+            _replicaInfoLayer.Input.RegisterHotKeyCategory(
+                HotKeyManager.GetCategory("GenericPanelGameKeyCategory"));
             MissionScreen.MouseVisible = true;
             MissionScreen.AddLayer(_replicaInfoLayer);
             _replicaInfoMovie = _replicaInfoLayer.LoadMovie(
@@ -818,9 +825,14 @@ namespace CoopSpectator.UI
             // Invalidate even while the cursor is over the pinned panel, where
             // UpdateReplicaInformation intentionally yields to UI hit testing.
             if (entity.Kind != CoopCampaignMapPrototypeEntityKind.Settlement &&
-                !CoopCampaignMapPartyBodyPolicy.ShouldRenderBody(
+                !CoopCampaignMapPartyPickPolicy.ShouldAllowPick(
                     entity.Kind, entity.PartyNameplateFlags))
             {
+                if (string.Equals(_hoveredReplicaId, entity.EntityId, StringComparison.OrdinalIgnoreCase))
+                {
+                    _hoveredReplicaId = null;
+                    _tooltipPresenter?.Clear();
+                }
                 if (string.Equals(_selectedReplicaId, entity.EntityId,
                         StringComparison.OrdinalIgnoreCase))
                     _selectedReplicaId = null;
@@ -852,6 +864,11 @@ namespace CoopSpectator.UI
                 return;
 
             _settlementGeometry.Apply(entityId, false);
+            if (string.Equals(_hoveredReplicaId, entityId, StringComparison.OrdinalIgnoreCase))
+            {
+                _hoveredReplicaId = null;
+                _tooltipPresenter?.Clear();
+            }
             if (_entityReplicas.TryGetValue(entityId, out EntityReplica replica))
             {
                 RemovePartyPickGeometry(replica);
@@ -1178,7 +1195,7 @@ namespace CoopSpectator.UI
                     out CoopCampaignMapPrototypeDynamicEntityState dynamicState) ||
                 !dynamicState.IsVisible ||
                 (catalog.Kind != CoopCampaignMapPrototypeEntityKind.Settlement &&
-                 !CoopCampaignMapPartyBodyPolicy.ShouldRenderBody(
+                 !CoopCampaignMapPartyPickPolicy.ShouldAllowPick(
                      catalog.Kind, dynamicState.PartyNameplateFlags)))
             {
                 if (pinned)
@@ -1684,6 +1701,8 @@ namespace CoopSpectator.UI
 
         private void ReleaseSceneLayer()
         {
+            ClearNativeMovementTargets();
+            ClearNativeHoverDecals();
             ClearNativePicking();
             _settlementGeometry.Clear();
             ReleaseReplicaInfoLayer();
@@ -1765,6 +1784,7 @@ namespace CoopSpectator.UI
             _camera = null;
             _hasDisplayedCamera = false;
             _cameraPolicy.Reset();
+            _escapeInput.Reset();
         }
 
         private void ReleaseEntityOverlayLayer()
@@ -1899,6 +1919,18 @@ namespace CoopSpectator.UI
                    CoopCampaignMapPrototypeNetworkController.CurrentClientConversation?.IsActive != true &&
                    (ScreenManager.FocusedLayer == null ||
                     ReferenceEquals(ScreenManager.FocusedLayer, _replicaInfoLayer));
+        }
+
+        private void HandleReplicaEscapeInput()
+        {
+            bool ownsInput = GameNetwork.IsClient &&
+                ExperimentalFeatures.EnableCampaignMapPrototype &&
+                MissionScreen != null && _mapSceneReadyToRender &&
+                CanUseReplicaMapInput();
+            bool released = ownsInput &&
+                _replicaInfoLayer.Input.IsHotKeyReleased("ToggleEscapeMenu");
+            if (_escapeInput.Tick(ownsInput, released))
+                MissionScreen.OnEscape();
         }
 
         private void InitializeLocalFreeCamera()

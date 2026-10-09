@@ -8,7 +8,7 @@ namespace CoopSpectator.Infrastructure
     {
         public const int MaxPayloadBytes = 1048576;
         public const int MaxChunks = MaxPayloadBytes / CoopCampaignMapCatalogChunkCodec.MaxChunkBytes;
-        private const int Magic = 0x43445031;
+        private const int Magic = 0x43445032;
         private static readonly UTF8Encoding Utf8 = new UTF8Encoding(false, true);
 
         public static bool TrySerialize(CoopCampaignMapConversationState state, out byte[] payload)
@@ -34,6 +34,9 @@ namespace CoopSpectator.Infrastructure
                         writer.Write(option.IsEnabled);
                         writer.Write(option.IsSpecial);
                     }
+                    if (!CoopConversationHudCodec.TrySerialize(state.Hud, out var hud)) return false;
+                    writer.Write(hud.Length);
+                    writer.Write(hud);
                     byte[] tableau = Array.Empty<byte>();
                     if (state.Tableau != null &&
                         !CoopCampaignMapConversationTableauCodec.TrySerialize(state.Tableau, out tableau)) return false;
@@ -75,6 +78,11 @@ namespace CoopSpectator.Infrastructure
                         IsEnabled = CoopCampaignMapConversationTableauCodec.ReadBoolean(reader),
                         IsSpecial = CoopCampaignMapConversationTableauCodec.ReadBoolean(reader)
                     });
+                    int hudSize = reader.ReadInt32();
+                    if (hudSize < 5 || hudSize > CoopConversationHudCodec.MaxPayloadBytes ||
+                        hudSize > stream.Length - stream.Position ||
+                        !CoopConversationHudCodec.TryDeserialize(reader.ReadBytes(hudSize), out var hud)) return false;
+                    decoded.Hud = hud;
                     int size = reader.ReadInt32();
                     if (size < 0 || size > CoopCampaignMapConversationTableauCodec.MaxPayloadBytes ||
                         size != stream.Length - stream.Position) return false;

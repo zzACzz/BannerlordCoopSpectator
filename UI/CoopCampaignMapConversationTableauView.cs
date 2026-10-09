@@ -119,6 +119,7 @@ namespace CoopSpectator.UI
         private int _textureHeight;
         private MBAgentRendererSceneController _renderer;
         private float _baseFov;
+        private CoopCampaignMapConversationMissionScene _missionScene;
         private float _aspect;
         private readonly Stopwatch _readinessClock = new Stopwatch();
         private double _lastReadinessSeconds;
@@ -235,6 +236,12 @@ namespace CoopSpectator.UI
                 for (int i = 0; i < _actors.Count; i++)
                 {
                     var motion = accepted.Actors[i];
+                    if (_missionScene != null)
+                    {
+                        MatrixFrame actorFrame = Frame(motion.Frame);
+                        actorFrame.rotation.ApplyScaleLocal(_actors[i].GetScale());
+                        _actors[i].GetVisuals().SetFrame(ref actorFrame);
+                    }
                     bool changedAction = skeletons[i].GetActionAtChannel(0).GetName() != motion.ActionName;
                     bool seed = i >= _posePlayback.Count || _poseActions[i] != motion.ActionName || changedAction;
                     if (changedAction)
@@ -249,6 +256,7 @@ namespace CoopSpectator.UI
                     if (seed) skeletons[i].SetAnimationSpeedAtChannel(0, motion.Speed);
                 }
                 // Cached admitted values only; no diagnostic native probes.
+                if (_missionScene != null) _camera.Frame = Frame(accepted.CameraFrame);
                 if (_verboseAttempt && _lastPoseTraceRevision != accepted.ConversationRevision)
                 {
                     _lastPoseTraceRevision = accepted.ConversationRevision;
@@ -280,39 +288,50 @@ namespace CoopSpectator.UI
                 item.Banner = actor.Visual.HasBanner ? new Banner(actor.BannerCode) : null;
                 resolved.Add(item);
             }
-            string owner = ResolveSceneOwner();
+            _missionScene = state.MissionScene?.Clone();
+            string sceneName = _missionScene?.SceneName ?? CoopCampaignMapConversationTableauCodec.SceneName;
+            string owner = ResolveSceneOwner(sceneName);
             if (string.IsNullOrEmpty(owner)) throw new InvalidOperationException("Scene owner unavailable.");
             // Same asset initialization as the installed native thumbnail cache,
             // but with no shared cache, Campaign.Current or physical Agent objects.
-            _scene = Scene.CreateNewScene(true, false, (DecalAtlasGroup)0, "CoopConversationTableau");
-            var init = new SceneInitializationData(true) { InitPhysicsWorld = false, InitSkyboxFromStart = false };
-            _scene.DisableStaticShadows(true);
+            _scene = Scene.CreateNewScene(_missionScene == null, false, (DecalAtlasGroup)0, "CoopConversationTableau");
+            var init = new SceneInitializationData(true)
+            {
+                InitPhysicsWorld = false, InitSkyboxFromStart = _missionScene != null,
+                LoadNavMesh = _missionScene == null, EnableFloraPhysics = _missionScene == null
+            };
+            _scene.DisableStaticShadows(_missionScene == null);
             TraceStage("scene-read-begin");
-            _scene.Read(CoopCampaignMapConversationTableauCodec.SceneName, owner, ref init, string.Empty);
+            _scene.Read(sceneName, owner, ref init, string.Empty);
             TraceStage("scene-read-complete");
             _scene.SetShadow(true);
             _renderer = MBAgentRendererSceneController.CreateNewAgentRendererSceneController(_scene);
-            Utilities.LoadVirtualTextureTileset("WorldMap");
+            if (_missionScene == null) Utilities.LoadVirtualTextureTileset("WorldMap");
             TraceStage("atmosphere-begin");
             _scene.SetAtmosphereWithName(state.AtmosphereName);
             // Outdoor backgrounds are atmosphere resources; only some interiors
             // have additional tagged entities. An empty tag group is native-valid.
-            foreach (GameEntity entity in _scene.FindEntitiesWithTag(state.AtmosphereName))
+            if (_missionScene == null)
             {
-                entity.SetVisibilityExcludeParents(true);
+                foreach (GameEntity entity in _scene.FindEntitiesWithTag(state.AtmosphereName))
+                    entity.SetVisibilityExcludeParents(true);
+                _scene.FindEntityWithTag("raining_entity")?.SetVisibilityExcludeParents(state.IsRaining);
+                _scene.FindEntityWithTag("snowing_entity")?.SetVisibilityExcludeParents(state.IsSnowing);
             }
-            _scene.FindEntityWithTag("raining_entity")?.SetVisibilityExcludeParents(state.IsRaining);
-            _scene.FindEntityWithTag("snowing_entity")?.SetVisibilityExcludeParents(state.IsSnowing);
+            else ApplyMissionClimate();
             _scene.EnsurePostfxSystem();
-            _scene.SetDofMode(true);
+            _scene.SetDofMode(_missionScene == null);
             _scene.SetMotionBlurMode(false);
             _scene.SetBloom(true);
-            _scene.SetDynamicShadowmapCascadesRadiusMultiplier(0.31f);
+            if (_missionScene == null) _scene.SetDynamicShadowmapCascadesRadiusMultiplier(0.31f);
             _camera = Camera.CreateCamera();
-            GameEntity cameraEntity = _scene.FindEntityWithTag("player_infantry_to_infantry");
-            if (cameraEntity == null) throw new InvalidOperationException("Camera anchor unavailable.");
-            Vec3 cameraTarget = Vec3.Zero;
-            cameraEntity.GetCameraParamsFromCameraScript(_camera, ref cameraTarget);
+            if (_missionScene == null)
+            {
+                GameEntity cameraEntity = _scene.FindEntityWithTag("player_infantry_to_infantry");
+                if (cameraEntity == null) throw new InvalidOperationException("Camera anchor unavailable.");
+                Vec3 cameraTarget = Vec3.Zero;
+                cameraEntity.GetCameraParamsFromCameraScript(_camera, ref cameraTarget);
+            }
             _camera.Frame = Frame(state.CameraFrame);
             _baseFov = state.BaseCameraHorizontalFov;
             UpdateCameraAspect();
@@ -413,7 +432,7 @@ namespace CoopSpectator.UI
             _view.SetClearGbuffer(true);
             _view.DoNotClear(false);
             Vec3 shadowCenter = Vec3.Zero;
-            _view.SetFocusedShadowmap(true, ref shadowCenter, 1.55f);
+            _view.SetFocusedShadowmap(_missionScene == null, ref shadowCenter, 1.55f);
             _view.SetEnable(true);
         }
 
@@ -449,7 +468,25 @@ namespace CoopSpectator.UI
             float aspect = height > 0f && width > 0f ? width / height : 16f / 9f;
             if (_aspect == aspect) return;
             _aspect = aspect;
-            _camera.SetFovHorizontal(Math.Min(3f, _baseFov * aspect / (16f / 9f)), aspect, 0.2f, 200f);
+            if (_missionScene != null)
+                _camera.SetFovVertical(_missionScene.CameraVerticalFov, aspect,
+                    _missionScene.CameraNear, _missionScene.CameraFar);
+            else
+                _camera.SetFovHorizontal(Math.Min(3f, _baseFov * aspect / (16f / 9f)), aspect, 0.2f, 200f);
+        }
+
+        private void ApplyMissionClimate()
+        {
+            // Only the owned detached scene is mutated. Full interpolated
+            // lighting is not reconstructed by these climate setters alone.
+            _scene.TimeOfDay = _missionScene.TimeOfDay;
+            _scene.SetWinterTimeFactor(_missionScene.Winter);
+            _scene.SetDrynessFactor(_missionScene.Dryness);
+            _scene.SetRainDensity(_missionScene.Rain);
+            _scene.SetSnowDensity(_missionScene.Snow);
+            _scene.SetTemperature(_missionScene.Temperature);
+            _scene.SetHumidity(_missionScene.Humidity);
+            _scene.SetGlobalWindStrengthVector(new Vec2(_missionScene.WindX, _missionScene.WindY));
         }
 
         private static MatrixFrame Frame(float[] values)
@@ -462,12 +499,12 @@ namespace CoopSpectator.UI
             return frame;
         }
 
-        private static string ResolveSceneOwner()
+        private static string ResolveSceneOwner(string sceneName)
         {
             string owner = null;
             foreach (string module in Utilities.GetModulesNames())
                 foreach (string scene in Utilities.GetSingleModuleScenesOfModule(module) ?? Array.Empty<string>())
-                    if (string.Equals(scene, CoopCampaignMapConversationTableauCodec.SceneName, StringComparison.OrdinalIgnoreCase))
+                    if (string.Equals(scene, sceneName, StringComparison.OrdinalIgnoreCase))
                         owner = module;
             return owner;
         }
@@ -523,6 +560,7 @@ namespace CoopSpectator.UI
             _layer = null;
             try { _scene?.ClearAll(); } catch { cleanupErrors++; }
             _scene = null;
+            _missionScene = null;
             _aspect = 0f;
             if (cleanupErrors != 0)
                 ModLogger.Info("CoopCampaignMapConversationTableauView: native cleanup incomplete. FailedOperations=" + cleanupErrors + ".");

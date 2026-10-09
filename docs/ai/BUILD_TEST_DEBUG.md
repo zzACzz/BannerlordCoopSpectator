@@ -1,5 +1,10 @@
 # Build, Test, and Debug Guide
 
+For campaign-map replica testing, use the [agent runbook](CAMPAIGN_MAP_TEST_RUNBOOK.md)
+and [current handoff](CAMPAIGN_MAP_HANDOFF_2026-10-09.md). They document the
+campaign-menu-owned server, prescribed MP shortcut, input boundaries, evidence
+and exact cleanup; connection-only automation is not a substitute.
+
 Tooltip network cmp-b32/b33 and presenter cmp-b34 isolated builds passed;
 cmp-c32/c33/c34 all 24 projects passed (345 chunk/network assertions plus presenter
 ownership/lifecycle tests). cmp-b35/b36 both builds and cmp-c35/c36 all 24 projects

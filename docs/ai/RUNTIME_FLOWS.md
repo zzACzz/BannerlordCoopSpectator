@@ -1,5 +1,41 @@
 # Runtime Flows
 
+Standalone companion-dialogue source candidate: successful map write -> exact
+OpenNew postfix before scene loading -> campaign/session/mission lease -> live
+native MissionConversationVM text/HUD -> existing server-only atomic dialogue
+channel. Loading publishes nothing; capture failure/close clears dialogue, and
+unsupported mission/reset revokes the anchor. No lifecycle/battle intent changes.
+Bounded mission scene/actor descriptors and separate framed poses now reach the
+owned renderer (protocol33/bridge28/tableau2/pose2). Native verification remains open; see
+[source flow and gates](CAMPAIGN_MAP_MISSION_DIALOGUE.md).
+
+Dialogue HUD candidate: admitted host VM -> visibility-gated detached HUD ->
+required bridge schema 26 field -> protocol 31 atomic text/tableau/HUD chunks ->
+existing latest-revision/modal admission -> read-only stock conversation bindings.
+Close removes the whole presentation; native gates remain open. See
+[format and evidence](CAMPAIGN_MAP_CONVERSATION_HUD.md).
+
+Replica lifetime candidate: server map opening binds a scoped lobby tick guard;
+native WaitingFirstPlayers proceeds, map Playing cannot expire as a battle,
+and explicit Ending continues through stock UDP teardown. See
+[timeout dump and validation gates](CAMPAIGN_MAP_LOBBY_LIFETIME.md).
+
+Replica input candidate: an owned map/dialogue Escape release queues one next-frame
+stock menu dispatch. Local menu/options/inquiry ownership defers dialogue
+reconstruction while retaining the newest host revision. The map client explicitly
+wires the stock options event subscriber; its same-screen active layer blocks
+dialogue rebuilding after the escape menu closes. Local close allows that
+revision (including host dialogue close) to apply. See
+[input flow and verification boundaries](CAMPAIGN_MAP_ESCAPE_INPUT.md).
+
+Movement-target source candidate (29/24/8): ready campaign map/publication ->
+native target selection/live disclosure/frame/clock capture -> bounded ordered
+state recipe -> server admission after catalog/dynamic updates -> existing state
+message -> fresh receipt/revision readiness -> client disclosure -> owned decals
+and same-target hover suppression. New empty state clears; stale/dialogue/lost
+input hides; scene release removes owned entities. Native acceptance is pending.
+See [implementation and test boundary](CAMPAIGN_MAP_MOVEMENT_TARGETS.md).
+
 Tooltip source path: menu launcher Prepare -> exact child Attach -> run binding;
 host application tick after map publication -> bounded fresh owned request batch
 -> published target admission/native capture -> correlated rows/denial response.

@@ -1,5 +1,68 @@
 # Code Map
 
+`CoopCampaignMapConversationMissionScene` extends the tableau descriptor with
+allowlisted land-scene/camera/climate data. `CoopCampaignMapMissionConversationVisualCapture`
+reads the admitted native camera/visible actors; tableau and pose schema2 carry
+resource identity and separate motion. `CoopCampaignMapConversationTableauView`
+owns the terrain-scene branch. `ConversationMissionSceneTests` covers malformed
+data, bounded framed poses and source wiring. Full lighting/mount/crowd/native
+acceptance is open; see [current limits](CAMPAIGN_MAP_MISSION_DIALOGUE.md).
+
+`Campaign/CoopCampaignMapConversationPublicationLease.cs` is a pure
+map-anchor lifetime boundary for standalone companion dialogue. It binds exact
+campaign/session/mission identities, revokes on context loss and never refreshes
+snapshot timestamps. `ConversationPublicationLeaseTests` covers its boundaries.
+The existing OpenNew postfix now binds it through PublisherBehavior.MissionConversation;
+MissionConversationContext validates the native role/type/view and ConversationCapture
+reads prepared mission text/HUD. Bounded mission 3D rendering is connected in
+source through the types above, but not native-verified; see
+[native investigation and next gates](CAMPAIGN_MAP_MISSION_DIALOGUE.md).
+
+`GameMode/CoopCampaignMapLobbyLifetimePatch.cs` binds before server map opening;
+`Infrastructure/CoopCampaignMapLobbyLifetimePolicy.cs` excludes only that map's
+Playing lobby tick from stock match expiry. `LobbyLifetimeTests` checks gating
+and wiring. See [failure and native gates](CAMPAIGN_MAP_LOBBY_LIFETIME.md).
+
+`CoopCampaignMapSettlementEventPolicy` bounds event/quest bits by host inspection
+or spotting; publisher and settlement overlay consume it. Exhaustive masks and
+wiring: `SettlementEventDisclosureTests`. See [disclosure](CAMPAIGN_MAP_EVENT_DISCLOSURE.md).
+
+`Infrastructure/CoopCampaignMapSettlementMarkerOrder.cs` is the pure bounded
+ordered-event/quest representation; `SettlementMarkerOrderTests` enumerates every
+ordered subset and malformed-input/disclosure cases. The publisher now reads the
+existing host UI lists; full/dynamic contracts and message codecs carry their order,
+and the settlement overlay preserves it without rebuilding unchanged lists.
+`SettlementMarkerTransportTests` covers clones, codecs, order-only deltas, clearing,
+party isolation and native message source wiring. Source format is32/27/8; installed
+candidate is now cmp-b65 (32/27/8), staged for a fresh native run; acceptance is
+pending. See integration/native gates in the same document.
+
+`CoopCampaignMapEscapeInputPolicy` queues one owned-layer release for next-frame
+native menu dispatch. Map and conversation views each own a policy instance;
+conversation presentation defers queued host revisions while local modals own the
+screen, including the native same-screen MissionOptions layer. The isolated map
+mode explicitly adds the stock options view only on the client. `EscapeInputTests`
+covers dispatch/cancellation and options/modal source wiring. See
+[source correction and native gates](CAMPAIGN_MAP_ESCAPE_INPUT.md).
+
+`Infrastructure/CoopCampaignMapMovementTarget.cs` defines detached host target
+selection, hover suppression and decal layout; its Codec defines bounded wire,
+disclosure and readiness rules. PublisherBehavior.MovementTarget captures host
+state; state message/controller transport it; MissionView.MovementTargets owns
+replica decals and teardown. MovementTargetTests and MovementTargetTransportTests
+cover the managed rules. See [scope and native gates](CAMPAIGN_MAP_MOVEMENT_TARGETS.md).
+
+`Infrastructure/CoopCampaignMapHoverDecal.cs` defines the bounded detached native
+hover-frame/color descriptor. Host publisher captures it; snapshot/catalog codecs
+and projection carry it; `UI/CoopCampaignMapPrototypeMissionView.HoverDecals.cs`
+owns scene-local rendering and teardown. `HoverDecalTests.cs` covers wire validity,
+transport and delta propagation. See [scope and native gates](CAMPAIGN_MAP_HOVER_DECALS.md).
+
+`CoopCampaignMapPartyPickPolicy` in the prototype contract separates ordinary
+hover admission from visible bodies: non-main rafts cannot be hovered. Picking,
+pinned info and shared tooltip target admission consume it; host capture also
+checks the current native raft flag. See the dated source-only refinement.
+
 Native picking candidate: `UI/CoopCampaignMapPrototypeMissionView.Picking.cs`
 owns map-scene ray hits, referenced settlement geometry and owned party spheres;
 `Infrastructure/CoopCampaignMapPickResolver.cs` resolves bounded admitted hits in
@@ -289,6 +352,7 @@ contracts; native acceptance pending in the canonical resume report.
 | Map and dialogue wire messages | `Network/Messages/CoopCampaignMapPrototypeNetworkMessages.cs`, `Network/Messages/CoopCampaignMapReplicaNetworkMessages.cs`, `Network/Messages/CoopCampaignMapConversationNetworkMessages.cs` |
 | Client map rendering and interaction | `UI/CoopCampaignMapPrototypeMissionView.cs`, map overlay and replica-info view-models |
 | Client synchronous dialogue | `UI/CoopCampaignMapConversationView.cs`, `UI/CoopCampaignMapConversationVM.cs` |
+| Host-owned dialogue upper HUD/banner | `Infrastructure/CoopCampaignMapConversationHud.cs`, `Campaign/CoopCampaignMapConversationCapture.cs`, `UI/CoopCampaignMapConversationHudVM.cs`, `ConversationHudTests.cs`; [scope and verification](CAMPAIGN_MAP_CONVERSATION_HUD.md) |
 | Client dialogue scene ownership | `UI/CoopCampaignMapConversationTableauView.cs`, `Infrastructure/CoopCampaignMapConversationVisualLifetime.cs`, `ConversationVisualLifetimeTests.cs` in the map contract project |
 | Live dialogue body motion | `Infrastructure/CoopCampaignMapConversationPose.cs` (codec, exact receiver, pure `CoopConversationPosePlayback` rate steering), map contract `ConversationPoseTests.cs`, host capture, message/controller/view; protocol 22/bridge 18. cmt-b27 first-dialogue smoothness user-confirmed; first/repeat retention, read-only/text update and both closes passed. Installed b27 retained after exact cleanup; no full visual/battle-regression claim. |
 | 3D dialogue descriptor and atomic transport | `Campaign/CoopCampaignMapConversationTableauCapture.cs`, `Infrastructure/CoopCampaignMapConversationTableauState.cs`, `Infrastructure/CoopCampaignMapConversationPayloadCodec.cs`, map contract `ConversationTableauTests.cs` and `ConversationPayloadTests.cs` |

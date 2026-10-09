@@ -7,10 +7,25 @@
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="ReplicaCameraTests.cs" />
+    <Compile Include="EscapeInputTests.cs" />
+    <Compile Include="LobbyLifetimeTests.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapLobbyLifetimePolicy.cs" Link="CoopCampaignMapLobbyLifetimePolicy.cs" />
+    <Compile Include="SettlementEventDisclosureTests.cs" />
+    <Compile Include="SettlementMarkerOrderTests.cs" />
+    <Compile Include="SettlementMarkerTransportTests.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapSettlementMarkerOrder.cs" Link="CoopCampaignMapSettlementMarkerOrder.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapEscapeInputPolicy.cs" Link="CoopCampaignMapEscapeInputPolicy.cs" />
     <Compile Include="SettlementGeometryTests.cs" />
     <Compile Include="SettlementPartyBadgeTests.cs" />
+    <Compile Include="SettlementRelationTests.cs" />
     <Compile Include="PartyBodyTests.cs" />
     <Compile Include="PickResolverTests.cs" />
+    <Compile Include="HoverDecalTests.cs" />
+    <Compile Include="MovementTargetTests.cs" />
+    <Compile Include="MovementTargetTransportTests.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapMovementTarget.cs" Link="CoopCampaignMapMovementTarget.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapMovementTargetCodec.cs" Link="CoopCampaignMapMovementTargetCodec.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapHoverDecal.cs" Link="CoopCampaignMapHoverDecal.cs" />
     <Compile Include="..\..\Infrastructure\CoopCampaignMapPickResolver.cs" Link="CoopCampaignMapPickResolver.cs" />
     <Compile Include="TooltipPayloadTests.cs" />
     <Compile Include="TooltipInterestTests.cs" />
@@ -36,7 +51,13 @@
     <Compile Include="..\..\Infrastructure\CoopCampaignMapSettlementGeometryAdmission.cs" Link="CoopCampaignMapSettlementGeometryAdmission.cs" />
     <Compile Include="..\..\Infrastructure\CoopCampaignMapReplicaCameraPolicy.cs" Link="CoopCampaignMapReplicaCameraPolicy.cs" />
     <Compile Include="ConversationTableauTests.cs" />
+    <Compile Include="ConversationMissionSceneTests.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapConversationMissionScene.cs" Link="CoopCampaignMapConversationMissionScene.cs" />
+    <Compile Include="ConversationPublicationLeaseTests.cs" />
+    <Compile Include="..\..\Campaign\CoopCampaignMapConversationPublicationLease.cs" Link="CoopCampaignMapConversationPublicationLease.cs" />
     <Compile Include="ConversationPayloadTests.cs" />
+    <Compile Include="ConversationHudTests.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapConversationHud.cs" Link="CoopCampaignMapConversationHud.cs" />
     <Compile Include="ConversationVisualLifetimeTests.cs" />
     <Compile Include="ConversationPoseTests.cs" />
     <Compile Include="..\..\Infrastructure\CoopCampaignMapConversationPose.cs" Link="CoopCampaignMapConversationPose.cs" />
