@@ -1,10 +1,129 @@
 # Automatic Campaign Map / Battle Mission Lifecycle
 
+## Applied-result close candidate, 2026-10-13 (r15 native verification in progress)
+
+Current r15 supersedes older not-deployed statements below: b96 was installed
+and loaded in campaign8772, dedicated32460 and multiplayer30496, with exact
+role identities retained in artifacts/runtime/transition-ack-r15-20261013.
+User-assisted join rendered the automatic map. A campaign UI field encounter
+with22 deserters automatically transitioned the same connected MP client to
+battle/team selection and commander deployment. Dedicated EndMap command2
+at15:46:11.090 -> StartBattle command3 at15:46:13.301 is2.211 seconds,
+compared with the prior r14 server dispatch interval15.251 seconds. This is
+not total client loading time. Full cross-scenario fix acceptance remains open.
+The first field battle subsequently completed: result publication15:49:10.234,
+campaign consumed audit15:49:11.201, EndBattle15:49:11.908, client unload
+15:49:12.063. This bounds publication-to-close at1.674s with the consumed audit
+before close. StartMap15:49:47.990 and client render-ready15:49:51.590 prove
+automatic return, but aftermath UI occupied part of the36.082s between close
+and map dispatch; do not label that interval a fixed timer or claim measured
+host-map-readiness latency. User advanced aftermath UI. Returned-map interaction
+and adjacent scenarios are not yet verified. Cleanup/configuration restoration
+also remain pending.
+
+User-controlled repeat entry: EndMap command6 at15:50:51.329 -> StartBattle
+command7 at15:50:51.662 (0.333s); client unload/load messages at15:50:51.461
+and15:50:51.794. Second completion was then observed at15:52:38.389,
+campaign consumed audit15:52:39.179, EndBattle command8 at15:52:39.490 and
+client unload15:52:39.639. StartMap command9 at15:52:56.678 was followed by
+client render-ready15:53:00.630. Both observed cycles preserve audit-before-close;
+second audit-to-close is0.311s. User controls aftermath UI, so return intervals
+are not isolated host-readiness measurements. These bounded observations do not
+establish adjacent siege/hideout or multi-client coverage.
+
+A third user-controlled cycle is recorded: EndMap15:53:47.772 ->
+StartBattle15:53:48.112 (0.340s), consumed audit15:55:47.741 ->
+EndBattle15:55:48.064 (0.323s), StartMap15:55:48.625 -> client render-ready
+15:55:51.864 (3.239s). The result reports WinnerSide=Defender; scenario type
+and post-return interaction are not established by these timing entries.
+Later Get-Process and Win32_Process checks both found the three recorded IDs
+absent. No agent stop/restart was issued during passive observation. Exit cause,
+replacement sessions and configuration restoration remain unverified.
+
+Latest source: b96 passed both isolated builds with installed inventories unchanged.
+The automatic-session adapter now installs three dedicated-only Harmony guards:
+owned completed-battle warmup ticks are suppressed; owned battle lobby-ending
+requests are admitted only inside the reconciler's synchronous close dispatch;
+the Ending timer is zeroed only for that exact mission inside that dispatch.
+No global duration constant changes. Native Ending broadcast, UDP end callback,
+UnloadMission, unsynchronization and actual teardown remain in their normal path.
+Start still requires native intermission readiness. Bounded client timing is
+recorded above; adjacent scenarios remain UNVERIFIED. This is a test candidate,
+not a generally accepted release.
+
+Installed DedicatedCustomServer.MissionCustomGameServerComponent.EndGameAsServer
+broadcasts UnloadMission, calls UnSynchronizeEveryone and
+BannerlordNetwork.EndMultiplayerLobbyMission. The candidate retains this path.
+Native-sensitive risk: ordering now has no presentation grace period; verify
+connected client unload/load, late join and multi-stage results in game.
+The native client still initially derives its Ending display timer as15 seconds;
+early UnloadMission must clear that presentation. No claim of UI verification.
+Full contract run transition-ack-c101-20261013 passed all25 projects.
+Runtime helpers and exact deployment/loaded-identity evidence are retained under
+artifacts/runtime/transition-ack-r15-20261013. The user retained control for
+testing, but these recorded processes are no longer live; reconcile current
+user activity before deployment, relaunch or configuration restoration.
+
+User accepted the bearing correction and reported two successful field battles
+with map return, but requested shorter, evidence-driven transitions.
+Live r14 server log22944 shows EndMap command5 at10:56:09.404 and StartBattle
+command6 at10:56:24.655. Installed MissionLobbyComponent sets
+PostMatchWaitDuration=15 and starts that timer in SetStateEndingAsServer.
+Second result publication occurred at10:59:02.407; lobby Ending only at
+11:00:02.414, then StartMap command7 at11:00:17.652.
+During the intervening minute, native warmup resumed after BattleEnded:
+timer activity at10:59:02 and10:59:32. Installed MultiplayerWarmupComponent
+includes a separate 30-second EndWarmupProgress timer. This is not evidence
+that result persistence needs 60 seconds.
+
+Source now emits EndBattle once only when the exact owned battle has both
+server publication proof and a fresh matching host applied-journal acknowledgement,
+plus native CanEnd. The adapter rechecks mission and result identity and uses
+ListedServer.EndMission. It still waits for actual teardown and native readiness;
+pending followup blocks map return, not closing an already applied stage.
+This supersedes the historical prohibition on adapter-issued battle ending below
+only for this explicitly acknowledged completed-battle boundary.
+
+Focused map contracts passed, including 4,327 lifecycle assertions. New checks
+cover publication-only, wrong/stale acknowledgement, elapsed-time non-authority,
+native readiness, one-shot close, teardown, replacement/wrong completion rejection,
+pending-close timeout and followup map suppression.
+These are pure contracts, NOT native siege/hideout coverage or deployment proof.
+The shared adapter affects field, village, siege, sally, ambush, relief and
+hideout stages; scenario construction and result-application gates are unchanged.
+
+Remaining: native adjacent-scenario and multi-stage verification, late join,
+returned-map interaction and final exact cleanup. The scoped timer removal and
+warmup/ending guards are implemented in b96 and exercised by the bounded field
+observations above. Do not infer broad native coverage from pure contracts.
+
+### Historical interrupted preparation and r14 recovery
+
+Recovery audit after user-reported reboot: transition-ack-b94-20261013 has a
+terminal AssertionFailed runner status, not an unknown running build. Both
+project logs report NU1301 resolving api.nuget.org; compilation was not validated.
+No Bannerlord/dotnet/MSBuild processes were observed in the recovery inventory.
+Five of seven r14 config preimages match; engine_config.txt and the dedicated
+test config differ and require reviewed restoration. No restoration claimed.
+
+Subsequent recovery completed: the only reviewed changes were physics_tick_rate
+90.0000 -> 58.3911 and dedicated map empire_village_o -> battle_terrain_biome_093b
+(including its usable-map entry). Exact postimage hashes were admitted; the
+cleanup helper preserved postimages and restored both. cleanup.json proves all
+seven configurations match, recorded campaign already exited, no owned IDs remain;
+test saves and installed modules are retained. Fresh transition-ack-b95-20261013
+passed both isolated builds with installed module inventories unchanged. This
+validates the applied-result close candidate only, not the remaining native
+warmup/presentation-wait changes or a native timing improvement.
+
+## Original adapter design and historical verification
+
 Status: main-thread host/server adapters implemented in source, 2026-09-26.
 First native attempt failed at opening-origin verification on 2026-09-27.
 Full native acceptance remains open. The separate explicit environment gate
 `COOPSPECTATOR_AUTOMATIC_CAMPAIGN_MISSIONS=1` AND the existing map prototype
-gate are required. No default rollout or installed-module change is claimed.
+gate are required. No default rollout is claimed. Current test installation and
+verification are recorded in the 2026-10-13 section above.
 
 Implementation boundary: the reconciler now has a production caller in
 `DedicatedServer/CoopCampaignMissionServer.cs`. Both module ticks are wired.
@@ -310,3 +429,19 @@ historical battle reports remain unchanged; they do not verify this new lifecycl
 Source adapter integration updates CODE_MAP, README, ARCHITECTURE,
 RUNTIME_FLOWS and INVARIANTS_AND_RISKS. These describe source ownership, not
 native acceptance. The acceptance checklist remains open until measured in game.
+# Queued-stage teardown regression (2026-10-13)
+
+`MissionLifecycleTests.QueuedStageDuringClose` adds 16 pure assertions for a
+next-stage host intent arriving either before or during acknowledged predecessor
+closure. The close remains bound to the previous battle/native instance; the
+next stage waits for actual teardown, native start readiness and fresh host
+authorization, then starts once without an intervening map.
+
+Focused validation: `CoopCampaignMapPrototype.ContractTests` Release passed,
+including 4343 lifecycle assertions. Set `COOPSPECTATOR_REPOSITORY_ROOT` to the
+repository before invoking this project directly. The first direct attempt
+failed without that variable; the next was denied access to synthetic test
+files under sandbox restrictions; the permission-approved rerun passed.
+No installed modules, game processes or live configurations were changed.
+This is ordering coverage relevant to multi-stage battles, not native siege,
+hideout or multi-client acceptance. The user retains control of the live test.

@@ -155,6 +155,14 @@
       <HintPath>$(BannerlordNativeModuleBinDir)\TaleWorlds.MountAndBlade.View.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="TaleWorlds.MountAndBlade.GauntletUI">
+      <HintPath>$(BannerlordNativeModuleBinDir)\TaleWorlds.MountAndBlade.GauntletUI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.MountAndBlade.GauntletUI">
+      <HintPath>$(BannerlordNativeModuleBinDir)\TaleWorlds.MountAndBlade.GauntletUI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="TaleWorlds.MountAndBlade.ViewModelCollection" Condition="Exists('$(BannerlordBinDir)\TaleWorlds.MountAndBlade.ViewModelCollection.dll')">
       <HintPath>$(BannerlordBinDir)\TaleWorlds.MountAndBlade.ViewModelCollection.dll</HintPath>
       <Private>false</Private>

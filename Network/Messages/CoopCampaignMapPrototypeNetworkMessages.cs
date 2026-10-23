@@ -30,6 +30,7 @@ namespace CoopSpectator.Network.Messages
             CoopCampaignMapPrototypeState state)
         {
             ProtocolVersion = CoopCampaignMapPrototypeContract.ProtocolVersion;
+            SessionId = state?.SessionId ?? string.Empty;
             Revision = ClampPositive(state?.Revision ?? 0);
             NormalizedX = ClampUnit(state?.NormalizedX ?? 0);
             NormalizedY = ClampUnit(state?.NormalizedY ?? 0);
@@ -56,6 +57,7 @@ namespace CoopSpectator.Network.Messages
         }
 
         public int ProtocolVersion { get; private set; }
+        public string SessionId { get; private set; } = string.Empty;
 
         public int Revision { get; private set; }
 
@@ -85,6 +87,7 @@ namespace CoopSpectator.Network.Messages
         {
             return new CoopCampaignMapPrototypeState
             {
+                SessionId = SessionId,
                 Revision = Revision,
                 NormalizedX = NormalizedX,
                 NormalizedY = NormalizedY,
@@ -122,6 +125,8 @@ namespace CoopSpectator.Network.Messages
                 ? ReadCamera(ref valid)
                 : null;
             MovementTarget = ReadStringFromPacket(ref valid);
+            SessionId = ReadStringFromPacket(ref valid);
+            valid &= Guid.TryParseExact(SessionId, "N", out var session) && session != Guid.Empty;
             valid &= CoopCampaignMapMovementTargetCodec.TryDecode(MovementTarget, out _);
             return valid;
         }
@@ -150,6 +155,7 @@ namespace CoopSpectator.Network.Messages
             if (hasCamera)
                 WriteCamera(Camera);
             WriteStringToPacket(MovementTarget);
+            WriteStringToPacket(SessionId);
         }
 
         protected override MultiplayerMessageFilter OnGetLogFilter() =>
@@ -352,6 +358,7 @@ namespace CoopSpectator.Network.Messages
                 maximumValueGiven: true);
         private static readonly CompressionInfo.Integer PartyFlagsCompression =
             new CompressionInfo.Integer(0, CoopCampaignMapPrototypeContract.MaxPartyNameplateFlags, true);
+        private static readonly CompressionInfo.Integer SettlementMapEventTypeCompression = new CompressionInfo.Integer(0, 5, true);
         private static readonly CompressionInfo.Integer SettlementRelationCompression =
             new CompressionInfo.Integer(0, CoopCampaignMapSettlementRelationPolicy.Maximum, true);
         private static readonly CompressionInfo.Integer EventOrderCompression =
@@ -442,6 +449,7 @@ namespace CoopSpectator.Network.Messages
                 SettlementQuestOrder = ReadIntFromPacket(QuestOrderCompression, ref valid),
                 IsSettlementTracked = ReadBoolFromPacket(ref valid),
                 SettlementRelation = ReadIntFromPacket(SettlementRelationCompression, ref valid),
+                SettlementMapEventType = ReadIntFromPacket(SettlementMapEventTypeCompression, ref valid),
                 IsSettlementInRange = ReadBoolFromPacket(ref valid),
                 NormalizedX = ReadIntFromPacket(UnitCompression, ref valid),
                 NormalizedY = ReadIntFromPacket(UnitCompression, ref valid),
@@ -470,6 +478,7 @@ namespace CoopSpectator.Network.Messages
             Entity.SettlementLevelFlags = ReadIntFromPacket(UnitCompression, ref valid);
             Entity.SettlementWallStates = ReadStringFromPacket(ref valid) ?? string.Empty;
             Entity.SettlementPreparationState = ReadIntFromPacket(UnitCompression, ref valid);
+            Entity.SettlementRaidState = ReadIntFromPacket(UnitCompression, ref valid);
             Entity.HoverDecal = ReadStringFromPacket(ref valid) ?? string.Empty;
             return valid &&
                    ExpectedCount > 0 &&
@@ -563,6 +572,7 @@ namespace CoopSpectator.Network.Messages
             WriteIntToPacket(safeEntity.SettlementQuestOrder, QuestOrderCompression);
             WriteBoolToPacket(safeEntity.IsSettlementTracked);
             WriteIntToPacket(safeEntity.SettlementRelation, SettlementRelationCompression);
+            WriteIntToPacket(safeEntity.SettlementMapEventType, SettlementMapEventTypeCompression);
             WriteBoolToPacket(safeEntity.IsSettlementInRange);
             WriteIntToPacket(ClampUnit(safeEntity.NormalizedX), UnitCompression);
             WriteIntToPacket(ClampUnit(safeEntity.NormalizedY), UnitCompression);
@@ -588,6 +598,7 @@ namespace CoopSpectator.Network.Messages
             WriteIntToPacket(safeEntity.SettlementLevelFlags, UnitCompression);
             WriteStringToPacket(safeEntity.SettlementWallStates ?? string.Empty);
             WriteIntToPacket(safeEntity.SettlementPreparationState, UnitCompression);
+            WriteIntToPacket(safeEntity.SettlementRaidState, UnitCompression);
             WriteStringToPacket(safeEntity.HoverDecal ?? string.Empty);
         }
 

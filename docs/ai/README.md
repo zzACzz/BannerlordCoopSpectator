@@ -1,5 +1,442 @@
 # AI Knowledge Base
 
+Model handoff: [2026-10-23 checkpoint](CAMPAIGN_MAP_HANDOFF_2026-10-23.md).
+It records installed b231, bounded user acceptance, current live-run cleanup
+responsibility and default-off flight-observer launch requirements.
+
+r44/b231 user acceptance: siege shots now look correct and smooth; repeated siege
+and menu open/close also passed the user's checks. All three loaded identities
+match the candidate. Broader regression and full Goal acceptance remain open;
+run cleanup is pending. See SIEGE_PRESENTATION_PLAYBACK_2026-10-23.md for scope.
+
+r44 staged b231: seven installed files verified and seven configuration preimages
+retained after all26 c170 contracts and both builds passed. Scoped campaign launcher
+enables the default-off flight observer. No game launched/native acceptance yet;
+older installed-b217 statements below are historical. See local r44 OBSERVATION.md.
+
+Latest source: siege flight orientation/scale connected, protocol60/bridge55,
+CSF2/CSP4/CSO10. Isolated b230 builds and all26 c169 contracts pass without
+installed mutation; offline native call-site matching passes. Native acceptance
+and visual regression remain pending; installed b217 is unchanged.
+See SIEGE_PRESENTATION_PLAYBACK_2026-10-23.md for current evidence and limits.
+
+Latest source now attaches retained flight history and evaluates flight positions
+on the buffered host timeline. Map tests pass for short flights, pause and late
+join. Native orientation/scale and visual acceptance remain open; installed b217
+is unchanged. New observer still requires explicit environment opt-in.
+
+Latest source trajectory transport: protocol59/bridge54/catalog10, CSP3/CSO9 with
+optional CSF1 flight data. Full map contracts pass. Host journal attachment and
+client flight rendering remain incomplete; installed b217 stays58/53. Never mix
+candidate and installed roles. See siege playback investigation for evidence.
+
+r43 CLOSED: user exited games, elevated inventory found no game roles, all seven
+configuration hashes match after restoring the generated server-map change.
+b217 retained; user reports machines normal but projectiles jerky/missing.
+Projectile fidelity acceptance FAILED. Detached full-flight math foundation passes
+map contracts but is not yet captured/transported/rendered. See siege playback research.
+
+Latest source b217: sampled projectile translation and matching-instance/cycle
+machine phases use shared timing. CSM2/CSO8, protocol58/bridge53. Full map contracts
+and both isolated builds pass; c168 passed all 26 contract projects. r43 staged
+b217 with seven installed files and seven configuration preimages retained; no
+game launched by this run yet. Earlier installed-b211 notes are historical. Native acceptance,
+orientation, short-flight coverage and trail/impact fidelity remain open.
+
+Siege smoothing research: [identity and playback requirements](SIEGE_PRESENTATION_PLAYBACK_2026-10-23.md).
+Native missile lists compact after collision; side/index is not a persistent shot
+identity. Source candidate b213 integrates stable ShotId capture/transport/render
+keys (56/51, CSP2/CSO6), passes map contracts and both isolated builds. Installed
+b211 is unchanged. Smooth playback is still unimplemented; native acceptance open.
+Follow-up b214 adds host siege timing capture/CSO7 transport (57/52), with map
+contracts and both isolated builds passing. Playback consumption remains pending.
+Follow-up b215 connects bounded sampled projectile translation; full map tests and
+both isolated builds pass. No deployment/native acceptance; machine phase and full
+flight/trail fidelity remain open. See the playback investigation for limitations.
+
+2026-10-23 r42 CLOSED: all authorized game roles exited and seven configuration
+hashes match preimages. Steam/saves preserved, b211 retained. Host probe found one
+flight-child particle component for three projectile resources; manual MP launch
+worked after agent-launch Steam login failure but supplied no replica probe lines.
+User reports partial trail and possibly jerky animation. Full trail/smoothness
+acceptance remains open; see r42 OBSERVATION.md. Earlier status below is historical.
+
+2026-10-23 r42 IN PROGRESS: diagnostic b211 staged after both builds and c167
+all26 contracts passed. Seven installed files verified/seven config preimages.
+Campaign launched with opt-in particle-count probe; MP must use scoped launcher
+for comparative diagnostics. No trail cause/fix accepted. r41 is closed.
+
+2026-10-23 r41 CLOSED after explicit user shutdown and elevated process check.
+All seven configuration hashes restored/verified; b210 retained, Steam/saves
+untouched. User reports siege firing works but projectile trail is missing.
+Trail initialization/movement investigation continues; do not claim full parity.
+The earlier IN PROGRESS entries below are historical.
+
+2026-10-23 r41 IN PROGRESS: b210 installed, seven files verified and seven
+configuration preimages retained. Campaign launched; no projectile native
+acceptance yet. Await UI handoff after previous physical Escape. Do not duplicate
+user-started multiplayer. See r41 OBSERVATION.md under artifacts/runtime.
+
+2026-10-23 r40 CLOSED after user exited games: all seven configurations match
+preimages, Steam/saves preserved. Projectile candidate b210 (55/50/10, CSO5/CSP1)
+passed both isolated builds and c166 all26 contracts. Capture, transport and
+owned rendering are connected; deployment/native acceptance remain pending.
+Installed b207 retained. Earlier IN PROGRESS notes are historical.
+
+2026-10-23 r40 is IN PROGRESS on b207. Agent paired screenshots confirm visible
+ram and ranged siege models; user reports firing/stopping works. Projectiles are
+still absent. Physical Escape interrupted further input; do not resume UI control
+without a user handoff. No cleanup performed. The projectile DTO foundation is
+source-only and not yet test/build verified or connected to the runtime.
+See artifacts/runtime/map-siege-machines-r40-20261023/OBSERVATION.md.
+
+2026-10-23 r39 CLOSED on b204: blue siege slot outlines render and the host-camera
+return button worked. User reports the camp flag now looks normal in this scene;
+engine models are still missing, independently observed against campaign.
+All three authorized game roles exited gracefully and all seven configurations
+match preimages. Steam/saves preserved. Source-only animation/resource admission
+foundations pass map contracts but are not deployed. Full siege fidelity remains
+open. The IN PROGRESS note below is historical.
+
+2026-10-23 r39 is IN PROGRESS on staged b204: seven files verified and seven
+configuration preimages retained. Campaign loaded MVID matches the candidate.
+The user is manually loading/connecting; do not duplicate their client or take
+input control before handoff. Native decal acceptance and cleanup are pending.
+See artifacts/runtime/map-siege-decals-r39-20261023/OBSERVATION.md locally.
+This supersedes the installed-b199 statement immediately below.
+
+2026-10-23 siege decal candidate b204 passed both isolated builds with installed
+module inventories unchanged; c164 passed all 26 contract projects. Capture,
+CSO3/CSD1 transport and owned decal rendering are connected in source
+(protocol53/bridge48/catalog10). Native appearance and lifecycle acceptance are
+NOT RUN; b199 remains the last installed revision. Closed r38 is the latest
+native observation. See CODE_MAP's siege audit for scope and remaining gates.
+
+2026-10-23 r38 is CLOSED: all three loaded identities verified; user-authorized
+campaign, dedicated and multiplayer processes exited gracefully. The inspected
+generated server-map change was restored and all seven configuration hashes match.
+Steam/saves preserved, b199 retained. See r38 OBSERVATION.md for bounded siege
+progress acceptance and remaining model/slot/fidelity gaps.
+
+2026-10-23 r38 b199 native observation: siege camp progress, wall health and
+defender construction indicators render and update in both campaign and replica.
+Paused paired evidence is retained in r38 OBSERVATION.md. Built siege engine models
+and ground slot outlines remain absent; full siege acceptance is still open.
+Campaign is paused, all three roles remain running, cleanup is pending.
+The staging-only notes below are historical.
+
+2026-10-23 r38 staged b199 after both isolated builds and c163 all26 contract
+projects passed. Seven files installed with seven configuration preimages and
+module backups retained. No game launched yet; native siege overlay acceptance
+remains pending. Installed protocol52/bridge47/catalog10, CMN7/CSO2 now supersedes
+historical installed-b194 notes below. See local r38 OBSERVATION.md.
+
+2026-10-23 b199 connects the stock siege overlay movie to detached client bindings.
+CSO2 includes native camera distance; the full map-contract executable and both
+isolated builds passed. No deployment/native acceptance yet; b194 remains installed.
+See CODE_MAP siege audit for rendering ownership and remaining fidelity gates.
+
+2026-10-23 detached siege UI bindings passed b197 isolated builds. The mission
+view does not load them yet; native camera-range admission, depth order and remaining
+tooltip/production presentation fidelity are open. Installed b194 remains unchanged.
+See CODE_MAP's siege audit for the binding and native-camera findings.
+
+2026-10-23 siege overlay capture/transport is connected in source (52/47/10,
+CMN7), with b196 both isolated builds and the full map-contract executable passing.
+Renderer/native acceptance remain open; installed b194 is unchanged. The dated
+foundation/capture-only notes below are historical stages. See CODE_MAP's siege audit.
+
+2026-10-23 siege overlay capture candidate compiles in both isolated b195 roles,
+with installed inventories unchanged. It reads prepared native bindings only;
+publisher/transport/renderer integration and native acceptance remain open.
+Installed b194 is retained and r37 is closed. See the current siege audit below.
+
+2026-10-23 siege overlay foundation now has a detached validated model and CSO1
+codec, with tests passing in the full map-contract executable. It is not connected
+to host capture, transport or rendering; no new visual acceptance is claimed.
+See [siege audit](CODE_MAP.md#map-party-event-animation-and-siege-audit-2026-10-23).
+
+2026-10-23 latest siege observation: b194 is retained after CLOSED r37.
+The flag cloth now spreads and shows its emblem, but fold/lighting parity is
+not accepted. Camp preparation progress, siege slot outlines and machine/wall
+indicators remain absent. All three user-authorized game roles exited; all seven
+configuration hashes match their preimages. Steam and saves were preserved.
+See [r37 observation](../../artifacts/runtime/map-siege-wind-r37-20261023/OBSERVATION.md).
+Older installed/running statements below are historical snapshots.
+
+2026-10-23 r35 native siege observation: b191 is installed (superseding the older
+installed-b187 statements below). Zeonica menu, upper panel and tent render, but
+the flag and siege overlays are missing. Host CST1 carries no banner. Native
+inspection identifies the flag as a ClothSimulator component omitted by the
+MetaMesh-only sampler. The bounded cloth sampler correction passed isolated b193
+client/dedicated compilation; it is not installed or native-accepted. b192 failed
+before compilation because sandbox CIM access was unavailable. See
+[r35 observation](../../artifacts/runtime/map-siege-tent-r35-20261023/OBSERVATION.md).
+
+2026-10-23 siege-tent source continuation: protocol51/bridge46/catalog10 now carries
+explicit tent presentation through host and binary catalog formats; focused map
+contracts pass. b191 connects native capture and owned client rendering and passed
+both isolated builds; native siege acceptance remains open. Installed b187/r34
+remains50/45/9. See the current tent section in
+[CODE_MAP](CODE_MAP.md#map-party-event-animation-and-siege-audit-2026-10-23).
+
+r34 is now CLOSED: user exited all three game roles; fresh process query found
+none. After the user denied changing settings, the single physics_tick_rate
+difference was restored from its hash-verified preimage. All seven configurations
+match; Steam and saves are preserved. b187 remains installed, b191 not staged.
+
+2026-10-23 source continuation: party-animation host capture, bounded file transport,
+server forwarding, client receipt admission and exact-actor rendering are connected.
+The subsequent clock-domain correction uses protocol50/bridge45/catalog9 and CMP2.
+b184 passed both isolated builds and c157 passed all26 contract projects for the
+clock-corrected candidate. r32 installed b184; user confirmed battle animation but
+reported it persisting after Surrender without a battlefield mission. r32 is closed,
+all seven configurations matched; r33 staged the b186 release-sentinel correction
+after both builds and all26 c158 contracts passed. r33 native release acceptance
+FAILED: user repeated Surrender and attack motion persisted; host still publishes
+act_none. All three loaded identities match b186. Further diagnosis is required.
+Follow-up b187 adds one-time owned actor reconstruction on explicit-action
+release/revocation. Both isolated builds and all26 c159 contracts passed. r33 is
+closed with seven configuration hashes restored; r34 staged b187 with backups.
+In r34 the user repeated Surrender and confirmed the lingering animation is fixed;
+all three loaded identities match b187. This is bounded manual acceptance, not
+raid/mounted/siege regression coverage. The user subsequently also confirmed an
+actual bandit battle and correct post-battle animation. Cleanup remains pending.
+Siege-tent detached presentation validation and focused tests now exist, but host
+capture, transport and rendering are not integrated; no siege visual pass is claimed.
+Native smoothness/safety, pause/fast-forward
+and dense-party refresh capacity remain unverified/open.
+See [animation integration](CODE_MAP.md#map-party-event-animation-and-siege-audit-2026-10-23).
+
+2026-10-23 latest runtime: r31 CLOSED on b173 (protocol48/bridge43/catalog9).
+Control-hint capture, transport and rendering are connected source candidates;
+c154 passed all26 contract projects and b173 passed both isolated builds.
+Campaign PID34920 and user-launched MP PID51936 report the candidate client MVID.
+MP visibly renders the replica map, raid panel and bottom bar. Automated party-button
+hover did not display a hint; the subsequent user comparison reports bottom-bar
+data matching campaign. This is bounded user acceptance, not exhaustive provider
+coverage. Postflight found no game/server processes and all seven configurations
+already matching their preimages. Steam/saves preserved, b173 retained.
+See the r31 observation for bounded evidence.
+Historical r30 CLOSED on b162: Alt expansion/release/menu-return passed, three
+authorized roles exited and seven configurations matched. Full Goal, sieges and
+broader fidelity/regression gates remain open.
+See [current boundaries](CODE_MAP.md#bottom-bar-remaining-hint-boundary-2026-10-22-research)
+and [r31 evidence](../../artifacts/runtime/map-control-hints-r31-20261022/OBSERVATION.md).
+The dated entries below are historical snapshots, not current installed state.
+
+2026-10-22 latest verification: source candidate b160 (protocol46/bridge41/catalog9)
+built both roles without installed changes; `bar-hints-c141-20261022` passed all
+26 canonical contract projects. Bottom-bar statistic/gold hints and mirror material
+thumbnail framing are implemented candidates, NOT native-accepted. Installed b150
+remains after closed r28: three roles exited, seven configurations matched and
+Steam/test saves were preserved. Never mix b150 and b160 roles. See
+[current capture boundaries](CODE_MAP.md) and
+[next native acceptance checklist](CAMPAIGN_MAP_TEST_RUNBOOK.md#bottom-bar-candidate-acceptance-2026-10-22-not-yet-run).
+Older dated entries below describe historical revisions, not current authorization.
+
+2026-10-21: the user confirmed the external player's deployment stall was caused
+by the host not launching/joining a separate multiplayer client. Do not treat that
+case as a remaining topology or village-classification failure. Both PCs must join
+the dedicated battlefield; see TWO_PC_PREVIEW_TEST_EN.md for the explicit workflow.
+Replica acceptance resumed in fresh r20 with retained b134 and new configuration
+preimages. Campaign loaded the verified candidate; marker/raid visual tests remain
+pending. r19 process identities are historical and must not be reused.
+
+2026-10-17 live preparation resumed with explicit user permission after manual
+tests ended. b134 both isolated builds and c132 all26 contract projects passed.
+Fresh `map-events-r19-20261017` staged seven files with seven configuration
+preimages; campaign loaded the verified b134 MVID. Native map-event acceptance
+is pending. Earlier manual-test no-mutation notes below are historical, not the
+current authorization. Do not reuse old process IDs or infer a visual pass.
+
+2026-10-17 latest source: protocol42/bridge37/catalog9. World battle markers
+now have host capture, chunk transfer and detached rendering; settlement map
+event types are carried through full/dynamic state. b131 both isolated builds
+and c128 all26 contracts passed; none of this is new native visual acceptance.
+The two-PC village loading report exposed a missing `_village` scene suffix:
+campaign `battania_village` was incorrectly replaced with a field map patch.
+The shared classifier candidate is compiled/tested, not deployed or runtime
+accepted. See [evidence and next gates](VILLAGE_FIELD_LOADING_INVESTIGATION_2026-10-17.md).
+The user is still manually testing: do not touch installed modules, configs or
+game processes. The b124 r4 archive remains immutable. Earlier chronological
+"current" statements below describe their dated revisions, not current source.
+
+2026-10-17 battle-marker capture and host-file transport are source candidates
+(bridge36/protocol40), not deployed or native-accepted. Client marker transfer and
+rendering remain open. c121 passed26 projects; b125 passed both isolated builds.
+Later codec/integration checks are pending; see
+[marker boundary and current integration](CODE_MAP.md#world-battle-marker-native-boundary-2026-10-17-research).
+The user is manually installing/testing the immutable b124 r4 archive; do not
+overwrite installed modules or take over game processes without coordination.
+
+2026-10-17 encounter portrait renderer is now a gated source candidate using
+replica-only, pose-separated thumbnail requests and scoped pose substitution.
+b124 builds and final c119 all26 tests passed. Not deployed or native-accepted; installed
+b114 remains unchanged. See
+[renderer ownership and open gates](CODE_MAP.md#replica-portrait-rendering-candidate-2026-10-17).
+
+Current source adds visible encounter portrait pose capture and atomic transport
+(CMN4/protocol40/bridge35/catalog9), behind the explicit observer gate. b122 both
+isolated builds and c117 all26 contracts passed without installed mutation.
+Client pose-specific rendering remains unimplemented, so portrait parity is not
+fixed. b114 is still installed. See
+[current transport boundary](CODE_MAP.md#visible-encounter-portrait-pose-transport-2026-10-13-candidate).
+
+Latest portrait observer candidate: b121 both isolated builds and c116 all26
+contract projects passed, including14 patched-substitute checks. The observer
+is explicitly default-off and not deployed. Host-visible lookup, transport and
+client pose override remain open; no portrait parity fix is claimed. Installed
+b114 remains unchanged and r18 is closed. See
+[observer source and limits](CODE_MAP.md#gated-portrait-observation-candidate-2026-10-13).
+
+Portrait pose evidence foundation is source/build/contract verified (b117 both
+isolated builds; c113 all25 contracts), but not wired into native capture, network
+transport or rendering. No portrait parity fix is claimed. See CODE_MAP's
+encounter/portrait section. Product processes remain closed after r18.
+
+Encounter overlay source candidate now has host capture, atomic menu transport
+(protocol39/bridge34/catalog9) and detached stock EncounterOverlay UI bindings.
+b114 isolated builds and c111 all25 contract projects passed (1712 menu checks).
+Deployed in r18 with all three loaded identities verified. Native field encounter
+menu/upper strip renders, but banner/portrait/world-marker parity fails. A source
+nine-grid banner correction passed b116 both isolated builds/c112 all25 contracts,
+but is not deployed. r18 is closed: all owned processes absent and seven configs
+match preimages; b114 retained. Hero thumbnail native random-pose selection and
+cache reuse require explicit synchronization, not equipment substitution. See
+[current encounter implementation and gaps](CODE_MAP.md#native-encounter-overlay-investigation-2026-10-13).
+
+r17 b107 native village-defense battle completed and returned automatically to
+the raid panel; raid interruption by a hostile dialogue also replicated. Full
+progress and visual parity remain open. The user closed the game; r17 is now
+CLOSED: all ten recorded identities absent, all seven configuration hashes match,
+test saves preserved. Only the exact-owned remaining console helper needed termination.
+Preloaded-item fallback for missing plunder icons is source-only; isolated b109
+compiled both roles without changing installed module inventories; c105 passed
+all25 contract projects. Installed b107 is retained; b109 is not deployed.
+
+r16 is CLOSED: native village menu failed because BattleSize=-1 was rejected.
+b107 admits that native sentinel; c103 passes all25 projects. r17 has staged b107
+and launched campaign PID24516 with loaded identity verified; native acceptance
+and cleanup remain pending. See
+[r17 observation](../../artifacts/runtime/menu-sentinel-r17-20261013/OBSERVATION.md).
+
+Native menu/raid run `menu-raid-r16-20261013` is IN PROGRESS on b106: eight files
+staged, seven configuration preimages retained, campaign loaded identity verified.
+Fresh c102 passed all25 contract projects. Server/MP and native acceptance are
+pending; cleanup is not complete. See
+[run observation](../../artifacts/runtime/menu-raid-r16-20261013/OBSERVATION.md).
+
+2026-10-13 read-only raid/pre-battle menu candidate: host capture, bounded menu
+transport and detached stock-menu binding are in source (protocol38/bridge33/catalog9).
+Both isolated b106 builds and281 menu checks pass; r16 has staged this candidate,
+but native menu/raid acceptance remains unverified.
+Raid world effects are now connected in source; raid-effects-b105 built both roles
+and raid-menu-c101 passed all25 contract projects. Encounter overlays and all native
+input/visual parity gates remain open. See
+[canonical implementation and gaps](CODE_MAP.md#read-only-campaign-menu-candidate-2026-10-13).
+
+2026-10-13 bearing correction: map-facing-b93-20261013 passed both isolated
+builds; map-facing-c100-20261013 passed all25 contracts. r14 installed the
+candidate and logs confirm automatic server map startup/client render readiness.
+User-controlled moving-turn and battle-cycle checks remain pending; cleanup is
+not complete. See [current bearing evidence](BUILD_TEST_DEBUG.md#map-bearing-correction-2026-10-13-deployed-movement-acceptance-pending)
+and the manual-vs-automatic launch caveat in [test runbook](CAMPAIGN_MAP_TEST_RUNBOOK.md).
+
+Standalone host-gaze source candidate uses protocol37/bridge32/tableau5/pose4,
+catalog8. cmp-b91 both isolated builds and cmp-c98 all24 contracts passed.
+cmp-b91 is retained after closed r12; three-actor rendering/text synchronization,
+bounded user motion comparison and map/camera return passed. See
+[gaze candidate](CAMPAIGN_MAP_MISSION_DIALOGUE.md#host-gaze-candidate-2026-10-11-r12-in-progress).
+
+Fresh r11 closed on cmp-b90: automatic map, Tristania plus two guards, dialogue
+text advancement and return to map passed. Trace proves THREE visible actors,
+not four-actor native acceptance. All23 owned identities absent; seven config
+hashes match. cmp-b90 retained. See
+[r11 evidence and limits](CAMPAIGN_MAP_MISSION_DIALOGUE.md#r11-bodyguard-regression-2026-10-11-closed).
+
+2026-10-11 post-r10 source candidate admits four standalone human dialogue actors
+while preserving the map's three-actor limit. Protocol36/bridge31/tableau5/pose3,
+catalog8; framed pose cap853 and corrected host bridge Base64 bound1140.
+cmp-b90 both isolated builds passed without installed mutation; final cmp-c96
+passed all24 contract projects. Installed cmp-b90 retained after r11; four-visible-actor acceptance open.
+See [coverage and candidate](CAMPAIGN_MAP_MISSION_DIALOGUE.md#post-r10-coverage-audit-ordinary-bodyguard-dialogue-2026-10-11).
+
+2026-10-11 r10: cmp-b88 is now coherently staged and loaded in all three roles.
+User-assisted join renders the map; companion greeting/text/options replicate.
+User comparison found no visible campaign/MP difference in the Iara dialogue;
+this is bounded visual acceptance, not all-scene/weather parity. Host closure
+also returned MP to the map. Repeat dialogue, zoom/manual detach and camera
+return passed. Run closed: all23 owned identities absent, seven configs match;
+cmp-b88 retained. Other scenes/weather and full Goal acceptance remain open.
+See [current r10 evidence](CAMPAIGN_MAP_MISSION_DIALOGUE.md#r10-photo-atmosphere-observation-2026-10-11-run-in-progress).
+This supersedes the not-deployed/current-installed status immediately below.
+
+2026-10-11 photo-atmosphere source candidate: the retained host log proves that
+r9 chose TOD_photo_01_00_SemiCloudy, not the descriptor's interpolated preset.
+The candidate uses the same native photo selector for detached land dialogue,
+keeps its lighting and transfers the host sun direction. Protocol35/bridge30/
+tableau4 requires all three rebuilt roles. cmp-c94 passed all24 contracts and
+cmp-b88 both isolated builds with installed inventories unchanged. Not deployed
+or native-verified; cmp-b87 retained.
+See [candidate and native evidence](CAMPAIGN_MAP_MISSION_DIALOGUE.md#native-photo-atmosphere-candidate-2026-10-11-not-deployed).
+
+2026-10-11 r9: cmp-b87 still FAILS companion dialogue lighting/background
+parity. Greeting renders and host closure returns MP to the map. All22 recorded
+identities are absent and seven configurations are restored; cmp-b87 retained.
+The bounded lighting log proves descriptor receipt, not effective native state.
+See [r9 evidence and research boundary](CAMPAIGN_MAP_MISSION_DIALOGUE.md#r9-descriptor-observation-2026-10-11-parity-failed-run-closed).
+This supersedes the r8 installed-candidate status below.
+
+2026-10-11 r8: cmp-b86 standalone preload executes, but paired companion dialogue
+still FAILS lighting parity (MP darker/bluer). Text/options/close and returned-map
+zoom pass. Run closed: seven configs restored, no owned/product processes;
+cmp-b86 retained. See [r8 result](CAMPAIGN_MAP_MISSION_DIALOGUE.md#r8-standalone-preload-result-2026-10-11-parity-failed).
+This supersedes the not-deployed/not-native-verified candidate status below.
+
+2026-10-11 r7 native observation: cmp-b84 replica map and companion dialogue render,
+but lighting/background parity still FAILS. Bounded terrain/heightmap/loading
+getters are true at all three samples through10 seconds; waiting longer is not
+an established fix. r7 is closed: seven configs restored, no owned/product
+processes. Standalone-preload candidate cmp-b86/cmp-c92 passed both builds/all24
+tests but is not deployed or native-verified. See
+[r7 evidence and limits](CAMPAIGN_MAP_MISSION_DIALOGUE.md#r7-bounded-loading-observation-2026-10-11-visual-parity-failed).
+
+2026-10-11 recovery: interrupted cmp-b83/cmp-c89 have no terminal evidence and
+are not passes. Fresh cmp-b84 passed both isolated builds with installed modules
+unchanged; cmp-c90 passed all24 projects. The default-off bounded standalone
+scene-loading probe is source/build/test verified, not deployed/native-verified.
+See [probe scope and next gate](CAMPAIGN_MAP_MISSION_DIALOGUE.md#bounded-scene-loading-probe-2026-10-11-not-native-verified).
+
+2026-10-09 continuation: cmp-b77 fixes native companion visual capture admission.
+r3 renders the companion/forest scene in MP, replicates text/options and closes
+back to a usable map, but lighting differs significantly: NOT 1:1 acceptance.
+r1/r2/r3 are closed with seven configs restored and no owned/product processes.
+New source removes the temporary capture probe and projects bounded host lighting
+to the owned scene (protocol34/bridge29/tableau3); cmp-b78 both builds and
+cmp-c83/c84 all24 contracts passed. Fresh r4 on cmp-b78 renders night lighting,
+but remains darker/bluer than campaign: NOT 1:1 acceptance. Text/options/read-only
+and close/map zoom passed. r4 is closed: seven configs restored, no owned/product
+processes, cmp-b78 retained. Earlier r3 evidence is not lighting-fix acceptance.
+Post-r4 owned-target effect-profile hypothesis passed cmp-b80 both builds and
+cmp-c86 all24 contracts (cmp-c85 failed a corrected duplicate test declaration).
+Fresh r5 on cmp-b80 FAILED lighting parity: MP is substantially brighter than
+the paired host night dialogue. Native join/automatic map/dialogue rendered.
+r5 is closed: seven configs match, no owned/product processes remain; b80 is
+retained as an unaccepted candidate. See the same canonical investigation below.
+Post-r5 source removes the rejected effect-profile branch; cmp-b81 both isolated
+builds and cmp-c87 all24 contracts passed. Installed b80 was not changed; source
+and installed candidate intentionally differ. Lighting parity remains open.
+Next source candidate explicitly admits view-level shadows only for standalone
+dialogue replicas, matching installed MissionScreen initialization. cmp-b82 both
+isolated builds/cmp-c88 all24 contracts passed. Fresh r6 has staged cmp-b82,
+verified all three loaded identities and launched the server through campaign UI.
+Fresh r6 FAILED lighting parity: MP remains darker/bluer, with visible background
+differences. Dialogue text/options, close-to-map and zoom/manual detach passed.
+r6 is closed: seven configs match, no owned/product processes remain; cmp-b82
+is retained as an unaccepted candidate. View shadows alone did not solve parity.
+See [current investigation](CAMPAIGN_MAP_MISSION_DIALOGUE.md#native-investigation-2026-10-09-in-progress).
+
 Start here after reboot/model handoff: [2026-10-09 checkpoint](CAMPAIGN_MAP_HANDOFF_2026-10-09.md)
 and [agent test runbook](CAMPAIGN_MAP_TEST_RUNBOOK.md). They summarize the latest
 evidence and supersede older chronological "current/running/pending" notes below.

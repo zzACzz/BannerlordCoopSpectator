@@ -21,6 +21,7 @@ internal static class SettlementGeometryTests
         ValidateLevels();
         ValidateAuthoringHelpers();
         ValidatePresentation();
+        ValidateRaidPresentation();
         var admission = new CoopCampaignMapSettlementGeometryAdmission<Root>((root, visible) =>
         {
             root.Visible = visible;
@@ -97,7 +98,7 @@ internal static class SettlementGeometryTests
         Check(cleanup.IndexOf("SelectRemovalRoots(", StringComparison.Ordinal) <
             cleanup.IndexOf("helper.Remove(112)", StringComparison.Ordinal), "Plan all removals before invalidating native references.");
         Check(view.Contains("entity.Kind == CoopCampaignMapPrototypeEntityKind.Settlement, entity.SettlementLevelFlags,") &&
-            view.Contains("entity.SettlementWallStates, entity.SettlementPreparationState);"),
+            view.Contains("entity.SettlementWallStates, entity.SettlementPreparationState, entity.SettlementRaidState);"),
             "Full and incremental upserts must share typed geometry admission.");
         string remove = Slice(view, "private void RemoveEntityReplica", "private void UpdateEntityReplicas");
         Check(remove.IndexOf("_settlementGeometry.Apply(entityId, false)", StringComparison.Ordinal) <
@@ -261,6 +262,64 @@ internal static class SettlementGeometryTests
         Check(root.Visible, "Fresh reveal reapplies the host variant.");
         admission.Apply("settlement:town", true, 0);
         Check(!root.Visible, "Loss of variant capture must not leave stale geometry visible.");
+    }
+
+    private static void ValidateRaidPresentation()
+    {
+        int effects = 0, applied = -1;
+        bool geometryOk = true, effectOk = true;
+        var root = new Root();
+        var admission = new CoopCampaignMapSettlementGeometryAdmission<Root>((r, v) => r.Visible = v,
+            (r, f) => geometryOk, null,
+            (r, state) => { effects++; applied = state; return effectOk; });
+        admission.Register("village", root);
+        Check(applied == 0 && !root.Visible, "Registration removes authoring particles before disclosure.");
+        admission.Apply("settlement:village", true, 9, "", 1, 2);
+        int first = effects;
+        admission.Apply("settlement:village", true, 9, "", 1, 2);
+        Check(root.Visible && applied == 2 && effects == first, "Unchanged raid must not restart emitters.");
+        admission.Apply("settlement:village", true, 9, "", 1, 3);
+        Check(applied == 3 && effects == first + 1, "Raid completion replaces effect once.");
+        admission.Apply("settlement:village", false);
+        Check(applied == 0 && !root.Visible, "Hidden settlement clears particles.");
+        admission.Apply("settlement:village", true, 9, "", 1, 2);
+        geometryOk = false;
+        admission.Apply("settlement:village", true, 10, "", 1, 2);
+        Check(applied == 0 && !root.Visible, "Failed geometry admission clears prior raid effect.");
+        geometryOk = true; effectOk = false;
+        admission.Apply("settlement:village", true, 9, "", 1, 2);
+        Check(!root.Visible, "Failed effect cannot reveal settlement.");
+        effectOk = true;
+        admission.Apply("settlement:village", true, 9, "", 1, 2);
+        Check(root.Visible && applied == 2, "Failed application retries on fresh update.");
+        int beforeClear = effects;
+        admission.Clear();
+        admission.Apply("settlement:village", false);
+        Check(effects == beforeClear, "Cleared scene bindings never dereference old roots.");
+        var catalog = new CoopCampaignMapPrototypeCatalogEntityState { SettlementRaidState = 2 };
+        var copy = catalog.Clone();
+        Check(copy.SettlementRaidState == 2 && CoopCampaignMapPrototypeCatalogDeltaPolicy.AreEquivalent(catalog, copy),
+            "Catalog clone preserves active raid.");
+        copy.SettlementRaidState = 3;
+        Check(!CoopCampaignMapPrototypeCatalogDeltaPolicy.AreEquivalent(catalog, copy),
+            "Raid-only change must publish a catalog delta.");
+        var entity = new CoopCampaignMapPrototypeEntityState { SettlementRaidState = 3 };
+        Check(entity.Clone().SettlementRaidState == 3, "Replica clone preserves completed raid.");
+        for (int flags = 0; flags < 16; flags++)
+        {
+            bool visible = (flags & 1) != 0, village = (flags & 2) != 0;
+            bool active = (flags & 4) != 0, raided = (flags & 8) != 0;
+            int state = CoopCampaignMapRaidPresentationPolicy.Capture(visible, village, active, raided);
+            Check(CoopCampaignMapRaidPresentationPolicy.IsValid(state), "Raid capture is bounded.");
+            string effect = CoopCampaignMapRaidPresentationPolicy.ParticleSystem(state);
+            if (!visible) Check(state == 0 && effect == "", "Undisclosed raid cannot produce an effect.");
+            else if (!village) Check(state == 1 && effect == "", "Fortification/hideout must not acquire village raid FX.");
+            else if (active) Check(state == 2 && effect == "psys_fire_smoke_env_point", "Active raid precedes raided state.");
+            else if (raided) Check(state == 3 && effect == "map_icon_village_plunder_fx", "Completed raid uses native plunder effect.");
+            else Check(state == 1 && effect == "", "Recovered village clears effects.");
+        }
+        Check(!CoopCampaignMapRaidPresentationPolicy.IsValid(-1) &&
+            !CoopCampaignMapRaidPresentationPolicy.IsValid(4), "Unknown wire values rejected.");
     }
 
     private static string Slice(string source, string start, string end)

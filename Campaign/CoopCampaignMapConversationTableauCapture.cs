@@ -43,7 +43,7 @@ namespace CoopSpectator.Campaign
                 var actors = Visuals.GetValue(tableau) as List<AgentVisuals>;
                 var camera = Camera.GetValue(tableau) as TaleWorlds.Engine.Camera;
                 var data = Data.GetValue(tableau) as MapConversationTableauData;
-                if (actors == null || actors.Count < 1 || actors.Count > CoopCampaignMapConversationTableauCodec.MaxActors ||
+                if (actors == null || actors.Count < 1 || actors.Count > CoopCampaignMapConversationTableauCodec.MaxMapActors ||
                     camera == null || data == null)
                     return false;
                 var captured = new CoopCampaignMapConversationTableauState

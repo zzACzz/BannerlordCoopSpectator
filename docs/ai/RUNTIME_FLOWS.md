@@ -1,5 +1,66 @@
 # Runtime Flows
 
+Siege overlay source integration (2026-10-23): protocol52/bridge47/catalog10 and
+CMN7 now carry detached siege overlay values inside the atomic campaign menu.
+Publisher captures only a present siege-mode menu outside conversation; capture
+failure, departure or enclosing-menu close removes the overlay. Existing bridge,
+server menu clone and atomic interface transport preserve it. Rendering remains
+pending. b196 both isolated builds and the complete map-contract executable passed;
+installed b19451/46/10 is unchanged. See CODE_MAP's siege audit for canonical detail.
+
+Siege-tent catalog source candidate (2026-10-23): protocol51/bridge46/catalog10
+carries a required canonical SiegeTentPresentation string through full host state,
+host catalog, binary catalog, cloning/delta comparison and dynamic projection.
+Tent=4 excludes actor tuples and settlement entities; empty data is allowed only
+for non-tent kinds. b191 now captures disclosed prepared camp tents, publishes None
+on failure and renders owned tent/flag geometry; appearance-key changes replace it.
+Native siege acceptance remains open. Installed b187 remains
+50/45/9 and must not be mixed with this source candidate.
+
+## Map-party animation transport candidate (2026-10-23)
+
+Host map publication captures at most64 disclosed native party pose tuples per
+cycle, bound to the current session/publication/catalog. Bridge44 carries the
+atomic batch; the server admits it only with matching fresh host state and its
+catalog/dynamic stores, then translates revisions into protocol49 network values.
+Individual CPE1 messages go only to synchronized current-catalog peers. Client
+receipt admission rejects hidden bodies, stale revisions, replay and active
+dialogue, and expires receipts. Mission dialogues publish an empty map-pose batch.
+No render consumer is connected yet; this is not native animation acceptance.
+See CODE_MAP's map-party animation section for evidence and capacity limitations.
+
+Later same-day source now has an owner-screen exact-actor consumer. Protocol50/
+bridge45 transports CMP2 with the campaign clock scale. Each mounted tuple is
+resource-validated before mutation; matching actions use rate correction, not
+per-sample phase seeks. Hidden/expired sources release the override. Native visual
+and pause/accelerated-time behavior still require runtime acceptance; the earlier
+no-consumer statement describes the preceding b182 stage only.
+
+2026-10-22 bottom-bar candidate: existing host MapBarVM -> bounded detached copy
+with source identity recheck -> snapshot MapBar -> revision-bound CMB1 encoded
+MapBarPresentation in required bridge40 -> server snapshot parse. Null means
+explicit removal, including capture failure/dialogue. Protocol45 carries menu and
+bar together in CMI1 on the reliable menu-chunk channel. Hash/revision-checked
+completion replaces both client values; resets clear both. Ordinary value changes
+finish in-flight sends before the latest payload; closure/identity change preempts.
+Client source binds stock MapBar only with fresh host state, ready scene and no
+dialogue/local modal; teardown releases resources. Native visual acceptance,
+hints and live slow-transfer/rejoin verification remain open.
+See [implementation status](CODE_MAP.md#native-bottom-bar-implementation-boundary-2026-10-22-research).
+
+2026-10-17 world-battle markers: host prepared/current disclosure -> bounded
+whole list -> required bridge field -> server content-change revision -> reliable
+server chunks -> hash/revision-bound client assembly -> atomic list replacement.
+A newly admitted revision revokes the preceding display until complete; an empty
+list clears. Client display also requires map-state receipt within two seconds,
+ready scene/camera and no active replicated dialogue. Mission teardown resets
+the assembler and releases the owned movie/VM. New synchronized peers receive
+the latest server list. Current source projects after the frame's final camera
+update, including visibility checks on early-return paths. Native rendering,
+slow multi-chunk transport under frequent updates and late-join parity remain
+acceptance gates, not consequences of passing pure tests. See
+[canonical details](CODE_MAP.md#world-battle-marker-native-boundary-2026-10-17-research).
+
 Standalone companion-dialogue source candidate: successful map write -> exact
 OpenNew postfix before scene loading -> campaign/session/mission lease -> live
 native MissionConversationVM text/HUD -> existing server-only atomic dialogue

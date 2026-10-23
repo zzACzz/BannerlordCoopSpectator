@@ -94,13 +94,19 @@ namespace CoopSpectator.MissionBehaviors
         private bool ServerTooltipTarget(CoopCampaignMapTooltipRequest request, long now)
         {
             if (!ServerTooltipAvailable(now) || _serverConversation.IsActive || request == null) return false;
+            if (CoopCampaignMapTooltipTargetAdmission.IsBarHintAdmitted(_lastBridgeSessionId, request, _serverMapBar)) return true;
+            if (CoopCampaignMapTooltipTargetAdmission.IsPlunderAdmitted(_lastBridgeSessionId, request, _serverMenu)) return true;
+            if (CoopCampaignMapTooltipTargetAdmission.IsEncounterAdmitted(_lastBridgeSessionId, request, _serverMenu)) return true;
             return CoopCampaignMapTooltipTargetAdmission.IsAdmitted(_lastBridgeSessionId, request,
                 _serverCatalog.Find(value => value.EntityId == request.EntityId), _serverDynamic.Find(value => value.EntityId == request.EntityId));
         }
         private static bool ClientTooltipTarget(long now)
         {
-            if (!ClientTooltipAvailable(now) || CurrentClientConversation?.IsActive == true || string.IsNullOrEmpty(_tooltipDesired) ||
-                !ClientCatalogById.TryGetValue(_tooltipDesired, out var catalog) || !ClientDynamicById.TryGetValue(_tooltipDesired, out var dynamicState)) return false;
+            if (!ClientTooltipAvailable(now) || CurrentClientConversation?.IsActive == true || string.IsNullOrEmpty(_tooltipDesired)) return false;
+            if (CoopCampaignMapTooltipTargetAdmission.ContainsBarHint(CurrentClientMapBar, _tooltipDesired)) return true;
+            if (CoopCampaignMapTooltipTargetAdmission.ContainsPlunder(CurrentClientMenu, _tooltipDesired)) return true;
+            if (CoopCampaignMapTooltipTargetAdmission.ContainsEncounter(CurrentClientMenu, _tooltipDesired)) return true;
+            if (!ClientCatalogById.TryGetValue(_tooltipDesired, out var catalog) || !ClientDynamicById.TryGetValue(_tooltipDesired, out var dynamicState)) return false;
             return dynamicState.IsVisible && catalog.EntityId == _tooltipDesired && dynamicState.EntityId == _tooltipDesired &&
                 (catalog.Kind == CoopCampaignMapPrototypeEntityKind.Settlement || CoopCampaignMapPartyBodyPolicy.ShouldRenderBody(catalog.Kind, dynamicState.PartyNameplateFlags));
         }

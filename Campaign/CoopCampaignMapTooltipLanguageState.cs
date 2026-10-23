@@ -55,16 +55,42 @@ namespace CoopSpectator.Campaign
         // that shape. Nonempty dictionaries are copied before direct assignment.
         internal static bool AreWritableTemplatesIsolated()
         {
-            var manager = Game.Current?.GameTextManager;
-            if (manager == null) return false;
-            foreach (string id in new[]
+            return AreTemplatesIsolated(new[]
             {
                 "str_map_tooltip_info", "str_NUMBER_percent", "str_men_count_in_paranthesis_wo_wounded",
                 "str_party_health", "str_hours", "str_days_hours", "str_days",
                 "str_army_going_to_settlement", "str_army_waiting_in_settlement", "str_army_gathering",
                 "str_army_besieging", "str_army_besieging_travelling", "str_army_patrolling_travelling",
                 "str_army_raiding", "str_army_raiding_travelling", "str_army_defending_travelling", "str_army_defending"
-            })
+            });
+        }
+
+        // Audited installed RefreshItemTooltip: flag concatenation and banner
+        // percent formatting assign variables to these GameTexts copies.
+        // ItemHelper damage descriptions allocate a new TextObject instead.
+        // Global RANK/NUMBER writes still require the surrounding text transaction.
+        // Separate from map admission so missing item templates cannot disable
+        // ordinary settlement/party tooltips. Not yet a live item capture route.
+        internal static bool AreItemWritableTemplatesIsolated()
+        {
+            return AreTemplatesIsolated(new[] { "str_STR1_space_STR2", "str_NUMBER_percent" });
+        }
+
+        internal static bool AreRundownWritableTemplatesIsolated() => AreTemplatesIsolated(new[]
+            { "str_LEFT_colon_RIGHT_wSpaceAfterColon", "str_map_tooltip_info", "str_finance_trade_agreement_income" });
+
+        internal static bool AreBarWritableTemplatesIsolated() => AreWritableTemplatesIsolated() &&
+            AreItemWritableTemplatesIsolated() && AreTemplatesIsolated(new[] { "str_LEFT_over_RIGHT_no_space" });
+
+        // Native navigation tooltip getters assign TEXT/HOTKEY on this copied template.
+        internal static bool AreControlWritableTemplatesIsolated() =>
+            AreTemplatesIsolated(new[] { "str_hotkey_with_hint" });
+
+        private static bool AreTemplatesIsolated(string[] ids)
+        {
+            var manager = Game.Current?.GameTextManager;
+            if (manager == null) return false;
+            foreach (string id in ids)
             {
                 TextObject template = manager.GetGameText(id)?.DefaultText;
                 if (template == null || (template.Attributes != null && template.Attributes.Count == 0)) return false;

@@ -1,6 +1,8 @@
 {
   "SchemaVersion": 1,
   "Projects": [
+    { "Name": "PortraitObservation.ContractTests", "Path": "Tests/PortraitObservation.ContractTests/PortraitObservation.ContractTests.csproj" },
+    { "Name": "IntermissionCulture.ContractTests", "Path": "Tests/IntermissionCulture.ContractTests/IntermissionCulture.ContractTests.csproj" },
     { "Name": "CoopAutomationSpawnSmoke.ContractTests", "Path": "Tests/CoopAutomationSpawnSmoke.ContractTests/CoopAutomationSpawnSmoke.ContractTests.csproj" },
     { "Name": "CampaignlessConversationMissionSafety.ContractTests", "Path": "Tests/CampaignlessConversationMissionSafety.ContractTests/CampaignlessConversationMissionSafety.ContractTests.csproj" },
     { "Name": "CoopAutomationFixture.ContractTests", "Path": "Tests/CoopAutomationFixture.ContractTests/CoopAutomationFixture.ContractTests.csproj" },

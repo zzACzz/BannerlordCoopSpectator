@@ -12,6 +12,14 @@ internal static class TooltipPayloadTests
     internal static void Run()
     {
         var source = Fixture();
+        var barInfo = Fixture(); barInfo.Kind = CoopCampaignMapTooltipKind.BarInfo;
+        barInfo.EntityId = "barhint:" + Guid.NewGuid().ToString("N"); barInfo.Mode = 0;
+        Check(CoopCampaignMapTooltipPayloadCodec.TrySerialize(barInfo, out var barBytes) &&
+            CoopCampaignMapTooltipPayloadCodec.TryDeserialize(barBytes, out var barCopy) &&
+            barCopy.Kind == CoopCampaignMapTooltipKind.BarInfo && barCopy.Rows.Count == barInfo.Rows.Count, "bar info roundtrip");
+        barInfo.Mode = 1; Check(!CoopCampaignMapTooltipPayloadCodec.IsValid(barInfo), "bar mode fixed to native generic");
+        barInfo.Mode = 0; barInfo.EntityId = "party:a";
+        Check(!CoopCampaignMapTooltipPayloadCodec.IsValid(barInfo), "bar requires bar token");
         Check(CoopCampaignMapTooltipPayloadCodec.TrySerialize(source, out var bytes), "serialize");
         Check(CoopCampaignMapTooltipPayloadCodec.TryDeserialize(bytes, out var decoded), "decode");
         Check(CoopCampaignMapTooltipPayloadCodec.TrySerialize(decoded, out var again) && bytes.SequenceEqual(again),
@@ -52,7 +60,7 @@ internal static class TooltipPayloadTests
         Reject(x => x.EntityId = "\ud800", "target invalid UTF16");
         Reject(x => x.RequestGeneration = 0, "zero generation");
         Reject(x => x.Sequence = -1, "negative sequence");
-        Reject(x => x.Kind = (CoopCampaignMapTooltipKind)6, "unknown provider kind");
+        Reject(x => x.Kind = (CoopCampaignMapTooltipKind)10, "unknown provider kind");
         Reject(x => x.Mode = 5, "unknown mode");
         Reject(x => x.Rows = null, "null rows");
         Reject(x => x.Rows.Clear(), "empty response is not a close message");
@@ -93,7 +101,7 @@ internal static class TooltipPayloadTests
         Check(!CoopCampaignMapTooltipPayloadCodec.TryDeserialize(new byte[1048577], out _), "incoming payload cap");
         Check(!CoopCampaignMapTooltipPayloadCodec.TryDeserialize(bytes.Concat(new byte[] { 0 }).ToArray(), out _), "trailing garbage");
         Corrupt(bytes, 0, int.MaxValue, "magic");
-        Corrupt(bytes, 4, 2, "version");
+        Corrupt(bytes, 4, 1, "old version");
         Corrupt(bytes, 8, int.MaxValue, "string length prefix");
         Corrupt(bytes, 8, -1, "negative string length prefix");
         int flagsOffset = 16 + Encoding.UTF8.GetByteCount(Session) + Encoding.UTF8.GetByteCount(Fixture().EntityId) + 16;

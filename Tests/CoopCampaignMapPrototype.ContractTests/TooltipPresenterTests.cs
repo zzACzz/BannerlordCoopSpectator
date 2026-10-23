@@ -86,7 +86,52 @@ internal static class TooltipPresenterTests
         using (var replacement = new CoopCampaignMapTooltipPresenter())
         {
             old.Dispose();
-            Check(InformationManager.RegisteredTypes.Count == 2, "old disposal cannot unregister replacement");
+            Check(InformationManager.RegisteredTypes.Count == 4, "old disposal cannot unregister replacement");
+            replacement.Tick(.05f, "barhint:test");
+            var finance = new CoopCampaignMapTooltipPayload { EntityId = "barhint:test", Kind = CoopCampaignMapTooltipKind.BarRundown,
+                Rundown = new CoopCampaignMapRundownPresentation { IsActive = true, TitleText = "Finance", ExpectedChangeText = "17,13" } };
+            finance.Rundown.Lines.Add(new CoopCampaignMapRundownLine { Name = "Income", Value = 17.125f, ValueAsString = "17,13" });
+            CoopCampaignMapPrototypeNetworkController.CurrentClientTooltip = finance;
+            replacement.Tick(.05f, "barhint:test");
+            var rundown = InformationManager.CurrentRundown;
+            Check(rundown?.IsActive == true && rundown.Lines[0].ValueAsString == "17,13", "native rundown bindings");
+            int shown = InformationManager.Shows;
+            CoopCampaignMapPrototypeNetworkController.CurrentClientTooltip = new CoopCampaignMapTooltipPayload {
+                EntityId = finance.EntityId, Kind = finance.Kind, Rundown = finance.Rundown.Clone() };
+            replacement.Tick(.05f, "barhint:test");
+            Check(ReferenceEquals(rundown, InformationManager.CurrentRundown) && shown == InformationManager.Shows, "rundown stable refresh");
+            replacement.Tick(.05f, "party:c");
+            Check(InformationManager.CurrentRundown == null, "leaving finance hides owned movie");
+            CoopCampaignMapPrototypeNetworkController.CurrentClientTooltip = Rows("party:c", false, "ordinary");
+            replacement.Tick(.05f, "party:c");
+            Check(InformationManager.Current?.IsActive == true, "ordinary movie resumes");
+            replacement.Tick(.05f, "barhint:control");
+            var control = new CoopCampaignMapTooltipPayload { EntityId = "barhint:control",
+                Kind = CoopCampaignMapTooltipKind.BarControl, ControlHint = new CoopCampaignMapControlHint { Text = "Pause (1)" } };
+            CoopCampaignMapPrototypeNetworkController.CurrentClientTooltip = control;
+            replacement.Tick(.05f, control.EntityId);
+            var hint = InformationManager.CurrentHint;
+            Check(hint?.Text == "Pause (1)" && hint.IsActive, "plain native hint bindings");
+            shown = InformationManager.Shows;
+            var refreshed = new CoopCampaignMapTooltipPayload { EntityId = control.EntityId, Kind = control.Kind,
+                ControlHint = control.ControlHint.Clone() };
+            refreshed.ControlHint.Text = "Play (2)";
+            CoopCampaignMapPrototypeNetworkController.CurrentClientTooltip = refreshed;
+            replacement.Tick(.05f, control.EntityId);
+            Check(ReferenceEquals(hint, InformationManager.CurrentHint) && hint.Text == "Play (2)" &&
+                shown == InformationManager.Shows, "plain hint refresh without reopening");
+            var structured = new CoopCampaignMapTooltipPayload { EntityId = control.EntityId, Kind = control.Kind,
+                ControlHint = new CoopCampaignMapControlHint() };
+            structured.ControlHint.Rows.Add(new CoopCampaignMapTooltipRow { Definition = "Morning", Value = "Reset camera" });
+            CoopCampaignMapPrototypeNetworkController.CurrentClientTooltip = structured;
+            replacement.Tick(.05f, control.EntityId);
+            Check(InformationManager.CurrentHint == null && InformationManager.Current?.TooltipPropertyList[0].Definition == "Morning",
+                "control shape switch uses native property card");
+            InformationManager.ShowTooltip(typeof(Foreign));
+            var foreign = InformationManager.Current;
+            replacement.Clear();
+            Check(ReferenceEquals(foreign, InformationManager.Current), "control cleanup preserves foreign tooltip");
+            InformationManager.HideTooltip();
         }
         Check(InformationManager.RegisteredTypes.Count == 1, "replacement disposes exactly its mapping");
         InformationManager.UnregisterTooltip<Foreign>();
@@ -111,32 +156,61 @@ namespace TaleWorlds.InputSystem
 }
 namespace TaleWorlds.Library
 {
+    public sealed class DataSourcePropertyAttribute : Attribute { }
+    public class ViewModel { public virtual void OnFinalize() { } protected void OnPropertyChanged(string property) { } }
+    public class MBBindingList<T> : List<T> { }
+    public class TooltipBaseVM : ViewModel
+    {
+        private readonly Type _type; private readonly object[] _args; private bool _extended;
+        public bool IsActive { get; set; }
+        public bool IsExtended { get => _extended; set { if (_extended != value) { _extended = value; OnIsExtendedChanged(); } } }
+        public TooltipBaseVM(Type type, object[] args) { _type = type; _args = args; }
+        protected virtual void OnIsExtendedChanged() { }
+        protected void InvokeRefreshData<T>(T vm) { ((Action<T, object[]>)InformationManager.RegisteredTypes[_type].OnRefreshData)(vm, _args); }
+    }
     public struct Color
     { public float red, green, blue, alpha; public Color(float r, float g, float b, float a) { red=r; green=g; blue=b; alpha=a; } }
     public static class InformationManager
     {
-        public sealed class Registry { public object OnRefreshData; }
+        public sealed class Registry { public object OnRefreshData; public Type VmType; }
         public static Dictionary<Type, Registry> RegisteredTypes = new Dictionary<Type, Registry>();
         public static event Action<Type, object[]> OnShowTooltip;
         public static event Action OnHideTooltip;
         public static PropertyBasedTooltipVM Current;
+        public static CoopCampaignMapRundownVM CurrentRundown;
+        public static HintVM CurrentHint;
         public static int Shows;
         public static void RegisterTooltip<T, TVm>(Action<TVm, object[]> renderer, string movie)
-        { RegisteredTypes[typeof(T)] = new Registry { OnRefreshData = renderer }; }
+        { RegisteredTypes[typeof(T)] = new Registry { OnRefreshData = renderer, VmType = typeof(TVm) }; }
         public static void UnregisterTooltip<T>() { RegisteredTypes.Remove(typeof(T)); }
-        public static bool GetIsAnyTooltipActive() => Current?.IsActive == true;
+        public static bool GetIsAnyTooltipActive() => Current?.IsActive == true || CurrentRundown?.IsActive == true || CurrentHint?.IsActive == true;
         public static void ShowTooltip(Type type, params object[] args) { OnShowTooltip?.Invoke(type, args); }
         public static void HideTooltip() { OnHideTooltip?.Invoke(); }
         public static void NativeShow(Type type, object[] args)
         {
             NativeHide(); Shows++;
-            Current = new PropertyBasedTooltipVM(type, args);
+            if (RegisteredTypes[type].VmType == typeof(CoopCampaignMapRundownVM)) CurrentRundown = new CoopCampaignMapRundownVM(type, args);
+            else if (RegisteredTypes[type].VmType == typeof(HintVM)) CurrentHint = new HintVM(type, args);
+            else Current = new PropertyBasedTooltipVM(type, args);
         }
-        public static void NativeHide() { Current?.FinalizeVm(); Current = null; }
+        public static void NativeHide() { Current?.FinalizeVm(); Current = null; CurrentRundown?.OnFinalize(); CurrentRundown = null; CurrentHint = null; }
+    }
+}
+namespace TaleWorlds.Core.ViewModelCollection.Information.RundownTooltip
+{
+    public class RundownLineVM : ViewModel
+    {
+        public string Name { get; set; } public float Value { get; set; } public string ValueAsString { get; set; }
+        public RundownLineVM(string name, float value) { Name = name; Value = value; }
     }
 }
 namespace TaleWorlds.Core.ViewModelCollection.Information
 {
+    public sealed class HintVM : TooltipBaseVM
+    {
+        public string Text { get; set; }
+        public HintVM(Type type, object[] args) : base(type, args) { InvokeRefreshData(this); IsActive = true; }
+    }
     public sealed class TooltipProperty
     {
         public enum TooltipPropertyFlags { None }

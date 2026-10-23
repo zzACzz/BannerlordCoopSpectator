@@ -13,7 +13,11 @@ namespace CoopSpectator.Infrastructure
         MobileParty = 2,
         Army = 3,
         MapEvent = 4,
-        SiegeEvent = 5
+        SiegeEvent = 5,
+        PlunderItem = 6,
+        BarRundown = 7,
+        BarInfo = 8,
+        BarControl = 9
     }
 
     public sealed class CoopCampaignMapTooltipRow
@@ -39,11 +43,13 @@ namespace CoopSpectator.Infrastructure
         public CoopCampaignMapTooltipKind Kind { get; set; }
         public int Mode { get; set; }
         public List<CoopCampaignMapTooltipRow> Rows { get; set; } = new List<CoopCampaignMapTooltipRow>();
+        public CoopCampaignMapRundownPresentation Rundown { get; set; }
+        public CoopCampaignMapControlHint ControlHint { get; set; }
     }
 
     public static class CoopCampaignMapTooltipPayloadCodec
     {
-        public const int Version = 1;
+        public const int Version = 3;
         public const int MaxPayloadBytes = 1048576;
         public const int MaxRows = 512;
         public const int MaxTextCharacters = 4096;
@@ -110,6 +116,16 @@ namespace CoopSpectator.Infrastructure
                         writer.Write(row.Blue);
                         writer.Write(row.Alpha);
                     }
+                    if (payload.Kind == CoopCampaignMapTooltipKind.BarRundown)
+                    {
+                        if (!CoopCampaignMapRundownCodec.TryEncode(payload.Rundown, out var rundownBytes)) return false;
+                        writer.Write(rundownBytes.Length); writer.Write(rundownBytes);
+                    }
+                    if (payload.Kind == CoopCampaignMapTooltipKind.BarControl)
+                    {
+                        if (!CoopCampaignMapControlHintCodec.TryEncode(payload.ControlHint, out var controlBytes)) return false;
+                        writer.Write(controlBytes.Length); writer.Write(controlBytes);
+                    }
                     writer.Flush();
                     if (stream.Length != size) return false;
                     bytes = stream.ToArray();
@@ -142,7 +158,7 @@ namespace CoopSpectator.Infrastructure
                     decoded.Mode = reader.ReadInt32();
                     int count = reader.ReadInt32();
                     // Each row requires two length prefixes and six 32-bit fields.
-                    if (count < 1 || count > MaxRows || count > (stream.Length - stream.Position) / 32) return false;
+                    if (count < (decoded.Kind == CoopCampaignMapTooltipKind.BarRundown || decoded.Kind == CoopCampaignMapTooltipKind.BarControl ? 0 : 1) || count > MaxRows || count > (stream.Length - stream.Position) / 32) return false;
                     for (int i = 0; i < count; i++)
                     {
                         decoded.Rows.Add(new CoopCampaignMapTooltipRow {
@@ -153,6 +169,20 @@ namespace CoopSpectator.Infrastructure
                             Red = reader.ReadSingle(), Green = reader.ReadSingle(),
                             Blue = reader.ReadSingle(), Alpha = reader.ReadSingle()
                         });
+                    }
+                    if (decoded.Kind == CoopCampaignMapTooltipKind.BarRundown)
+                    {
+                        int length = reader.ReadInt32();
+                        if (length < 0 || length > MaxPayloadBytes || length != stream.Length - stream.Position ||
+                            !CoopCampaignMapRundownCodec.TryDecode(reader.ReadBytes(length), out var rundown)) return false;
+                        decoded.Rundown = rundown;
+                    }
+                    if (decoded.Kind == CoopCampaignMapTooltipKind.BarControl)
+                    {
+                        int length = reader.ReadInt32();
+                        if (length < 0 || length > MaxPayloadBytes || length != stream.Length - stream.Position ||
+                            !CoopCampaignMapControlHintCodec.TryDecode(reader.ReadBytes(length), out var control)) return false;
+                        decoded.ControlHint = control;
                     }
                     if (stream.Position != stream.Length || !IsValid(decoded)) return false;
                     payload = decoded;
@@ -168,11 +198,33 @@ namespace CoopSpectator.Infrastructure
         {
             size = 0;
             if (payload == null || !IsValidCorrelation(payload.SessionId, payload.EntityId, payload.RequestGeneration, payload.Sequence) ||
-                (int)payload.Kind < 1 || (int)payload.Kind > 5 || payload.Mode < 0 || payload.Mode > 4 ||
-                payload.Rows == null || payload.Rows.Count < 1 || payload.Rows.Count > MaxRows) return false;
+                (int)payload.Kind < 1 || (int)payload.Kind > 9 || payload.Mode < 0 || payload.Mode > 4 ||
+                payload.Rows == null || payload.Rows.Count > MaxRows) return false;
             try
             {
                 long measured = 45L + Utf8.GetByteCount(payload.SessionId) + Utf8.GetByteCount(payload.EntityId);
+                if (payload.Kind != CoopCampaignMapTooltipKind.BarControl && payload.ControlHint != null) return false;
+                if (payload.Kind == CoopCampaignMapTooltipKind.BarControl)
+                {
+                    if (payload.Rows.Count != 0 || payload.Mode != 0 || payload.Rundown != null ||
+                        !CoopCampaignMapBarHintIdentity<object>.IsToken(payload.EntityId) ||
+                        !CoopCampaignMapControlHintCodec.TryEncode(payload.ControlHint, out var controlBytes)) return false;
+                    measured += 4L + controlBytes.Length;
+                    if (measured > MaxPayloadBytes) return false;
+                }
+                else if (payload.Kind == CoopCampaignMapTooltipKind.BarRundown)
+                {
+                    if (payload.Rows.Count != 0 || payload.Mode != 0 ||
+                        !CoopCampaignMapBarHintIdentity<object>.IsToken(payload.EntityId) ||
+                        payload.Rundown == null || !payload.Rundown.IsActive ||
+                        payload.Rundown.IsExtended != payload.IsExtended ||
+                        !CoopCampaignMapRundownCodec.TryEncode(payload.Rundown, out var rundownBytes)) return false;
+                    measured += 4L + rundownBytes.Length;
+                    if (measured > MaxPayloadBytes) return false;
+                }
+                else if (payload.Rundown != null || payload.Rows.Count < 1) return false;
+                if (payload.Kind == CoopCampaignMapTooltipKind.BarInfo &&
+                    (payload.Mode != 0 || !CoopCampaignMapBarHintIdentity<object>.IsToken(payload.EntityId))) return false;
                 foreach (var row in payload.Rows)
                 {
                     if (row == null || !ValidText(row.Definition, MaxTextCharacters, true) ||

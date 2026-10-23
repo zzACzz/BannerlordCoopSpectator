@@ -20,6 +20,7 @@ namespace CoopSpectator.UI
     internal sealed class CoopCampaignMapConversationTableauView : IDisposable
     {
         internal const string LayerName = "CoopConversationVisual";
+        private static int _lightingDescriptorSamples;
 
         private sealed class PassiveTextureLayer : GauntletLayer
         {
@@ -124,6 +125,9 @@ namespace CoopSpectator.UI
         private readonly Stopwatch _readinessClock = new Stopwatch();
         private double _lastReadinessSeconds;
         private bool _verboseAttempt;
+        private bool _sceneProbeEnabled;
+        private int _sceneProbeSample;
+        private static int _sceneProbeProcessSamples;
         private bool _readinessStarted;
         private bool _targetConfigured;
         private int _lastActorReadyMask;
@@ -143,6 +147,9 @@ namespace CoopSpectator.UI
                 _readinessClock.Restart();
                 _lastReadinessSeconds = 0d;
                 _verboseAttempt = CoopDebugConfig.VerboseDiagnostics;
+                _sceneProbeEnabled = _verboseAttempt && string.Equals(Environment.GetEnvironmentVariable(
+                    "COOPSPECTATOR_MISSION_SCENE_LOADING_DIAGNOSTICS"), "1", StringComparison.Ordinal);
+                _sceneProbeSample = 0;
                 _readinessStarted = false;
                 _targetConfigured = false;
                 _lastActorReadyMask = 0;
@@ -162,6 +169,7 @@ namespace CoopSpectator.UI
                 { Fail(_callbackFailure ?? _widget.DrawFailure); return; }
                 UpdateCameraAspect();
                 EnsureTextureSize();
+                ObserveMissionSceneLoading();
                 bool ready = _lifetime.IsReady;
                 if (!ready)
                 {
@@ -241,6 +249,7 @@ namespace CoopSpectator.UI
                         MatrixFrame actorFrame = Frame(motion.Frame);
                         actorFrame.rotation.ApplyScaleLocal(_actors[i].GetScale());
                         _actors[i].GetVisuals().SetFrame(ref actorFrame);
+                        _actors[i].SetLookDirection(new Vec3(motion.LookDirection[0], motion.LookDirection[1], motion.LookDirection[2]));
                     }
                     bool changedAction = skeletons[i].GetActionAtChannel(0).GetName() != motion.ActionName;
                     bool seed = i >= _posePlayback.Count || _poseActions[i] != motion.ActionName || changedAction;
@@ -308,11 +317,12 @@ namespace CoopSpectator.UI
             _renderer = MBAgentRendererSceneController.CreateNewAgentRendererSceneController(_scene);
             if (_missionScene == null) Utilities.LoadVirtualTextureTileset("WorldMap");
             TraceStage("atmosphere-begin");
-            _scene.SetAtmosphereWithName(state.AtmosphereName);
+            TraceLightingDescriptor(state);
             // Outdoor backgrounds are atmosphere resources; only some interiors
             // have additional tagged entities. An empty tag group is native-valid.
             if (_missionScene == null)
             {
+                _scene.SetAtmosphereWithName(state.AtmosphereName);
                 foreach (GameEntity entity in _scene.FindEntitiesWithTag(state.AtmosphereName))
                     entity.SetVisibilityExcludeParents(true);
                 _scene.FindEntityWithTag("raining_entity")?.SetVisibilityExcludeParents(state.IsRaining);
@@ -358,7 +368,8 @@ namespace CoopSpectator.UI
                 if (skeleton != null)
                 {
                     skeleton.TickAnimationsAndForceUpdate(0.1f, MatrixFrame.Identity, true);
-                    actor.SetLookDirection(_camera.Position - actor.GetVisuals().GetGlobalStableEyePoint(true));
+                    if (_missionScene == null)
+                        actor.SetLookDirection(_camera.Position - actor.GetVisuals().GetGlobalStableEyePoint(true));
                 }
             }
 
@@ -367,8 +378,10 @@ namespace CoopSpectator.UI
             _widget = new TableauTextureWidget(_layer.UIContext) { ParentWidget = _layer.UIContext.Root };
             EnsureTextureSize();
             _screen.AddLayer(_layer);
-            // This stock tableau asset has terrain disabled. Let its native
-            // texture consumer request drawing resources; a scene-wide resource
+            // The map tableau asset has terrain disabled; standalone mission
+            // scenes may contain terrain. A standalone preload experiment did
+            // not establish complete rendering or correct lighting (r8).
+            // Let the native texture consumer request drawing resources; a scene-wide resource
             // check coincided with terrain shader preparation in the observed MP
             // run. Keep target/actor readiness and timeout in Tick: drawing alone
             // is not acceptance of a complete image. No synchronous force-load.
@@ -420,6 +433,10 @@ namespace CoopSpectator.UI
         {
             _view.SetCamera(_camera);
             _view.SetScene(_scene);
+            // MissionScreen explicitly enables view-level shadows. Scene-level
+            // shadow flags do not establish this independent rendering contract.
+            // Preserve the stock focused-shadow profile for map-only tableaux.
+            if (_missionScene != null) _view.SetSceneUsesShadows(true);
             _view.SetSceneUsesSkybox(true);
             _view.SetSceneUsesContour(false);
             _view.SetPointlightResolutionMultiplier(0f);
@@ -477,8 +494,10 @@ namespace CoopSpectator.UI
 
         private void ApplyMissionClimate()
         {
-            // Only the owned detached scene is mutated. Full interpolated
-            // lighting is not reconstructed by these climate setters alone.
+            // Native land mission initialization selects this photo preset, not
+            // InterpolatedAtmosphereName. Keep its sky, fog, exposure and colors.
+            // Selection uses initializer time/storm; current scene time is separate.
+            _scene.SetPhotoAtmosphereViaTod(_missionScene.AtmosphereTimeOfDay, _missionScene.IsInsideStorm);
             _scene.TimeOfDay = _missionScene.TimeOfDay;
             _scene.SetWinterTimeFactor(_missionScene.Winter);
             _scene.SetDrynessFactor(_missionScene.Dryness);
@@ -487,6 +506,8 @@ namespace CoopSpectator.UI
             _scene.SetTemperature(_missionScene.Temperature);
             _scene.SetHumidity(_missionScene.Humidity);
             _scene.SetGlobalWindStrengthVector(new Vec2(_missionScene.WindX, _missionScene.WindY));
+            Vec3 sunDirection = new Vec3(_missionScene.SunDirectionX, _missionScene.SunDirectionY, _missionScene.SunDirectionZ);
+            _scene.SetSunDirection(ref sunDirection);
         }
 
         private static MatrixFrame Frame(float[] values)
@@ -531,11 +552,51 @@ namespace CoopSpectator.UI
                 " ElapsedMs=" + _readinessClock.ElapsedMilliseconds + ".");
         }
 
+        private void TraceLightingDescriptor(CoopCampaignMapConversationTableauState state)
+        {
+            // Detached values only; no native getter, resource request or per-frame work.
+            // Bounded for the process, including repeated dialogue replacement.
+            if (!_verboseAttempt || _missionScene == null || _lightingDescriptorSamples >= 12) return;
+            _lightingDescriptorSamples++;
+            ModLogger.Info(FormattableString.Invariant(
+                $"CoopCampaignMapConversationTableauView: lighting descriptor Scene={_missionScene.SceneName} SourceAtmosphere={state.AtmosphereName} Selection=NativePhoto PresetTime={_missionScene.AtmosphereTimeOfDay:R} Storm={_missionScene.IsInsideStorm} SceneTime={_missionScene.TimeOfDay:R} SunDirection=({_missionScene.SunDirectionX:R},{_missionScene.SunDirectionY:R},{_missionScene.SunDirectionZ:R})."));
+        }
+
+        private void ObserveMissionSceneLoading()
+        {
+            // Opt-in native-sensitive reads, on the owning tick only. This is
+            // evidence collection, never a readiness gate or resource-load request.
+            if (!_sceneProbeEnabled || _missionScene == null || _scene == null ||
+                _sceneProbeSample >= 3 || _sceneProbeProcessSamples >= 12) return;
+            long elapsed = _readinessClock.ElapsedMilliseconds;
+            long due = _sceneProbeSample == 0 ? 0 : (_sceneProbeSample == 1 ? 2000 : 10000);
+            if (elapsed < due) return;
+            // Consume before native reads: an exception must not cause tick retries.
+            _sceneProbeSample++;
+            _sceneProbeProcessSamples++;
+            try
+            {
+                bool terrain = _scene.ContainsTerrain;
+                bool heightmap = _scene.HasTerrainHeightmap;
+                bool loaded = _scene.IsLoadingFinished();
+                ModLogger.Info("CoopCampaignMapConversationTableauView: scene-loading sample=" +
+                    _sceneProbeSample + " ElapsedMs=" + elapsed + " Terrain=" + terrain +
+                    " Heightmap=" + heightmap + " LoadingFinished=" + loaded + ".");
+            }
+            catch (Exception ex)
+            {
+                _sceneProbeEnabled = false;
+                ModLogger.Info("CoopCampaignMapConversationTableauView: scene-loading probe disabled. Reason=" +
+                    ex.GetType().Name + ".");
+            }
+        }
+
         private void ReleaseResources()
         {
             // Detach the draw consumer and render target before actors/scene.
             // The widget and 2D wrapper never release the shared target twice.
             int cleanupErrors = 0;
+            _sceneProbeEnabled = false;
             _readinessClock.Stop();
             _lastPoseTraceRevision = -1;
             try { ReleaseTexture(); } catch { cleanupErrors++; }

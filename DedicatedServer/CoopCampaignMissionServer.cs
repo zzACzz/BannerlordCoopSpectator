@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using HarmonyLib;
 using CoopSpectator.Campaign;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.Infrastructure.Hideout;
@@ -32,6 +33,41 @@ namespace CoopSpectator.DedicatedServer
         private static readonly Stopwatch Clock = Stopwatch.StartNew();
         private static double _lastFreshAt;
         private static CoopCampaignMissionOpening<Mission> _dispatchOpening;
+        private static Mission _closingMission;
+        private static bool _dispatchClosing;
+
+        private static bool IsOwnedBattle(Mission mission) => _lifecycle != null && !_ownedMap &&
+            mission != null && ReferenceEquals(mission, _ownedMission);
+
+        // Only this session's adapter can authorize a completed battle close.
+        // Native warmup must not reset the scene while the host applies its result.
+        private static bool AllowWarmupTick(MultiplayerWarmupComponent __instance) =>
+            !IsOwnedBattle(__instance.Mission) || _completedBattleKey != _battle?.Intent.BattleKey;
+
+        private static bool AllowLobbyEnding(MissionLobbyComponent __instance) =>
+            !IsOwnedBattle(__instance.Mission) ||
+            (_dispatchClosing && ReferenceEquals(__instance.Mission, _closingMission));
+
+        private static void SelectCloseTimer(MultiplayerTimerComponent __instance, ref float duration)
+        {
+            // Zero removes presentation pacing, not a persistence/readiness gate.
+            // Keep native Ending broadcast, UDP tick, UnloadMission and teardown.
+            if (_dispatchClosing && ReferenceEquals(__instance.Mission, _closingMission) &&
+                __instance.Mission.GetMissionBehavior<MissionLobbyComponent>()?.CurrentMultiplayerState ==
+                    MissionLobbyComponent.MultiplayerGameState.Ending)
+                duration = 0f;
+        }
+
+        private static void InstallCloseGuards()
+        {
+            var harmony = new Harmony("com.coopspectator.dedicated.owned-mission-close");
+            harmony.Patch(AccessTools.Method(typeof(MultiplayerWarmupComponent), "OnPreDisplayMissionTick"),
+                prefix: new HarmonyMethod(typeof(CoopCampaignMissionServer), nameof(AllowWarmupTick)));
+            harmony.Patch(AccessTools.Method(typeof(MissionLobbyComponent), "SetStateEndingAsServer"),
+                prefix: new HarmonyMethod(typeof(CoopCampaignMissionServer), nameof(AllowLobbyEnding)));
+            harmony.Patch(AccessTools.Method(typeof(MultiplayerTimerComponent), "StartTimerAsServer"),
+                prefix: new HarmonyMethod(typeof(CoopCampaignMissionServer), nameof(SelectCloseTimer)));
+        }
 
         // Called by the existing OpenNew postfix; no native state mutation.
         internal static void ObserveNativeOpening(Mission mission)
@@ -52,6 +88,7 @@ namespace CoopSpectator.DedicatedServer
                     _initialized = true;
                     _session = Environment.GetEnvironmentVariable(CoopCampaignMissionChannel.SessionEnvironment);
                     if (string.IsNullOrEmpty(_session)) return; // Manual server: no ownership to adopt.
+                    InstallCloseGuards();
                     _lifecycle = new CoopCampaignMissionLifecycle(_session, 120);
                     using (var process = Process.GetCurrentProcess()) _self = CoopMissionProcessIdentity.Capture(process);
                     _admission = new CoopCampaignMissionAdmission(_session, _self);
@@ -84,11 +121,16 @@ namespace CoopSpectator.DedicatedServer
                 var decision = _lifecycle.Step(envelope?.Intent, observed, Clock.Elapsed.TotalSeconds);
                 if (decision.Action == CoopCampaignMissionAction.Fault) { Fail(decision.Reason); return; }
                 if (decision.Action == CoopCampaignMissionAction.Wait) return;
-                if (decision.Action == CoopCampaignMissionAction.EndMap)
+                if (decision.Action == CoopCampaignMissionAction.EndMap || decision.Action == CoopCampaignMissionAction.EndBattle)
                 {
-                    if (!owned || !_ownedMap || decision.MissionInstance != _instance || !canEnd)
-                        throw new InvalidOperationException("map-close-identity-mismatch");
-                    _endMission.Invoke(manager, null);
+                    bool closingMap = decision.Action == CoopCampaignMissionAction.EndMap;
+                    if (!owned || _ownedMap != closingMap || decision.MissionInstance != _instance || !canEnd ||
+                        (!closingMap && (decision.BattleKey != _completedBattleKey || decision.BattleKey != _battle?.Intent.BattleKey)))
+                        throw new InvalidOperationException("mission-close-identity-mismatch");
+                    _closingMission = mission;
+                    _dispatchClosing = true;
+                    try { _endMission.Invoke(manager, null); }
+                    finally { _dispatchClosing = false; _closingMission = null; }
                 }
                 else
                 {

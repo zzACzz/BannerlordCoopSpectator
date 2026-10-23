@@ -35,6 +35,7 @@ namespace CoopSpectator.Infrastructure
                 return false;
 
             return sceneName.StartsWith(VillageBattleScenePrefix, StringComparison.OrdinalIgnoreCase)
+                || sceneName.EndsWith("_village", StringComparison.OrdinalIgnoreCase)
                 || sceneName.IndexOf(VillageBattleSceneMarker, StringComparison.OrdinalIgnoreCase) >= 0;
         }
 

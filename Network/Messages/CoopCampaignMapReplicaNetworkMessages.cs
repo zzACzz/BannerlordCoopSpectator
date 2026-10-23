@@ -172,6 +172,7 @@ namespace CoopSpectator.Network.Messages
             entity.SettlementLevelFlags = ReadIntFromPacket(UnitCompression, ref valid);
             entity.SettlementWallStates = ReadStringFromPacket(ref valid) ?? string.Empty;
             entity.SettlementPreparationState = ReadIntFromPacket(UnitCompression, ref valid);
+            entity.SettlementRaidState = ReadIntFromPacket(UnitCompression, ref valid);
             entity.HoverDecal = ReadStringFromPacket(ref valid) ?? string.Empty;
             Entity = entity;
             return valid && ExpectedCount > 0 && Index < ExpectedCount &&
@@ -221,6 +222,7 @@ namespace CoopSpectator.Network.Messages
             WriteIntToPacket(entity.SettlementLevelFlags, UnitCompression);
             WriteStringToPacket(entity.SettlementWallStates ?? string.Empty);
             WriteIntToPacket(entity.SettlementPreparationState, UnitCompression);
+            WriteIntToPacket(entity.SettlementRaidState, UnitCompression);
             WriteStringToPacket(entity.HoverDecal ?? string.Empty);
         }
 
@@ -810,6 +812,7 @@ namespace CoopSpectator.Network.Messages
         private static readonly CompressionInfo.Integer EventOrderCompression = new CompressionInfo.Integer(0, CoopCampaignMapSettlementMarkerOrder.MaxEventOrder, true);
         private static readonly CompressionInfo.Integer QuestOrderCompression = new CompressionInfo.Integer(0, CoopCampaignMapSettlementMarkerOrder.MaxQuestOrder, true);
         private static readonly CompressionInfo.Integer PartyFlagsCompression = new CompressionInfo.Integer(0, CoopCampaignMapPrototypeContract.MaxPartyNameplateFlags, true);
+        private static readonly CompressionInfo.Integer SettlementMapEventTypeCompression = new CompressionInfo.Integer(0, 5, true);
         private static readonly CompressionInfo.Integer SettlementRelationCompression = new CompressionInfo.Integer(0, CoopCampaignMapSettlementRelationPolicy.Maximum, true);
 
         public CoopCampaignMapDynamicBatchMessage(
@@ -883,6 +886,7 @@ namespace CoopSpectator.Network.Messages
                     SettlementQuestOrder = ReadIntFromPacket(QuestOrderCompression, ref valid),
                     IsSettlementTracked = ReadBoolFromPacket(ref valid),
                     SettlementRelation = ReadIntFromPacket(SettlementRelationCompression, ref valid),
+                    SettlementMapEventType = ReadIntFromPacket(SettlementMapEventTypeCompression, ref valid),
                     IsSettlementInRange = ReadBoolFromPacket(ref valid)
                 };
                 valid = valid && CoopCampaignMapPrototypeContract.IsValidDynamicEntity(entity);
@@ -935,6 +939,7 @@ namespace CoopSpectator.Network.Messages
                 WriteIntToPacket(entity?.SettlementQuestOrder ?? 0, QuestOrderCompression);
                 WriteBoolToPacket(entity?.IsSettlementTracked ?? false);
                 WriteIntToPacket(entity?.SettlementRelation ?? 0, SettlementRelationCompression);
+                WriteIntToPacket(entity?.SettlementMapEventType ?? 0, SettlementMapEventTypeCompression);
                 WriteBoolToPacket(entity?.IsSettlementInRange ?? false);
             }
         }

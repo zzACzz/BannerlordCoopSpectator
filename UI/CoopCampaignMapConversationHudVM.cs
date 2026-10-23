@@ -10,11 +10,17 @@ namespace CoopSpectator.UI
     public sealed class CoopConversationHudImageVM : ViewModel
     {
         private static int _portraitFailureDiagnostics;
-        public CoopConversationHudImageVM(string id, bool banner, bool nineGrid = false)
+        public CoopConversationHudImageVM(string id, bool banner, bool nineGrid = false, int portraitPose = -1)
         {
             TextureProviderName = banner ? "BannerImageTextureProvider" : "CharacterImageTextureProvider";
             AdditionalArgs = banner && nineGrid ? "ninegrid" : string.Empty;
             Id = banner ? SafeBanner(id) : SafePortrait(id);
+            if (!banner && !string.IsNullOrEmpty(Id) && portraitPose >= 0 && portraitPose <= 7 &&
+                Patches.CoopReplicaPortraitPosePatch.IsInstalled)
+            {
+                TextureProviderName = "CoopReplicaPortraitTextureProvider";
+                AdditionalArgs = portraitPose.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
         }
         [DataSourceProperty] public string Id { get; }
         [DataSourceProperty] public string AdditionalArgs { get; }

@@ -32,18 +32,20 @@ namespace CoopSpectator.Infrastructure
         public float Progress { get; set; }
         public float Speed { get; set; } = 1f;
         public float[] Frame { get; set; }
+        public float[] LookDirection { get; set; }
         public CoopCampaignMapConversationActorPose Clone()
         {
             var copy = (CoopCampaignMapConversationActorPose)MemberwiseClone();
             copy.Frame = Frame == null ? null : (float[])Frame.Clone();
+            copy.LookDirection = LookDirection == null ? null : (float[])LookDirection.Clone();
             return copy;
         }
     }
 
     public static class CoopCampaignMapConversationPoseCodec
     {
-        public const int MaxPayloadBytes = 768;
-        public const int SchemaVersion = 2;
+        public const int MaxPayloadBytes = 901;
+        public const int SchemaVersion = 4;
         private const int Magic = 0x43504F31;
 
         public static string Hash(CoopCampaignMapConversationTableauState tableau)
@@ -57,12 +59,15 @@ namespace CoopSpectator.Infrastructure
         {
             if (pose == null || pose.ConversationRevision < 0 || pose.Sequence < 0 ||
                 !IsHash(pose.TableauHash) || pose.Actors == null || pose.Actors.Count < 1 ||
-                pose.Actors.Count > CoopCampaignMapConversationTableauCodec.MaxActors) return false;
+                pose.Actors.Count > (pose.CameraFrame == null
+                    ? CoopCampaignMapConversationTableauCodec.MaxMapActors
+                    : CoopCampaignMapConversationTableauCodec.MaxActors)) return false;
             if (pose.CameraFrame != null && !CoopCampaignMapConversationTableauCodec.IsFrame(pose.CameraFrame)) return false;
             foreach (var actor in pose.Actors)
                 if (actor == null || !IsAction(actor.ActionName) || !InRange(actor.Progress, 0f, 1f) ||
                     !InRange(actor.Speed, 0f, 10f) ||
-                    (pose.CameraFrame == null ? actor.Frame != null : !CoopCampaignMapConversationTableauCodec.IsFrame(actor.Frame))) return false;
+                    (pose.CameraFrame == null ? actor.Frame != null || actor.LookDirection != null :
+                        !CoopCampaignMapConversationTableauCodec.IsFrame(actor.Frame) || !IsDirection(actor.LookDirection))) return false;
             return true;
         }
 
@@ -93,7 +98,11 @@ namespace CoopSpectator.Infrastructure
                     CoopCampaignMapConversationTableauCodec.WriteText(writer, actor.ActionName);
                     writer.Write(actor.Progress);
                     writer.Write(actor.Speed);
-                    if (pose.CameraFrame != null) CoopCampaignMapConversationTableauCodec.WriteFrame(writer, actor.Frame);
+                    if (pose.CameraFrame != null)
+                    {
+                        CoopCampaignMapConversationTableauCodec.WriteFrame(writer, actor.Frame);
+                        foreach (float component in actor.LookDirection) writer.Write(component);
+                    }
                 }
                 writer.Flush();
                 if (stream.Length > MaxPayloadBytes) return false;
@@ -120,12 +129,15 @@ namespace CoopSpectator.Infrastructure
                     bool hasFrames = CoopCampaignMapConversationTableauCodec.ReadBoolean(reader);
                     if (hasFrames) result.CameraFrame = CoopCampaignMapConversationTableauCodec.ReadFrame(reader);
                     int count = reader.ReadInt32();
-                    if (count < 1 || count > CoopCampaignMapConversationTableauCodec.MaxActors) return false;
+                    if (count < 1 || count > (hasFrames
+                        ? CoopCampaignMapConversationTableauCodec.MaxActors
+                        : CoopCampaignMapConversationTableauCodec.MaxMapActors)) return false;
                     for (int i = 0; i < count; i++) result.Actors.Add(new CoopCampaignMapConversationActorPose
                     {
                         ActionName = CoopCampaignMapConversationTableauCodec.ReadText(reader, 128),
                         Progress = reader.ReadSingle(), Speed = reader.ReadSingle(),
-                        Frame = hasFrames ? CoopCampaignMapConversationTableauCodec.ReadFrame(reader) : null
+                        Frame = hasFrames ? CoopCampaignMapConversationTableauCodec.ReadFrame(reader) : null,
+                        LookDirection = hasFrames ? new[] { reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle() } : null
                     });
                     if (stream.Position != stream.Length || !IsValid(result)) return false;
                     pose = result;
@@ -135,6 +147,18 @@ namespace CoopSpectator.Infrastructure
             catch (InvalidDataException) { return false; }
             catch (IOException) { return false; }
             catch (ArgumentException) { return false; }
+        }
+
+        private static bool IsDirection(float[] value)
+        {
+            if (value == null || value.Length != 3) return false;
+            double squared = 0;
+            foreach (float component in value)
+            {
+                if (!InRange(component, -1.001f, 1.001f)) return false;
+                squared += (double)component * component;
+            }
+            return squared >= 0.998 && squared <= 1.002;
         }
 
         private static bool IsAction(string value)
@@ -163,11 +187,19 @@ namespace CoopSpectator.Infrastructure
     {
         private float _phase, _speed, _duration, _age, _rate;
         private bool _cyclic;
+        private readonly float _maximumSpeed;
         public bool HasTarget { get; private set; }
+
+        public CoopConversationPosePlayback(float maximumSpeed = 10f)
+        {
+            if (!Finite(maximumSpeed) || maximumSpeed <= 0f || maximumSpeed > 16f)
+                throw new ArgumentOutOfRangeException(nameof(maximumSpeed));
+            _maximumSpeed = maximumSpeed;
+        }
 
         public void SetTarget(float phase, float speed, float duration, bool cyclic)
         {
-            if (!Finite(phase) || phase < 0f || phase > 1f || !Finite(speed) || speed < 0f || speed > 10f ||
+            if (!Finite(phase) || phase < 0f || phase > 1f || !Finite(speed) || speed < 0f || speed > _maximumSpeed ||
                 !Finite(duration) || duration <= 0f)
                 throw new ArgumentOutOfRangeException(nameof(phase));
             if (!HasTarget) _rate = speed;
@@ -194,7 +226,7 @@ namespace CoopSpectator.Infrastructure
                     wanted += Clamp(error * _duration / 0.75f, -0.15f * _speed, 0.15f * _speed);
             }
             float step = Math.Min(dt, 0.1f) * Math.Max(1f, _speed);
-            _rate = Clamp(_rate + Clamp(wanted - _rate, -step, step), 0f, 10f);
+            _rate = Clamp(_rate + Clamp(wanted - _rate, -step, step), 0f, _maximumSpeed);
             return _rate;
         }
 

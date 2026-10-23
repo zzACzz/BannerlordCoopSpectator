@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="SiegeFlightCallSiteTests.cs" />
+    <Compile Include="SiegeFlightObservationTests.cs" />
+    <Compile Include="SiegeFlightCleanupTests.cs" />
+    <Compile Include="../../Patches/CoopSiegeFlightObservationPatch.cs" Link="CoopSiegeFlightObservationPatch.cs" />
+    <Compile Include="../../Campaign/CoopCampaignMapSiegeFlightObservation.cs" Link="CoopCampaignMapSiegeFlightObservation.cs" />
+    <Compile Include="../../Campaign/CoopCampaignMapSiegeFlightReader.cs" Link="CoopCampaignMapSiegeFlightReader.cs" />
+    <Compile Include="../../Infrastructure/CoopCampaignMapSiegeFlight.cs" Link="CoopCampaignMapSiegeFlight.cs" />
+    <Compile Include="../../Infrastructure/CoopCampaignMapSiegeFlightBuffer.cs" Link="CoopCampaignMapSiegeFlightBuffer.cs" />
+    <Compile Include="../../Patches/CoopSiegeFlightCallSite.cs" Link="CoopSiegeFlightCallSite.cs" />
+    <Compile Include="MirrorItemPoseTests.cs" />
+    <Compile Include="../../Patches/CoopMirrorItemPosePatch.cs" Link="CoopMirrorItemPosePatch.cs" />
+    <Compile Include="../../Patches/CoopReplicaPortraitPosePatch.cs" Link="CoopReplicaPortraitPosePatch.cs" />
+    <Compile Include="../../Infrastructure/CoopReplicaPortraitCreationData.cs" Link="CoopReplicaPortraitCreationData.cs" />
+    <Compile Include="../../Patches/CoopPortraitPoseObservationPatch.cs" Link="CoopPortraitPoseObservationPatch.cs" />
+    <Compile Include="../../Infrastructure/CoopPortraitPoseEvidence.cs" Link="CoopPortraitPoseEvidence.cs" />
+    <PackageReference Include="Lib.Harmony" Version="2.4.2" />
+  </ItemGroup>
+</Project>

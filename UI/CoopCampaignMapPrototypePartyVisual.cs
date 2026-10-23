@@ -10,7 +10,7 @@ using TaleWorlds.ObjectSystem;
 
 namespace CoopSpectator.UI
 {
-    internal sealed class CoopCampaignMapPrototypePartyVisual
+    internal sealed partial class CoopCampaignMapPrototypePartyVisual
     {
         private const float MapScale = 0.3f;
         private static readonly Vec3 CaravanMountOffset =
@@ -23,9 +23,9 @@ namespace CoopSpectator.UI
         private bool _hasLastAppliedWorldFrame;
 
         internal bool IsUsable =>
-            HasValidEntity(_humanVisual) &&
+            _tentRoot != null || (HasValidEntity(_humanVisual) &&
             (_mountVisual == null || HasValidEntity(_mountVisual)) &&
-            (_caravanMountVisual == null || HasValidEntity(_caravanMountVisual));
+            (_caravanMountVisual == null || HasValidEntity(_caravanMountVisual)));
 
         internal static bool TryCreate(
             Scene scene,
@@ -42,6 +42,9 @@ namespace CoopSpectator.UI
             {
                 return false;
             }
+
+            if (state.PartyVisualKind == CoopCampaignMapPrototypePartyVisualKind.SiegeTent)
+                return TryCreateTent(scene, state, initialFrame, out visual);
 
             if (state.HumanVisual != null &&
                 TryCreateExact(scene, state, initialFrame, out visual))
@@ -72,21 +75,28 @@ namespace CoopSpectator.UI
             MatrixFrame worldFrame,
             float dt,
             bool isMoving,
-            float speed)
+            float speed,
+            CoopCampaignMapPartyPoseEnvelope pose = null)
         {
             float safeDt = dt > 0f && IsFinite(dt) ? dt : 0.0001f;
             float safeSpeed = IsFinite(speed)
                 ? Math.Max(0f, Math.Min(20f, speed))
                 : 0f;
 
-            _humanVisual?.Tick(_mountVisual, safeDt, isMoving, safeSpeed);
-            _mountVisual?.Tick(null, safeDt, isMoving, safeSpeed);
-            _caravanMountVisual?.Tick(null, safeDt, isMoving, safeSpeed);
+            if (pose == null) ReleaseHostPose();
+            float animationDt = _acceptsHostPose && pose?.IsValid() == true
+                ? safeDt * pose.Pose.TimeScale : safeDt;
+            _humanVisual?.Tick(_mountVisual, animationDt, isMoving, safeSpeed);
+            _mountVisual?.Tick(null, animationDt, isMoving, safeSpeed);
+            _caravanMountVisual?.Tick(null, animationDt, isMoving, safeSpeed);
+            ApplyHostPose(pose, animationDt);
             ApplyFrame(worldFrame, force: false);
         }
 
         internal void SetVisible(bool visible)
         {
+            _tentRoot?.SetVisibilityExcludeParents(visible);
+            if (!visible) ReleaseHostPose();
             SetVisualVisible(_humanVisual, visible);
             SetVisualVisible(_mountVisual, visible);
             SetVisualVisible(_caravanMountVisual, visible);
@@ -94,6 +104,7 @@ namespace CoopSpectator.UI
 
         internal void Reset()
         {
+            ResetTent();
             AgentVisuals humanVisual = _humanVisual;
             AgentVisuals mountVisual = _mountVisual;
             AgentVisuals caravanMountVisual = _caravanMountVisual;
@@ -101,6 +112,10 @@ namespace CoopSpectator.UI
             _mountVisual = null;
             _caravanMountVisual = null;
             _hasLastAppliedWorldFrame = false;
+            _poseChannels = null;
+            _poseSequence = -1;
+            _poseSession = null;
+            _poseRecreationRequired = false;
 
             ResetVisual(humanVisual);
             ResetVisual(mountVisual);
@@ -167,6 +182,7 @@ namespace CoopSpectator.UI
                     return FailCandidate(candidate, out visual);
                 }
 
+                candidate._acceptsHostPose = true;
                 return CompleteCandidate(
                     candidate,
                     initialFrame,
@@ -564,6 +580,9 @@ namespace CoopSpectator.UI
             }
 
             SetFrame(_mountVisual, worldFrame);
+            _tentRoot?.SetFrame(ref worldFrame, true);
+            // Match MobilePartyVisual.ApplyWindEffect on our owned tent only.
+            _tentFlagCloth?.SetForcedWind(-worldFrame.rotation.f, false);
             SetFrame(_humanVisual, worldFrame);
             MatrixFrame caravanFrame = worldFrame;
             caravanFrame.origin +=

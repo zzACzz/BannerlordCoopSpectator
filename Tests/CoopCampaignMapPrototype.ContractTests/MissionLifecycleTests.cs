@@ -103,7 +103,94 @@ internal static class MissionLifecycleTests
         var notMap = Map(); notMap.HostOnGlobalMap = false;
         Is(m.Step(notMap, Idle(1), 0), CoopCampaignMissionAction.Wait, "no map before actual host map");
         CapacityAndReplay();
+        AppliedResultClose();
+        QueuedStageDuringClose();
         Console.WriteLine("Campaign mission lifecycle assertions passed: " + _count);
+    }
+
+    private static void AppliedResultClose()
+    {
+        foreach (string invalid in new[] { "replaced", "wrong-completion", "timeout" })
+        {
+            var guarded = new CoopCampaignMissionLifecycle(Session, 30);
+            var initial = Battle("guarded", 1);
+            var opening = guarded.Step(initial, Idle(1), 0);
+            var active = Active(2, CoopCampaignObservedMissionKind.Battle, "exact", opening.Command, "guarded");
+            active.CompletedBattleKey = "guarded";
+            var applied = Map(2); applied.AftermathApplied = true; applied.AppliedBattleKey = "guarded";
+            Is(guarded.Step(applied, active, 1), CoopCampaignMissionAction.EndBattle, "guarded close admitted");
+            active.Sequence++;
+            if (invalid == "replaced") active.MissionInstance = "replacement";
+            var after = invalid == "wrong-completion" ? Idle(3) : active;
+            if (invalid == "wrong-completion") after.CompletedBattleKey = "unrelated";
+            Is(guarded.Step(applied, after, invalid == "timeout" ? 31 : 2), CoopCampaignMissionAction.Fault,
+                "close fails closed on " + invalid);
+        }
+        foreach (bool followup in new[] { false, true })
+        {
+            var m = new CoopCampaignMissionLifecycle(Session, 30);
+            var host = Battle("result-bound", 1);
+            var start = m.Step(host, Idle(1), 0);
+            var observed = Active(2, CoopCampaignObservedMissionKind.Battle, "native", start.Command, host.BattleKey);
+            observed.CompletedBattleKey = host.BattleKey;
+            Is(m.Step(host, observed, 1), CoopCampaignMissionAction.Wait, "publication without application cannot close");
+            host = Map(2); host.AftermathApplied = true; host.AppliedBattleKey = "wrong";
+            observed.Sequence++;
+            Is(m.Step(host, observed, 100), CoopCampaignMissionAction.Wait, "elapsed time and unrelated result cannot close");
+            host = Map(3); host.AftermathApplied = true; host.AppliedBattleKey = "result-bound";
+            host.FollowupStagePending = followup; host.Fresh = false;
+            observed.Sequence++;
+            Is(m.Step(host, observed, 101), CoopCampaignMissionAction.Wait, "stale acknowledgement cannot close");
+            host.Fresh = true; observed.Sequence++; observed.CanEnd = false;
+            Is(m.Step(host, observed, 102), CoopCampaignMissionAction.Wait, "native end readiness required");
+            observed.Sequence++; observed.CanEnd = true;
+            var close = m.Step(host, observed, 103);
+            Is(close, CoopCampaignMissionAction.EndBattle, "matching published and applied result closes immediately");
+            Check(close.MissionInstance == "native" && close.BattleKey == "result-bound", "close binds exact battle and mission");
+            observed.Sequence++;
+            Is(m.Step(host, observed, 104), CoopCampaignMissionAction.Wait, "close command not repeated");
+            var idle = Idle(++observed.Sequence); idle.CompletedBattleKey = "result-bound";
+            Is(m.Step(host, idle, 105), followup ? CoopCampaignMissionAction.Wait : CoopCampaignMissionAction.StartMap,
+                "native teardown required and followup still blocks map");
+        }
+    }
+
+    private static void QueuedStageDuringClose()
+    {
+        // Host preparation may overtake native teardown in multi-stage battles.
+        // This checks ordering only, not native siege/hideout acceptance.
+        foreach (bool queueBeforeClose in new[] { true, false })
+        {
+            var m = new CoopCampaignMissionLifecycle(Session, 30);
+            var first = Battle("previous-stage", 1);
+            var opening = m.Step(first, Idle(1), 0);
+            var active = Active(2, CoopCampaignObservedMissionKind.Battle, "previous-native",
+                opening.Command, first.BattleKey);
+            active.CompletedBattleKey = first.BattleKey;
+            var next = Battle("next-stage", 3);
+            next.AftermathApplied = true; next.AppliedBattleKey = first.BattleKey;
+            next.FollowupStagePending = true;
+            var hold = Map(2); hold.Kind = CoopCampaignMissionIntentKind.Hold;
+            hold.AftermathApplied = true; hold.AppliedBattleKey = first.BattleKey;
+            hold.FollowupStagePending = true;
+            var close = m.Step(queueBeforeClose ? next : hold, active, 1);
+            Is(close, CoopCampaignMissionAction.EndBattle, "queued stage closes only acknowledged predecessor");
+            Check(close.BattleKey == first.BattleKey && close.MissionInstance == "previous-native",
+                "next-stage intent cannot retarget predecessor close");
+            active.Sequence++;
+            Is(m.Step(next, active, 2), CoopCampaignMissionAction.Wait, "queued stage waits for actual teardown");
+            var idle = Idle(4); idle.CompletedBattleKey = first.BattleKey; idle.CanStart = false;
+            Is(m.Step(next, idle, 3), CoopCampaignMissionAction.Wait, "teardown alone is not start readiness");
+            idle.Sequence++; idle.CanStart = true; next.Fresh = false;
+            Is(m.Step(next, idle, 4), CoopCampaignMissionAction.Wait, "cached queued stage needs fresh authorization");
+            idle.Sequence++; next.Fresh = true;
+            var start = m.Step(next, idle, 5);
+            Is(start, CoopCampaignMissionAction.StartBattle, "ready next stage starts without intervening map");
+            Check(start.BattleKey == next.BattleKey && start.Command > close.Command,
+                "next stage preserves identity and command ordering");
+            idle.Sequence++;
+            Is(m.Step(next, idle, 6), CoopCampaignMissionAction.Wait, "next-stage dispatch remains one-shot");
+        }
     }
 
     private static void CapacityAndReplay()

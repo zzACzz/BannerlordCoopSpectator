@@ -304,25 +304,42 @@ namespace CoopSpectator.UI
     public sealed class CoopCampaignMapConversationHintVM : ViewModel
     {
         private readonly TextObject _hintText;
+        private readonly bool _traceMenuHint;
+        private static int _menuHintTraceCount;
 
         public CoopCampaignMapConversationHintVM()
             : this(TextObject.GetEmpty())
         {
         }
 
-        public CoopCampaignMapConversationHintVM(TextObject hintText)
+        public CoopCampaignMapConversationHintVM(TextObject hintText, bool traceMenuHint = false)
         {
             _hintText = hintText ?? TextObject.GetEmpty();
+            _traceMenuHint = traceMenuHint;
+            TraceMenuHint("created");
+        }
+
+        private void TraceMenuHint(string phase)
+        {
+            // Opt-in, bounded managed-only evidence. Never log host text or query a scene.
+            if (!_traceMenuHint || _menuHintTraceCount >= 64 || !CoopDebugConfig.VerboseDiagnostics ||
+                System.Environment.GetEnvironmentVariable("COOPSPECTATOR_MENU_HINT_DIAGNOSTICS") != "1") return;
+            _menuHintTraceCount++;
+            ModLogger.Info("Replica menu hint: phase=" + phase +
+                " hasText=" + !TextObject.IsNullOrEmpty(_hintText) +
+                " stringRegistered=" + InformationManager.RegisteredTypes.ContainsKey(typeof(string)));
         }
 
         public void ExecuteBeginHint()
         {
+            TraceMenuHint("begin");
             if (!TextObject.IsNullOrEmpty(_hintText))
                 MBInformationManager.ShowHint(_hintText.ToString());
         }
 
         public void ExecuteEndHint()
         {
+            TraceMenuHint("end");
             MBInformationManager.HideInformations();
         }
     }

@@ -12,6 +12,7 @@ internal static class Program
     {
         try
         {
+            ValidateVillageSceneSuffixRouting();
             ValidateServerScoreboardDependencyDecision();
             ValidateServerScoreboardDependencySourceWiring();
             ValidateExactReliefUniqueSettlementResolution();
@@ -1760,6 +1761,20 @@ internal static class Program
             methodBody.IndexOf("SetWeaponAmmoData", StringComparison.Ordinal) < 0 &&
             methodBody.IndexOf("SetWeaponReloadPhase", StringComparison.Ordinal) < 0,
             pathName + " must preserve Bannerlord's authoritative weapon state without manual injection.");
+    }
+
+    private static void ValidateVillageSceneSuffixRouting()
+    {
+        string root = FindRepositoryRoot();
+        string classifier = File.ReadAllText(Path.Combine(root, "Infrastructure", "SceneRuntimeClassifier.cs"));
+        Assert(classifier.Contains("sceneName.EndsWith(\"_village\", StringComparison.OrdinalIgnoreCase)"),
+            "Native battania_village must retain village scene routing instead of field map-patch fallback.");
+        string detector = File.ReadAllText(Path.Combine(root, "Campaign", "BattleDetector.cs"));
+        Assert(detector.Contains("SceneRuntimeClassifier.IsVillageBattleScene(missionSceneName)") &&
+            detector.Contains("context.Source = \"mission-scene-village\""),
+            "Campaign selection must use the shared village classifier.");
+        Assert(classifier.Contains("return IsVillageBattleScene(sceneName);"),
+            "Village scene level selection must share the corrected classification.");
     }
 
     private static void Assert(bool condition, string message)

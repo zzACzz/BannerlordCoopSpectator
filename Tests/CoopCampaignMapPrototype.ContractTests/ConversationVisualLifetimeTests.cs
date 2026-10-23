@@ -56,6 +56,15 @@ internal static class ConversationVisualLifetimeTests
         string view = File.ReadAllText(Path.Combine(root, "UI", "CoopCampaignMapConversationView.cs"));
         string tableau = File.ReadAllText(Path.Combine(root, "UI", "CoopCampaignMapConversationTableauView.cs"));
         string capture = File.ReadAllText(Path.Combine(root, "Campaign", "CoopCampaignMapConversationTableauCapture.cs"));
+        int lightingStart = tableau.IndexOf("private void TraceLightingDescriptor(", StringComparison.Ordinal);
+        int lightingEnd = tableau.IndexOf("private void ObserveMissionSceneLoading(", lightingStart, StringComparison.Ordinal);
+        string lightingTrace = tableau.Substring(lightingStart, lightingEnd - lightingStart);
+        Check(lightingTrace.Contains("if (!_verboseAttempt || _missionScene == null || _lightingDescriptorSamples >= 12) return;") &&
+            lightingTrace.Contains("_lightingDescriptorSamples++;") && lightingTrace.Contains("FormattableString.Invariant("),
+            "lighting descriptor diagnostics are opt-in, process-bounded and culture-invariant");
+        Check(!lightingTrace.Contains("_scene.") && !lightingTrace.Contains("_view.") &&
+            tableau.Contains("TraceLightingDescriptor(state);"),
+            "lighting descriptor trace consumes detached data without native scene reads");
         Check(capture.Contains("Scale = actor.GetScale()") && !capture.Contains("Scale = data.ScaleData") &&
             tableau.Contains(".Scale(descriptor.Scale)"), "resolved native scale preserved from host to client");
         Check(view.Contains("CloseConversation(releaseTableau: false)") && view.Contains("_tableau.Apply(state.Tableau)") &&
@@ -73,8 +82,10 @@ internal static class ConversationVisualLifetimeTests
         Check(tableau.Contains("oldTexture?.Release()") && tableau.Contains("_scene?.ClearAll()") &&
             tableau.Contains("DestructAgentRendererSceneController") && tableau.Contains("ReleaseCameraEntity()"), "explicit cleanup owner");
         Check(!tableau.Contains(".ReadyToRender()") && tableau.Contains(".IsTargetOperational(") &&
-            !tableau.Contains(".CheckSceneReadyToRender(") && !tableau.Contains(".PreloadForRendering("),
-            "tableau avoids world-view readiness flag and terrain preparation");
+            !tableau.Contains(".CheckSceneReadyToRender("),
+            "tableau avoids world-view readiness polling");
+        Check(!tableau.Contains(".PreloadForRendering("),
+            "rejected standalone preload experiment is absent from the replica renderer");
         Check(!tableau.Contains("_scene.CheckResources(") &&
             tableau.Contains("visuals.CheckResources(true)") &&
             tableau.Contains("_targetConfigured, _widget.HasSubmittedLoadedTarget, _actors.Count, _lastActorReadyMask"),

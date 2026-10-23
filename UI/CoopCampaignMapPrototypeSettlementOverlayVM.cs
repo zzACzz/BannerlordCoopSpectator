@@ -106,6 +106,12 @@ namespace CoopSpectator.UI
             }
         }
 
+        internal void SetMapEventsVisible(bool visible)
+        {
+            foreach (var nameplate in _nameplatesById.Values)
+                nameplate.SetMapEventVisible(visible);
+        }
+
         internal void Upsert(CoopCampaignMapPrototypeEntityState entity)
         {
             if (!CoopCampaignMapPrototypeContract.IsValidVisibleEntity(entity) ||
@@ -396,7 +402,20 @@ namespace CoopSpectator.UI
         public int PortLevel => 0;
 
         [DataSourceProperty]
-        public int MapEventVisualType => 0;
+        public int MapEventVisualType
+        {
+            get => _mapEventVisualType;
+            private set => SetField(ref _mapEventVisualType, value, nameof(MapEventVisualType));
+        }
+        private int _mapEventVisualType;
+        private int _hostMapEventVisualType;
+        private bool _mapEventVisible;
+
+        internal void SetMapEventVisible(bool visible)
+        {
+            _mapEventVisible = visible;
+            MapEventVisualType = visible ? _hostMapEventVisualType : 0;
+        }
 
         [DataSourceProperty]
         public bool IsTrackerHighlightEnabled => false;
@@ -437,6 +456,8 @@ namespace CoopSpectator.UI
             Size = entity.SettlementNameplateSize;
             IsTracked = entity.IsSettlementTracked;
             Relation = entity.SettlementRelation;
+            _hostMapEventVisualType = entity.SettlementMapEventType;
+            SetMapEventVisible(_mapEventVisible);
             IsInRange = entity.IsSettlementInRange;
             Name = entity.DisplayName ?? string.Empty;
             uint primaryColor = entity.PrimaryColor == 0u

@@ -11,6 +11,7 @@ using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.CampaignSystem.Siege;
 using TaleWorlds.CampaignSystem.ViewModelCollection;
+using TaleWorlds.CampaignSystem.ViewModelCollection.Map.MapBar;
 using TaleWorlds.Core;
 using TaleWorlds.Core.ViewModelCollection.Information;
 using TaleWorlds.Library;
@@ -21,7 +22,7 @@ namespace CoopSpectator.Campaign
 {
     // Host-main-thread adapter only, called by the launcher-owned local relay.
     // Caller must resolve a current admitted catalog target before calling.
-    internal sealed class CoopCampaignMapTooltipCapture
+    internal sealed partial class CoopCampaignMapTooltipCapture
     {
         private sealed class CaptureContext { }
         private readonly int _ownerThread = Thread.CurrentThread.ManagedThreadId;
@@ -33,6 +34,25 @@ namespace CoopSpectator.Campaign
         internal bool TryCapture(PartyBase target, string session, string entityId,
             long generation, long sequence, bool extended,
             out CoopCampaignMapTooltipPayload payload, out string reason)
+            => TryCaptureCore(target, null, session, entityId, generation, sequence, extended, out payload, out reason);
+
+        internal bool TryCaptureItem(EquipmentElement item, string session, string entityId,
+            long generation, long sequence, bool extended,
+            out CoopCampaignMapTooltipPayload payload, out string reason)
+            => TryCaptureCore(null, item, session, entityId, generation, sequence, extended, out payload, out reason);
+
+        internal bool TryCaptureEncounter(object encounter, string session, string entityId,
+            long generation, long sequence, bool extended,
+            out CoopCampaignMapTooltipPayload payload, out string reason)
+            => TryCaptureCore(null, null, session, entityId, generation, sequence, extended, out payload, out reason, encounter);
+
+        internal bool TryCaptureBarInfo(MapInfoItemVM source, string session, string token, long generation, long sequence,
+            bool extended, out CoopCampaignMapTooltipPayload payload, out string reason)
+            => TryCaptureCore(null, null, session, token, generation, sequence, extended, out payload, out reason, barInfo: source);
+
+        private bool TryCaptureCore(PartyBase target, EquipmentElement? item, string session, string entityId,
+            long generation, long sequence, bool extended,
+            out CoopCampaignMapTooltipPayload payload, out string reason, object encounter = null, MapInfoItemVM barInfo = null)
         {
             payload = null;
             reason = "tooltip-context-not-ready";
@@ -45,9 +65,44 @@ namespace CoopSpectator.Campaign
             bool success = false;
             try
             {
-                if (!IsMapContext() || !IsDisclosedTarget(target, entityId) ||
-                    !TryRoute(target, out Type type, out object[] args,
-                        out CoopCampaignMapTooltipKind kind, out Action<PropertyBasedTooltipVM, object[]> provider)) return false;
+                if (!IsMapContext()) return false;
+                Type type;
+                object[] args;
+                CoopCampaignMapTooltipKind kind;
+                Action<PropertyBasedTooltipVM, object[]> provider;
+                if (barInfo != null)
+                {
+                    if (!IsCurrentBarInfo(barInfo, session, entityId)) return false;
+                    type = typeof(List<TooltipProperty>); args = null;
+                    kind = CoopCampaignMapTooltipKind.BarInfo;
+                    provider = PropertyBasedTooltipVM.RefreshGenericPropertyBasedTooltip;
+                }
+                else if (encounter != null)
+                {
+                    if (!IsCurrentEncounter(encounter, session, entityId)) return false;
+                    if (encounter is MobileParty mobile)
+                    {
+                        type = typeof(MobileParty); args = new object[] { mobile, true, false };
+                        kind = CoopCampaignMapTooltipKind.MobileParty;
+                        provider = TooltipRefresherCollection.RefreshMobilePartyTooltip;
+                    }
+                    else if (encounter is Settlement settlement)
+                    {
+                        type = typeof(Settlement); args = new object[] { settlement };
+                        kind = CoopCampaignMapTooltipKind.Settlement;
+                        provider = TooltipRefresherCollection.RefreshSettlementTooltip;
+                    }
+                    else return false;
+                }
+                else if (item.HasValue)
+                {
+                    if (!IsCurrentItem(item.Value, session, entityId)) return false;
+                    type = typeof(ItemObject); args = new object[] { item.Value };
+                    kind = CoopCampaignMapTooltipKind.PlunderItem;
+                    provider = TooltipRefresherCollection.RefreshItemTooltip;
+                }
+                else if (!IsDisclosedTarget(target, entityId) ||
+                    !TryRoute(target, out type, out args, out kind, out provider)) return false;
                 if (!InformationManager.RegisteredTypes.TryGetValue(type, out var registration) ||
                     registration.TooltipType != typeof(PropertyBasedTooltipVM) ||
                     registration.MovieName != "PropertyBasedTooltip" ||
@@ -63,7 +118,9 @@ namespace CoopSpectator.Campaign
                     reason = "tooltip-text-context-incompatible-or-busy";
                     return false;
                 }
-                if (!CoopCampaignMapTooltipLanguageState.AreWritableTemplatesIsolated() ||
+                if (!(barInfo != null ? CoopCampaignMapTooltipLanguageState.AreBarWritableTemplatesIsolated() :
+                        item.HasValue ? CoopCampaignMapTooltipLanguageState.AreItemWritableTemplatesIsolated() :
+                        CoopCampaignMapTooltipLanguageState.AreWritableTemplatesIsolated()) ||
                     !CoopCampaignMapTooltipLanguageState.TryBegin(_ownerThread, out languageScope))
                 {
                     reason = "tooltip-language-state-incompatible";
@@ -81,6 +138,12 @@ namespace CoopSpectator.Campaign
                 {
                     reason = "tooltip-key-text-not-ready";
                     return false;
+                }
+                if (barInfo != null)
+                {
+                    var rows = CaptureBarInfoRows(barInfo.ItemId);
+                    if (rows == null || rows.Count > CoopCampaignMapTooltipPayloadCodec.MaxRows) return false;
+                    args = new object[] { rows };
                 }
                 provider(vm, args);
                 if (vm.TooltipPropertyList.Count < 1 ||
@@ -103,7 +166,10 @@ namespace CoopSpectator.Campaign
                         Red = color.Red, Green = color.Green, Blue = color.Blue, Alpha = color.Alpha
                     });
                 }
-                if (!IsMapContext() || !IsDisclosedTarget(target, entityId) ||
+                if (!IsMapContext() ||
+                    !(barInfo != null ? IsCurrentBarInfo(barInfo, session, entityId) :
+                        encounter != null ? IsCurrentEncounter(encounter, session, entityId) :
+                        item.HasValue ? IsCurrentItem(item.Value, session, entityId) : IsDisclosedTarget(target, entityId)) ||
                     !CoopCampaignMapTooltipPayloadCodec.IsValid(result))
                 {
                     reason = "tooltip-capture-invalidated";
@@ -150,6 +216,19 @@ namespace CoopSpectator.Campaign
                 Game.Current?.GameStateManager?.ActiveState is MapState &&
                 campaign.ConversationManager != null && !campaign.ConversationManager.IsConversationInProgress;
         }
+
+        private static bool IsCurrentItem(EquipmentElement expected, string session, string entityId)
+        {
+            return expected.Item != null && CoopCampaignMapMenuPlunder.IsTooltipId(entityId) &&
+                CoopCampaignMapMenuCapture.TryResolveCurrentPlunder(session, entityId, out var current) &&
+                ReferenceEquals(expected.Item, current.Item) &&
+                ReferenceEquals(expected.ItemModifier, current.ItemModifier) &&
+                ReferenceEquals(expected.CosmeticItem, current.CosmeticItem) && expected.IsQuestItem == current.IsQuestItem;
+        }
+
+        private static bool IsCurrentEncounter(object expected, string session, string entityId) =>
+            expected != null && CoopCampaignMapMenuCapture.TryResolveCurrentEncounter(session, entityId, out var current) &&
+            ReferenceEquals(expected, current);
 
         private static bool IsDisclosedTarget(PartyBase target, string entityId)
         {

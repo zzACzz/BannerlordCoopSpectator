@@ -3,6 +3,20 @@ using System.Collections.Generic;
 
 namespace CoopSpectator.Infrastructure
 {
+    public static class CoopCampaignMapRaidPresentationPolicy
+    {
+        // 0 unknown/undisclosed, 1 clear, 2 active raid, 3 already raided.
+        public static bool IsValid(int state) => state >= 0 && state <= 3;
+        public static int Capture(bool hostVisible, bool isVillage, bool activeRaid, bool isRaided) =>
+            !hostVisible ? 0 : !isVillage ? 1 : activeRaid ? 2 : isRaided ? 3 : 1;
+        public static string ParticleSystem(int state)
+        {
+            if (!IsValid(state)) throw new ArgumentOutOfRangeException(nameof(state));
+            return state == 2 ? "psys_fire_smoke_env_point" :
+                state == 3 ? "map_icon_village_plunder_fx" : string.Empty;
+        }
+    }
+
     public static class CoopCampaignMapSettlementPresentationPolicy
     {
         public const int MaxWallSections = 32;
@@ -157,6 +171,7 @@ namespace CoopSpectator.Infrastructure
             public int LevelFlags;
             public string WallStates;
             public int PreparationState;
+            public int RaidState;
         }
 
         private readonly Dictionary<string, Binding> _bindings =
@@ -164,14 +179,17 @@ namespace CoopSpectator.Infrastructure
         private readonly Action<T, bool> _setVisibility;
         private readonly Func<T, int, bool> _applyLevels;
         private readonly Func<T, string, int, bool> _applyPresentation;
+        private readonly Func<T, int, bool> _applyRaid;
 
         public CoopCampaignMapSettlementGeometryAdmission(Action<T, bool> setVisibility,
             Func<T, int, bool> applyLevels = null,
-            Func<T, string, int, bool> applyPresentation = null)
+            Func<T, string, int, bool> applyPresentation = null,
+            Func<T, int, bool> applyRaid = null)
         {
             _setVisibility = setVisibility ?? throw new ArgumentNullException(nameof(setVisibility));
             _applyLevels = applyLevels;
             _applyPresentation = applyPresentation;
+            _applyRaid = applyRaid;
         }
 
         public void Register(string sceneEntityName, T root)
@@ -179,6 +197,8 @@ namespace CoopSpectator.Infrastructure
             if (root == null)
                 throw new ArgumentNullException(nameof(root));
             _setVisibility(root, false);
+            if (_applyRaid != null && !_applyRaid(root, 0))
+                throw new InvalidOperationException("Could not clear settlement authoring particles.");
             if (string.IsNullOrWhiteSpace(sceneEntityName))
                 return;
 
@@ -188,7 +208,10 @@ namespace CoopSpectator.Infrastructure
                 // Native adapter deduplicates handles. Different roots with
                 // the same wire identity are ambiguous and must stay hidden.
                 if (existing != null)
+                {
                     _setVisibility(existing.Root, false);
+                    _applyRaid?.Invoke(existing.Root, 0);
+                }
                 _bindings[id] = null;
                 return;
             }
@@ -198,7 +221,7 @@ namespace CoopSpectator.Infrastructure
         }
 
         public void Apply(string entityId, bool isAdmittedSettlement, int levelFlags = 0,
-            string wallStates = "", int preparationState = 0)
+            string wallStates = "", int preparationState = 0, int raidState = 0)
         {
             if (entityId == null || !_bindings.TryGetValue(entityId, out Binding binding) ||
                 binding == null)
@@ -214,10 +237,26 @@ namespace CoopSpectator.Infrastructure
                     levelFlags == 0 || !CoopCampaignMapSettlementLevelPolicy.IsValid(levelFlags) ||
                     (_applyLevels != null && !_applyLevels(binding.Root, levelFlags)) ||
                     (_applyPresentation != null && !_applyPresentation(binding.Root, wallStates, preparationState)))
+                    isAdmittedSettlement = false;
+                else
+                {
+                    binding.LevelFlags = levelFlags;
+                    binding.WallStates = wallStates;
+                    binding.PreparationState = preparationState;
+                }
+            }
+            int admittedRaid = isAdmittedSettlement && CoopCampaignMapRaidPresentationPolicy.IsValid(raidState)
+                ? raidState : 0;
+            if (_applyRaid != null && binding.RaidState != admittedRaid)
+            {
+                if (!_applyRaid(binding.Root, admittedRaid))
+                {
+                    // Adapter also clears partially created effects on failure.
+                    _setVisibility(binding.Root, false); binding.Visible = false;
+                    binding.RaidState = -1; // Retry rather than cache a failed application.
                     return;
-                binding.LevelFlags = levelFlags;
-                binding.WallStates = wallStates;
-                binding.PreparationState = preparationState;
+                }
+                binding.RaidState = admittedRaid;
             }
             if (binding.Visible == isAdmittedSettlement) return;
             _setVisibility(binding.Root, isAdmittedSettlement);

@@ -227,8 +227,11 @@ namespace CoopSpectator.MissionBehaviors
                 registerer.RegisterBaseHandler<CoopCampaignMapConversationChunkMessage>(
                     HandleServerConversationChunk);
                 registerer.RegisterBaseHandler<CoopCampaignMapConversationPoseMessage>(HandleServerConversationPose);
+                registerer.RegisterBaseHandler<CoopCampaignMapPartyPoseMessage>(HandleServerPartyPose);
                 registerer.RegisterBaseHandler<CoopCampaignMapTooltipControlMessage>(HandleTooltipControl);
                 registerer.RegisterBaseHandler<CoopCampaignMapTooltipChunkMessage>(HandleTooltipChunk);
+                registerer.RegisterBaseHandler<CoopCampaignMapMenuChunkMessage>(HandleMenuChunk);
+                registerer.RegisterBaseHandler<CoopCampaignMapBattleMarkerChunkMessage>(HandleBattleMarkersChunk);
             }
             else if (GameNetwork.IsServer)
             {
@@ -247,12 +250,15 @@ namespace CoopSpectator.MissionBehaviors
             if (GameNetwork.IsClient)
             {
                 TickClientCatalogTransport();
+                ReconcileClientPartyPoses();
                 return;
             }
             if (!GameNetwork.IsServer)
                 return;
             TickServerCatalogTransports();
             TickServerConversationTransports();
+            TickMenuTransports();
+            TickBattleMarkersTransports();
             if (Mission.CurrentTime < _nextBridgePollAt)
                 return;
 
@@ -264,6 +270,8 @@ namespace CoopSpectator.MissionBehaviors
                     out string reason))
             {
                 LogAvailabilityTransition("unavailable:" + (reason ?? "unknown"));
+                UpdateServerMenu(null);
+                UpdateServerBattleMarkers(null);
                 if (_serverConversation.IsActive && _networkConversationRevision < int.MaxValue)
                 {
                     _serverConversation = CoopCampaignMapPrototypeContract.CreateInactiveConversation(++_networkConversationRevision);
@@ -356,6 +364,8 @@ namespace CoopSpectator.MissionBehaviors
                 return;
 
             _tooltipHostSeenAt = TooltipNow;
+            UpdateServerMenu(snapshot.Menu, !sameSession, snapshot.MapBar);
+            UpdateServerBattleMarkers(snapshot.BattleMarkers, !sameSession);
 
             List<CoopCampaignMapPrototypeCatalogEntityState> catalogDelta = null;
             int previousNetworkCatalogRevision = _networkCatalogRevision;
@@ -439,6 +449,7 @@ namespace CoopSpectator.MissionBehaviors
                 BroadcastDynamic(_networkDynamicRevision, dynamicDelta);
             if (conversationChanged)
                 BroadcastConversation(_serverConversation);
+            BroadcastPartyPoses(snapshot);
             // Motion never supersedes or restarts the reliable text/descriptor
             // transfer. One bounded latest sample per accepted host publication.
             if (snapshot.ConversationPose != null && _serverConversation.IsActive &&
@@ -467,12 +478,16 @@ namespace CoopSpectator.MissionBehaviors
                     _networkDynamicRevision,
                     _serverDynamic);
                 SendConversation(networkPeer, _serverConversation);
+                SendMenu(networkPeer);
+                SendBattleMarkers(networkPeer);
             }
         }
 
         public override void OnMissionStateFinalized()
         {
             FinalizeTooltips();
+            ResetServerMenu();
+            ResetServerBattleMarkers();
             if (GameNetwork.IsClient)
             {
                 CurrentClientState = null;
@@ -513,6 +528,7 @@ namespace CoopSpectator.MissionBehaviors
                 RemoveTooltipPeer(networkPeer);
                 _serverCatalogTransportByPeer.Remove(networkPeer.Index);
                 _conversationSends.Remove(networkPeer.Index);
+                _menuSends.Remove(networkPeer.Index);
             }
         }
 
@@ -1305,6 +1321,8 @@ namespace CoopSpectator.MissionBehaviors
 
         private static void ResetClientVisibleEntities()
         {
+            ClientPartyPoses.Clear();
+            _partyPoseSession = null;
             ClientEntityAssembler.Reset();
             ClientCatalogByIndex.Clear();
             ClientCatalogById.Clear();
@@ -1333,6 +1351,8 @@ namespace CoopSpectator.MissionBehaviors
 
         private static void ResetClientConversation()
         {
+            ResetClientMenu();
+            ResetClientBattleMarkers();
             ClientConversationAssembler.Reset();
             ClientPoseReceiver.Reset();
             CurrentClientConversation = null;

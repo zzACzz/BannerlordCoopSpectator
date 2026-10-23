@@ -9537,4 +9537,70 @@
 		</ItemComponent>
 		<Flags DropOnWeaponChange="true" ForceAttachOffHandPrimaryItemBone="true" HeldInOffHand="true" HasToBeHeldUp="true" CanBePickedUpFromCorpse="false" />
 	</Item>
+	<!-- DefaultItems supplement: 16 programmatically created campaign goods, installed 1.4.8.
+	     Preserve on regeneration; append-only so prior catalog ordering is unchanged. -->
+	<Item id="cs_mirror_grain_9560744c" name="{=Itv3fgJm}Grain{@Plural}loads of grain{\@}" mesh="merchandise_grain" item_category="grain" value="10" weight="10" Type="Goods" IsFood="true" multiplayer_item="true">
+		<ItemComponent><Trade morale_bonus="0" /></ItemComponent>
+		<Flags Civilian="true" />
+	</Item>
+	<Item id="cs_mirror_meat_88de06b2" name="{=LmwhFv5p}Meat{@Plural}loads of meat{\@}" mesh="merchandise_meat" item_category="meat" value="30" weight="10" Type="Goods" IsFood="true" multiplayer_item="true">
+		<ItemComponent><Trade morale_bonus="0" /></ItemComponent>
+		<Flags Civilian="true" />
+	</Item>
+	<Item id="cs_mirror_planks_9195c598" name="{=5ac8Boz1}Planks{@Plural}loads of planks{\@}" mesh="bd_planks_a" item_category="planks" value="180" weight="10" Type="Goods" IsFood="false" multiplayer_item="true">
+		<ItemComponent><Trade morale_bonus="0" /></ItemComponent>
+		<Flags Civilian="true" />
+	</Item>
+	<Item id="cs_mirror_felt_c546d834" name="{=hNwjpCVP}Felt{@Plural}rolls of felt{\@}" mesh="merchandise_hides_b" item_category="felt" value="230" weight="10" Type="Goods" IsFood="false" multiplayer_item="true">
+		<ItemComponent><Trade morale_bonus="0" /></ItemComponent>
+		<Flags Civilian="true" />
+	</Item>
+	<Item id="cs_mirror_hides_5eeb5a7a" name="{=4kvKQuXM}Hides{@Plural}loads of hide{\@}" mesh="merchandise_hides_b" item_category="hides" value="50" weight="10" Type="Goods" IsFood="false" multiplayer_item="true">
+		<ItemComponent><Trade morale_bonus="0" /></ItemComponent>
+		<Flags Civilian="true" />
+	</Item>
+	<Item id="cs_mirror_tools_ef46255c" name="{=n3cjEB0X}Tools{@Plural}loads of tools{\@}" mesh="bd_pickaxe_b" item_category="tools" value="250" weight="10" Type="Goods" IsFood="false" multiplayer_item="true">
+		<ItemComponent><Trade morale_bonus="0" /></ItemComponent>
+		<Flags Civilian="true" />
+	</Item>
+	<Item id="cs_mirror_iron_4bafc27b" name="{=Kw6BkhIf}Iron Ore{@Plural}loads of iron ore{\@}" mesh="iron_ore" item_category="iron" value="50" weight="10" Type="Goods" IsFood="false" multiplayer_item="true">
+		<ItemComponent><Trade morale_bonus="0" /></ItemComponent>
+		<Flags Civilian="true" />
+	</Item>
+	<Item id="cs_mirror_hardwood_e17ff4f1" name="{=ExjMoUiT}Hardwood{@Plural}hardwood logs{\@}" mesh="hardwood" item_category="hardwood" value="25" weight="10" Type="Goods" IsFood="false" multiplayer_item="true">
+		<ItemComponent><Trade morale_bonus="0" /></ItemComponent>
+		<Flags Civilian="true" />
+	</Item>
+	<Item id="cs_mirror_charcoal_b9488292" name="{=iQadPYNe}Charcoal{@Plural}loads of charcoal{\@}" mesh="charcoal" item_category="hardwood" value="50" weight="5" Type="Goods" IsFood="false" multiplayer_item="true">
+		<ItemComponent><Trade morale_bonus="0" /></ItemComponent>
+		<Flags Civilian="true" />
+	</Item>
+	<Item id="cs_mirror_ironingot1_71addbf5" name="{=gOpodlt1}Crude Iron{@Plural}loads of crude iron{\@}" mesh="crude_iron" item_category="iron" value="20" weight="0.5" Type="Goods" IsFood="false" multiplayer_item="true">
+		<ItemComponent><Trade morale_bonus="0" /></ItemComponent>
+		<Flags Civilian="true" />
+	</Item>
+	<Item id="cs_mirror_ironingot2_6eadd73c" name="{=7HvtT8bm}Wrought Iron{@Plural}loads of wrought iron{\@}" mesh="wrought_iron" item_category="iron" value="30" weight="0.5" Type="Goods" IsFood="false" multiplayer_item="true">
+		<ItemComponent><Trade morale_bonus="0" /></ItemComponent>
+		<Flags Civilian="true" />
+	</Item>
+	<Item id="cs_mirror_ironingot3_6fadd8cf" name="{=XHmmbnbB}Iron{@Plural}loads of iron{\@}" mesh="iron_a" item_category="iron" value="60" weight="0.5" Type="Goods" IsFood="false" multiplayer_item="true">
+		<ItemComponent><Trade morale_bonus="0" /></ItemComponent>
+		<Flags Civilian="true" />
+	</Item>
+	<Item id="cs_mirror_ironingot4_6cadd416" name="{=UfuLKuaI}Steel{@Plural}loads of steel{\@}" mesh="steel" item_category="iron" value="100" weight="0.5" Type="Goods" IsFood="false" multiplayer_item="true">
+		<ItemComponent><Trade morale_bonus="0" /></ItemComponent>
+		<Flags Civilian="true" />
+	</Item>
+	<Item id="cs_mirror_ironingot5_6dadd5a9" name="{=azjMBa86}Fine Steel{@Plural}loads of fine steel{\@}" mesh="fine_steel" item_category="iron" value="160" weight="0.5" Type="Goods" IsFood="false" multiplayer_item="true">
+		<ItemComponent><Trade morale_bonus="0" /></ItemComponent>
+		<Flags Civilian="true" />
+	</Item>
+	<Item id="cs_mirror_ironingot6_6aadd0f0" name="{=vLVAfcta}Thamaskene Steel{@Plural}loads of thamaskene steel{\@}" mesh="thamaskene_steel" item_category="iron" value="260" weight="0.5" Type="Goods" IsFood="false" multiplayer_item="true">
+		<ItemComponent><Trade morale_bonus="0" /></ItemComponent>
+		<Flags Civilian="true" />
+	</Item>
+	<Item id="cs_mirror_trash_5e644e05" name="{=ZvZN6UkU}Trash Item" mesh="iron_ore" item_category="unassigned" value="1" weight="1" Type="Goods" IsFood="false" multiplayer_item="true">
+		<ItemComponent><Trade morale_bonus="0" /></ItemComponent>
+		<Flags Civilian="true" />
+	</Item>
 </Items>

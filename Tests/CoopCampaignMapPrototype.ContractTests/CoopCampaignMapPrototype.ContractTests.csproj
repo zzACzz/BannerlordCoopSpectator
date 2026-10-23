@@ -6,6 +6,66 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="ControlHintTests.cs" />
+    <Compile Include="PartyAnimationTests.cs" />
+    <Compile Include="SiegeTentTests.cs" />
+    <Compile Include="SiegeOverlayTests.cs" />
+    <Compile Include="SiegeDecalTests.cs" />
+    <Compile Include="SiegeAnimationTests.cs" />
+    <Compile Include="SiegeMachineTests.cs" />
+    <Compile Include="SiegeProjectileTests.cs" />
+    <Compile Include="SiegeShotIdentityTests.cs" />
+    <Compile Include="SiegeProjectilePlaybackTests.cs" />
+    <Compile Include="SiegeFlightTests.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapSiegeFlightCodec.cs" Link="CoopCampaignMapSiegeFlightCodec.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapSiegeFlightJournal.cs" Link="CoopCampaignMapSiegeFlightJournal.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapSiegeFlightBuffer.cs" Link="CoopCampaignMapSiegeFlightBuffer.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapSiegeFlight.cs" Link="CoopCampaignMapSiegeFlight.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapSiegeProjectilePlayback.cs" Link="CoopCampaignMapSiegeProjectilePlayback.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapSiegeTime.cs" Link="CoopCampaignMapSiegeTime.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapSiegeShotIdentity.cs" Link="CoopCampaignMapSiegeShotIdentity.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapSiegeProjectiles.cs" Link="CoopCampaignMapSiegeProjectiles.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapSiegeProjectileCodec.cs" Link="CoopCampaignMapSiegeProjectileCodec.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapSiegeMachineCodec.cs" Link="CoopCampaignMapSiegeMachineCodec.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapSiegeMachines.cs" Link="CoopCampaignMapSiegeMachines.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapSiegeResources.cs" Link="CoopCampaignMapSiegeResources.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapSiegeAnimation.cs" Link="CoopCampaignMapSiegeAnimation.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapSiegeDecalCodec.cs" Link="CoopCampaignMapSiegeDecalCodec.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapSiegeDecals.cs" Link="CoopCampaignMapSiegeDecals.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapSiegeOverlayCodec.cs" Link="CoopCampaignMapSiegeOverlayCodec.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapSiegeOverlay.cs" Link="CoopCampaignMapSiegeOverlay.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapSiegeTentCodec.cs" Link="CoopCampaignMapSiegeTentCodec.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapSiegeTent.cs" Link="CoopCampaignMapSiegeTent.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapPartyPoseEnvelope.cs" Link="CoopCampaignMapPartyPoseEnvelope.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapPartyPose.cs" Link="CoopCampaignMapPartyPose.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapPartyPoseCodec.cs" Link="CoopCampaignMapPartyPoseCodec.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapPartyAnimationCodec.cs" Link="CoopCampaignMapPartyAnimationCodec.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapPartyAnimation.cs" Link="CoopCampaignMapPartyAnimation.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapControlHintCodec.cs" Link="CoopCampaignMapControlHintCodec.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapControlHint.cs" Link="CoopCampaignMapControlHint.cs" />
+    <Compile Include="MapBarPresentationTests.cs" />
+    <Compile Include="MapBarHintIdentityTests.cs" />
+    <Compile Include="RundownPresentationTests.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapRundownCodec.cs" Link="CoopCampaignMapRundownCodec.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapRundownPresentation.cs" Link="CoopCampaignMapRundownPresentation.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapBarHintIdentity.cs" Link="CoopCampaignMapBarHintIdentity.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapInterfaceCodec.cs" Link="CoopCampaignMapInterfaceCodec.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapBarCodec.cs" Link="CoopCampaignMapBarCodec.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapBarPresentation.cs" Link="CoopCampaignMapBarPresentation.cs" />
+    <Compile Include="MenuPresentationTests.cs" />
+    <Compile Include="PlunderIdentityTests.cs" />
+    <Compile Include="EncounterIdentityTests.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapEncounterIdentity.cs" Link="CoopCampaignMapEncounterIdentity.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapPlunderIdentity.cs" Link="CoopCampaignMapPlunderIdentity.cs" />
+    <Compile Include="PortraitPoseEvidenceTests.cs" />
+    <Compile Include="BattleMarkerTests.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapBattleMarkerCodec.cs" Link="CoopCampaignMapBattleMarkerCodec.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapBattleMarkerAssembler.cs" Link="CoopCampaignMapBattleMarkerAssembler.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapBattleMarkers.cs" Link="CoopCampaignMapBattleMarkers.cs" />
+    <Compile Include="..\..\Infrastructure\CoopPortraitPoseEvidence.cs" Link="CoopPortraitPoseEvidence.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapMenuAssembler.cs" Link="CoopCampaignMapMenuAssembler.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapMenuCodec.cs" Link="CoopCampaignMapMenuCodec.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapMenuPresentation.cs" Link="CoopCampaignMapMenuPresentation.cs" />
     <Compile Include="ReplicaCameraTests.cs" />
     <Compile Include="EscapeInputTests.cs" />
     <Compile Include="LobbyLifetimeTests.cs" />
@@ -18,6 +78,7 @@
     <Compile Include="SettlementGeometryTests.cs" />
     <Compile Include="SettlementPartyBadgeTests.cs" />
     <Compile Include="SettlementRelationTests.cs" />
+    <Compile Include="SettlementMapEventTests.cs" />
     <Compile Include="PartyBodyTests.cs" />
     <Compile Include="PickResolverTests.cs" />
     <Compile Include="HoverDecalTests.cs" />
@@ -36,6 +97,8 @@
     <Compile Include="TooltipChunkTests.cs" />
     <Compile Include="TooltipPresenterTests.cs" />
     <Compile Include="..\..\UI\CoopCampaignMapTooltipPresenter.cs" Link="CoopCampaignMapTooltipPresenter.cs" />
+    <Compile Include="..\..\UI\CoopCampaignMapRundownVM.cs" Link="CoopCampaignMapRundownVM.cs" />
+    <Compile Include="..\..\UI\CoopCampaignMapBarVM.cs" Link="CoopCampaignMapBarVM.cs" />
     <Compile Include="..\..\Infrastructure\CoopCampaignMapTooltipChunks.cs" Link="CoopCampaignMapTooltipChunks.cs" />
     <Compile Include="..\..\Infrastructure\CoopCampaignMapTooltipRelay.cs" Link="CoopCampaignMapTooltipRelay.cs" />
     <Compile Include="..\..\Infrastructure\CoopCampaignMapTooltipRelayClient.cs" Link="CoopCampaignMapTooltipRelayClient.cs" />

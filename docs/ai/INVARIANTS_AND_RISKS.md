@@ -1,5 +1,75 @@
 # Invariants and Risks
 
+Siege overlay b199 is connected but not native-accepted. Stock widget dependencies
+include a construction-controller widget even for passive bindings. Never pass
+native MapSiegeVM or invoke selection/update/tooltip producers on the client.
+Validate menu close, conversation/modal suspension, late join, siege assault/sally
+return and teardown. Following uses native captured camera distance; detached zoom
+tracks a local distance and still needs terrain-clamp/rotation/reattach acceptance.
+Production choices and tooltips remain missing, not proven1:1 read-only parity.
+
+Siege-tent capture is an unwired, runtime-sensitive read of native entity/mesh
+handles. Use only the publishing thread and the current disclosed party's prepared
+visual. Never call native visual creation or derive hidden strength to reproduce
+flag scale. Bound traversal, reject ambiguous geometry and revoke failed/stale
+presentation; do not substitute a human for an intentional tent. b188 compile
+success establishes API compatibility only, not native lifetime/visual safety.
+
+Party-animation capture reads native skeletons and is runtime-sensitive even
+without writes. Require publishing-thread/map ownership, current disclosure,
+unchanged visual identities and matching catalog body shape. Never turn an absent
+native human (including siege tents) into an invented idle figure. Bridge44 batches
+are publication/session/catalog-bound and limited to64 poses; network revisions
+must be translated by the server, not copied from host-file counters. No new
+hot-path diagnostics are enabled. Rendering, native lifetime and full-density
+refresh validation remain open; isolated builds/contracts cannot establish them.
+
+Protocol50/bridge45 renderer follow-up must preserve the native campaign animation
+clock (0.25*real dt, including stop/wait/fast-forward), not assume wall-clock playback.
+Only exact catalog-built actors may accept poses; validate the complete mounted
+tuple before setting any native action. Do not force an obsolete action over a
+native successor on release. Dialogue playback still defaults to its prior0..10
+domain; map instances explicitly admit0..16. Native scene tick interaction and
+restoration to travel after raids/battles remain unverified.
+
+Bottom-bar capture must run on the host UI thread and read existing prepared VMs
+only. Do not construct MapBarVM or invoke native Tick/Refresh/commands in MP:
+these subscribe to campaign events and read/write campaign state. Missing or
+replaced source clears output. The detached UI must preserve host visual button
+states without granting campaign time/navigation/army-management authority.
+Current bridge40 source is not native-verified; client presentation is pending.
+
+World battle markers must originate from the existing host event view and satisfy
+both prepared and current disclosure. Host viewport culling must not replace
+disclosure when the client uses a detached camera. The capture candidate reads
+private managed view metadata and native campaign-position conversion; it is not
+native-accepted and currently has no callers. Missing metadata, invalid coordinates
+or overflow must clear presentation rather than retain stale events. Snapshot-local
+IDs cannot be used as persistent interpolation identities. Settlement-related events
+must use their separate native presentation path, not duplicate standalone markers.
+
+SettlementMapEventType is copied from the existing host nameplate, not inferred
+from undisclosed campaign events and not filtered with quest/production range rules.
+Only disclosed settlements may carry a nonzero value; removal and event end must
+propagate0. The native range0..5 is separate from quest flags. Protocol42/bridge37
+source integration still requires live raid/siege/rebellion/sally-out comparisons.
+
+Portrait pose observation is a default-off, runtime-sensitive candidate even
+though it only reads managed pose outputs. Native generic cache implementations
+may share patched code: every callback must filter the concrete character cache.
+Preserve original RNG calls/results and exceptions; never infer equipment changes
+from pose differences. Successful substitute-method tests do not prove native
+hook safety. Internal observations must not be published unless attached to a
+currently host-visible portrait. Encounter-only capture/transport is now in source
+behind the explicit gate; replica-owned rendering remains unimplemented. See
+[transport boundaries](CODE_MAP.md#visible-encounter-portrait-pose-transport-2026-10-13-candidate).
+
+2026-10-17 follow-up supersedes the unimplemented-rendering statement: a separate
+replica provider and request-scoped pose override now exist, still default-off
+and not native-accepted. Do not widen the override to all CharacterCode requests,
+reuse ordinary cache keys or suppress native exceptions. Keep the stock base's
+resource release lifecycle and verify it in native repeated-menu/rejoin tests.
+
 Standalone mission-dialogue source exception is limited to exact land
 Conversation opening/behavior/view ownership. MissionMode.Conversation alone
 must never admit hideout/settlement/battle paths. Only a successful same-campaign
@@ -673,6 +743,63 @@ The remaining high-risk boundary is user state, not the recorder hot path: Banne
 Not every fix needs every cell, but shared changes must explain which cells are irrelevant and why.
 
 ## Documentation risks
+
+Siege decal candidate (2026-10-23): captured native frames already include decal
+scaling; do not apply slot scale a second time. Raw GetFactor1 must pair with
+SetFactor1, not SetFactor1Linear. The four materials are a closed native mapping.
+Only owned replica entities may be removed. Owner-thread native capture and
+decal lifetime still require in-game verification; a successful b204 build does
+not establish visibility, pulsing-color fidelity, modal recovery or teardown safety.
+The applied-reference optimization assumes admitted client presentation objects
+remain immutable; network receipt currently replaces them and sends observers a
+clone. If mutation is introduced, that optimization must be revisited.
+
+Siege machine capture candidate (2026-10-23): reading GameEntity prefab/frame and
+skeleton animation is native-sensitive despite being read-only. b205 compiles but
+does not prove object lifetime safety. The capture requires owner-thread map state,
+current siege/manager and visible settlement, bounds the typed lists, and rechecks
+owners. It is not yet invoked. Never call it from network callbacks or let retained
+native wrappers outlive the capture. Do not replace unknown prefabs with approximate
+machines; extend verified resource admission explicitly. Projectile visibility and
+effects need their own representation; machine capture alone is not full siege parity.
+
+Projectile identity follow-up uses a bounded managed-reference registry across
+both complete siege-side populations; visible list indices are not identities.
+Native SettlementVisual.Tick is called by SettlementVisualManager.OnTick through
+TWParallel.For. Any future trajectory observation hook must not assume owner-thread
+execution, traverse campaign globals from workers, or retain native wrappers.
+The private trajectory calculation also serves machine animation; call-site/actual
+missile identity is required, not side/slot matching. See siege playback research.
+Machine phases additionally require a positive managed instance ID, same native
+bombardment cycle, clip and nondecreasing phase. Never blend replacement machines
+solely by side/slot/prefab. Source format is now CSM2/CSO8, protocol58/bridge53.
+Sampled translation/phase playback is bounded and non-extrapolating, not exact
+ballistic or short-flight reconstruction. Runtime fidelity remains unverified.
+
+Historical projectile identity follow-up uses a bounded managed-reference registry across
+both complete siege-side populations; visible list indices are not identities.
+ShotId is monotonic within the capture instance and must remain enclosed by session
+admission. CSP2/CSO6 with protocol56/bridge51 requires coordinated installation.
+Missing state removes visuals but does not prove an impact. No native identity
+acceptance or smooth playback is claimed by the pure identity/codec tests.
+
+Projectile renderer candidate b210 uses the same owned replica-scene boundary:
+only disclosed visible roots, bounded closed resource admission, exact host frames
+and separate child-zero flight visibility. Never derive damage, trajectory or
+impact events from a reused list index. Callback/physics suppression requires
+native verification for fire/particle prefabs. Sampled positions may step or miss
+short flights; smooth identity-bound playback remains a fidelity gate, not waived
+by successful compilation. Town/castle, pause/fast-forward, reserve/destruction,
+siege exit, assault/sally return and reconnect require runtime checks.
+
+Machine renderer b207 creates only owned replica prefabs with callbacks/physics
+disabled. This must be runtime-checked: missing native initialization cannot be
+assumed harmless merely because compilation passes. The captured global transform
+already contains prefab scale/offset. Skeleton clips are admitted by prefab pairing,
+phases sampled with local playback stopped; sampled motion may visibly step until
+host-clock interpolation is implemented/verified. Do not claim smoothness or full
+bombardment fidelity from static machine presence. Clear roots before map-scene
+teardown and verify departure, modal hide/restore and battle-return lifetimes.
 
 - Dated documents are not ordered by authority; a later date may be a proposal rather than a completed change.
 - Existing files mix Ukrainian and English and sometimes preserve old mode names or architecture.

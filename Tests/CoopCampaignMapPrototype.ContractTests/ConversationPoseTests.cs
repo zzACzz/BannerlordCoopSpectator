@@ -35,7 +35,8 @@ internal static class ConversationPoseTests
             p => p.Actors[0].Progress = float.NaN, p => p.Actors[0].Progress = float.PositiveInfinity,
             p => p.Actors[0].Progress = -0.01f, p => p.Actors[0].Progress = 1.01f,
             p => p.Actors[0].Speed = float.NaN, p => p.Actors[0].Speed = float.NegativeInfinity,
-            p => p.Actors[0].Speed = -1, p => p.Actors[0].Speed = 11
+            p => p.Actors[0].Speed = -1, p => p.Actors[0].Speed = 11,
+            p => p.Actors[0].LookDirection = new[] { 0f, 1f, 0f }
         };
         foreach (var mutate in invalid)
         {
@@ -49,7 +50,7 @@ internal static class ConversationPoseTests
         }
         var trailing = new byte[bytes.Length + 1]; Array.Copy(bytes, trailing, bytes.Length);
         Check(!CoopCampaignMapConversationPoseCodec.TryDeserialize(trailing, out _), "trailing byte");
-        Check(!CoopCampaignMapConversationPoseCodec.TryDeserialize(new byte[513], out _), "allocation cap");
+        Check(!CoopCampaignMapConversationPoseCodec.TryDeserialize(new byte[CoopCampaignMapConversationPoseCodec.MaxPayloadBytes + 1], out _), "allocation cap");
         var random = new Random(927);
         for (int i = 0; i < 500; i++)
         {
@@ -126,7 +127,7 @@ internal static class ConversationPoseTests
         Check(!CoopCampaignMapPrototypeBridgeCodec.TryParse(lines.Select(s => s.StartsWith("ConversationPose=") ?
             "ConversationPose=!" : s).ToArray(), out _, out _), "bridge rejects corrupt pose");
         Check(!CoopCampaignMapPrototypeBridgeCodec.TryParse(lines.Select(s => s.StartsWith("ConversationPose=") ?
-            "ConversationPose=" + new string('A', 685) : s).ToArray(), out _, out _), "bridge rejects oversized encoded pose");
+            "ConversationPose=" + new string('A', ((CoopCampaignMapConversationPoseCodec.MaxPayloadBytes + 2) / 3) * 4 + 1) : s).ToArray(), out _, out _), "bridge rejects oversized encoded pose");
         copy = host.Clone(); copy.ConversationPose.Sequence++;
         Check(!CoopCampaignMapPrototypeBridgeCodec.TryParse(CoopCampaignMapPrototypeBridgeCodec.Serialize(copy), out _, out _),
             "bridge enforces host publication sequence");

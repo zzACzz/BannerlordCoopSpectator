@@ -284,6 +284,9 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
                 }
 
                 HideoutAmbushArrowBarrelPatch.Apply(harmony);
+                CoopPortraitPoseObservationPatch.Apply();
+            CoopReplicaPortraitPosePatch.Apply();
+            CoopMirrorItemPosePatch.Apply();
                 CampaignlessConversationMissionSafetyPatch.Apply(harmony);
                 if (ExperimentalFeatures.EnableCampaignMapPrototype)
                     CoopCampaignMapPrototypeSceneLoadPatch.Apply(harmony);

@@ -23,7 +23,8 @@ namespace CoopSpectator.Infrastructure
         None = 0,
         Foot = 1,
         Mounted = 2,
-        Caravan = 3
+        Caravan = 3,
+        SiegeTent = 4
     }
 
     public enum CoopCampaignMapPrototypeSettlementKind
@@ -594,6 +595,7 @@ namespace CoopSpectator.Infrastructure
         public string CultureId { get; set; }
 
         public CoopCampaignMapPrototypePartyVisualKind PartyVisualKind { get; set; }
+        public string SiegeTentPresentation { get; set; } = string.Empty;
 
         public CoopCampaignMapPrototypeAgentVisualState HumanVisual { get; set; }
 
@@ -615,7 +617,10 @@ namespace CoopSpectator.Infrastructure
 
         public int SettlementPreparationState { get; set; }
 
+        public int SettlementRaidState { get; set; }
+
         public int SettlementRelation { get; set; }
+        public int SettlementMapEventType { get; set; }
 
         public bool IsSettlementTracked { get; set; }
 
@@ -649,6 +654,7 @@ namespace CoopSpectator.Infrastructure
                 VisualCharacterId = VisualCharacterId,
                 CultureId = CultureId,
                 PartyVisualKind = PartyVisualKind,
+                SiegeTentPresentation = SiegeTentPresentation,
                 HumanVisual = HumanVisual?.Clone(),
                 MountVisual = MountVisual?.Clone(),
                 CaravanMountVisual = CaravanMountVisual?.Clone(),
@@ -659,7 +665,9 @@ namespace CoopSpectator.Infrastructure
                 SettlementLevelFlags = SettlementLevelFlags,
                 SettlementWallStates = SettlementWallStates,
                 SettlementPreparationState = SettlementPreparationState,
+                SettlementRaidState = SettlementRaidState,
                 SettlementRelation = SettlementRelation,
+                SettlementMapEventType = SettlementMapEventType,
                 IsSettlementTracked = IsSettlementTracked,
                 IsSettlementInRange = IsSettlementInRange,
                 SettlementProductionIconId = SettlementProductionIconId,
@@ -702,6 +710,8 @@ namespace CoopSpectator.Infrastructure
             if (catalog == null || dynamicState == null ||
                 string.IsNullOrEmpty(catalog.EntityId) || !dynamicState.IsVisible ||
                 !CoopCampaignMapSettlementRelationPolicy.IsValid(dynamicState.SettlementRelation) ||
+                dynamicState.SettlementMapEventType < 0 || dynamicState.SettlementMapEventType > 5 ||
+                (catalog.Kind != CoopCampaignMapPrototypeEntityKind.Settlement && dynamicState.SettlementMapEventType != 0) ||
                 (catalog.Kind != CoopCampaignMapPrototypeEntityKind.Settlement && dynamicState.SettlementRelation != 0) ||
                 !string.Equals(catalog.EntityId, dynamicState.EntityId,
                     StringComparison.OrdinalIgnoreCase))
@@ -731,6 +741,7 @@ namespace CoopSpectator.Infrastructure
                 VisualCharacterId = catalog.VisualCharacterId,
                 CultureId = catalog.CultureId,
                 PartyVisualKind = catalog.PartyVisualKind,
+                SiegeTentPresentation = catalog.SiegeTentPresentation,
                 HumanVisual = catalog.HumanVisual?.Clone(),
                 MountVisual = catalog.MountVisual?.Clone(),
                 CaravanMountVisual = catalog.CaravanMountVisual?.Clone(),
@@ -741,7 +752,9 @@ namespace CoopSpectator.Infrastructure
                 SettlementLevelFlags = catalog.SettlementLevelFlags,
                 SettlementWallStates = catalog.SettlementWallStates,
                 SettlementPreparationState = catalog.SettlementPreparationState,
+                SettlementRaidState = catalog.SettlementRaidState,
                 SettlementRelation = dynamicState.SettlementRelation,
+                SettlementMapEventType = dynamicState.SettlementMapEventType,
                 IsSettlementTracked = dynamicState.IsSettlementTracked,
                 IsSettlementInRange = dynamicState.IsSettlementInRange,
                 SettlementProductionIconId = catalog.SettlementProductionIconId,
@@ -778,6 +791,8 @@ namespace CoopSpectator.Infrastructure
 
         public int SettlementPreparationState { get; set; }
 
+        public int SettlementRaidState { get; set; }
+
         public uint PrimaryColor { get; set; }
 
         public uint SecondaryColor { get; set; }
@@ -791,6 +806,7 @@ namespace CoopSpectator.Infrastructure
         public string CultureId { get; set; }
 
         public CoopCampaignMapPrototypePartyVisualKind PartyVisualKind { get; set; }
+        public string SiegeTentPresentation { get; set; } = string.Empty;
 
         public CoopCampaignMapPrototypeAgentVisualState HumanVisual { get; set; }
 
@@ -830,6 +846,7 @@ namespace CoopSpectator.Infrastructure
                 SettlementLevelFlags = SettlementLevelFlags,
                 SettlementWallStates = SettlementWallStates,
                 SettlementPreparationState = SettlementPreparationState,
+                SettlementRaidState = SettlementRaidState,
                 PrimaryColor = PrimaryColor,
                 SecondaryColor = SecondaryColor,
                 NameplateColor = NameplateColor,
@@ -837,6 +854,7 @@ namespace CoopSpectator.Infrastructure
                 VisualCharacterId = VisualCharacterId,
                 CultureId = CultureId,
                 PartyVisualKind = PartyVisualKind,
+                SiegeTentPresentation = SiegeTentPresentation,
                 HumanVisual = HumanVisual?.Clone(),
                 MountVisual = MountVisual?.Clone(),
                 CaravanMountVisual = CaravanMountVisual?.Clone(),
@@ -885,6 +903,7 @@ namespace CoopSpectator.Infrastructure
                    left.SettlementLevelFlags == right.SettlementLevelFlags &&
                    left.SettlementWallStates == right.SettlementWallStates &&
                    left.SettlementPreparationState == right.SettlementPreparationState &&
+                   left.SettlementRaidState == right.SettlementRaidState &&
                    left.SettlementPartyBadges == right.SettlementPartyBadges &&
                    left.HoverDecal == right.HoverDecal &&
                    left.PrimaryColor == right.PrimaryColor &&
@@ -904,6 +923,7 @@ namespace CoopSpectator.Infrastructure
                        right.CultureId,
                        StringComparison.Ordinal) &&
                    left.PartyVisualKind == right.PartyVisualKind &&
+                   left.SiegeTentPresentation == right.SiegeTentPresentation &&
                    AgentVisualsAreEquivalent(
                        left.HumanVisual,
                        right.HumanVisual) &&
@@ -1114,6 +1134,7 @@ namespace CoopSpectator.Infrastructure
         public int SettlementQuestOrder { get; set; }
 
         public int SettlementRelation { get; set; }
+        public int SettlementMapEventType { get; set; }
 
         public bool IsSettlementTracked { get; set; }
 
@@ -1165,6 +1186,7 @@ namespace CoopSpectator.Infrastructure
                    left.SettlementEventOrder == right.SettlementEventOrder &&
                    left.SettlementQuestOrder == right.SettlementQuestOrder &&
                    left.SettlementRelation == right.SettlementRelation &&
+                left.SettlementMapEventType == right.SettlementMapEventType &&
                    left.IsSettlementTracked == right.IsSettlementTracked &&
                    left.IsSettlementInRange == right.IsSettlementInRange;
         }
@@ -1204,6 +1226,7 @@ namespace CoopSpectator.Infrastructure
                 hidden.IsVisible = false;
                 hidden.IsMoving = false;
                 hidden.SettlementRelation = 0;
+                hidden.SettlementMapEventType = 0;
                 hidden.IsSettlementTracked = false;
                 hidden.IsSettlementInRange = false;
                 hidden.SettlementEventFlags = 0;
@@ -1519,6 +1542,7 @@ namespace CoopSpectator.Infrastructure
 
     public sealed class CoopCampaignMapPrototypeState
     {
+        public string SessionId { get; set; } = string.Empty;
         public int Revision { get; set; }
 
         public int NormalizedX { get; set; }
@@ -1547,6 +1571,7 @@ namespace CoopSpectator.Infrastructure
         {
             return new CoopCampaignMapPrototypeState
             {
+                SessionId = SessionId,
                 Revision = Revision,
                 NormalizedX = NormalizedX,
                 NormalizedY = NormalizedY,
@@ -1602,6 +1627,12 @@ namespace CoopSpectator.Infrastructure
             CoopCampaignMapPrototypeContract.CreateInactiveConversation();
 
         public CoopCampaignMapConversationPose ConversationPose { get; set; }
+        public CoopCampaignMapPartyPoseEnvelope[] PartyPoses { get; set; } = Array.Empty<CoopCampaignMapPartyPoseEnvelope>();
+
+        public CoopCampaignMapMenuPresentation Menu { get; set; }
+        public CoopCampaignMapBarPresentation MapBar { get; set; }
+
+        public CoopCampaignMapBattleMarker[] BattleMarkers { get; set; } = Array.Empty<CoopCampaignMapBattleMarker>();
 
         public string MovementTarget { get; set; } = string.Empty;
 
@@ -1629,6 +1660,10 @@ namespace CoopSpectator.Infrastructure
                 Camera = Camera?.Clone(),
                 Conversation = Conversation?.Clone(),
                 ConversationPose = ConversationPose?.Clone(),
+                PartyPoses = CoopCampaignMapPartyPoseBatchCodec.Clone(PartyPoses),
+                Menu = Menu?.Clone(),
+                MapBar = MapBar?.Clone(),
+                BattleMarkers = BattleMarkers == null ? null : (CoopCampaignMapBattleMarker[])BattleMarkers.Clone(),
                 MovementTarget = MovementTarget,
                 UpdatedUtc = UpdatedUtc
             };
@@ -1777,8 +1812,8 @@ namespace CoopSpectator.Infrastructure
     /// </summary>
     public static class CoopCampaignMapPrototypeContract
     {
-        public const int ProtocolVersion = 33;
-        public const int HostBridgeSchemaVersion = 28;
+        public const int ProtocolVersion = 60;
+        public const int HostBridgeSchemaVersion = 55;
         public const int ProtocolCompressionMaximum = 63;
         public const int MaxCatalogEntities = 2048;
         public const int MaxCatalogLogicalBytes = 16777216;
@@ -2064,7 +2099,8 @@ namespace CoopSpectator.Infrastructure
                         : fallbackHeading;
             }
 
-            return QuantizeHeading(Math.Atan2(directionY, directionX));
+            // Match Vec2.RotationInRadians: native map visuals face +Y at zero.
+            return QuantizeHeading(Math.Atan2(-directionX, directionY));
         }
 
         public static bool TryQuantizeCamera(
@@ -2229,6 +2265,16 @@ namespace CoopSpectator.Infrastructure
                 return false;
             if (!TryValidateConversationState(snapshot.Conversation, out reason))
                 return false;
+            if (snapshot.Menu != null && (!snapshot.Menu.IsValid() || snapshot.Conversation?.IsActive == true))
+                return Fail("menu-presentation", out reason);
+            if (snapshot.MapBar != null && (!snapshot.MapBar.IsValid() || snapshot.Conversation?.IsActive == true))
+                return Fail("map-bar-presentation", out reason);
+            if (!CoopCampaignMapBattleMarkerPolicy.TrySnapshot(snapshot.BattleMarkers, out _) ||
+                (snapshot.Conversation?.IsActive == true && snapshot.BattleMarkers.Length != 0))
+                return Fail("battle-markers", out reason);
+            if (!CoopCampaignMapPartyPoseBatchCodec.IsBound(snapshot.PartyPoses, snapshot.SessionId,
+                    snapshot.Revision, snapshot.CatalogRevision, snapshot.Conversation?.IsActive == true))
+                return Fail("party-pose-binding", out reason);
             if (snapshot.ConversationPose != null &&
                 (!CoopCampaignMapConversationPoseCodec.Matches(snapshot.ConversationPose, snapshot.Conversation) ||
                  snapshot.ConversationPose.Sequence != snapshot.Revision))
@@ -2261,6 +2307,7 @@ namespace CoopSpectator.Infrastructure
             return new CoopCampaignMapPrototypeState
             {
                 Revision = Math.Max(0, networkRevision),
+                SessionId = Guid.TryParse(snapshot.SessionId, out var session) ? session.ToString("N") : string.Empty,
                 NormalizedX = snapshot.NormalizedX,
                 NormalizedY = snapshot.NormalizedY,
                 Heading = snapshot.Heading,
@@ -2286,6 +2333,8 @@ namespace CoopSpectator.Infrastructure
                 entity.SettlementWallStates, entity.SettlementPreparationState) ||
                 (entity.Kind != CoopCampaignMapPrototypeEntityKind.Settlement &&
                  (entity.SettlementWallStates.Length != 0 || entity.SettlementPreparationState != 0))) return false;
+            if (!CoopCampaignMapRaidPresentationPolicy.IsValid(entity.SettlementRaidState) ||
+                (entity.Kind != CoopCampaignMapPrototypeEntityKind.Settlement && entity.SettlementRaidState != 0)) return false;
             if (entity == null || !CoopCampaignMapSettlementLevelPolicy.IsValid(entity.SettlementLevelFlags) ||
                 (entity.Kind != CoopCampaignMapPrototypeEntityKind.Settlement && entity.SettlementLevelFlags != 0))
                 return false;
@@ -2335,7 +2384,8 @@ namespace CoopSpectator.Infrastructure
                 entity.QuestMarkerFlags > MaxQuestMarkerFlags ||
                 entity.SettlementEventFlags < 0 ||
                 entity.SettlementEventFlags > MaxSettlementEventFlags ||
-                !CoopCampaignMapSettlementRelationPolicy.IsValid(entity.SettlementRelation))
+                !CoopCampaignMapSettlementRelationPolicy.IsValid(entity.SettlementRelation) ||
+                entity.SettlementMapEventType < 0 || entity.SettlementMapEventType > 5)
             {
                 return false;
             }
@@ -2374,7 +2424,7 @@ namespace CoopSpectator.Infrastructure
                 (entity.SettlementEventFlags &
                  (int)CoopCampaignMapPrototypeSettlementEventFlags.Production) != 0;
             if ((!isSettlement &&
-                 (entity.SettlementEventFlags != 0 || entity.SettlementRelation != 0 ||
+                 (entity.SettlementEventFlags != 0 || entity.SettlementRelation != 0 || entity.SettlementMapEventType != 0 ||
                   entity.IsSettlementTracked || entity.IsSettlementInRange ||
                   !string.IsNullOrEmpty(entity.SettlementProductionIconId))) ||
                 hasProductionEvent !=
@@ -2386,6 +2436,7 @@ namespace CoopSpectator.Infrastructure
             if (!isSettlement &&
                 entity.PartyVisualKind !=
                     CoopCampaignMapPrototypePartyVisualKind.None &&
+                entity.PartyVisualKind != CoopCampaignMapPrototypePartyVisualKind.SiegeTent &&
                 entity.VisualCharacterId.Length == 0 &&
                 entity.CultureId.Length == 0)
             {
@@ -2401,6 +2452,10 @@ namespace CoopSpectator.Infrastructure
             {
                 return false;
             }
+
+            if (!CoopCampaignMapSiegeTentCodec.IsValidForEntity(entity.SiegeTentPresentation,
+                    entity.Kind, entity.PartyVisualKind, entity.HumanVisual != null ||
+                    entity.MountVisual != null || entity.CaravanMountVisual != null)) return false;
 
             if (!IsValidAgentVisualState(
                     entity.HumanVisual,
@@ -2463,6 +2518,10 @@ namespace CoopSpectator.Infrastructure
         public static bool IsCompletePartyVisualState(
             CoopCampaignMapPrototypeCatalogEntityState entity)
         {
+            if (entity?.PartyVisualKind == CoopCampaignMapPrototypePartyVisualKind.SiegeTent)
+                return CoopCampaignMapSiegeTentCodec.IsValidForEntity(entity.SiegeTentPresentation,
+                    entity.Kind, entity.PartyVisualKind, entity.HumanVisual != null ||
+                    entity.MountVisual != null || entity.CaravanMountVisual != null);
             if (entity == null ||
                 entity.Kind == CoopCampaignMapPrototypeEntityKind.Settlement ||
                 entity.PartyVisualKind ==
@@ -2489,6 +2548,9 @@ namespace CoopSpectator.Infrastructure
         public static bool IsValidCatalogEntity(
             CoopCampaignMapPrototypeCatalogEntityState entity)
         {
+            if (entity == null || !CoopCampaignMapSiegeTentCodec.IsValidForEntity(entity.SiegeTentPresentation,
+                entity.Kind, entity.PartyVisualKind, entity.HumanVisual != null ||
+                entity.MountVisual != null || entity.CaravanMountVisual != null)) return false;
             if (entity == null || !CoopCampaignMapHoverDecal.IsValidForEntity(entity.HoverDecal, entity.Kind)) return false;
             if (entity == null || !CoopCampaignMapSettlementPartyBadgePolicy.IsValidEncoded(entity.SettlementPartyBadges) ||
                 (entity.Kind != CoopCampaignMapPrototypeEntityKind.Settlement && entity.SettlementPartyBadges.Length != 0))
@@ -2497,6 +2559,8 @@ namespace CoopSpectator.Infrastructure
                 entity.SettlementWallStates, entity.SettlementPreparationState) ||
                 (entity.Kind != CoopCampaignMapPrototypeEntityKind.Settlement &&
                  (entity.SettlementWallStates.Length != 0 || entity.SettlementPreparationState != 0))) return false;
+            if (!CoopCampaignMapRaidPresentationPolicy.IsValid(entity.SettlementRaidState) ||
+                (entity.Kind != CoopCampaignMapPrototypeEntityKind.Settlement && entity.SettlementRaidState != 0)) return false;
             if (entity == null || !CoopCampaignMapSettlementLevelPolicy.IsValid(entity.SettlementLevelFlags) ||
                 (entity.Kind != CoopCampaignMapPrototypeEntityKind.Settlement && entity.SettlementLevelFlags != 0))
                 return false;
@@ -2586,6 +2650,9 @@ namespace CoopSpectator.Infrastructure
                        entity.SettlementEventOrder, entity.SettlementQuestOrder,
                        entity.SettlementEventFlags, entity.QuestMarkerFlags) &&
                    CoopCampaignMapSettlementRelationPolicy.IsValid(entity.SettlementRelation) &&
+                   entity.SettlementMapEventType >= 0 && entity.SettlementMapEventType <= 5 &&
+                   (entity.SettlementMapEventType == 0 || (entity.IsVisible &&
+                    entity.EntityId.StartsWith("settlement:", StringComparison.Ordinal))) &&
                    (entity.SettlementRelation == 0 || (entity.IsVisible &&
                     entity.EntityId.StartsWith("settlement:", StringComparison.Ordinal)));
         }

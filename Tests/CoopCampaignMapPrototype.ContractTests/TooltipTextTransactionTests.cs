@@ -90,6 +90,12 @@ internal static class TooltipTextTransactionTests
         Check(capture.IndexOf("IsValidCorrelation(", StringComparison.Ordinal) < capture.IndexOf("TryBeginTextScope(out", StringComparison.Ordinal),
             "invalid request cannot enter native capture");
         Check(capture.Contains("tooltip-key-text-not-ready"), "missing native key text fails closed");
+        string language = File.ReadAllText(Path.Combine(root, "Campaign", "CoopCampaignMapTooltipLanguageState.cs"));
+        Check(language.Contains("AreItemWritableTemplatesIsolated()") &&
+            language.Contains("new[] { \"str_STR1_space_STR2\", \"str_NUMBER_percent\" }"),
+            "item provider mutable template inventory is explicit and separate");
+        Check(language.Contains("template == null || (template.Attributes != null && template.Attributes.Count == 0)"),
+            "shared empty attribute dictionary and missing templates rejected");
         Console.WriteLine("Tooltip text transaction assertions passed: " + _count);
     }
 

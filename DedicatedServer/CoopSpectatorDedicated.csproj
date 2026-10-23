@@ -87,7 +87,12 @@
     <Compile Include="..\Mission\CoopHideoutAmbushNetworkController.cs" Link="Mission\CoopHideoutAmbushNetworkController.cs" />
     <Compile Include="..\Mission\CoopBattlePowerNetworkController.cs" Link="Mission\CoopBattlePowerNetworkController.cs" />
     <Compile Include="..\Mission\CoopCampaignMapPrototypeNetworkController.cs" Link="Mission\CoopCampaignMapPrototypeNetworkController.cs" />
+    <Compile Include="..\Mission\CoopCampaignMapPrototypeNetworkController.Menu.cs" Link="Mission\CoopCampaignMapPrototypeNetworkController.Menu.cs" />
+    <Compile Include="..\Mission\CoopCampaignMapPrototypeNetworkController.BattleMarkers.cs" Link="Mission\CoopCampaignMapPrototypeNetworkController.BattleMarkers.cs" />
+    <Compile Include="..\Network\Messages\CoopCampaignMapBattleMarkerNetworkMessages.cs" Link="Network\Messages\CoopCampaignMapBattleMarkerNetworkMessages.cs" />
+    <Compile Include="..\Network\Messages\CoopCampaignMapMenuNetworkMessages.cs" Link="Network\Messages\CoopCampaignMapMenuNetworkMessages.cs" />
     <Compile Include="..\Mission\CoopCampaignMapPrototypeNetworkController.Tooltips.cs" Link="Mission\CoopCampaignMapPrototypeNetworkController.Tooltips.cs" />
+    <Compile Include="..\Mission\CoopCampaignMapPrototypeNetworkController.PartyPoses.cs" Link="Mission\CoopCampaignMapPrototypeNetworkController.PartyPoses.cs" />
     <Compile Include="..\Mission\CoopSiegeAssaultFormationOrderRuntime.cs" Link="Mission\CoopSiegeAssaultFormationOrderRuntime.cs" />
     <Compile Include="..\MissionModels\CoopCampaignDerivedAgentStatCalculateModel.cs" Link="MissionModels\CoopCampaignDerivedAgentStatCalculateModel.cs" />
     <Compile Include="..\MissionModels\CoopCampaignDerivedStrikeMagnitudeCalculationModel.cs" Link="MissionModels\CoopCampaignDerivedStrikeMagnitudeCalculationModel.cs" />
@@ -107,6 +112,27 @@
     <Compile Include="..\Network\Messages\CoopBattlePowerNetworkMessages.cs" Link="Network\Messages\CoopBattlePowerNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopCampaignMapPrototypeNetworkMessages.cs" Link="Network\Messages\CoopCampaignMapPrototypeNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopCampaignMapConversationNetworkMessages.cs" Link="Network\Messages\CoopCampaignMapConversationNetworkMessages.cs" />
+    <Compile Include="..\Network\Messages\CoopCampaignMapPartyPoseMessage.cs" Link="Network\Messages\CoopCampaignMapPartyPoseMessage.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapPartyAnimation.cs" Link="Infrastructure\CoopCampaignMapPartyAnimation.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapSiegeTent.cs" Link="Infrastructure\CoopCampaignMapSiegeTent.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapSiegeOverlay.cs" Link="Infrastructure\CoopCampaignMapSiegeOverlay.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapSiegeTime.cs" Link="Infrastructure\CoopCampaignMapSiegeTime.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapSiegeDecals.cs" Link="Infrastructure\CoopCampaignMapSiegeDecals.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapSiegeMachines.cs" Link="Infrastructure\CoopCampaignMapSiegeMachines.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapSiegeMachineCodec.cs" Link="Infrastructure\CoopCampaignMapSiegeMachineCodec.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapSiegeProjectiles.cs" Link="Infrastructure\CoopCampaignMapSiegeProjectiles.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapSiegeProjectileCodec.cs" Link="Infrastructure\CoopCampaignMapSiegeProjectileCodec.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapSiegeFlight.cs" Link="Infrastructure\CoopCampaignMapSiegeFlight.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapSiegeFlightCodec.cs" Link="Infrastructure\CoopCampaignMapSiegeFlightCodec.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapSiegeResources.cs" Link="Infrastructure\CoopCampaignMapSiegeResources.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapSiegeAnimation.cs" Link="Infrastructure\CoopCampaignMapSiegeAnimation.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapSiegeDecalCodec.cs" Link="Infrastructure\CoopCampaignMapSiegeDecalCodec.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapSiegeOverlayCodec.cs" Link="Infrastructure\CoopCampaignMapSiegeOverlayCodec.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapSiegeTentCodec.cs" Link="Infrastructure\CoopCampaignMapSiegeTentCodec.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapPartyAnimationCodec.cs" Link="Infrastructure\CoopCampaignMapPartyAnimationCodec.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapPartyPose.cs" Link="Infrastructure\CoopCampaignMapPartyPose.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapPartyPoseCodec.cs" Link="Infrastructure\CoopCampaignMapPartyPoseCodec.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapPartyPoseEnvelope.cs" Link="Infrastructure\CoopCampaignMapPartyPoseEnvelope.cs" />
     <Compile Include="..\Network\Messages\CoopCampaignMapTooltipNetworkMessages.cs" Link="Network\Messages\CoopCampaignMapTooltipNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopCampaignMapReplicaNetworkMessages.cs" Link="Network\Messages\CoopCampaignMapReplicaNetworkMessages.cs" />
     <Compile Include="..\Network\Messages\CoopBattleAgentControlNetworkMessages.cs" Link="Network\Messages\CoopBattleAgentControlNetworkMessages.cs" />
@@ -189,6 +215,20 @@
     <Compile Include="..\Infrastructure\CoopCampaignMapConversationTableauState.cs" Link="Infrastructure\CoopCampaignMapConversationTableauState.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMapConversationMissionScene.cs" Link="Infrastructure\CoopCampaignMapConversationMissionScene.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMapConversationPayloadCodec.cs" Link="Infrastructure\CoopCampaignMapConversationPayloadCodec.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapMenuPresentation.cs" Link="Infrastructure\CoopCampaignMapMenuPresentation.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapBarPresentation.cs" Link="Infrastructure\CoopCampaignMapBarPresentation.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapBarHintIdentity.cs" Link="Infrastructure\CoopCampaignMapBarHintIdentity.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapBarCodec.cs" Link="Infrastructure\CoopCampaignMapBarCodec.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapRundownPresentation.cs" Link="Infrastructure\CoopCampaignMapRundownPresentation.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapControlHint.cs" Link="Infrastructure\CoopCampaignMapControlHint.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapControlHintCodec.cs" Link="Infrastructure\CoopCampaignMapControlHintCodec.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapRundownCodec.cs" Link="Infrastructure\CoopCampaignMapRundownCodec.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapInterfaceCodec.cs" Link="Infrastructure\CoopCampaignMapInterfaceCodec.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapMenuCodec.cs" Link="Infrastructure\CoopCampaignMapMenuCodec.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapBattleMarkers.cs" Link="Infrastructure\CoopCampaignMapBattleMarkers.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapBattleMarkerCodec.cs" Link="Infrastructure\CoopCampaignMapBattleMarkerCodec.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapBattleMarkerAssembler.cs" Link="Infrastructure\CoopCampaignMapBattleMarkerAssembler.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMapMenuAssembler.cs" Link="Infrastructure\CoopCampaignMapMenuAssembler.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMapConversationHud.cs" Link="Infrastructure\CoopCampaignMapConversationHud.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMapTooltipPayload.cs" Link="Infrastructure\CoopCampaignMapTooltipPayload.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMapTooltipInterest.cs" Link="Infrastructure\CoopCampaignMapTooltipInterest.cs" />

@@ -10,6 +10,20 @@ internal static class Program
         try
         {
             ValidateProtocolVersion();
+            ControlHintTests.Run();
+            PartyAnimationTests.Run();
+            SiegeTentTests.Run();
+            SiegeOverlayTests.Run();
+            SiegeDecalTests.Run();
+            SiegeAnimationTests.Run();
+            SiegeMachineTests.Run();
+            SiegeProjectileTests.Run();
+            SiegeShotIdentityTests.Run();
+            SiegeProjectilePlaybackTests.Run();
+            SiegeFlightTests.Run();
+            ValidateSiegeTentTransport();
+            MapBarHintIdentityTests.Run();
+            RundownPresentationTests.Run();
             ValidatePartyNameplateColor();
             ValidateHostBannerColorPreservation();
             ValidateHiddenPartyInformation();
@@ -33,6 +47,7 @@ internal static class Program
             ValidateReplicaStateProjection();
             ValidateSettlementPresentation();
             SettlementRelationTests.Run();
+            SettlementMapEventTests.Run();
             ReplicaCameraTests.Run();
             EscapeInputTests.Run();
             LobbyLifetimeTests.Run();
@@ -51,6 +66,10 @@ internal static class Program
             ConversationVisualLifetimeTests.Run();
             ConversationPoseTests.Run();
             MissionLifecycleTests.Run();
+            MenuPresentationTests.Run();
+            MapBarPresentationTests.Run();
+            PortraitPoseEvidenceTests.Run();
+            BattleMarkerTests.Run();
             MissionOpeningTests.Run();
             MissionChannelTests.Run();
             ValidateConversationSnapshotAssembler();
@@ -155,10 +174,58 @@ internal static class Program
     private static void ValidateProtocolVersion()
     {
         Assert(
-            CoopCampaignMapPrototypeContract.ProtocolVersion == 33 &&
-            CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion == 28 &&
-            CoopCampaignMapCatalogBinarySerializer.SchemaVersion == 8,
-            "Ordered markers require coherent protocol/bridge/catalog schema 32/27/8.");
+            CoopCampaignMapPrototypeContract.ProtocolVersion == 60 &&
+            CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion == 55 &&
+            CoopCampaignMapCatalogBinarySerializer.SchemaVersion == 10,
+            "Siege trajectory payload requires coherent protocol/bridge/catalog schema 59/54/10.");
+    }
+
+    private static void ValidateSiegeTentTransport()
+    {
+        var tent = new CoopCampaignMapSiegeTent {
+            TentFrame = new[] { 1.2f, 0f, 0f, 0f, 1.2f, 0f, 0f, 0f, 1.2f, 0f, 0f, 0f }
+        };
+        Assert(CoopCampaignMapSiegeTentCodec.TryEncode(tent, out var payload), "Encode tent fixture");
+        string encoded = Convert.ToBase64String(payload);
+        var party = CreateCatalogParty(0);
+        party.PartyVisualKind = CoopCampaignMapPrototypePartyVisualKind.SiegeTent;
+        party.HumanVisual = party.MountVisual = party.CaravanMountVisual = null;
+        party.SiegeTentPresentation = encoded;
+        Assert(CoopCampaignMapPrototypeContract.IsValidCatalogEntity(party) &&
+            CoopCampaignMapPrototypeContract.IsCompletePartyVisualState(party), "Tent is a complete actor-free presentation");
+        Assert(party.Clone().SiegeTentPresentation == encoded, "Catalog clone preserves tent");
+        var changed = party.Clone(); changed.SiegeTentPresentation = string.Empty;
+        Assert(!CoopCampaignMapPrototypeCatalogDeltaPolicy.AreEquivalent(party, changed) &&
+            !CoopCampaignMapPrototypeContract.IsValidCatalogEntity(changed), "Missing tent invalidates catalog");
+        changed = party.Clone(); changed.PartyVisualKind = CoopCampaignMapPrototypePartyVisualKind.Foot;
+        Assert(!CoopCampaignMapPrototypeContract.IsValidCatalogEntity(changed), "Foot figure cannot carry tent");
+        var host = CreateHostSnapshot(DateTime.UtcNow);
+        var visible = host.VisibleEntities[0];
+        visible.PartyVisualKind = CoopCampaignMapPrototypePartyVisualKind.SiegeTent;
+        visible.HumanVisual = visible.MountVisual = visible.CaravanMountVisual = null;
+        visible.SiegeTentPresentation = encoded;
+        Assert(visible.Clone().SiegeTentPresentation == encoded, "Visible clone preserves tent");
+        Assert(CoopCampaignMapPrototypeBridgeCodec.TryParse(
+            CoopCampaignMapPrototypeBridgeCodec.Serialize(host), out var parsed, out var reason) &&
+            parsed.VisibleEntities[0].SiegeTentPresentation == encoded, "Host bridge preserves tent: " + reason);
+        var catalog = new CoopCampaignMapPrototypeCatalogSnapshot {
+            SchemaVersion = CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion,
+            SessionId = host.SessionId, Revision = 1, UpdatedUtc = host.UpdatedUtc,
+            Entities = new List<CoopCampaignMapPrototypeCatalogEntityState> { party }
+        };
+        Assert(CoopCampaignMapPrototypeBridgeCodec.TryParseCatalog(
+            CoopCampaignMapPrototypeBridgeCodec.SerializeCatalog(catalog), out var decodedCatalog, out reason) &&
+            decodedCatalog.Entities[0].SiegeTentPresentation == encoded, "Catalog bridge preserves tent: " + reason);
+        Assert(CoopCampaignMapCatalogBinarySerializer.TrySerialize(1, catalog.Entities, out var bytes, out reason) &&
+            CoopCampaignMapCatalogBinarySerializer.TryDeserialize(bytes, out _, out var decoded, out reason) &&
+            decoded[0].SiegeTentPresentation == encoded, "Binary catalog preserves tent: " + reason);
+        Assert(!CoopCampaignMapSiegeTentCodec.TryDecodeText(encoded + " ", out _), "Noncanonical text denied");
+        Assert(!CoopCampaignMapSiegeTentCodec.IsValidForEntity(encoded,
+            CoopCampaignMapPrototypeEntityKind.Settlement, CoopCampaignMapPrototypePartyVisualKind.SiegeTent, false),
+            "Settlement cannot be a party tent");
+        Assert(!CoopCampaignMapSiegeTentCodec.IsValidForEntity(encoded,
+            CoopCampaignMapPrototypeEntityKind.MobileParty, CoopCampaignMapPrototypePartyVisualKind.SiegeTent, true),
+            "Tent cannot coexist with actors");
     }
 
     private static void ValidateSettlementLevels()
@@ -391,6 +458,13 @@ internal static class Program
                !overlay.Contains("DistanceToCamera = depth;"),
             "Native party label scaling must use spatial distance, not camera projection depth.");
         string missionView = File.ReadAllText(Path.Combine(root, "UI", "CoopCampaignMapPrototypeMissionView.cs"));
+        Assert(overlay.Contains("internal void SetFullNamesVisible(bool visible)") &&
+               overlay.Contains("nameplate.SetFullNameVisible(visible)") &&
+               !overlay.Contains("ShouldShowFullName = isSettlement") &&
+               missionView.Contains("_entityOverlayViewModel?.SetFullNamesVisible(") &&
+               missionView.Contains("_replicaInfoLayer.Input.IsGameKeyDown(5)") &&
+               missionView.Contains("HotKeyManager.GetCategory(\"MapHotKeyCategory\")"),
+            "Source wiring: party label expansion must use native game key 5 and not be reset by identity updates.");
         Assert(missionView.Contains("private const float PartyNameplateHeadHeight = 0.8f;") &&
                missionView.Contains("replica.WorldPosition + Vec3.Up * PartyNameplateHeadHeight;") &&
                !missionView.Contains("Vec3.Up * (markerScale * 1.2f)"),
@@ -696,7 +770,7 @@ internal static class Program
             "NormalizedX", "NormalizedY", "Heading", "PartySize",
             "IsPartyInformationHidden", "QuestMarkerFlags", "SettlementEventFlags",
             "SettlementEventOrder", "SettlementQuestOrder",
-            "SettlementRelation",
+            "SettlementRelation", "SettlementMapEventType",
             "IsSettlementTracked", "IsSettlementInRange",
             "PartyNameplateCountText", "PartyNameplateExtraInfoText",
             "PartyNameplateFlags", "PartyMovementSpeedText"
@@ -1866,8 +1940,18 @@ internal static class Program
             1d,
             fallbackHeading: 0);
         Assert(
-            north == CoopCampaignMapPrototypeContract.UnitScale / 4,
-            "A north-facing bearing must quantize to one quarter turn.");
+            north == 0,
+            "Native +Y forward must quantize to zero rotation.");
+
+        Assert(CoopCampaignMapPrototypeContract.QuantizeDirection(1d, 0d, 0) ==
+            CoopCampaignMapPrototypeContract.UnitScale * 3 / 4,
+            "Native +X bearing must rotate clockwise by a quarter turn.");
+        Assert(CoopCampaignMapPrototypeContract.QuantizeDirection(0d, -1d, 0) ==
+            CoopCampaignMapPrototypeContract.UnitScale / 2,
+            "Native -Y bearing must rotate by half a turn.");
+        Assert(CoopCampaignMapPrototypeContract.QuantizeDirection(-1d, 0d, 0) ==
+            CoopCampaignMapPrototypeContract.UnitScale / 4,
+            "Native -X bearing must rotate counterclockwise by a quarter turn.");
 
         int fallback = CoopCampaignMapPrototypeContract.QuantizeDirection(
             0d,

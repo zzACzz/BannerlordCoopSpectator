@@ -118,8 +118,9 @@ namespace CoopSpectator.Infrastructure
 
     public static class CoopCampaignMapConversationTableauCodec
     {
-        public const int SchemaVersion = 2;
-        public const int MaxActors = 3;
+        public const int SchemaVersion = 5;
+        public const int MaxMapActors = 3;
+        public const int MaxActors = 4;
         public const int MaxPayloadBytes = 65536;
         public const int MaxIdentifierCharacters = 128;
         public const string SceneName = "scn_conversation_tableau";
@@ -133,7 +134,8 @@ namespace CoopSpectator.Infrastructure
                     ? !state.AtmosphereName.StartsWith("conv_", StringComparison.Ordinal)
                     : !CoopCampaignMapConversationMissionScene.IsValid(state.MissionScene)) ||
                 !IsFrame(state.CameraFrame) || !InRange(state.BaseCameraHorizontalFov, 0.1f, 3f) ||
-                state.Actors == null || state.Actors.Count < 1 || state.Actors.Count > MaxActors)
+                state.Actors == null || state.Actors.Count < 1 ||
+                state.Actors.Count > (state.MissionScene == null ? MaxMapActors : MaxActors))
                 return false;
             foreach (var actor in state.Actors)
             {
@@ -220,7 +222,7 @@ namespace CoopSpectator.Infrastructure
                         BaseCameraHorizontalFov = reader.ReadSingle()
                     };
                     int count = reader.ReadInt32();
-                    if (count < 1 || count > MaxActors) return false;
+                    if (count < 1 || count > (decoded.MissionScene == null ? MaxMapActors : MaxActors)) return false;
                     for (int index = 0; index < count; index++)
                     {
                         var actor = new CoopCampaignMapConversationActorState

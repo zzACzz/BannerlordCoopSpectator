@@ -66,6 +66,7 @@ namespace CoopSpectator.Campaign
             snapshot.MovementTarget = string.Empty;
             snapshot.Conversation = _cachedConversation.Clone();
             snapshot.ConversationPose = _capturedConversationPose?.Clone();
+            snapshot.PartyPoses = Array.Empty<CoopCampaignMapPartyPoseEnvelope>();
             reason = null;
             return true;
         }

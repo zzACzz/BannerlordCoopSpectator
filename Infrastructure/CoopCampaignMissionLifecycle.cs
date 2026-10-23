@@ -5,7 +5,7 @@ namespace CoopSpectator.Infrastructure
 {
     internal enum CoopCampaignMissionIntentKind { Hold, Map, Battle }
     internal enum CoopCampaignObservedMissionKind { Intermission, Map, Battle, Other }
-    internal enum CoopCampaignMissionAction { Wait, StartMap, EndMap, StartBattle, Fault }
+    internal enum CoopCampaignMissionAction { Wait, StartMap, EndMap, StartBattle, Fault, EndBattle }
 
     // Adapter inputs are detached values. Freshness and exact PID/path/start-time
     // admission belong to the adapters; Session binds the admitted process pair.
@@ -119,7 +119,20 @@ namespace CoopSpectator.Infrastructure
             if (_pending != null)
             {
                 if (observed.RejectedCommand == _pending.Command) return Fault("native-command-rejected");
-                if (_pending.Action == CoopCampaignMissionAction.EndMap)
+                if (_pending.Action == CoopCampaignMissionAction.EndBattle)
+                {
+                    if (observed.Kind == CoopCampaignObservedMissionKind.Intermission)
+                    {
+                        if (observed.CompletedBattleKey != _lastBattleKey)
+                            return Fault("battle-ended-without-matching-completion");
+                        _ownedBattle = null; _battleCompleted = true; _pending = null;
+                    }
+                    else if (observed.Kind != CoopCampaignObservedMissionKind.Battle ||
+                        observed.MissionInstance != _ownedBattle || observed.BattleKey != _lastBattleKey)
+                        return Fault("mission-replaced-during-battle-close");
+                    else return Wait("awaiting-battle-teardown");
+                }
+                else if (_pending.Action == CoopCampaignMissionAction.EndMap)
                 {
                     if (observed.Kind == CoopCampaignObservedMissionKind.Intermission)
                     { _ownedMap = null; _pending = null; }
@@ -145,7 +158,18 @@ namespace CoopSpectator.Infrastructure
             if (_ownedBattle != null)
             {
                 if (observed.Kind == CoopCampaignObservedMissionKind.Battle && observed.MissionInstance == _ownedBattle &&
-                    observed.BattleKey == _lastBattleKey) return Wait("battle-owns-lifecycle");
+                    observed.BattleKey == _lastBattleKey)
+                {
+                    // Publication alone is insufficient: require the host's journal
+                    // acknowledgement for this exact battle, never elapsed time.
+                    if (admittedIntent && observed.CanEnd && observed.CompletedBattleKey == _lastBattleKey &&
+                        _intent.AftermathApplied && _intent.AppliedBattleKey == _lastBattleKey)
+                    {
+                        _appliedBattleKey = _lastBattleKey;
+                        return Issue(CoopCampaignMissionAction.EndBattle, monotonicSeconds, _lastBattleKey, _ownedBattle);
+                    }
+                    return Wait("battle-owns-lifecycle");
+                }
                 if (observed.Kind != CoopCampaignObservedMissionKind.Intermission || observed.CompletedBattleKey != _lastBattleKey)
                     return Fault("battle-ended-without-matching-completion");
                 _ownedBattle = null;

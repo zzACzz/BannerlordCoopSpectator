@@ -12,6 +12,98 @@ Never bypass a safety stop, integrity boundary or authentication restriction.
 
 ## Fresh-run preparation
 
+### Party animation candidate acceptance (2026-10-23, not yet run)
+
+Current source b184 uses protocol50/bridge45/catalog9 and CMP2 animation tuples.
+Installed b173 remains unchanged. Use a fresh coherent three-role installation
+with configuration preimages and loaded hashes before accepting any visual result.
+Do not mix old roles with this candidate. Source tests/builds are not native proof.
+
+- Compare paired host/MP moving, stationary, raiding and fighting figures; include
+  the host and another disclosed party, mounted/unmounted and caravan if available.
+- Compare action choice, weapon/mount synchrony and continuity over several loops.
+  Do not accept a screenshot alone as proof that motions are smooth.
+- Pause, resume and fast-forward in the campaign, including stoppable waiting.
+  Verify pose progression follows the host clock rather than MP wall-clock time.
+- End/cancel a raid and resume travel. No attack loop may remain on an idle/travel
+  figure; test host dialogue open/close, settings and map->battle->map similarly.
+- Hide/reveal a party through host disclosure, change appearance when feasible,
+  and reconnect: no obsolete tuple, resource reuse or undisclosed model motion.
+- Check frame time and send volume with increasing disclosed party counts. The
+  current64-sample rotating publication budget has an unresolved dense-party
+  refresh limit; normal small-count success does not close that requirement.
+- Siege participants may be tents rather than figures in native campaign. This
+  renderer does not implement those tents or complete siege UI/engine presentation;
+  record that as a remaining feature, not a passing animation fallback.
+
+If native action validation fails, preserve the log/dump and current source identity;
+do not replace the host action with an invented generic attack to make the test pass.
+
+### Bottom-bar candidate acceptance (2026-10-22, not yet run)
+
+Candidate b160 uses protocol46/bridge41/catalog9 and stock MapBar with detached
+bindings plus statistic/gold hint transport. Do not mix with installed b150.
+Both isolated builds passed and c141 passed all26 contract projects; native
+provider execution and visual parity are still unverified. Use fresh-run backup/hash
+and exact-process ownership procedure below; compilation is not visual acceptance.
+
+- Compare full paired screens: date/time image, pause label and selected speed,
+  ordered navigation icons/alerts, primary/expanded statistics and army button.
+- Change campaign time and visible statistics, then pause. Verify updates reach
+  the replica without resetting local expansion or flickering the menu/raid bar.
+- Click replica time/navigation/army controls: no campaign mutation or unwanted
+  local campaign screens. The central camera control must return only the local
+  replica camera to the host. Test world input immediately above/outside the bar.
+- Check camera/help overlays and the native bar at both normal and smaller window
+  sizes. Confirm no overlap with raid/encounter, pause text and item tooltip.
+- Open/close local settings, a host dialogue, raid and encounter; perform battle
+  return and rejoin. No stale bar after host disappearance or old mission teardown.
+- Check siege preparation separately; stock bottom bar is not siege UI coverage.
+- Compare host/replica normal and Alt-expanded gold breakdowns: title, category,
+  signed/formatted amounts, row order, total and extension text. Ensure hovering
+  never changes campaign gold. A rejected custom finance model is not a parity pass.
+- Compare influence, health, troops, food, morale, view distance, wages and speed
+  hints. Test moving between icons, value changes, expansion, mouse leave and local
+  settings; old targets must not retain rows or reopen over another tooltip.
+- Compare hardwood/material thumbnails in raid loot. Confirm the mirror-only
+  native pose patch was admitted; build/substitute tests do not prove native IL
+  admission or correct framing. Preserve ordinary campaign rendering.
+- Simple/navigation/time hints remain unimplemented; explicitly record that gap.
+  Statistics/gold hints are source candidates, not full visual acceptance.
+
+### Pending map-event acceptance (2026-10-17)
+
+The user is manually testing; do not deploy or interrupt their processes without
+fresh coordination. b131 VillageFix is an immutable two-PC candidate; b132/b133
+source changes are not in that archive. Record loaded hashes, not only 0.3.2.
+
+For the next coordinated map-event run, retain paired host/replica evidence for:
+
+- A disclosed non-settlement battle icon, host-follow camera, manual camera pan
+  and return; the icon must stay anchored to the event, with native zoom cutoff.
+- Loss of host disclosure and battle completion: no persistent or resurrected
+  old icon. Moving the client camera must not reveal undisclosed events.
+- A village raid and siege/sally/rebellion settlement marker when obtainable;
+  compare the host's actual nameplate, not inferred campaign conditions. Mark
+  unavailable event types untested, not passed. Avoid duplicate world icons.
+- Dialogue open/close, map -> battle -> map and disconnect/rejoin; verify fresh
+  marker data, usable camera and no retained markers from the prior mission.
+- Many changing visible events and multiple peers: record server frame time and
+  transfer latency. b133 sends at most 33 chunks / 8,204 payload bytes per changed
+  list per peer; aggregate bandwidth and native delivery are not test-verified.
+
+Pure codec/source tests and successful compilation cannot satisfy these visual,
+disclosure or network-runtime gates. Preserve the no-mutation manual-test boundary.
+
+Important manual-test caveat (2026-10-13): installing candidate DLLs does not
+persist the automatic lifecycle gate. A campaign launched by an agent with
+process-local flags can work while the same DLLs launched normally remain in
+manual mode. Both map and automatic flags must be present when the campaign
+starts; the menu-owned server inherits them and its new session identity.
+`coop.map_prototype_start` starts only a manual map, not the automatic lifecycle.
+Never present this command as enabling map/battle/map transitions. A user-led
+test must distinguish those modes before interpreting a missing battle switch.
+
 1. Inspect Git branch/status and installed game versions. Preserve other changes.
    Use a fresh, short run ID; never reuse a closed run or old PID after reboot.
 2. Inventory current Steam/game/server/helpers and ports. Record baseline identities
@@ -33,6 +125,9 @@ Never bypass a safety stop, integrity boundary or authentication restriction.
    candidate consistency, not just one DLL. Last run staged seven files: client
    DLL/PDB, dedicated DLL in both client/server bin directories, replica-info
    prefab and both mirror-item catalogs. Recompute this list for current source.
+   The menu/raid candidate additionally requires
+   `GUI/Prefabs/CoopCampaignMenu.xml` from the client module. Preserve its preimage
+   or prior absence and stage it with the matching DLL; otherwise menu loading fails.
 5. Preserve all configuration preimages (including dedicated test config). The
    user permits progress in the test campaign to remain; unrelated saves remain
    protected. Keep diagnostics default-off unless a bounded explicit probe needs them.
@@ -94,6 +189,15 @@ execute an old script unchanged or guess unavailable helper commands.
 
 ## Evidence and acceptance checklist
 
+Party-action release regression (r32 follow-up): test encounter -> Surrender ->
+captivity/travel separately from an actual battlefield mission. Also test leaving
+an encounter without fighting, completed field/village battles, stopped/completed
+raids and applicable sally/siege-outside events. Compare host and replica before
+and after the transition, for foot and mounted actors. act_none is a channel
+release sentinel, not a missing animation clip; no attack loop may survive it.
+Repeat during pause/resume and after hide/reveal or pose expiry. Codec tests and
+successful compilation do not verify native channel release or smooth movement.
+
 For every stage record candidate/run identity, timestamp, expected/actual state,
 pass/fail/not-run and user assistance. Keep paired host/MP screenshots locally.
 
@@ -112,6 +216,28 @@ pass/fail/not-run and user assistance. Keep paired host/MP screenshots locally.
   hideout or naval path. Map longevity beyond the old ~1800-second expiry when relevant.
 - On crash retain exact role logs/dump provenance, stop blind retries, inspect the
   lowest useful native/managed boundary and audit other battle types before fixing.
+
+## Transition timing evidence
+
+For automatic map/battle transitions, capture separate timestamps for:
+
+1. Server EndMap dispatch and StartBattle dispatch.
+2. Server result publication, campaign consumed-result audit, and EndBattle dispatch.
+3. Actual host return to global-map state, StartMap dispatch, and client render readiness.
+4. A real post-return camera/tooltip/menu interaction.
+
+Do not treat dispatch as client loading completion. Do not attribute time spent
+in campaign aftermath menus to a server timer. A published result is not proof
+of campaign application, and a consumed-result audit is not proof of a disk save.
+The r15 candidate retains exact-result acknowledgement, actual native teardown
+and start readiness; no elapsed timeout authorizes discarding pending results.
+Record a missing measurement as unmeasured rather than inferring it from nearby
+log entries. Repeat with adjacent battle types; field success alone is insufficient.
+
+When the user takes over, stop UI input and avoid deployment/restart. Passive
+log evidence may continue. If recorded processes disappear, reconcile replacement
+identities and user activity before doing cleanup; never claim restoration from
+process absence alone or restart solely because an observation timed out.
 
 ## Cleanup and final report
 

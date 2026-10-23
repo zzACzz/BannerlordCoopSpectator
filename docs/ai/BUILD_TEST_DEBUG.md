@@ -1,5 +1,152 @@
 # Build, Test, and Debug Guide
 
+Offline siege trajectory call-site inspection: run Windows PowerShell with
+`scripts/Test-SiegeFlightNativeCallSite.ps1 -CandidateDirectory <isolated-client-bin>`.
+The directory must contain the candidate CoopSpectator.dll and 0Harmony.dll.
+It reads installed SandBox.View IL and invokes the candidate matcher without
+installing Harmony patches or starting the game. b219 matched 936 -> 941
+instructions for MVID 4b56e072-e521-4518-8c8c-171ba8e3f483. This is not native
+runtime acceptance; see SIEGE_PRESENTATION_PLAYBACK_2026-10-23.md.
+
+2026-10-21 menu-hint-b135-20261021: isolated CompileOnly passed client and dedicated,
+with installed module inventories unchanged. The default-off menu hint probe
+requires both COOPSPECTATOR_VERBOSE_DIAGNOSTICS=1 and
+COOPSPECTATOR_MENU_HINT_DIAGNOSTICS=1 in the client process. It is limited to64
+managed-only records per process; see CODE_MAP.md's encounter hint investigation.
+Not deployed or native-accepted; retained b134 remains installed.
+
+2026-10-17 portrait-render-b124 passed both isolated builds without installed
+mutation, after b123 failed ambiguous FaceGen resolution (now fully qualified).
+portrait-render-c118 passed all26 projects, including23 observer/override checks.
+c119 passed all26 with the strengthened exception-scope test before the requested two-PC
+preview package. No native visual acceptance or new game launch is claimed.
+
+## Portrait observer gate (2026-10-13, source/build/test only)
+
+Current follow-up `portrait-transport-b122-20261013` compiled both roles without
+installed mutation. Source now carries encounter pose in CMN4/protocol40/bridge35
+(catalog9 unchanged); coherent deployment is mandatory. Renderer integration is
+still pending. `portrait-transport-c117-20261013` passed all26 projects,
+including17 patched-substitute observer checks; this is not native acceptance.
+
+The candidate observer requires both `COOPSPECTATOR_CAMPAIGN_MAP_PROTOTYPE=1`
+and `COOPSPECTATOR_PORTRAIT_POSE_OBSERVER=1` before startup. Leave the latter
+unset for normal runs. It does not yet synchronize portrait poses to clients.
+No hot-path logging is added; installation/failure is logged once at startup.
+`portrait-observer-c116-20261013` passed all26 contract projects, including14
+patched-substitute observer checks. c115 failed the inherited Harmony target
+check and is superseded, not a pass. `portrait-observer-b121-20261013` passed
+both isolated builds with installed inventories unchanged; b120 failed restricted
+CIM access before compilation. Installed b114 is unchanged; native acceptance
+requires a fresh, owned run and explicit observer gate, not reuse of closed r18.
+See [implementation and limits](CODE_MAP.md#gated-portrait-observation-candidate-2026-10-13).
+
+## Map bearing correction, 2026-10-13 (deployed; movement acceptance pending)
+
+Installed TaleWorlds.Library Vec2.RotationInRadians uses atan2(-x,y).
+Native MobilePartyVisual uses this bearing with RotateAboutUp; the replica
+previously encoded atan2(y,x), introducing a quarter-turn basis error.
+QuantizeDirection now follows the native convention for host and other parties.
+Four cardinal-direction assertions replace the incorrect +Y quarter-turn oracle.
+The complete CoopCampaignMapPrototype.ContractTests executable passed with
+COOPSPECTATOR_REPOSITORY_ROOT set and temporary-file access permitted. Earlier
+attempts lacked the environment variable, then failed on sandbox file access.
+Isolated map-facing-b93-20261013 CompileOnly passed both client and dedicated
+builds and verified installed module inventories unchanged.
+map-facing-c100-20261013 passed all25 contract projects. Fresh r14 deployed seven
+files with seven configuration preimages; client loaded MVID
+47154383-f4a9-4531-8d8f-9cbb114146e0 and dedicated loaded MVID
+256811ba-0521-49d0-ab83-b03700512812. The user took over native testing after
+physical Escape. Server StartMap command=1 at10:50:25 and client render-ready
+at10:50:40 prove automatic startup, not moving-turn or battle-cycle acceptance.
+No native moving-turn acceptance yet. A separately
+reported frozen heading still requires moving observation. Battle adapters are
+unchanged; map re-entry across battle types remains a regression requirement.
+Local run evidence: artifacts/runtime/map-facing-r14-20261013/OBSERVATION.md.
+Run remains open; configuration restoration is pending. Do not stop the user's
+manual session or adopt independently launched processes without authorization.
+User-operated r14 field-victory cycle is now log-verified: EndMap10:51:37,
+StartBattle10:51:54, BattleActive10:52:43, Attacker victory and campaign result
+consumption10:53:27, StartMap command4 at10:54:42, client render-ready10:54:46.
+Visual facing and post-return input are still pending; this does not validate
+other battle types or claim full Goal completion.
+
+## Intermission culture correction candidate (2026-10-11, not deployed)
+
+Update: r13 is now live on coherently staged cmp-b92, with all three loaded
+identities verified. User-assisted first join rendered the automatic map;
+the native correction was logged and the inspected MP log had no intermission
+or null-argument exceptions. Native Quit/rejoin and cleanup are pending. See
+[live evidence](../../artifacts/runtime/intermission-r13-20261011/OBSERVATION.md).
+This supersedes the not-deployed/installed-cmp-b91 status below.
+
+Closed r12 MP log25284 at22:41:12 records ArgumentNullException(key) from
+MBObjectManager.GetObject inside MPIntermissionVM.OnIntermissionStateUpdated.
+Installed native IL has two B lookups guarded by the A identifier (guards at
+02c1/052b, B reads at02d3/053d). The general branch assigns the B display property
+only later, at061a. This establishes a native null-guard/ordering defect consistent
+with the trace, not the exact failing call site or a system-black-screen cause.
+
+IntermissionVmCrashGuardPatch now recognizes exactly two audited instruction
+sequences, replacing their guard/read operands with a current CultureTeam2 reader.
+It uses CurrentMapOptions (enum1), honors the already-set end-game flag, changes
+no options or VM properties, preserves instruction labels/exception blocks and
+returns the entire original sequence if cardinality/shape differs. No native
+agent/scene state is touched. Existing exception finalizers remain as compatibility
+fallback; their silence is not proof the correction installed. Startup must log
+the two-lookups correction, and fresh join must no longer produce the exception.
+
+Focused IntermissionCulture.ContractTests passed: four operand replacements,
+original/label preservation, zero/one/three-site and malformed partial rejection,
+A/B null/empty combinations, stale B replacement, current-options mode and end-game
+suppression. Tests use API stubs, not a live native VM; they do not establish full
+binary compatibility, voting, color rendering or network lifecycle correctness.
+Canonical manifest now includes25 projects. cmp-b92 passed both isolated builds
+with installed inventories unchanged. Full cmp-c99 completed successfully: all25
+contract projects passed. This is automated-test evidence, not native acceptance.
+The subsequent focused test also emits and executes corrected instruction streams
+in a DynamicMethod with short and long conditional branches. All18 combinations
+of A null/empty/present, B null/empty/present and end-game false/true passed:
+empty/end-game states perform zero object lookups; populated states perform two
+lookups with current B, never the stale display property. This checks evaluation
+stack/branch behavior against stubs, not the installed VM's complete method.
+Installed cmp-b91 remains the runtime baseline. Native map join/rejoin and shared
+field/village/siege/hideout lobby transitions remain regression gates because the
+patched VM is shared across custom modes. No all-mode acceptance is claimed.
+
+Documentation impact: this section owns implementation/evidence; CODE_MAP indexes
+the focused test. Map protocol, scene ownership and battle authority are unchanged.
+
+Host-gaze source candidate requires protocol37/bridge32/catalog8/tableau5/pose4.
+cmp-b91 is coherently installed after closed r12; do not mix it with older roles.
+cmp-b91 both isolated builds passed with unchanged installed inventories;
+cmp-c98 passed all24 contracts. Native three-actor dialogue/text rendering passed;
+user motion comparison passed for the inspected scene; cleanup restored all seven
+configs and confirmed all22 recorded identities absent. Broader parity remains open. See
+[scope and evidence](CAMPAIGN_MAP_MISSION_DIALOGUE.md#host-gaze-candidate-2026-10-11-r12-in-progress).
+
+Post-r10 four-actor candidate requires protocol36/bridge31/catalog8/tableau5/pose3
+across all three roles. cmp-b90 both isolated builds passed with installed
+inventories unchanged. Final cmp-c96 passed all24 contract projects. Subsequent
+r11 deployed cmp-b90 coherently and verified all three loaded identities. Bounded
+Tristania/guards text and map-return checks passed; trace contains three actors,
+so four-visible-actor native acceptance is still open. r11 closed with all23 owned
+identities absent and seven configs matching; cmp-b90 retained. Use Windows
+PowerShell5.1 for retained r11 helpers (PowerShell7 JSON date conversion caused a
+fail-closed timestamp mismatch). Do not mix protocol versions across roles.
+
+2026-10-11 standalone dialogue photo-atmosphere candidate changes wire formats to
+protocol35/bridge30/catalog8/tableau4/pose2. cmp-c94 all24 contracts and cmp-b88
+both isolated builds passed with installed inventories unchanged during those
+commands. Subsequent r10 staging installed cmp-b88 coherently and verified all
+three loaded identities. Map and companion text/options render. User comparison
+accepts the bounded Iara lighting result; host closure returned MP to the map.
+Repeat dialogue/map return and zoom/detach/camera return passed. Run closed with
+all23 owned identities absent and seven configs matching preimages; cmp-b88
+retained. Other scenes/weather and full visual acceptance remain open.
+Native rendering is not verified by a successful isolated build or contracts.
+See [candidate scope](CAMPAIGN_MAP_MISSION_DIALOGUE.md#native-photo-atmosphere-candidate-2026-10-11-not-deployed).
+
 For campaign-map replica testing, use the [agent runbook](CAMPAIGN_MAP_TEST_RUNBOOK.md)
 and [current handoff](CAMPAIGN_MAP_HANDOFF_2026-10-09.md). They document the
 campaign-menu-owned server, prescribed MP shortcut, input boundaries, evidence
@@ -935,6 +1082,16 @@ Then enable only the targeted second-level flag:
 | `COOPSPECTATOR_AI_WIELD_DIAGNOSTICS` | live AI weapon-wield state |
 
 Other source-local flags also exist for AI hold, captain perks, and hideout mannequin isolation. Search the exact use site before enabling them; some may be gated differently or alter isolation behavior.
+
+### Temporary standalone scene-loading observation
+
+`COOPSPECTATOR_MISSION_SCENE_LOADING_DIAGNOSTICS=1` additionally requires
+`COOPSPECTATOR_VERBOSE_DIAGNOSTICS=1`. Scope both to the exact test multiplayer
+child; do not persist them globally. The owned standalone dialogue scene is
+sampled at approximately 0/2/10 seconds (three samples per attempt, twelve per
+process); no host/battle scene or forced resource preparation is touched. Native
+getter calls remain runtime-sensitive and this probe is not a readiness fix.
+Remove after diagnosis. See [candidate and evidence](CAMPAIGN_MAP_MISSION_DIALOGUE.md#bounded-scene-loading-probe-2026-10-11-not-native-verified).
 
 ### Diagnostic discipline
 

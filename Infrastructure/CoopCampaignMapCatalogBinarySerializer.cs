@@ -8,7 +8,7 @@ namespace CoopSpectator.Infrastructure
     public static class CoopCampaignMapCatalogBinarySerializer
     {
         private const int Magic = 0x434D4331; // "CMC1"
-        public const int SchemaVersion = 8;
+        public const int SchemaVersion = 10;
         private static readonly Encoding StrictUtf8 =
             new UTF8Encoding(false, true);
 
@@ -183,6 +183,7 @@ namespace CoopSpectator.Infrastructure
             WriteString(writer, entity.VisualCharacterId);
             WriteString(writer, entity.CultureId);
             writer.Write((byte)entity.PartyVisualKind);
+            WriteString(writer, entity.SiegeTentPresentation);
             WriteAgentVisual(writer, entity.HumanVisual);
             WriteAgentVisual(writer, entity.MountVisual);
             WriteAgentVisual(writer, entity.CaravanMountVisual);
@@ -197,6 +198,7 @@ namespace CoopSpectator.Infrastructure
             writer.Write((byte)entity.SettlementLevelFlags);
             WriteString(writer, entity.SettlementWallStates);
             writer.Write((byte)entity.SettlementPreparationState);
+            writer.Write((byte)entity.SettlementRaidState);
             WriteString(writer, entity.SettlementProductionIconId);
             WriteString(writer, entity.SettlementPartyBadges);
             WriteString(writer, entity.HoverDecal);
@@ -236,6 +238,7 @@ namespace CoopSpectator.Infrastructure
                     CoopCampaignMapPrototypeContract.MaxCultureIdCharacters),
                 PartyVisualKind =
                     (CoopCampaignMapPrototypePartyVisualKind)reader.ReadByte(),
+                SiegeTentPresentation = ReadString(reader, CoopCampaignMapSiegeTentCodec.MaximumEncodedCharacters),
                 HumanVisual = ReadAgentVisual(reader),
                 MountVisual = ReadAgentVisual(reader),
                 CaravanMountVisual = ReadAgentVisual(reader),
@@ -268,6 +271,7 @@ namespace CoopSpectator.Infrastructure
                 SettlementLevelFlags = reader.ReadByte(),
                 SettlementWallStates = ReadString(reader, CoopCampaignMapSettlementPresentationPolicy.MaxWallSections),
                 SettlementPreparationState = reader.ReadByte(),
+                SettlementRaidState = reader.ReadByte(),
                 SettlementProductionIconId = ReadString(
                     reader,
                     CoopCampaignMapPrototypeContract

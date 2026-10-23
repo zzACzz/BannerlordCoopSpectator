@@ -36,6 +36,12 @@ namespace CoopSpectator.UI
         [DataSourceProperty]
         public CoopCampaignMapPrototypeEntityNameplateVM PlayerNameplate => null;
 
+        internal void SetFullNamesVisible(bool visible)
+        {
+            foreach (var nameplate in Nameplates)
+                nameplate.SetFullNameVisible(visible);
+        }
+
         internal void Synchronize(
             IReadOnlyList<CoopCampaignMapPrototypeEntityState> entities)
         {
@@ -383,7 +389,6 @@ namespace CoopSpectator.UI
                 OnPropertyChangedWithValue(IsDisorganized, nameof(IsDisorganized));
                 OnPropertyChangedWithValue(IsCurrentlyAtSea, nameof(IsCurrentlyAtSea));
             }
-            ShouldShowFullName = isSettlement;
             uint primaryColor = entity.PrimaryColor == 0u
                 ? FallbackPrimaryColor
                 : entity.PrimaryColor;
@@ -398,6 +403,11 @@ namespace CoopSpectator.UI
         private bool HasFlag(CoopCampaignMapPartyNameplateFlags flag)
         {
             return (_partyNameplateFlags & (int)flag) != 0;
+        }
+
+        internal void SetFullNameVisible(bool visible)
+        {
+            ShouldShowFullName = visible;
         }
 
         internal bool UpdatePosition(

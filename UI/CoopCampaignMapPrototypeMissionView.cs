@@ -116,7 +116,7 @@ namespace CoopSpectator.UI
         {
             _settlementGeometry = new CoopCampaignMapSettlementGeometryAdmission<GameEntity>(
                 (root, visible) => root.SetVisibilityExcludeParents(visible), ApplySettlementLevels,
-                ApplySettlementPresentation);
+                ApplySettlementPresentation, ApplySettlementRaid);
         }
         private readonly Dictionary<string, EntityReplica> _entityReplicas =
             new Dictionary<string, EntityReplica>(StringComparer.OrdinalIgnoreCase);
@@ -204,6 +204,10 @@ namespace CoopSpectator.UI
         {
             base.OnMissionScreenTick(dt);
             HandleReplicaEscapeInput();
+            TickCampaignMenu();
+            TickMapBar();
+            try
+            {
             if (!GameNetwork.IsClient || !ExperimentalFeatures.EnableCampaignMapPrototype)
             { HideNativeHoverDecals(); _tooltipPresenter?.Clear(); return; }
 
@@ -255,7 +259,23 @@ namespace CoopSpectator.UI
             UpdateReplicaInformation(dt);
             UpdateNativeMovementTargets();
             UpdateNativeHoverDecal();
-            _tooltipPresenter?.Tick(dt, _hoveredReplicaId);
+            _tooltipPresenter?.Tick(dt, IsPointerOverMapBar() ? _hoveredMapBarHint : IsPointerOverCampaignMenu() ? _hoveredPlunderId : _hoveredReplicaId);
+            }
+            finally
+            {
+                // Match GauntletMapPartyNameplateView's local game-key 5.
+                // Apply after snapshot updates and clear on modal/scene loss.
+                _entityOverlayViewModel?.SetFullNamesVisible(
+                    _mapSceneReadyToRender && CanUseReplicaMapInput() &&
+                    _replicaInfoLayer.Input.IsGameKeyDown(5));
+                // Project with this frame's final camera; early returns still
+                // enforce freshness/readiness hiding instead of retaining icons.
+                TickBattleMarkers();
+                _settlementOverlayViewModel?.SetMapEventsVisible(
+                    _mapSceneReadyToRender &&
+                    CoopCampaignMapPrototypeNetworkController.CurrentClientConversation?.IsActive != true &&
+                    CoopCampaignMapPrototypeNetworkController.TryGetMovementTargetState(out _, out _));
+            }
         }
 
         public override void OnMissionScreenFinalize()
@@ -564,6 +584,31 @@ namespace CoopSpectator.UI
             catch { return false; }
         }
 
+        private bool ApplySettlementRaid(GameEntity root, int state)
+        {
+            // Only an owned Main_map root reaches this adapter. Match the native
+            // village root's fixed emitters, never accept arbitrary resource names.
+            try
+            {
+                root.RemoveAllParticleSystems();
+                string effect = CoopCampaignMapRaidPresentationPolicy.ParticleSystem(state);
+                if (effect.Length != 0)
+                {
+                    root.EntityFlags &= (EntityFlags)(~0x20000000u);
+                    if ((root.EntityFlags & (EntityFlags)0x10000000) != 0)
+                        root.RemoveFromPredisplayEntity();
+                    root.AddParticleSystemComponent(effect);
+                    root.CheckResources(true, false);
+                }
+                return true;
+            }
+            catch
+            {
+                try { root.RemoveAllParticleSystems(); } catch { }
+                return false;
+            }
+        }
+
         private void RemoveSettlementAuthoringCircles()
         {
             // SettlementVisual.OnStartup removes these frame-only helpers in
@@ -652,6 +697,10 @@ namespace CoopSpectator.UI
             _replicaInfoLayer.InputRestrictions.SetMouseVisibility(true);
             _replicaInfoLayer.Input.RegisterHotKeyCategory(
                 HotKeyManager.GetCategory("GenericPanelGameKeyCategory"));
+            _replicaInfoLayer.Input.RegisterHotKeyCategory(
+                HotKeyManager.GetCategory("Generic"));
+            _replicaInfoLayer.Input.RegisterHotKeyCategory(
+                HotKeyManager.GetCategory("MapHotKeyCategory"));
             MissionScreen.MouseVisible = true;
             MissionScreen.AddLayer(_replicaInfoLayer);
             _replicaInfoMovie = _replicaInfoLayer.LoadMovie(
@@ -842,7 +891,7 @@ namespace CoopSpectator.UI
             }
             _settlementGeometry.Apply(entity.EntityId,
                 entity.Kind == CoopCampaignMapPrototypeEntityKind.Settlement, entity.SettlementLevelFlags,
-                entity.SettlementWallStates, entity.SettlementPreparationState);
+                entity.SettlementWallStates, entity.SettlementPreparationState, entity.SettlementRaidState);
             if (_dynamicById.TryGetValue(
                     entity.EntityId,
                     out CoopCampaignMapPrototypeDynamicEntityState dynamicState))
@@ -1042,6 +1091,15 @@ namespace CoopSpectator.UI
                     replica.PartyVisualRetryDelayRemaining - Math.Max(0f, dt));
                 if (shouldRenderParty)
                 {
+                    CoopCampaignMapPrototypeNetworkController.TryGetClientPartyPose(pair.Key, out var partyPose);
+                    if (replica.PartyVisual?.RequiresPoseRecreation(partyPose) == true)
+                    {
+                        // Native party refresh resets its actors at event transitions.
+                        // Reset once on the owner screen, never from a packet callback.
+                        ResetPartyVisual(replica);
+                        replica.PartyVisualAttemptCount = 0;
+                        replica.PartyVisualRetryDelayRemaining = 0f;
+                    }
                     TryEnsurePartyVisual(replica, target, visualFrame);
                     if (replica.PartyVisual != null)
                     {
@@ -1052,7 +1110,8 @@ namespace CoopSpectator.UI
                                 visualFrame,
                                 dt,
                                 isMoving,
-                                visualSpeed);
+                                visualSpeed,
+                                partyPose);
                             if (!replica.PartyVisual.IsUsable)
                             {
                                 ResetPartyVisual(replica);
@@ -1156,7 +1215,7 @@ namespace CoopSpectator.UI
         {
             if (_replicaInfoViewModel == null || _camera == null)
             { _hoveredReplicaId = null; return; }
-            if (!CanUseReplicaMapInput() || _replicaInfoLayer.HitTest())
+            if (!CanUseReplicaMapInput() || _replicaInfoLayer.HitTest() || IsPointerOverCampaignMenu())
             { _hoveredReplicaId = null; return; }
 
             bool clicked = GlobalInput.IsKeyPressed(InputKey.LeftMouseButton);
@@ -1224,6 +1283,7 @@ namespace CoopSpectator.UI
 
             var builder = new StringBuilder(512);
             builder.Append((int)state.PartyVisualKind).Append('|');
+            AppendVisualKeyToken(builder, state.SiegeTentPresentation);
             AppendVisualKeyToken(builder, state.VisualCharacterId);
             AppendVisualKeyToken(builder, state.CultureId);
             AppendVisualKeyToken(builder, state.BannerCode);
@@ -1701,6 +1761,9 @@ namespace CoopSpectator.UI
 
         private void ReleaseSceneLayer()
         {
+            ReleaseCampaignMenu();
+            ReleaseMapBar();
+            ReleaseBattleMarkers();
             ClearNativeMovementTargets();
             ClearNativeHoverDecals();
             ClearNativePicking();
@@ -1954,7 +2017,7 @@ namespace CoopSpectator.UI
         private void TickReplicaFreeCamera(float dt)
         {
             if (!_hasDisplayedCamera || _mapScene == null || !CanUseReplicaMapInput() ||
-                _replicaInfoLayer.HitTest())
+                _replicaInfoLayer.HitTest() || IsPointerOverCampaignMenu())
                 return;
 
             float safeDt = Math.Max(0f, Math.Min(0.1f, dt));
@@ -2016,6 +2079,8 @@ namespace CoopSpectator.UI
                     (float)CoopCampaignMapPrototypeInteractionPolicy
                         .ResolveZoomStep(horizontalSpan, cameraHeight);
                 origin += direction * (zoomStep * zoomIntent);
+                if (IsFinite(_siegeLocalCameraDistance))
+                    _siegeLocalCameraDistance = Math.Max(0f, _siegeLocalCameraDistance - zoomStep * zoomIntent);
                 ClampCameraOriginToMap(ref origin, horizontalSpan);
             }
 

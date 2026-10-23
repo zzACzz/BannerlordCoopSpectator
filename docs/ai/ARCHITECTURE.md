@@ -1,5 +1,47 @@
 # Architecture
 
+Siege overlay candidate b199: prepared host MapSiegeVM values cross the existing
+atomic menu envelope (52/47/10,CMN7/CSO2). The client owns a detached VM and stock
+movie on its menu layer; command methods are inert and production controller is
+disabled. No campaign model/command objects cross the boundary. Movie lifetime
+follows enclosing menu ownership; native visual/input acceptance is pending.
+
+Siege-tent source candidate b191: the existing campaign visual is the sole source
+of disclosed camp geometry/local frames. Clients instantiate their own tent/flag
+entities and private banner materials in the replica scene; they do not access
+campaign MapScreen caches or derive army strength. Reset invalidates texture
+callbacks before removing owned geometry. Protocol51/bridge46/catalog10 carries
+presentation only; no siege command authority is transferred. Native acceptance
+is still required before claiming visual or lifecycle parity.
+
+2026-10-22 bottom-bar source candidate: only the current host's prepared MapBarVM
+supplies time, ordered statistics/navigation and visibility. Detached values cross
+host bridge40; no native VM, callbacks or campaign commands cross this boundary.
+Protocol45 now carries the bar and menu atomically to detached client values;
+stock MapBar now has detached read-only client binding in source, not native
+acceptance. Client owns its layer/movie/sprite lease and local camera/expansion;
+host retains time/navigation/army authority. Hints remain pending. See
+[native boundary and current evidence](CODE_MAP.md#native-bottom-bar-implementation-boundary-2026-10-22-research).
+
+2026-10-17 map-event ownership (source candidate, protocol42/bridge37/catalog9):
+the host's existing MapEventVisualsVM owns world-battle disclosure. Capture also
+checks current MapEvent.IsVisible, excludes settlement events and copies only
+bounded positions with snapshot-local IDs. Clients never enumerate campaign
+events. Settlement event types instead come from admitted native nameplate VMs
+and use the existing entity state path. Replica-owned stock movies/VMs project
+the received presentation without creating campaign models. Snapshot-local IDs
+must not be interpolated across updates. See
+[source and native acceptance gates](CODE_MAP.md#world-battle-marker-native-boundary-2026-10-17-research).
+
+Gated encounter portrait candidate (2026-10-17): the host owns observed pose and
+disclosure; protocol40/bridge35 carries it with visible encounter parties. The
+client creates only replica-specific thumbnail requests with pose-separated keys.
+The stock image provider base/cache retains native resource ownership, and a
+narrow request-scoped hook supplies the host pose without changing host RNG.
+This introduces a non-copy-local client Native GauntletUI reference, no dedicated
+dependency or battle authority change. Not deployed/native-accepted. See
+[implementation boundaries](CODE_MAP.md#replica-portrait-rendering-candidate-2026-10-17).
+
 Standalone land-conversation source extension: an exact native opening binds a
 successful same-campaign map anchor. Only that mission's existing dialogue VM
 can supply text/HUD; map native visuals are not read during the mission and no
@@ -454,6 +496,23 @@ Current source defaults in `Infrastructure/ExperimentalFeatures.cs`:
 - most targeted high-volume diagnostics additionally require their own environment variable. See [BUILD_TEST_DEBUG.md](BUILD_TEST_DEBUG.md).
 
 ## Dependency and deployment boundaries
+
+Siege decal replica candidate (2026-10-23): only campaign owner-thread capture
+now also reads prepared siege machine entities through a separate capture object.
+The latest source uses protocol54/bridge49 with CSM1 machines and CSD1 decals inside
+CSO4, retaining outer menu/interface identity and freshness. Machines carry actual
+host-selected admitted prefab/frame/clip data, not production commands or authority.
+Source b206 builds and map contracts pass; machine rendering/native acceptance are
+pending. Installed b204 remains unchanged. The previous decal-only boundary below
+is historical.
+
+Previous decal-only candidate: campaign owner-thread capture
+reads prepared SettlementVisualManager decal arrays. Protocol53/bridge48 carries
+validated CSD1 inside CSO3 inside the atomic menu/interface payload. Clients own
+separate GameEntity/Decal instances, with no campaign command binding. Admission
+uses existing menu freshness/conversation/modal gates; clearing resets applied
+sample identity so the same admitted sample can be recreated after suspension.
+No installed deployment or native acceptance is implied by the isolated b204 build.
 
 - Client code may reference CampaignSystem and client UI assemblies.
 - Dedicated code must compile through its explicit linked-source list and dedicated reference profile.

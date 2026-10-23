@@ -100,7 +100,7 @@ internal static class SettlementMarkerTransportTests
         Check(!CoopCampaignMapPrototypeContract.IsValidDynamicEntity(dynamicParty), "dynamic party rejects settlement quest order");
         dynamicParty.SettlementQuestOrder = 0; dynamicParty.SettlementEventFlags = 64; dynamicParty.SettlementEventOrder = 7;
         Check(!CoopCampaignMapPrototypeContract.IsValidDynamicEntity(dynamicParty), "party rejects settlement events");
-        Check(CoopCampaignMapPrototypeContract.ProtocolVersion == 33 && CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion == 28,
+        Check(CoopCampaignMapPrototypeContract.ProtocolVersion == 60 && CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion == 55,
             "coherent incompatible format version bump");
         Check(CoopCampaignMapPrototypeContract.ProtocolCompressionMaximum == 63, "six-bit protocol range includes version32");
         Check(CoopCampaignMapPrototypeContract.MaxDynamicBatchSize == 2, "bounded two-entry dynamic batch retained");

@@ -102,7 +102,7 @@ internal static class ConversationHudTests
         Wiring();
         Console.WriteLine("Conversation HUD assertions passed: " + _count);
     }
-    private static string Portrait() => "@---@" + string.Concat(Enumerable.Range(0, 12).Select(i => "+" + i + "-@null-@null")) +
+    internal static string Portrait() => "@---@" + string.Concat(Enumerable.Range(0, 12).Select(i => "+" + i + "-@null-@null")) +
         "@---@<BodyProperties version=\"4\" age=\"30\" weight=\"0.5\" build=\"0.5\" key=\"0000000000000000000000000000000000000000000000000000000000000000\" />@---@0@---@1@---@0@---@4294967295@---@4294967295@---@0@---@";
     private static CoopCampaignMapConversationHud Fixture()
     {
@@ -135,7 +135,7 @@ internal static class ConversationHudTests
         var dragon = items.Single(e => (string)e.Attribute("id") == dragonId);
         Check(items.Select(e => (string)e.Attribute("id")).Distinct(StringComparer.Ordinal).Count() == items.Length,
             "mirror catalog has unique identifiers");
-        Check(dragon == items.Last() && (string)dragon.Attribute("multiplayer_item") == "true" &&
+        Check(items.SkipWhile(e => e != dragon).Skip(1).All(e => (string)e.Attribute("Type") == "Goods") && (string)dragon.Attribute("multiplayer_item") == "true" &&
             (string)dragon.Attribute("Type") == "Banner" && (string)dragon.Attribute("mesh") == "dragon_banner_weapon" &&
             (string)dragon.Attribute("prefab") == "dragon_banner_weapon", "append-only exact StoryMode banner resource");
         Check((string)dragon.Element("ItemComponent").Element("Banner").Attribute("effect") == "IncreasedMeleeDamageAgainstMountedTroops" &&

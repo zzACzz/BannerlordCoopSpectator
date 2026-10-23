@@ -1,5 +1,33 @@
 # Release Packaging Standard
 
+## Two-PC development preview exception (2026-10-17)
+
+For a user-requested local test archive, `scripts/CreateTwoPcPreviewPackage.ps1`
+accepts explicit successful isolated build and full-contract run roots plus a
+fresh package name. It writes only `dist/previews/<name>` and its ZIP, refuses
+existing destinations, and does not build, deploy, publish or touch public release
+assets. The archive separates Client (both PCs) and Host (dedicated module only).
+Source assets exclude stale module bin directories; binaries/dependencies come
+from the exact isolated output, with the existing standard multiplayer runtime
+copies from the installed game/server. Client ModuleData is mirrored to the host.
+Build output hashes, matching descriptors, copied files and ZIP entry hashes are
+checked. A manifest, build/test evidence, Harmony license and the English manual
+test instructions are included. This is not a clean public release: metadata may
+remain v0.3.2, so the preview name and hashes identify it. No speculative diagnosis
+may be advertised as a confirmed fix. Keep default-off portrait/map gates explicit.
+
+Verified preview: `dist/previews/BannerlordCoop_TwoPC_b124_20261017_r4.zip`,
+11,338,876 bytes, SHA256
+`FDD6A4B27C5C9283E31DC222F9F98E43D937C947000D4E5E0390F1131164ECAB`.
+Sources: portrait-render-b124-20261017 (both isolated builds) and
+portrait-render-c119-20261017 (all26 contracts). All47 ZIP entries were enumerated;
+46 payload entries were length/hash verified against the staging manifest, with
+MANIFEST.json as the remaining entry. No installation or publication occurred.
+Earlier attempts are NOT delivery artifacts: initial staging stopped at a
+PowerShell reserved variable; r2 ZIP failed slash-normalized entry verification;
+r3 stopped before ZIP creation because Compression assembly loading was missing.
+The corrected r4 writes forward-slash entry names explicitly and passed validation.
+
 This document is the source of truth for creating release archives for
 BannerlordCoopCampaign. It covers local artifact creation and validation only.
 Publishing, tagging, committing, pushing, or uploading artifacts always requires
