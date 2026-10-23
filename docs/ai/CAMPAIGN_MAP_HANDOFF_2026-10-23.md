@@ -15,7 +15,9 @@ investigation and CAMPAIGN_MAP_TEST_RUNBOOK.md. Revalidate actual state before a
 - Client/campaign MVID aeb78a5c-2a70-4019-8942-e556621cf3b7; dedicated MVID
   a16ae152-3a01-4ca0-b2ce-a0181f969a28. All three loaded identities checked.
 - Local r44: artifacts/runtime/map-siege-flight-r44-20261023. Seven module files
-  staged with preimages; seven configuration preimages. Cleanup is NOT complete.
+  staged with preimages; seven configuration preimages. Run is now CLOSED:
+  elevated inventory found no game/server roles; all seven config hashes match
+  after restoring the inspected generated server-map change. Steam/saves preserved.
 - Last observed campaign19548, dedicated53852, MP52696. These are historical
   identities, not authority to operate on a reused PID. Recheck path/start time.
   Only the agent-launched campaign is in owned-processes.json; user launched
@@ -40,7 +42,7 @@ them. Audit and recreate a fresh transaction from the runbook when necessary.
 
 ## Next actions
 
-1. Coordinate completion of the current user test and exact process/config cleanup.
+1. Current r44 is closed. Recheck process state and create a fresh run before testing.
 2. Verify actual flight-bearing payloads and remaining pause/fast-forward, siege
    exit/re-entry, castle, assault-return and remote-peer cases. Keep user reports
    distinct from direct measured evidence. Native hook removal remains unverified.

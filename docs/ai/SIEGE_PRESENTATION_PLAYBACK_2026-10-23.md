@@ -10,8 +10,9 @@ measurement or exhaustive projectile/trail/impact parity. Pause/fast-forward,
 castle coverage, assault return, remote-peer delivery and native hook removal
 remain separately unverified. Full replica Goal acceptance remains open.
 
-r44 retains seven configuration preimages and module backups. Cleanup is pending;
-do not treat this report as authorization to stop user-launched server/MP roles.
+r44 is CLOSED: no game/server processes found; seven configuration hashes match
+after restoring the inspected generated server-map change. Module backups retained,
+b231 remains installed; Steam and saves preserved.
 Source protocol60/bridge55/catalog10; CSF2/CSP4/CSO10. b231 both isolated builds
 and all26 c170 contracts passed. Earlier b217 failures below are historical.
 

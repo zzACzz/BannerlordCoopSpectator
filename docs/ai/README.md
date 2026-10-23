@@ -1,5 +1,8 @@
 # AI Knowledge Base
 
+r44 CLOSED after user tests: no game/server roles remain, all seven configuration
+hashes match; b231 retained and Steam/saves preserved. See the 2026-10-23 handoff.
+
 Model handoff: [2026-10-23 checkpoint](CAMPAIGN_MAP_HANDOFF_2026-10-23.md).
 It records installed b231, bounded user acceptance, current live-run cleanup
 responsibility and default-off flight-observer launch requirements.
