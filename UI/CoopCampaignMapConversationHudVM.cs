@@ -33,7 +33,7 @@ namespace CoopSpectator.UI
             catch (Exception) { return string.Empty; }
         }
 
-        private static string SafePortrait(string id)
+        internal static string SafePortrait(string id)
         {
             if (string.IsNullOrEmpty(id)) return string.Empty;
             if (!CoopConversationHudCodec.IsPortraitCode(id)) return PortraitUnavailable("structure");

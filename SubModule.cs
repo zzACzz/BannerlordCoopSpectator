@@ -557,6 +557,12 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
             ShowMessage("Bannerlord Coop Campaign mod loaded! (v0.3.1)"); // Version marker to confirm the client runs the latest build
         } // Ð—Ð°Ð²ÐµÑ€ÑˆÑƒÑ”Ð¼Ð¾ Ð±Ð»Ð¾Ðº Ð¼ÐµÑ‚Ð¾Ð´Ñƒ
 
+        public override void InitializeSubModuleGameObjects(Game game)
+        {
+            base.InitializeSubModuleGameObjects(game);
+            CoopStoryBannerResources.EnsureForMultiplayer(game);
+        }
+
         private static void TryRegisterCoopCampaignDerivedAgentStatModel(Game game, IGameStarter gameStarterObject, string source)
         {
             try

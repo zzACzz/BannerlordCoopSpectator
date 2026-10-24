@@ -94,6 +94,7 @@ namespace CoopSpectator.MissionBehaviors
         private bool ServerTooltipTarget(CoopCampaignMapTooltipRequest request, long now)
         {
             if (!ServerTooltipAvailable(now) || _serverConversation.IsActive || request == null) return false;
+            if (CoopCampaignMapTooltipTargetAdmission.IsAftermathAdmitted(_lastBridgeSessionId, request, _serverMenu)) return true;
             if (CoopCampaignMapTooltipTargetAdmission.IsBarHintAdmitted(_lastBridgeSessionId, request, _serverMapBar)) return true;
             if (CoopCampaignMapTooltipTargetAdmission.IsPlunderAdmitted(_lastBridgeSessionId, request, _serverMenu)) return true;
             if (CoopCampaignMapTooltipTargetAdmission.IsEncounterAdmitted(_lastBridgeSessionId, request, _serverMenu)) return true;
@@ -103,6 +104,8 @@ namespace CoopSpectator.MissionBehaviors
         private static bool ClientTooltipTarget(long now)
         {
             if (!ClientTooltipAvailable(now) || CurrentClientConversation?.IsActive == true || string.IsNullOrEmpty(_tooltipDesired)) return false;
+            if (CoopCampaignAftermathInspectionTarget.IsDisclosed(CurrentClientMenu?.Aftermath, _tooltipDesired)) return true;
+            if (CoopCampaignAftermathLoadoutTarget.IsDisclosed(CurrentClientMenu?.Aftermath, _tooltipDesired)) return true;
             if (CoopCampaignMapTooltipTargetAdmission.ContainsBarHint(CurrentClientMapBar, _tooltipDesired)) return true;
             if (CoopCampaignMapTooltipTargetAdmission.ContainsPlunder(CurrentClientMenu, _tooltipDesired)) return true;
             if (CoopCampaignMapTooltipTargetAdmission.ContainsEncounter(CurrentClientMenu, _tooltipDesired)) return true;

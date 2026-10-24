@@ -96,7 +96,12 @@ namespace CoopSpectator.Infrastructure
                 (f[3] != "0" && f[3] != "1") || (f[4] != "0" && f[4] != "1") ||
                 !Integer(f[5], 0, 10) || !uint.TryParse(f[6], NumberStyles.None, CultureInfo.InvariantCulture, out _) ||
                 !uint.TryParse(f[7], NumberStyles.None, CultureInfo.InvariantCulture, out _) || !Integer(f[8], 0, 255)) return false;
-            string[] slots = f[1].Split('+');
+            return IsEquipmentCode(f[1]);
+        }
+        public static bool IsEquipmentCode(string code)
+        {
+            if (code == null || code.Length > MaxPortraitCharacters) return false;
+            string[] slots = code.Split('+');
             if (slots.Length != 13 || slots[0].Length != 0) return false;
             for (int i = 0; i < 12; i++)
             {
@@ -119,7 +124,17 @@ namespace CoopSpectator.Infrastructure
             if (string.IsNullOrEmpty(code) || !IsPortraitCode(code) || resolveItem == null || hasModifier == null)
                 return string.Empty;
             string[] fields = code.Split(new[] { "@---@" }, StringSplitOptions.None);
-            string[] slots = fields[1].Split('+');
+            fields[1] = ResolveEquipmentCode(fields[1], resolveItem, hasModifier);
+            if (fields[1].Length == 0) return string.Empty;
+            string result = string.Join("@---@", fields);
+            return IsPortraitCode(result) ? result : string.Empty;
+        }
+
+        public static string ResolveEquipmentCode(string code, Func<string, string> resolveItem,
+            Func<string, bool> hasModifier)
+        {
+            if (!IsEquipmentCode(code) || resolveItem == null || hasModifier == null) return string.Empty;
+            string[] slots = code.Split('+');
             for (int i = 1; i < slots.Length; i++)
             {
                 string[] parts = slots[i].Split('-');
@@ -132,9 +147,8 @@ namespace CoopSpectator.Infrastructure
                 if (parts[2] != "@null" && !hasModifier(parts[2])) return string.Empty;
                 slots[i] = string.Join("-", parts);
             }
-            fields[1] = string.Join("+", slots);
-            string result = string.Join("@---@", fields);
-            return IsPortraitCode(result) ? result : string.Empty;
+            string result = string.Join("+", slots);
+            return IsEquipmentCode(result) ? result : string.Empty;
         }
 
         public static bool Equivalent(CoopCampaignMapConversationHud a, CoopCampaignMapConversationHud b)

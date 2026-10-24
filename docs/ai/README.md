@@ -1,5 +1,187 @@
 # AI Knowledge Base
 
+Current user-test checkpoint: [2026-10-25 aftermath handoff](HANDOFF_2026-10-25_AFTERMATH.md).
+Use that document for the installed b274 identity, verified scope, open issues and
+single-machine test matrix. Dated progress entries below are historical; newest
+terminal evidence supersedes earlier staged/pending statements. The user will run
+the next scenario sweep manually; do not restart games or prepare a two-machine
+archive until their test results are available.
+
+2026-10-25 r57 CLOSED after user shutdown: fresh product inventory empty, all7
+configuration hashes restored and verified. b274 retained. First Dragon Banner
+fragment thumbnail/card native acceptance is recorded below and in aftermath doc.
+Continue independent prisoner inspection next; broad Goal remains active/incomplete.
+
+2026-10-25 r57 staged coherent b274 (nine files, seven config preimages); all26 c179
+pass. Native first Dragon Banner fragment thumbnail and full local item card now
+render and match host orientation/text. Independent Iara mannequin and helmet card
+remain visible while host selects Halgard. Comparison PNGs retained in r57/evidence.
+Other2 fragment visuals not native-tested. User will close roles; cleanup PENDING.
+No prisoner independence, terrain fix or broad Goal completion claimed. b274 installed.
+
+2026-10-25 r56 CLOSED: fresh product inventory empty, all7 config hashes restored.
+User reports hover continuity fixed; bounded agent captures retain model/slots and
+equipped-item card. Dragon Banner First Piece spinner remains. Source b274 appends
+all3 StoryMode fragment mirrors, initializes the exact zero banner effect during
+MP submodule object initialization before Items XML, and normalizes first-fragment
+thumbnail pose only. Both isolated builds and detached checks pass; all26 c179
+running. NOT installed/native accepted. r57 prepared scripts only. Installed b273.
+Unused prisoner target/admission foundation passes contracts but remains unwired.
+See CAMPAIGN_MAP_AFTERMATH_SCREENS.md for boundaries and current evidence.
+
+2026-10-25 r56 staged coherent b273, campaign launched; all26 c178 passed. Seven
+config preimages retained. Protocol65/bridge60/tooltip5/catalog10. Native continuous
+preview on hover PENDING. Installed b273 supersedes older b271 staging notes below.
+
+2026-10-25 b273 both isolated builds and detached checks pass, including real
+focus-only changes, independent other-hero updates, same selection/mode echoes,
+actual selected-equipment change and stale prior-equipment replies. c177 was25/26:
+old protocol assertion in settlement transport fixture fixed; c178 rerun in progress.
+r56 prepared, NOT staged. Installed b271 retained, r55 CLOSED all7config hashes match.
+
+2026-10-25 r55 CLOSED all7config hashes restored. Native b271 item/gear cards and
+independent armor/weight render, but preview blink remains. Exact bridge comparison
+shows only focus fields change on hover; whole-root equality was insufficient.
+Source b273 sends a per-hero equipment-version key and rejects stale version replies;
+protocol65/bridge60 (tooltip5/catalog10 unchanged), coherent installation required.
+Both isolated builds and binding/session checks pass; all26 c177 running. Installed
+b271 retained. See canonical aftermath doc and r55 observation before next staging.
+
+2026-10-25 r55 staged coherent b271 (nine files, seven config preimages), campaign
+launched. All26 c176 and detached checks passed. Native hover/layout/gear acceptance
+PENDING; installed b271 supersedes older installed-b268 notes below. r54 closed.
+
+2026-10-25 r54 CLOSED all7config hashes match; native b268 model/card visible but
+hover blink/card layout/slot inspection fail. Source b271 adds semantic snapshot
+comparison, fresh per-item card widgets, independent hero armor/weight/color and
+canonical gear targets through existing bounded channel. Both isolated builds,
+map contracts and detached checks pass; all26 c176 running. Not installed/native
+accepted. See CAMPAIGN_MAP_AFTERMATH_SCREENS.md before staging a next run.
+
+2026-10-25 r54 staged coherent b268 (nine files, seven config preimages), campaign
+launch prepared. Child visibility tests pass; native rendering acceptance pending.
+This supersedes installed-b266 statements below. r53 closed all7config hashes match.
+
+2026-10-25 r53 CLOSED: user stopped roles, fresh inventory empty, seven config
+hashes restored. b266 native test changed independent hero equipment but mannequin
+and item cards remained invisible. Matching-card trace proves delivery only.
+Source b268 puts visibility flags in MainCharacter/ItemMenu child contexts; both
+isolated builds and detached binding/session tests pass (new assertions fail b266).
+Native acceptance pending; installed b266 until coherent r54 staging.
+
+2026-10-25 r53 staged coherent b266 (nine files, seven config preimages), all26
+c175 passed. Native independent model/slot validation pending. No native acceptance
+or completion claimed; do not follow older installed-b262 statements below.
+
+2026-10-25 source b266 integrates independent Loot hero model/12 slots through
+loadout targets and AftermathLoadout replies. Protocol64/bridge59/tooltip5 uses
+shared7-bit protocol range127. Both builds, full map contracts and detached binding/
+session checks pass; native acceptance pending. r53 is prepared, not installed.
+Installed remains b262; r52 closed with all7 configuration hashes matching.
+Cards, independent slot hints/weight, prisoner selection and other fidelity gates
+remain open. See CAMPAIGN_MAP_AFTERMATH_SCREENS.md before any staging/test.
+
+2026-10-24 source b264: independent hero-only target/disclosure contracts pass;
+unwired host visual projection prepares selected hero mannequin plus12 equipment
+slots without changing live selection. Detached slots deliberately have no live
+ReplicaRowId; network/UI delivery and slot-inspection admission remain unfinished.
+Both isolated builds and detached binding/session checks pass. Installed r52 stays
+b262, staged with seven config preimages; no product process launched for r52.
+
+2026-10-24 r51 CLOSED: user exited roles, fresh inventory empty, all7 configs match.
+b262 retained. Native equipment/most item icons improved; item cards still absent,
+local hero arrows change name only, stale Plains Battle hint persists, Dragon
+Banner icon spins. r52 prepares a manual-session diagnostic wrapper calling the
+unchanged original BAT with temporary inspection env1, avoiding failed automated
+Steam detection. Not staged/launched yet; objective remains incomplete.
+
+2026-10-24 r51: nine coherent b262 files staged, seven config preimages retained.
+Both builds and detached binding/session tests passed; all26 c174 contracts passed.
+Aftermath VM now projects campaign item/equipment/portrait resources through existing
+verified preloaded mirrors, cached per owned node. Native visual/card acceptance is
+pending. Use scoped inspection diagnostics on MP launch; source remains unwired for
+independent prisoner previews. r50 is closed; see canonical aftermath document.
+
+2026-10-24 latest: r50 CLOSED after user shutdown, all seven configuration hashes
+match and no owned processes remain. b256 remains installed. Simulated-battle
+Prisoners -> Loot reached both clients but independent cards failed manual and
+automated hover; most item images spin and equipped models appear partly naked.
+No crash fix is accepted. Retained MP exit codeFFFFFFFF coincided with announced
+user shutdown, not an independently proven crash. Source b260 adds explicit-opt-in
+bounded inspection-stage logging; both builds and detached binding/session tests
+pass without installation. See canonical aftermath document.
+
+2026-10-24 latest runtime: r49 CLOSED with all seven configuration hashes restored
+and no owned processes remaining. r50 staged nine coherent b256 files and retained
+seven configuration preimages after the product guard confirmed no active roles.
+Native acceptance is pending; b256 is a separately proven binding-feedback guard,
+not a proven explanation of either silent MP exit. Retain a client exit handle
+before the next test. Source-only b258 prisoner-preview work is NOT deployed.
+
+2026-10-24 latest: r49 MP exit reproduced after Send troops without entering a
+battlefield. Source b256 fixes a separately proven setter-feedback recursion hazard;
+both builds, binding/session tests and all26 c173 contracts pass, but this is not
+yet the proven exit cause. r50 deployment/restoration was safely deferred because
+user server39208 remains running. b254 stays installed; r49 cleanup remains open.
+No further blind b254 repeats; coordinate server shutdown before coherent b256 test.
+
+2026-10-24 live r49 IN PROGRESS: nine coherent b254 files staged with seven config
+preimages; campaign PID56904 loaded candidate MVID and Continue Campaign reached
+the host map. Injected Escape did not open pause. Server/MP/card native acceptance
+not run; cleanup pending. This supersedes installed-b240 statements below.
+See local r49 OBSERVATION.md and canonical aftermath document.
+
+2026-10-24 latest b254/c172: native base-class dispatch for local inspection is
+corrected and verified against installed ViewModel; both isolated builds and all26
+contracts pass. Client hover/card wiring exists but is not native-accepted. Installed
+b240 is unchanged and incompatible with protocol63/bridge58. Follow the current
+independent-loot section in CAMPAIGN_MAP_TEST_RUNBOOK.md and canonical aftermath
+document before staging. Broader independence/terrain/full Goal gates remain open.
+
+2026-10-24 latest source b251: independent Loot card interests now use current-row/
+hero admission and the existing per-peer tooltip relay. Tooltip4/protocol63/bridge58
+carry full CAF2 cards. Full map contracts and both isolated builds pass; no installed
+mutation. Client hover/card application and native provider acceptance remain open.
+Installed b240 is retained. See CAMPAIGN_MAP_AFTERMATH_SCREENS.md; older snapshots
+below are historical.
+
+2026-10-24 current aftermath state: r48 is CLOSED; cleanup.json proves all seven
+configuration hashes match and no owned processes remain. b240 remains installed.
+Source b242 is isolated-build verified, not deployed. Independent inspection is
+still pending. Native SetItem also emits InventoryItemInspectedEvent; remote hover
+must not invoke the host's ProcessItemTooltip or this side-effecting entry directly.
+See the canonical aftermath document. Older live-run notes below are historical.
+
+2026-10-24 aftermath clarification: clients independently inspect loot/prisoners;
+only host mutations/shared-list changes synchronize. The b240 host-hover mirror
+was misaligned and is removed from source. b241 fixes missing unannotated native
+tooltip fields and adds typed color (protocol62/bridge57/CAF2); builds, map tests
+and detached installed-library row checks pass. Independent inspection is still
+unimplemented. Installed b240/r48 is unchanged; see the canonical aftermath document.
+
+Latest runtime r48 IN PROGRESS: b240 staged (ten files, seven config preimages),
+campaign launched; native loot-tooltip checks pending. No dark-terrain fix included.
+See the aftermath document and local r48 observation; r47 is closed.
+
+Loot tooltip candidate b240: passive host visibility/position capture
+and a separate stock-layout movie; both isolated builds and full map contracts pass.
+Not native-accepted. Installed b240 supersedes the earlier installed-b238 snapshot;
+the separate MP dark-terrain report is still unresolved. See the aftermath document.
+
+Latest aftermath runtime: r47 CLOSED on b238 with seven config hashes restored,
+no game roles, Steam/saves preserved. Prisoners and loot render in MP; tooltip,
+modal and banner-image fidelity gaps remain. User reported MP-only black/blue field
+ground (campaign normal); cause unproven. Full Goal remains open.
+See [prisoners and loot](CAMPAIGN_MAP_AFTERMATH_SCREENS.md) for the stale dynamic
+catalog correction and exact hero/input-key capture admission. Older snapshots below
+are historical; b238 is installed, protocol61/bridge56/CMN8/CAF1.
+
+Aftermath screens source candidate: [prisoners and loot](CAMPAIGN_MAP_AFTERMATH_SCREENS.md).
+CMN8/protocol61/bridge56, detached host UI bindings and read-only stock-layout
+client movies are connected. Full map contracts and isolated b233 both-role builds
+pass; installed-library binding checks pass without game startup. Not deployed or
+native-accepted; installed b231 and closed r44 remain the last live evidence.
+
 r44 CLOSED after user tests: no game/server roles remain, all seven configuration
 hashes match; b231 retained and Steam/saves preserved. See the 2026-10-23 handoff.
 

@@ -12,6 +12,8 @@
     <Compile Include="../../Infrastructure/CoopCampaignMapSiegeFlightBuffer.cs" Link="CoopCampaignMapSiegeFlightBuffer.cs" />
     <Compile Include="../../Patches/CoopSiegeFlightCallSite.cs" Link="CoopSiegeFlightCallSite.cs" />
     <Compile Include="MirrorItemPoseTests.cs" />
+    <Compile Include="StoryBannerResourceTests.cs" />
+    <Compile Include="../../Infrastructure/CoopStoryBannerResources.cs" Link="CoopStoryBannerResources.cs" />
     <Compile Include="../../Patches/CoopMirrorItemPosePatch.cs" Link="CoopMirrorItemPosePatch.cs" />
     <Compile Include="../../Patches/CoopReplicaPortraitPosePatch.cs" Link="CoopReplicaPortraitPosePatch.cs" />
     <Compile Include="../../Infrastructure/CoopReplicaPortraitCreationData.cs" Link="CoopReplicaPortraitCreationData.cs" />

@@ -15,6 +15,7 @@ internal static class Program
         try
         {
             MirrorItemPoseTests.Run();
+            StoryBannerResourceTests.Run();
             SiegeFlightCallSiteTests.Run();
             SiegeFlightObservationTests.Run();
             SiegeFlightCleanupTests.Run();

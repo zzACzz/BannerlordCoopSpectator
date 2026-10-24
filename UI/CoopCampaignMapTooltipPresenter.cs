@@ -120,6 +120,10 @@ namespace CoopSpectator.UI
             HideOwned();
         }
 
+        // The fullscreen inventory owns the shared per-client interest while it
+        // is visible. Hide only our map movie, not its pending inventory request.
+        public void SuspendPresentation() { _extendTime = 0f; HideOwned(); }
+
         private static void Refresh(PropertyBasedTooltipVM vm, object[] args)
         {
             if (args == null || args.Length != 1 || !(args[0] is CoopCampaignMapTooltipPresenter owner) ||

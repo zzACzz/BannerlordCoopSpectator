@@ -11,6 +11,7 @@ internal static class Program
         {
             ValidateProtocolVersion();
             ControlHintTests.Run();
+            AftermathPresentationTests.Run();
             PartyAnimationTests.Run();
             SiegeTentTests.Run();
             SiegeOverlayTests.Run();
@@ -174,10 +175,10 @@ internal static class Program
     private static void ValidateProtocolVersion()
     {
         Assert(
-            CoopCampaignMapPrototypeContract.ProtocolVersion == 60 &&
-            CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion == 55 &&
+            CoopCampaignMapPrototypeContract.ProtocolVersion == 65 &&
+            CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion == 60 &&
             CoopCampaignMapCatalogBinarySerializer.SchemaVersion == 10,
-            "Siege trajectory payload requires coherent protocol/bridge/catalog schema 59/54/10.");
+            "Aftermath loadout payload requires coherent protocol/bridge/catalog schema 65/60/10.");
     }
 
     private static void ValidateSiegeTentTransport()

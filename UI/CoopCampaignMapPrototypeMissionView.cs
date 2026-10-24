@@ -259,7 +259,8 @@ namespace CoopSpectator.UI
             UpdateReplicaInformation(dt);
             UpdateNativeMovementTargets();
             UpdateNativeHoverDecal();
-            _tooltipPresenter?.Tick(dt, IsPointerOverMapBar() ? _hoveredMapBarHint : IsPointerOverCampaignMenu() ? _hoveredPlunderId : _hoveredReplicaId);
+            if (HasAftermathPresentation) _tooltipPresenter?.SuspendPresentation();
+            else _tooltipPresenter?.Tick(dt, IsPointerOverMapBar() ? _hoveredMapBarHint : IsPointerOverCampaignMenu() ? _hoveredPlunderId : _hoveredReplicaId);
             }
             finally
             {

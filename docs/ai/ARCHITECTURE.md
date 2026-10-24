@@ -1,5 +1,25 @@
 # Architecture
 
+Current aftermath architecture uses CAF2, protocol65/bridge60/tooltip5/catalog10.
+See [current checkpoint](HANDOFF_2026-10-25_AFTERMATH.md); older candidate notes below
+are retained history. Local loot inspection and hero/gear projection are connected;
+independent prisoner selection remains unwired.
+
+2026-10-24 inspection candidate: per-client item/hero/equipment interests reuse
+the existing leased tooltip channel. Dedicated and host independently admit current
+published Loot rows; only the host reads campaign equipment. Full detached CAF2
+cards return to the requesting peer, never as host-hover/shared selection state.
+Tooltip format4, protocol63/bridge58 require coherent roles. Client hover/application
+and native provider acceptance remain open; see the canonical aftermath document.
+
+Aftermath source candidate (2026-10-23): the existing host Loot-mode PartyVM or
+SPInventoryVM supplies a detached CAF1 binding tree; the client owns read-only
+IViewModel adapters and copied stock movie layouts. Native campaign VMs/commands
+are never constructed on the client. Final applied-result gates permit map-backed
+presentation while the host is still choosing prisoners/loot. The existing atomic
+menu channel carries CMN8/protocol61/bridge56. See
+[aftermath ownership and validation](CAMPAIGN_MAP_AFTERMATH_SCREENS.md).
+
 Siege overlay candidate b199: prepared host MapSiegeVM values cross the existing
 atomic menu envelope (52/47/10,CMN7/CSO2). The client owns a detached VM and stock
 movie on its menu layer; command methods are inert and production controller is

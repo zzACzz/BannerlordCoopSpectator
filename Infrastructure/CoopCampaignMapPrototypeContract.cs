@@ -1812,9 +1812,9 @@ namespace CoopSpectator.Infrastructure
     /// </summary>
     public static class CoopCampaignMapPrototypeContract
     {
-        public const int ProtocolVersion = 60;
-        public const int HostBridgeSchemaVersion = 55;
-        public const int ProtocolCompressionMaximum = 63;
+        public const int ProtocolVersion = 65;
+        public const int HostBridgeSchemaVersion = 60;
+        public const int ProtocolCompressionMaximum = 127;
         public const int MaxCatalogEntities = 2048;
         public const int MaxCatalogLogicalBytes = 16777216;
         public const int MaxDynamicEntities = 2048;

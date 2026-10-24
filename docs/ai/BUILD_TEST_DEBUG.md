@@ -1,5 +1,29 @@
 # Build, Test, and Debug Guide
 
+Current b274 evidence and exact isolated build/test commands are consolidated in
+[the aftermath handoff](HANDOFF_2026-10-25_AFTERMATH.md). It supersedes the older
+installed/candidate version notes below. Never deploy mixed protocol65/bridge60 roles.
+
+Detached loot session lifetime check:
+`scripts/Test-LootInspectionSession.ps1 -CandidateDirectory <b255-or-later-client-bin>`
+injects a fake local channel into CoopCampaignLootInspection and verifies matching
+responses, stable hover, stale-item rejection and host-removal cleanup. No game or
+native network initialization; not native provider/rendering acceptance. b255 passes.
+
+2026-10-24 aftermath network candidate b251: tooltip4/protocol63/bridge58/CAF2,
+full map contracts and both isolated builds pass with installed inventories
+unchanged. Installed b240 remains tooltip3/protocol61/bridge56/CAF1: never mix these
+roles. No native card acceptance or new deployment is claimed. Follow the canonical
+aftermath document before staging a complete client hover/application candidate.
+
+Detached aftermath UI check: Windows PowerShell
+`scripts/Test-AftermathBindings.ps1 -CandidateDirectory <isolated-client-bin>`
+loads the installed TaleWorlds.Library and candidate, creates detached replicas
+only and exercises actual IViewModel dispatch, nested list paths, in-place updates,
+ignored client setters/commands and teardown. No game/scene/campaign is started.
+b233 passed this check. Prefabs CoopCampaignPrisoners.xml and CoopCampaignLoot.xml
+must be installed alongside coherent protocol61/bridge56 modules for native tests.
+
 Offline siege trajectory call-site inspection: run Windows PowerShell with
 `scripts/Test-SiegeFlightNativeCallSite.ps1 -CandidateDirectory <isolated-client-bin>`.
 The directory must contain the candidate CoopSpectator.dll and 0Harmony.dll.

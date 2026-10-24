@@ -4,6 +4,12 @@ namespace CoopSpectator.Infrastructure
 {
     public static class CoopCampaignMapTooltipTargetAdmission
     {
+        public static bool IsAftermathAdmitted(string session, CoopCampaignMapTooltipRequest request,
+            CoopCampaignMapMenuPresentation menu) => request != null && request.LeaseId != Guid.Empty &&
+            string.Equals(session, request.SessionId, StringComparison.Ordinal) &&
+            CoopCampaignMapTooltipPayloadCodec.IsValidCorrelation(request.SessionId, request.EntityId, request.Generation, 1) &&
+            (CoopCampaignAftermathInspectionTarget.IsDisclosed(menu?.Aftermath, request.EntityId) ||
+             CoopCampaignAftermathLoadoutTarget.IsDisclosed(menu?.Aftermath, request.EntityId));
         public static bool ContainsBarHint(CoopCampaignMapBarPresentation bar, string token)
         {
             if (bar == null || !bar.IsEnabled || !bar.IsValid() ||

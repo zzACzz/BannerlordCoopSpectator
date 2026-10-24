@@ -1,5 +1,30 @@
 # Runtime Flows
 
+Current aftermath runtime and manual validation sequence:
+[2026-10-25 handoff](HANDOFF_2026-10-25_AFTERMATH.md). Older staged/pending version
+notes below are historical; installed b274 uses65/60/5/10/CAF2.
+
+b253 client source wiring: native inventory hover command -> detached local row
+token -> current Loot disclosure check -> existing peer interest -> matching full
+card -> local ItemMenu. Local hero/mode overrides persist across host publications.
+Hover exit/modal/close revoke interest; the ordinary map presenter hides without
+clearing inventory requests. Native command argument conversion is not yet verified.
+
+2026-10-24 source inspection flow: compact Loot window/item/hero/mode/usage/offset
+interest -> current published tree admission -> existing per-peer leased relay ->
+owner-thread live row/hero resolution -> isolated card generation/revalidation ->
+typed CAF2 response through existing sequence/chunk admission. Client hover producer
+and card consumer remain unconnected. Closing/replacing the screen or removing the
+item/hero revokes target admission. This is source/test evidence, not a live run.
+
+Aftermath candidate: final battle result applied -> host opens native Loot-mode
+PartyState -> automatic intent permits the replica map -> fresh anchored map
+snapshot plus prisoner presentation -> Loot InventoryState replaces it atomically
+with a new owner token -> closing inventory returns to ordinary live map/menu.
+Intermediate siege/hideout stages retain existing follow-up gates. Freshness,
+conversation, session change and teardown revoke the fullscreen presentation.
+See [source evidence and open native gates](CAMPAIGN_MAP_AFTERMATH_SCREENS.md).
+
 Siege overlay source integration (2026-10-23): protocol52/bridge47/catalog10 and
 CMN7 now carry detached siege overlay values inside the atomic campaign menu.
 Publisher captures only a present siege-mode menu outside conversation; capture

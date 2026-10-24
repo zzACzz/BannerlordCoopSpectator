@@ -9603,4 +9603,18 @@
 		<ItemComponent><Trade morale_bonus="0" /></ItemComponent>
 		<Flags Civilian="true" />
 	</Item>
+  <!-- StoryMode fragments: exact source attributes/components/flags; only IDs
+       and multiplayer_item differ. Their zero effect is initialized before XML. -->
+  <Item id="cs_mirror_dragon_banner_center_a116ad33" name="{=IzT8jY82}Dragon Banner First Piece" is_merchandise="false" body_name="bo_mace_a" recalculate_body="true" mesh="dragon_banner_center" prefab="dragon_banner_center" culture="Culture.empire" using_tableau="true" value="4" weight="0.2" Type="Banner" item_holsters="abdomen_left" multiplayer_item="true">
+    <ItemComponent><Banner banner_level="1" effect="dragon_banner_effect" weapon_class="Banner" weapon_balance="100" thrust_speed="78" speed_rating="97" missile_speed="0" weapon_length="65" swing_damage="6" swing_damage_type="Blunt" item_usage="banner" physics_material="metal_weapon" /></ItemComponent>
+    <Flags DropOnWeaponChange="true" ForceAttachOffHandPrimaryItemBone="true" HeldInOffHand="true" HasToBeHeldUp="true" CanBePickedUpFromCorpse="false" />
+  </Item>
+  <Item id="cs_mirror_dragon_banner_dragonhead_57179aef" name="{=LVXy2C8y}Dragon Banner Second Piece" is_merchandise="false" body_name="bo_mace_a" recalculate_body="true" mesh="dragon_banner_dragonhead" prefab="dragon_banner_dragonhead" culture="Culture.empire" using_tableau="true" value="4" weight="0.2" Type="Banner" item_holsters="abdomen_left" multiplayer_item="true">
+    <ItemComponent><Banner banner_level="1" effect="dragon_banner_effect" weapon_class="Banner" weapon_balance="100" thrust_speed="78" speed_rating="97" missile_speed="0" weapon_length="65" swing_damage="6" swing_damage_type="Blunt" item_usage="banner" physics_material="metal_weapon" /></ItemComponent>
+    <Flags DropOnWeaponChange="true" ForceAttachOffHandPrimaryItemBone="true" HeldInOffHand="true" HasToBeHeldUp="true" CanBePickedUpFromCorpse="false" />
+  </Item>
+  <Item id="cs_mirror_dragon_banner_handle_8d58eae8" name="{=PRsvWzGW}Dragon Banner Third Piece" is_merchandise="false" body_name="bo_mace_a" recalculate_body="true" mesh="dragon_banner_handle" prefab="dragon_banner_handle" culture="Culture.empire" using_tableau="true" value="4" weight="0.2" Type="Banner" item_holsters="abdomen_left" multiplayer_item="true">
+    <ItemComponent><Banner banner_level="1" effect="dragon_banner_effect" weapon_class="Banner" weapon_balance="100" thrust_speed="78" speed_rating="97" missile_speed="0" weapon_length="65" swing_damage="6" swing_damage_type="Blunt" item_usage="banner" physics_material="metal_weapon" /></ItemComponent>
+    <Flags DropOnWeaponChange="true" ForceAttachOffHandPrimaryItemBone="true" HeldInOffHand="true" HasToBeHeldUp="true" CanBePickedUpFromCorpse="false" />
+  </Item>
 </Items>

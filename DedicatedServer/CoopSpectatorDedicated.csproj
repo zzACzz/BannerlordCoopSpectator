@@ -184,6 +184,7 @@
     <Compile Include="..\Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" Link="Infrastructure\ExactCampaignObjectCatalogBootstrap.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignItemCatalogLoadPolicy.cs" Link="Infrastructure\ExactCampaignItemCatalogLoadPolicy.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignRuntimeItemRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeItemRegistry.cs" />
+    <Compile Include="..\Infrastructure\CoopStoryBannerResources.cs" Link="Infrastructure\CoopStoryBannerResources.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMirrorEquipmentResolver.cs" Link="Infrastructure\CoopCampaignMirrorEquipmentResolver.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignRuntimeObjectRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeObjectRegistry.cs" />
     <Compile Include="..\Infrastructure\ExactCreateAgentCorridorDiagnostics.cs" Link="Infrastructure\ExactCreateAgentCorridorDiagnostics.cs" />
@@ -216,6 +217,7 @@
     <Compile Include="..\Infrastructure\CoopCampaignMapConversationMissionScene.cs" Link="Infrastructure\CoopCampaignMapConversationMissionScene.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMapConversationPayloadCodec.cs" Link="Infrastructure\CoopCampaignMapConversationPayloadCodec.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMapMenuPresentation.cs" Link="Infrastructure\CoopCampaignMapMenuPresentation.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignAftermathPresentation.cs" Link="Infrastructure\CoopCampaignAftermathPresentation.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMapBarPresentation.cs" Link="Infrastructure\CoopCampaignMapBarPresentation.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMapBarHintIdentity.cs" Link="Infrastructure\CoopCampaignMapBarHintIdentity.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMapBarCodec.cs" Link="Infrastructure\CoopCampaignMapBarCodec.cs" />

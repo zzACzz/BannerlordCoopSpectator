@@ -30,7 +30,7 @@ namespace CoopSpectator.UI
             else if (_hoveredPlunderId == id) _hoveredPlunderId = null;
         }
 
-        private bool IsPointerOverCampaignMenu() => IsPointerOverMapBar() || (_campaignMenuVisible &&
+        private bool IsPointerOverCampaignMenu() => HasAftermathPresentation || IsPointerOverMapBar() || (_campaignMenuVisible &&
             _campaignMenuLayer != null && _campaignMenuLayer.HitTest());
 
         private void TickCampaignMenu()
@@ -38,10 +38,11 @@ namespace CoopSpectator.UI
             var state = CoopCampaignMapPrototypeNetworkController.CurrentClientMenu;
             bool modal = ScreenManager.FocusedLayer != null &&
                 !ReferenceEquals(ScreenManager.FocusedLayer, _replicaInfoLayer);
+            TickAftermath(modal);
             bool visible = _mapSceneReadyToRender && MissionScreen != null &&
                 CoopCampaignMapPrototypeNetworkController.IsClientMenuHostFresh &&
                 CoopCampaignMapPrototypeNetworkController.CurrentClientConversation?.IsActive != true &&
-                state != null && !modal;
+                state != null && state.Aftermath == null && !modal;
             if (!visible)
             {
                 _siegeProjectilePlayback.Clear();
@@ -121,6 +122,7 @@ namespace CoopSpectator.UI
 
         private void ReleaseCampaignMenu()
         {
+            ReleaseAftermath();
             _siegeProjectilePlayback.Clear();
             ClearSiegeDecals();
             ClearSiegeMachines();

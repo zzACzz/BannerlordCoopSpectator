@@ -32,7 +32,11 @@ internal static class MirrorItemPoseTests
             if (cache.Select(new MBObjectBase { StringId = id }) != expected) throw new Exception("Ordinary item changed");
         }
         CoopSpectator.Infrastructure.ExactCampaignRuntimeItemRegistry.Ids["cs_mirror_dragon"] = "dragon_banner_center";
-        if (cache.Select(new MBObjectBase { StringId = "cs_mirror_dragon" }) != "goods") throw new Exception("Non-material admitted");
+        var fragment = new MBObjectBase { StringId = "cs_mirror_dragon" };
+        if (cache.Select(fragment) != "dragon" || fragment.StringId != "cs_mirror_dragon") throw new Exception("Story fragment pose or identity");
+        GameNetwork.IsMultiplayer = false;
+        if (cache.Select(fragment) != "goods") throw new Exception("Campaign fragment pose affected");
+        GameNetwork.IsMultiplayer = true;
         var transpile = typeof(CoopMirrorItemPosePatch).GetMethod("Transpile", BindingFlags.NonPublic | BindingFlags.Static);
         bool rejected = false;
         try { transpile.Invoke(null, new object[] { new[] { new CodeInstruction(OpCodes.Ret) } }); }

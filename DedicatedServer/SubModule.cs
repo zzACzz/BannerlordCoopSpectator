@@ -563,6 +563,12 @@ namespace CoopSpectator
             TryRegisterCoopCampaignDerivedBattleMoraleModel(game, gameStarterObject, "dedicated");
         }
 
+        public override void InitializeSubModuleGameObjects(Game game)
+        {
+            base.InitializeSubModuleGameObjects(game);
+            CoopStoryBannerResources.EnsureForMultiplayer(game);
+        }
+
         protected override void OnSubModuleUnloaded()
         {
             try

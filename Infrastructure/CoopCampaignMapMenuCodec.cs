@@ -7,7 +7,7 @@ namespace CoopSpectator.Infrastructure
     public static class CoopCampaignMapMenuCodec
     {
         public const int MaxPayloadBytes = 1048576;
-        private const int Magic = 0x434D4E37;
+        private const int Magic = 0x434D4E38; // CMN8
         private static readonly UTF8Encoding Utf8 = new UTF8Encoding(false, true);
 
         // A null presentation is a versioned close, not a missing update.
@@ -49,6 +49,12 @@ namespace CoopSpectator.Infrastructure
                         {
                             if (!CoopCampaignMapSiegeOverlayCodec.TryEncode(menu.SiegeOverlay, out var siegeBytes)) return false;
                             writer.Write(siegeBytes.Length); writer.Write(siegeBytes);
+                        }
+                        writer.Write(menu.Aftermath != null);
+                        if (menu.Aftermath != null)
+                        {
+                            if (!CoopCampaignAftermathCodec.TryEncode(menu.Aftermath, out var aftermathBytes)) return false;
+                            writer.Write(aftermathBytes.Length); writer.Write(aftermathBytes);
                         }
                     }
                     writer.Flush();
@@ -104,6 +110,13 @@ namespace CoopSpectator.Infrastructure
                                 siegeLength > stream.Length - stream.Position ||
                                 !CoopCampaignMapSiegeOverlayCodec.TryDecode(reader.ReadBytes(siegeLength), out var siege)) return false;
                             decoded.SiegeOverlay = siege;
+                        }
+                        if (ReadBool(reader))
+                        {
+                            int length = reader.ReadInt32();
+                            if (length < 46 || length > CoopCampaignAftermathCodec.MaximumBytes || length > stream.Length - stream.Position ||
+                                !CoopCampaignAftermathCodec.TryDecode(reader.ReadBytes(length), out var aftermath)) return false;
+                            decoded.Aftermath = aftermath;
                         }
                         if (!decoded.IsValid()) return false;
                     }

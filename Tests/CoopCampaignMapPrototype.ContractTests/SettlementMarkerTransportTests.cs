@@ -100,9 +100,9 @@ internal static class SettlementMarkerTransportTests
         Check(!CoopCampaignMapPrototypeContract.IsValidDynamicEntity(dynamicParty), "dynamic party rejects settlement quest order");
         dynamicParty.SettlementQuestOrder = 0; dynamicParty.SettlementEventFlags = 64; dynamicParty.SettlementEventOrder = 7;
         Check(!CoopCampaignMapPrototypeContract.IsValidDynamicEntity(dynamicParty), "party rejects settlement events");
-        Check(CoopCampaignMapPrototypeContract.ProtocolVersion == 60 && CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion == 55,
+        Check(CoopCampaignMapPrototypeContract.ProtocolVersion == 65 && CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion == 60,
             "coherent incompatible format version bump");
-        Check(CoopCampaignMapPrototypeContract.ProtocolCompressionMaximum == 63, "six-bit protocol range includes version32");
+        Check(CoopCampaignMapPrototypeContract.ProtocolCompressionMaximum == 127, "seven-bit protocol range includes version65");
         Check(CoopCampaignMapPrototypeContract.MaxDynamicBatchSize == 2, "bounded two-entry dynamic batch retained");
         SourceWiring();
         Console.WriteLine("Settlement marker transport assertions passed: " + checks);
@@ -124,7 +124,7 @@ internal static class SettlementMarkerTransportTests
                 readers++;
             }
             Check(Regex.Matches(wire, @"CompressionInfo.Integer\(0, CoopCampaignMapPrototypeContract.ProtocolCompressionMaximum, (?:maximumValueGiven: )?true\)").Count == reads.Count,
-                name + " every protocol reader/writer uses six-bit range");
+                name + " every protocol reader/writer uses shared seven-bit range");
             if (name != "Prototype" && name != "Replica") continue;
             foreach (string field in new[] { "SettlementEventOrder", "SettlementQuestOrder" })
             {
@@ -139,9 +139,9 @@ internal static class SettlementMarkerTransportTests
             overlay.Contains("_inRange == inRange") && overlay.Contains("string.Equals(_productionIcon, icon, StringComparison.Ordinal)"),
             "unchanged orders/range/icon retain existing UI lists");
         // Wire audit: unchanged bounded strings; new fixed fields add 21+15 bits
-        // per entity, and protocol range grows from five to six bits per packet.
-        int extraBits = CoopCampaignMapPrototypeContract.MaxDynamicBatchSize * (21 + 15) + 1;
-        Check(extraBits == 73 && (extraBits + 7) / 8 == 10, "maximum incremental batch payload is ten bytes");
+        // per entity, and protocol range is now seven rather than five bits.
+        int extraBits = CoopCampaignMapPrototypeContract.MaxDynamicBatchSize * (21 + 15) + 2;
+        Check(extraBits == 74 && (extraBits + 7) / 8 == 10, "maximum incremental batch payload is ten bytes");
     }
 
     private static string ReplaceField(string line, string field, string value)

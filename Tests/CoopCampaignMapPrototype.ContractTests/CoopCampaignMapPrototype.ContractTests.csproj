@@ -6,6 +6,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="AftermathPresentationTests.cs" />
+    <Compile Include="../../Infrastructure/CoopCampaignAftermathPresentation.cs" Link="CoopCampaignAftermathPresentation.cs" />
     <Compile Include="ControlHintTests.cs" />
     <Compile Include="PartyAnimationTests.cs" />
     <Compile Include="SiegeTentTests.cs" />

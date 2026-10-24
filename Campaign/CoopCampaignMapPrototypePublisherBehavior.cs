@@ -96,6 +96,8 @@ namespace CoopSpectator.Campaign
         private readonly int _tooltipOwnerThread = System.Threading.Thread.CurrentThread.ManagedThreadId;
         private CoopCampaignMapTooltipCapture _tooltipCapture;
         private TaleWorlds.CampaignSystem.Campaign _lastPublishedCampaign;
+        private TaleWorlds.CampaignSystem.Campaign _aftermathAnchorCampaign;
+        private CoopCampaignMapPrototypeHostSnapshot _aftermathAnchor;
         private string _lastPublishedSession;
         private CoopCampaignMapMenuPresentation _lastPublishedMenu;
         private CoopCampaignMapBarPresentation _lastPublishedMapBar;
@@ -141,7 +143,7 @@ namespace CoopSpectator.Campaign
                 publisher.PublishTick(dt);
                 return;
             }
-            if (!IsMapCameraAvailable())
+            if (!IsMapCameraAvailable() && !CoopCampaignAftermathCapture.IsAftermathState(GameStateManager.Current?.ActiveState))
                 return;
 
             publisher.PublishTick(dt);
@@ -152,6 +154,7 @@ namespace CoopSpectator.Campaign
             _applicationTickPublisher?._siegeProjectileCapture?.ReleaseFlights();
             CoopCampaignMapMenuCapture.ResetPlunderIdentity();
             CoopCampaignMapBarCapture.ResetHintIdentity();
+            CoopCampaignAftermathCapture.Reset();
             _applicationTickPublisher?.RevokeMissionConversation();
             _applicationTickPublisher = null;
         }
@@ -174,6 +177,34 @@ namespace CoopSpectator.Campaign
                 (now - publisher._lastPublishedTimestamp) / (double)System.Diagnostics.Stopwatch.Frequency >= 2d) return false;
             try
             {
+                if (CoopCampaignMapTooltipTargetAdmission.IsAftermathAdmitted(publisher._lastPublishedSession, request, publisher._lastPublishedMenu) &&
+                    CoopCampaignMapTooltipPayloadCodec.IsValidCorrelation(request.SessionId, request.EntityId, request.Generation, sequence) &&
+                    CoopCampaignAftermathInspectionTarget.TryParse(request.EntityId, out var inspection))
+                {
+                    if (publisher._tooltipCapture == null) publisher._tooltipCapture = new CoopCampaignMapTooltipCapture();
+                    if (!publisher._tooltipCapture.TryPrepareLootCard(inspection.WindowId, inspection.RowId, inspection.HeroId,
+                        inspection.EquipmentMode, inspection.Usage, inspection.ComparisonOffset, out var card, inspection.EquipmentSlot)) return false;
+                    var prepared = new CoopCampaignMapTooltipPayload { SessionId = request.SessionId, EntityId = request.EntityId,
+                        RequestGeneration = request.Generation, Sequence = sequence, IsExtended = request.IsExtended,
+                        Kind = CoopCampaignMapTooltipKind.AftermathItem,
+                        AftermathCard = new CoopCampaignAftermathPresentation { Kind = CoopCampaignAftermathKind.Loot,
+                            WindowId = inspection.WindowId, Root = card } };
+                    if (!CoopCampaignMapTooltipPayloadCodec.IsValid(prepared)) return false;
+                    payload = prepared; reason = null; return true;
+                }
+                if (CoopCampaignMapTooltipTargetAdmission.IsAftermathAdmitted(publisher._lastPublishedSession, request, publisher._lastPublishedMenu) &&
+                    CoopCampaignMapTooltipPayloadCodec.IsValidCorrelation(request.SessionId, request.EntityId, request.Generation, sequence) &&
+                    !request.IsExtended && CoopCampaignAftermathLoadoutTarget.TryParse(request.EntityId, out var loadout))
+                {
+                    if (publisher._tooltipCapture == null) publisher._tooltipCapture = new CoopCampaignMapTooltipCapture();
+                    if (!publisher._tooltipCapture.TryPrepareLootHeroVisual(loadout.WindowId, loadout.HeroId, loadout.EquipmentMode, out var visual)) return false;
+                    var prepared = new CoopCampaignMapTooltipPayload { SessionId = request.SessionId, EntityId = request.EntityId,
+                        RequestGeneration = request.Generation, Sequence = sequence, Kind = CoopCampaignMapTooltipKind.AftermathLoadout,
+                        AftermathCard = new CoopCampaignAftermathPresentation { Kind = CoopCampaignAftermathKind.Loot,
+                            WindowId = loadout.WindowId, Root = visual } };
+                    if (!CoopCampaignMapTooltipPayloadCodec.IsValid(prepared)) return false;
+                    payload = prepared; reason = null; return true;
+                }
                 if (CoopCampaignMapTooltipTargetAdmission.IsBarHintAdmitted(publisher._lastPublishedSession, request, publisher._lastPublishedMapBar))
                 {
                     if (publisher._tooltipCapture == null) publisher._tooltipCapture = new CoopCampaignMapTooltipCapture();
@@ -306,6 +337,12 @@ namespace CoopSpectator.Campaign
 
             if (mapPublication)
             {
+                if (GameStateManager.Current?.ActiveState is TaleWorlds.CampaignSystem.GameState.MapState &&
+                    snapshot.Conversation?.IsActive != true)
+                {
+                    _aftermathAnchorCampaign = TaleWorlds.CampaignSystem.Campaign.Current;
+                    _aftermathAnchor = snapshot.Clone();
+                }
                 _lastPublishedCampaign = TaleWorlds.CampaignSystem.Campaign.Current;
                 _lastPublishedSession = snapshot.SessionId;
                 _lastPublishedMenu = snapshot.Menu?.Clone();
@@ -345,6 +382,39 @@ namespace CoopSpectator.Campaign
                 reason = "main-party-missing";
                 return false;
             }
+            var activeState = GameStateManager.Current?.ActiveState;
+            if (activeState is TaleWorlds.CampaignSystem.GameState.PartyState ||
+                activeState is TaleWorlds.CampaignSystem.GameState.InventoryState)
+            {
+                reason = "aftermath-anchor-unavailable";
+                if (!ReferenceEquals(_aftermathAnchorCampaign, campaign) || _aftermathAnchor == null ||
+                    _aftermathAnchor.SessionId != _sessionId || _revision == int.MaxValue) return false;
+                if (!CoopCampaignAftermathCapture.TryCapture(out var aftermathMenu, out reason)) return false;
+                // A new server map mission must admit the anchored dynamic catalog
+                // even after a long battle. Renew its receipt time, not world data.
+                // Never bind a different campaign/session/revision to this screen.
+                reason = "aftermath-dynamic-anchor-unavailable";
+                if (_cachedDynamic == null || _cachedDynamic.SessionId != _sessionId ||
+                    _cachedDynamic.Revision != _aftermathAnchor.DynamicRevision ||
+                    _cachedCatalog == null || _cachedCatalog.SessionId != _sessionId ||
+                    _cachedCatalog.Revision != _aftermathAnchor.CatalogRevision) return false;
+                snapshot = _aftermathAnchor.Clone();
+                snapshot.Revision = ++_revision;
+                snapshot.UpdatedUtc = DateTime.UtcNow;
+                _cachedDynamic.UpdatedUtc = snapshot.UpdatedUtc;
+                _dynamicDirty = true;
+                snapshot.SampleTimeMilliseconds = Environment.TickCount & int.MaxValue;
+                snapshot.IsMoving = false;
+                snapshot.Menu = aftermathMenu;
+                snapshot.MapBar = null;
+                snapshot.MovementTarget = string.Empty;
+                snapshot.ConversationPose = null;
+                snapshot.PartyPoses = Array.Empty<CoopCampaignMapPartyPoseEnvelope>();
+                snapshot.BattleMarkers = Array.Empty<CoopCampaignMapBattleMarker>();
+                reason = null;
+                return true;
+            }
+            CoopCampaignAftermathCapture.Reset();
             Mission activeMission = Mission.Current ??
                 (GameStateManager.Current?.ActiveState as MissionState)?.CurrentMission;
             if (activeMission != null)

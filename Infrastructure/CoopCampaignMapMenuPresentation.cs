@@ -176,6 +176,7 @@ namespace CoopSpectator.Infrastructure
         public bool IsInSiegeMode { get; set; }
         public CoopCampaignMapEncounterPresentation Encounter { get; set; }
         public CoopCampaignMapSiegeOverlay SiegeOverlay { get; set; }
+        public CoopCampaignAftermathPresentation Aftermath { get; set; }
         public List<CoopCampaignMapMenuOption> Options { get; set; } = new List<CoopCampaignMapMenuOption>();
         public List<CoopCampaignMapMenuProgress> ProgressItems { get; set; } = new List<CoopCampaignMapMenuProgress>();
         public List<CoopCampaignMapMenuPlunder> PlunderItems { get; set; } = new List<CoopCampaignMapMenuPlunder>();
@@ -189,6 +190,9 @@ namespace CoopSpectator.Infrastructure
                 PlunderItems == null || PlunderItems.Count > MaxPlunderItems) return false;
             if (Encounter != null && (!IsEncounterMenu || !Encounter.IsValid())) return false;
             if (SiegeOverlay != null && (!IsInSiegeMode || !SiegeOverlay.IsValid())) return false;
+            if (Aftermath != null && (!Aftermath.IsValid() || IsEncounterMenu || IsInSiegeMode ||
+                Encounter != null || SiegeOverlay != null || Options.Count != 0 || ProgressItems.Count != 0 || PlunderItems.Count != 0 ||
+                MenuId != "aftermath:" + (int)Aftermath.Kind + ":" + Aftermath.WindowId)) return false;
             var tooltipIds = new HashSet<string>(StringComparer.Ordinal);
             foreach (var loot in PlunderItems)
             {
@@ -224,6 +228,7 @@ namespace CoopSpectator.Infrastructure
             snapshot = null;
             if (!IsValid()) return false;
             var copy = (CoopCampaignMapMenuPresentation)MemberwiseClone();
+            copy.Aftermath = Aftermath?.Clone();
             if (SiegeOverlay != null)
             {
                 if (!SiegeOverlay.TrySnapshot(out var siege)) return false;

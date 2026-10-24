@@ -1,5 +1,47 @@
 # Code Map
 
+Current aftermath entry points and acceptance boundaries:
+[2026-10-25 handoff](HANDOFF_2026-10-25_AFTERMATH.md). Earlier dated entries describe
+their then-current candidates, including now-superseded format versions.
+
+Aftermath independent inspection follow-up (2026-10-24):
+`Campaign/CoopCampaignMapTooltipCapture.Prisoners.cs` is an unwired host preview
+candidate, with exact active-screen/four-list membership resolution in the capture
+adapter. Owned HeroViewModel and prepared labels replace unsafe live selection
+commands. b258 builds; native safety/rendering and client delivery are unverified.
+Keep it separate from the immutable b256 feedback-correction runtime candidate.
+`scripts/Test-LootInspectionSession.ps1` exercises the client session with injected
+channel delegates, without native network/game initialization. Source b255 adds
+that test seam only; installed b254 and the coordinated r49 repeat remain separate.
+`UI/CoopCampaignLootInspection.cs` connects local hover/hero/mode handlers to
+per-peer card interests and applies only matching responses to a detached ItemMenu.
+`CoopCampaignAftermathVM` supports isolated local overrides and explicitly bound
+inspection handlers; default commands/setters remain inert. The map presenter
+suspends its own movie without stealing inventory interest. b253 is build/binding
+verified, not native-accepted. Hero mannequin, cycling controls and prisoner
+inspection remain open; canonical aftermath documentation lists exact limits.
+`Campaign/CoopCampaignMapTooltipCapture.Aftermath.cs` is an isolated
+host-side ItemMenu projection candidate connected through the publisher's admitted
+per-peer tooltip relay. It excludes SetItem's inspection event,
+uses existing language restoration, and revalidates live Loot row identity.
+Explicit admitted-hero equipment comparisons are now source candidates, with native
+comparability/ordering and pure bounds tests; native validation and delivery remain
+incomplete. `CoopCampaignAftermathInspectionTarget` and tooltip format4 carry exact
+view interests/full CAF2 cards (protocol63/bridge58). No working independent hover
+is claimed; the client producer/consumer remains pending.
+`Campaign/CoopCampaignAftermathCapture.cs` publishes prepared bindings and opaque
+window-local ReplicaRowId values for exact SPItemVM/PartyCharacterVM rows.
+`Infrastructure/CoopCampaignAftermathPresentation.cs` owns the reference-identity
+registry; successful captures revoke removed rows, reset revokes the whole window.
+Row identity tests cover reordering, removal/reintroduction and screen replacement.
+`UI/CoopCampaignAftermathVM.cs` reconciles identified rows by token, preserving VM
+references across reorder and finalizing revoked rows; ordinary property lists
+remain index-based. Installed-library tests exercise both behaviors without startup.
+The b240 host-hover movie is superseded and no longer loaded. Per-client inspection
+requests, isolated full-card generation and local selection rendering remain open.
+No native inspection or terrain fix is claimed. See the
+[canonical aftermath state](CAMPAIGN_MAP_AFTERMATH_SCREENS.md).
+
 Siege playback foundation (2026-10-23):
 `Infrastructure/CoopCampaignMapSiegeShotIdentity.cs` assigns bounded reference-based
 identities to complete managed missile populations, independent of list indices.
@@ -3198,3 +3240,21 @@ Integration and native verification remain open; see
 `Campaign/CoopCampaignMapSiegeFlightReader.cs` decodes the exact private native
 trajectory value type into that detached model. It is not installed as a hook;
 caller/shot identity, parallel admission and transport remain required.
+## Post-battle prisoner and loot presentation (2026-10-23 candidate)
+
+`Campaign/CoopCampaignAftermathCapture.cs` reads the exact active native Loot
+PartyVM/SPInventoryVM. `Infrastructure/CoopCampaignAftermathPresentation.cs` owns
+the detached CAF1 tree. CMN8/protocol61/bridge56 carries it through existing menu
+transport. `UI/CoopCampaignAftermathVM.cs` provides read-only IViewModel bindings;
+`CoopCampaignMapPrototypeMissionView.Aftermath.cs` owns the fullscreen layer and
+stock-layout CoopCampaignPrisoners/CoopCampaignLoot prefabs. Publisher map anchors
+and CoopCampaignMissionHost final-result gates permit presentation before host
+aftermath screens close. See [implementation and gates](CAMPAIGN_MAP_AFTERMATH_SCREENS.md).
+# 2026-10-25 independent aftermath hero integration
+
+`CoopCampaignAftermathLoadoutTarget` handles canonical hero-only interests and
+current disclosed hero membership. `CoopCampaignMapTooltipPayload` kind11 carries
+the bounded visual tree with window/hero/mode correlation. Publisher dispatches to
+`TryPrepareLootHeroVisual`; `CoopCampaignLootInspection.TickVisual` applies local
+model/slots, revokes on host atomic snapshot/modal/selection changes. Source b266
+protocol64/bridge59/tooltip5; native acceptance pending. See canonical aftermath doc.

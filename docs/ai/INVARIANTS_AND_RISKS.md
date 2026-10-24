@@ -1,5 +1,40 @@
 # Invariants and Risks
 
+Current aftermath baseline is protocol65/bridge60/tooltip5/catalog10/CAF2. Independent
+loot cards, hero models and equipment slots are connected and bounded native checks
+passed; older candidate claims below are historical. Independent prisoner selection,
+full scenario acceptance and original silent-exit/terrain findings remain open.
+See [current handoff](HANDOFF_2026-10-25_AFTERMATH.md).
+
+Detached aftermath setters must not recursively echo a rejected widget write.
+Gauntlet bindings are two-way, and native widgets may coerce values synchronously.
+Keep host data unchanged, suppress equal-value echoes, and guard per-property
+restoration notifications against reentry. b256 has a bounded failing-before/
+passing-after managed test; relation to r49's silent MP exits remains unproven.
+
+Aftermath card channel candidate uses protocol63/bridge58/tooltip4. Admission must
+bind session, live lease, exact current window, disclosed row and selectable hero.
+Opaque correlation alone is not authority. Response must preserve exact interest
+and generation/sequence. Native generator transitive effects and text restoration
+still need runtime proof; client hover/card application is not implemented. Do not
+deploy mixed candidates or treat codec passes as native provider safety evidence.
+
+Aftermath inspection clarification (2026-10-24): host mutations remain authoritative,
+but each client owns hover, inspected row/hero and tooltip state. Never display a
+host-hover ItemMenu for a different local row or invoke shared campaign commands
+to satisfy a client inspection. The earlier b240 host-hover mirror is superseded;
+see CAMPAIGN_MAP_AFTERMATH_SCREENS.md. Independent inspection is not yet implemented.
+
+Aftermath replicas read only prepared annotated UI properties from the exact
+active Loot state/top-screen/source owner on the host thread. Never create or
+refresh PartyVM/SPInventoryVM, traverse their campaign logic, invoke tooltip
+delegates or transfer troops/items from a client. Only detached primitive/list/VM
+binding values may cross CAF1, subject to strict total bounds. Same-campaign map
+anchors cannot authorize a different save/session. Host result-key/final-stage
+proof remains mandatory before the server returns to the replica map. Native
+stock-widget/tableau behavior still needs runtime verification; managed binding
+tests do not establish full visual or input parity.
+
 Siege overlay b199 is connected but not native-accepted. Stock widget dependencies
 include a construction-controller widget even for passive bindings. Never pass
 native MapSiegeVM or invoke selection/update/tooltip producers on the client.
@@ -808,3 +843,12 @@ teardown and verify departure, modal hide/restore and battle-return lifetimes.
 - Comments can lag feature flags.
 
 Use current source first, and update this knowledge base whenever a protected invariant or verified limitation changes.
+# Independent aftermath visual projection — 2026-10-25
+
+Source protocol64 requires7-bit protocol range127 on every map message. Never mix
+with installed b262 protocol63/bridge58. Hero preview must not select the host hero;
+only owned prepared model/slots cross transport. Bind replies to current screen,
+hero and equipment mode, renew generation on host snapshot changes, hide pending/
+revoked visuals and reject prior-hero replies. No live row ID is allocated for
+detached equipment slots; independent slot hints remain unimplemented. Native
+constructor/helper/rendering safety and original card crash remain unproven.

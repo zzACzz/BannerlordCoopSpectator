@@ -62,6 +62,7 @@ namespace CoopSpectator.Patches
                 case "iron": case "hardwood": case "charcoal":
                 case "ironIngot1": case "ironIngot2": case "ironIngot3":
                 case "ironIngot4": case "ironIngot5": case "ironIngot6": return original;
+                case "dragon_banner_center": return original;
                 default: return id;
             }
         }

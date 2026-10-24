@@ -103,7 +103,12 @@ namespace CoopSpectator.Campaign
                 if (!ReferenceEquals(_campaign, TaleWorlds.CampaignSystem.Campaign.Current) ||
                     !BattleResultWritebackJournalBehavior.TryGetActiveCampaignId(out string campaignId) || campaignId != _state.CampaignId ||
                     !_state.Dedicated.IsAlive()) { Fail("campaign-or-dedicated-identity-lost"); return; }
-                bool onMap = Mission.Current == null && GameStateManager.Current?.ActiveState is TaleWorlds.CampaignSystem.GameState.MapState;
+                // Once final results are applied, Loot-mode screens are map-backed
+                // read-only presentation too. The existing final/applied-key gates
+                // still forbid returning during an intermediate siege/hideout stage.
+                bool onMap = Mission.Current == null &&
+                    (GameStateManager.Current?.ActiveState is TaleWorlds.CampaignSystem.GameState.MapState ||
+                     CoopCampaignAftermathCapture.IsAftermathState(GameStateManager.Current?.ActiveState));
                 bool awaitingBattle = !string.IsNullOrEmpty(_state.Intent.BattleKey) && _appliedBattleKey != _state.Intent.BattleKey;
                 var intent = new CoopCampaignMissionIntent {
                     Session = _state.Intent.Session, BattleKey = _state.Intent.BattleKey ?? "",

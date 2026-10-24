@@ -12,6 +12,43 @@ Never bypass a safety stop, integrity boundary or authentication restriction.
 
 ## Fresh-run preparation
 
+### Current user test — 2026-10-25
+
+Use [the b274 handoff and single-machine matrix](HANDOFF_2026-10-25_AFTERMATH.md).
+User is conducting the next manual sweep; wait for results before producing a
+two-machine archive. The older candidate procedures below are historical and do
+not describe the current installed version or accepted loot inspection scope.
+
+### Independent loot inspection candidate (2026-10-24)
+
+Current b254 is protocol63/bridge58/tooltip4/CAF2; installed b240 is older and
+incompatible. Fresh c172 passed all26 contracts; b254 both isolated builds and
+installed-library base-command dispatch checks pass. Stage coherent roles and the
+current CoopCampaignLoot/CoopCampaignPrisoners prefabs with exact preimages. The
+unused CoopCampaignLootTooltip host-hover prefab is NOT a candidate dependency.
+
+After a final battle, leave loot open. Hover different items in MP while keeping
+host hover elsewhere or absent: local card must name the local item and preserve
+all property rows/modifier colors, not the host hover. Check food/trade rumors,
+armor and multi-use weapons. Host transfers must update counts and revoke a removed
+hover target without retargeting it to the replacement list index. Verify hover
+exit, reentry, modal suspension, screen close/reopen and return to map. Selecting
+a hero/mode is local; independent mannequin/slot display and comparison cycling
+remain open implementation work, so do not accept them from partial card behavior.
+Prisoner independent inspection and the MP-only dark-ground report remain open.
+Do not treat these candidate checks as full Goal acceptance.
+
+### Aftermath candidate (2026-10-23, native test pending)
+
+Use coherent protocol61/bridge56 modules and additionally stage the new
+CoopCampaignPrisoners.xml and CoopCampaignLoot.xml prefabs, preserving prior absence
+or exact bytes. Source/binding contracts are not visual acceptance. After a final
+field battle, leave host prisoner selection open and compare all four lists and
+host changes; proceed to loot, compare items/counts/equipment and close to map.
+Remote clicks/hotkeys must not transfer/confirm host resources. Repeat with local
+settings, reconnect and final village/hideout/siege outcomes; verify no map return
+for intermediate stages. See CAMPAIGN_MAP_AFTERMATH_SCREENS.md for open parity gates.
+
 ### Party animation candidate acceptance (2026-10-23, not yet run)
 
 Current source b184 uses protocol50/bridge45/catalog9 and CMP2 animation tuples.

@@ -49,6 +49,14 @@ internal static class ConversationHudTests
         clone = hud.Clone(); clone.AttackerLeader.PortraitCode = Portrait().Replace("+1-", "+0-");
         Check(!CoopConversationHudCodec.IsValid(clone), "duplicate slot rejected");
         string portrait = Portrait().Replace("+0-@null-@null", "+0-campaign_sword-fine");
+        string equipment = portrait.Split(new[] { "@---@" }, StringSplitOptions.None)[1];
+        Check(CoopConversationHudCodec.IsEquipmentCode(equipment), "standalone equipment structure");
+        Check(CoopConversationHudCodec.ResolveEquipmentCode(equipment, item => "cs_mirror_" + item, modifier => modifier == "fine") ==
+            equipment.Replace("campaign_sword", "cs_mirror_campaign_sword"), "aftermath equipment resolves mirror without losing slots/modifiers");
+        Check(CoopConversationHudCodec.ResolveEquipmentCode(equipment, item => null, modifier => true) == string.Empty,
+            "missing aftermath equipment fails closed rather than partially stripping slots");
+        Check(CoopConversationHudCodec.ResolveEquipmentCode(equipment.Replace("+1-", "+0-"), item => item, modifier => true) == string.Empty,
+            "duplicate aftermath equipment slots rejected");
         Check(CoopConversationHudCodec.ResolvePortraitEquipment(portrait, item => item, modifier => modifier == "fine") == portrait,
             "existing item retains exact portrait");
         Check(CoopConversationHudCodec.ResolvePortraitEquipment(portrait, item => "cs_mirror_" + item, modifier => true) ==
@@ -135,11 +143,20 @@ internal static class ConversationHudTests
         var dragon = items.Single(e => (string)e.Attribute("id") == dragonId);
         Check(items.Select(e => (string)e.Attribute("id")).Distinct(StringComparer.Ordinal).Count() == items.Length,
             "mirror catalog has unique identifiers");
-        Check(items.SkipWhile(e => e != dragon).Skip(1).All(e => (string)e.Attribute("Type") == "Goods") && (string)dragon.Attribute("multiplayer_item") == "true" &&
+        Check(items.SkipWhile(e => e != dragon).Skip(1).Take(16).All(e => (string)e.Attribute("Type") == "Goods") && (string)dragon.Attribute("multiplayer_item") == "true" &&
             (string)dragon.Attribute("Type") == "Banner" && (string)dragon.Attribute("mesh") == "dragon_banner_weapon" &&
             (string)dragon.Attribute("prefab") == "dragon_banner_weapon", "append-only exact StoryMode banner resource");
         Check((string)dragon.Element("ItemComponent").Element("Banner").Attribute("effect") == "IncreasedMeleeDamageAgainstMountedTroops" &&
             (string)dragon.Element("Flags").Attribute("CanBePickedUpFromCorpse") == "false", "banner semantics retained");
+        foreach (var fragment in new[] { new[] { "dragon_banner_center", "a116ad33" }, new[] { "dragon_banner_dragonhead", "57179aef" }, new[] { "dragon_banner_handle", "8d58eae8" } })
+        {
+            var item = items.Single(e => (string)e.Attribute("id") == "cs_mirror_" + fragment[0] + "_" + fragment[1]);
+            var component = item.Element("ItemComponent").Element("Banner");
+            Check((string)item.Attribute("mesh") == fragment[0] && (string)item.Attribute("prefab") == fragment[0] &&
+                (string)item.Attribute("multiplayer_item") == "true" && (string)item.Attribute("Type") == "Banner" &&
+                (string)component.Attribute("effect") == "dragon_banner_effect" && (string)component.Attribute("weapon_length") == "65" &&
+                (string)item.Element("Flags").Attribute("CanBePickedUpFromCorpse") == "false", "exact StoryMode fragment resource and zero effect reference");
+        }
         string bannerPortrait = Portrait().Replace("+4-@null-@null", "+4-dragon_banner-@null");
         Check(CoopConversationHudCodec.ResolvePortraitEquipment(bannerPortrait,
             item => item == "dragon_banner" ? dragonId : null, modifier => true) ==
