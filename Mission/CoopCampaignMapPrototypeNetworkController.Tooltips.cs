@@ -98,6 +98,7 @@ namespace CoopSpectator.MissionBehaviors
             if (CoopCampaignMapTooltipTargetAdmission.IsBarHintAdmitted(_lastBridgeSessionId, request, _serverMapBar)) return true;
             if (CoopCampaignMapTooltipTargetAdmission.IsPlunderAdmitted(_lastBridgeSessionId, request, _serverMenu)) return true;
             if (CoopCampaignMapTooltipTargetAdmission.IsEncounterAdmitted(_lastBridgeSessionId, request, _serverMenu)) return true;
+            if (CoopCampaignMapTooltipTargetAdmission.IsSettlementHintAdmitted(_lastBridgeSessionId, request, _serverMenu)) return true;
             return CoopCampaignMapTooltipTargetAdmission.IsAdmitted(_lastBridgeSessionId, request,
                 _serverCatalog.Find(value => value.EntityId == request.EntityId), _serverDynamic.Find(value => value.EntityId == request.EntityId));
         }
@@ -106,9 +107,11 @@ namespace CoopSpectator.MissionBehaviors
             if (!ClientTooltipAvailable(now) || CurrentClientConversation?.IsActive == true || string.IsNullOrEmpty(_tooltipDesired)) return false;
             if (CoopCampaignAftermathInspectionTarget.IsDisclosed(CurrentClientMenu?.Aftermath, _tooltipDesired)) return true;
             if (CoopCampaignAftermathLoadoutTarget.IsDisclosed(CurrentClientMenu?.Aftermath, _tooltipDesired)) return true;
+            if (CoopCampaignAftermathTroopTarget.IsDisclosed(CurrentClientMenu?.Aftermath, _tooltipDesired)) return true;
             if (CoopCampaignMapTooltipTargetAdmission.ContainsBarHint(CurrentClientMapBar, _tooltipDesired)) return true;
             if (CoopCampaignMapTooltipTargetAdmission.ContainsPlunder(CurrentClientMenu, _tooltipDesired)) return true;
             if (CoopCampaignMapTooltipTargetAdmission.ContainsEncounter(CurrentClientMenu, _tooltipDesired)) return true;
+            if (CoopCampaignMapTooltipTargetAdmission.ContainsSettlementHint(CurrentClientMenu, _tooltipDesired)) return true;
             if (!ClientCatalogById.TryGetValue(_tooltipDesired, out var catalog) || !ClientDynamicById.TryGetValue(_tooltipDesired, out var dynamicState)) return false;
             return dynamicState.IsVisible && catalog.EntityId == _tooltipDesired && dynamicState.EntityId == _tooltipDesired &&
                 (catalog.Kind == CoopCampaignMapPrototypeEntityKind.Settlement || CoopCampaignMapPartyBodyPolicy.ShouldRenderBody(catalog.Kind, dynamicState.PartyNameplateFlags));

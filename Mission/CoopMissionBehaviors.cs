@@ -42133,17 +42133,30 @@ namespace CoopSpectator.MissionBehaviors
                     BattleSnapshotRuntimeState.GetScenarioContext() ??
                     BattleSnapshotRuntimeState.GetCurrent()?.ScenarioContext ??
                     BattleSnapshotRuntimeState.GetState()?.ScenarioContext;
+                bool isLordsHall = LordsHallScenarioContract.IsValidatedScenario(
+                    scenarioContext, mission?.SceneName ?? string.Empty, out _);
                 bool requireMaterializedPrebattleEntry =
+                    isLordsHall ||
                     SiegeAmbushScenarioContract.IsSiegeAmbushScenario(
                         scenarioContext) ||
                     SallyOutScenarioContract.IsValidatedScenario(
                         scenarioContext,
                         mission?.SceneName ?? string.Empty,
                         out _);
+                bool hasMaterializedEntries = HasTrackedBattlefieldEntryStateForSide(mission, side);
+                // A keep assault carries the campaign's full army for result
+                // accounting, but only its native assault cohort may be possessed.
+                // Wait for that cohort instead of exposing the full roster before
+                // materialization. The same resolver validates server requests.
+                if (isLordsHall && !hasMaterializedEntries)
+                {
+                    source = "live-prebattle-materialized-pending";
+                    return Array.Empty<string>();
+                }
                 bool useMaterializedPrebattleEntries =
                     (currentPhase >= CoopBattlePhase.PreBattleHold ||
                      requireMaterializedPrebattleEntry) &&
-                    HasTrackedBattlefieldEntryStateForSide(mission, side);
+                    hasMaterializedEntries;
                 if (useMaterializedPrebattleEntries)
                 {
                     IReadOnlyList<string> livePrebattleEntryIds = FilterClaimedSelectableEntryIdsForPeer(

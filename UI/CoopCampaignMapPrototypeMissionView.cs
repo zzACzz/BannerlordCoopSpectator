@@ -144,7 +144,6 @@ namespace CoopSpectator.UI
             _dynamicById =
                 new Dictionary<string, CoopCampaignMapPrototypeDynamicEntityState>(
                     StringComparer.OrdinalIgnoreCase);
-        private string _selectedReplicaId;
         private string _hoveredReplicaId;
         private CoopCampaignMapTooltipPresenter _tooltipPresenter;
         private float _replicaHoverUpdateDelay;
@@ -259,7 +258,7 @@ namespace CoopSpectator.UI
             UpdateReplicaInformation(dt);
             UpdateNativeMovementTargets();
             UpdateNativeHoverDecal();
-            if (HasAftermathPresentation) _tooltipPresenter?.SuspendPresentation();
+            if (HasAftermathPresentation || HasAutoBattlePresentation) _tooltipPresenter?.SuspendPresentation();
             else _tooltipPresenter?.Tick(dt, IsPointerOverMapBar() ? _hoveredMapBarHint : IsPointerOverCampaignMenu() ? _hoveredPlunderId : _hoveredReplicaId);
             }
             finally
@@ -872,8 +871,7 @@ namespace CoopSpectator.UI
             if (entity.Kind == CoopCampaignMapPrototypeEntityKind.Settlement ||
                 !CoopCampaignMapPartyBodyPolicy.ShouldRenderBody(entity.Kind, entity.PartyNameplateFlags))
                 RemovePartyPickGeometry(replica);
-            // Invalidate even while the cursor is over the pinned panel, where
-            // UpdateReplicaInformation intentionally yields to UI hit testing.
+            // Revoke hidden hover even while input yields to another UI layer.
             if (entity.Kind != CoopCampaignMapPrototypeEntityKind.Settlement &&
                 !CoopCampaignMapPartyPickPolicy.ShouldAllowPick(
                     entity.Kind, entity.PartyNameplateFlags))
@@ -883,12 +881,6 @@ namespace CoopSpectator.UI
                     _hoveredReplicaId = null;
                     _tooltipPresenter?.Clear();
                 }
-                if (string.Equals(_selectedReplicaId, entity.EntityId,
-                        StringComparison.OrdinalIgnoreCase))
-                    _selectedReplicaId = null;
-                if (string.Equals(_replicaInfoViewModel?.DisplayedEntityId, entity.EntityId,
-                        StringComparison.OrdinalIgnoreCase))
-                    _replicaInfoViewModel.Hide();
             }
             _settlementGeometry.Apply(entity.EntityId,
                 entity.Kind == CoopCampaignMapPrototypeEntityKind.Settlement, entity.SettlementLevelFlags,
@@ -930,14 +922,6 @@ namespace CoopSpectator.UI
                 return;
             _entityOverlayViewModel?.Remove(entityId);
             _settlementOverlayViewModel?.Remove(entityId);
-            if (string.Equals(
-                    _selectedReplicaId,
-                    entityId,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                _selectedReplicaId = null;
-                _replicaInfoViewModel?.Hide();
-            }
         }
 
         private void UpdateEntityReplicas(float dt)
@@ -1214,66 +1198,17 @@ namespace CoopSpectator.UI
 
         private void UpdateReplicaInformation(float dt)
         {
-            if (_replicaInfoViewModel == null || _camera == null)
-            { _hoveredReplicaId = null; return; }
-            if (!CanUseReplicaMapInput() || _replicaInfoLayer.HitTest() || IsPointerOverCampaignMenu())
+            if (_replicaInfoViewModel == null || _camera == null ||
+                !CanUseReplicaMapInput() || _replicaInfoLayer.HitTest() || IsPointerOverCampaignMenu())
             { _hoveredReplicaId = null; return; }
 
-            bool clicked = GlobalInput.IsKeyPressed(InputKey.LeftMouseButton);
             _replicaHoverUpdateDelay -= Math.Max(0f, dt);
-            if (!clicked && _replicaHoverUpdateDelay > 0f)
-                return;
+            if (_replicaHoverUpdateDelay > 0f) return;
             _replicaHoverUpdateDelay = 0.08f;
-
-            Vec2 rangedMouse = GlobalInput.MousePositionRanged;
-            Vec2 mouse = new Vec2(
-                rangedMouse.x * Screen.RealScreenResolutionWidth,
-                rangedMouse.y * Screen.RealScreenResolutionHeight);
             string hoveredId = ResolveNativeHoveredReplica();
-
-            _hoveredReplicaId = hoveredId;
-            if (clicked && hoveredId != null)
-            {
-                _selectedReplicaId = string.Equals(
-                    _selectedReplicaId,
-                    hoveredId,
-                    StringComparison.OrdinalIgnoreCase)
-                    ? null
-                    : hoveredId;
-            }
-
-            string effectiveId = !string.IsNullOrWhiteSpace(_selectedReplicaId)
-                ? _selectedReplicaId
-                : hoveredId;
-            bool pinned = !string.IsNullOrWhiteSpace(_selectedReplicaId);
-            if (effectiveId == null ||
-                !_catalogById.TryGetValue(
-                    effectiveId,
-                    out CoopCampaignMapPrototypeCatalogEntityState catalog) ||
-                !_dynamicById.TryGetValue(
-                    effectiveId,
-                    out CoopCampaignMapPrototypeDynamicEntityState dynamicState) ||
-                !dynamicState.IsVisible ||
-                (catalog.Kind != CoopCampaignMapPrototypeEntityKind.Settlement &&
-                 !CoopCampaignMapPartyPickPolicy.ShouldAllowPick(
-                     catalog.Kind, dynamicState.PartyNameplateFlags)))
-            {
-                if (pinned)
-                    _selectedReplicaId = null;
-                _replicaInfoViewModel.Hide();
-                return;
-            }
-
-            // Native tooltip owns hover; preserve the explicit pinned summary.
-            if (!pinned) { _replicaInfoViewModel.Hide(); return; }
-            _replicaInfoViewModel.Show(
-                catalog,
-                dynamicState,
-                mouse,
-                pinned,
-                Screen.RealScreenResolutionWidth,
-                Screen.RealScreenResolutionHeight,
-                _replicaInfoLayer?.UIContext?.CustomScale ?? 1f);
+            // Hover retains the host-authorized native tooltip and highlight.
+            // Local clicks neither pin a custom summary nor issue campaign orders.
+            _hoveredReplicaId = hoveredId != null && IsPickTargetAdmitted(hoveredId) ? hoveredId : null;
         }
 
         private static string BuildPartyVisualAttemptKey(
@@ -1783,7 +1718,6 @@ namespace CoopSpectator.UI
             _appliedVisibleEntitiesRevision = -1;
             _catalogById.Clear();
             _dynamicById.Clear();
-            _selectedReplicaId = null;
             _tickedMapEntities = Array.Empty<GameEntity>();
             _tickedMapMeshes = Array.Empty<Mesh>();
 

@@ -20,6 +20,9 @@ namespace CoopSpectator.Campaign
         private static string _windowId;
         private static readonly CoopCampaignAftermathRowRegistry Rows = new CoopCampaignAftermathRowRegistry();
         private static readonly Dictionary<Type, PropertyInfo[]> Bindings = new Dictionary<Type, PropertyInfo[]>();
+        private static readonly Dictionary<string, string> VisualAliases = new Dictionary<string, string>(StringComparer.Ordinal);
+        private static readonly bool CaptureDiagnostics = string.Equals(Environment.GetEnvironmentVariable(
+            "COOPSPECTATOR_AFTERMATH_CAPTURE_DIAGNOSTICS"), "1", StringComparison.Ordinal);
 
         // Native Loot modes are shared by field/village/hideout/final siege aftermath.
         // Ordinary inventory, trade, garrison and ransom screens are outside this increment.
@@ -50,11 +53,16 @@ namespace CoopSpectator.Campaign
                 string sourceType = party ? "TaleWorlds.CampaignSystem.ViewModelCollection.Party.PartyVM" :
                     "TaleWorlds.CampaignSystem.ViewModelCollection.Inventory.SPInventoryVM";
                 if (source?.GetType().FullName != sourceType) { Reset(); return false; }
-                if (!ReferenceEquals(_owner, source)) { _owner = source; _windowId = Guid.NewGuid().ToString("N"); }
+                if (!ReferenceEquals(_owner, source)) { _owner = source; _windowId = Guid.NewGuid().ToString("N"); VisualAliases.Clear(); }
                 int budget = CoopCampaignAftermathCodec.MaximumValues;
                 Rows.Begin(_windowId);
                 reason = "aftermath-binding-capture";
                 var root = Capture(source, 0, ref budget, new HashSet<object>(ReferenceComparer.Instance));
+                // The same crafted identity must be used by the selected model
+                // and every row portrait, not only independent Loot previews.
+                // Resolve current campaign objects once per owned screen; native
+                // creation stays at the existing battle materialization boundary.
+                CoopCampaignAftermathEquipmentProjection.ApplyResolvedAliases(root, ResolveVisualItem);
                 // Revalidate the exact screen/state after reading prepared bindings.
                 reason = "aftermath-screen-changed";
                 if (!ReferenceEquals(state, Game.Current?.GameStateManager?.ActiveState) ||
@@ -63,7 +71,11 @@ namespace CoopSpectator.Campaign
                     Kind = party ? CoopCampaignAftermathKind.Prisoners : CoopCampaignAftermathKind.Loot,
                     WindowId = _windowId, Root = root };
                 reason = "aftermath-tree-invalid";
-                if (!presentation.IsValid()) { Reset(); return false; }
+                if (!CoopCampaignAftermathCodec.TryEncode(presentation, out _, out string rejection))
+                {
+                    if (CaptureDiagnostics) reason += ":" + rejection;
+                    Reset(); return false;
+                }
                 menu = new CoopCampaignMapMenuPresentation {
                     MenuId = "aftermath:" + (int)presentation.Kind + ":" + _windowId, Aftermath = presentation };
                 reason = "aftermath-menu-invalid";
@@ -148,6 +160,12 @@ namespace CoopSpectator.Campaign
             int budget = CoopCampaignAftermathCodec.MaximumValues;
             return Capture(source, 0, ref budget, new HashSet<object>(ReferenceComparer.Instance), registerRows);
         }
+        internal static CoopCampaignPresentationValue CapturePreparedWithPolicy(ViewModel source, Func<Type, bool> policy)
+        {
+            if (policy == null) throw new ArgumentNullException(nameof(policy));
+            int budget = CoopCampaignAftermathCodec.MaximumValues;
+            return Capture(source, 0, ref budget, new HashSet<object>(ReferenceComparer.Instance), false, policy);
+        }
 
         internal static string LootLoadoutVersion(TaleWorlds.CampaignSystem.Hero hero)
         {
@@ -166,7 +184,7 @@ namespace CoopSpectator.Campaign
                 return Convert.ToBase64String(hash.ComputeHash(Encoding.UTF8.GetBytes(text.ToString())));
         }
 
-        private static CoopCampaignPresentationValue Capture(object source, int depth, ref int budget, HashSet<object> ancestors, bool registerRows = true)
+        private static CoopCampaignPresentationValue Capture(object source, int depth, ref int budget, HashSet<object> ancestors, bool registerRows = true, Func<Type, bool> policy = null)
         {
             if (depth > CoopCampaignAftermathCodec.MaximumDepth || --budget < 0) throw new InvalidOperationException("Aftermath capture bound");
             var value = new CoopCampaignPresentationValue();
@@ -187,11 +205,17 @@ namespace CoopSpectator.Campaign
                 {
                     if (list.Count > CoopCampaignAftermathCodec.MaximumItems) throw new InvalidOperationException("Aftermath list bound");
                     value.Kind = CoopCampaignPresentationValueKind.List; value.Items = new List<CoopCampaignPresentationValue>();
-                    for (int i = 0; i < list.Count; i++) value.Items.Add(Capture(list[i], depth + 1, ref budget, ancestors, registerRows));
+                    for (int i = 0; i < list.Count; i++) value.Items.Add(Capture(list[i], depth + 1, ref budget, ancestors, registerRows, policy));
                     return value;
                 }
-                if (!(source is ViewModel) || !Allowed(type)) return value;
+                if (!(source is ViewModel) || !(policy ?? Allowed)(type)) return value;
                 value = CoopCampaignPresentationValue.Node();
+                // The explicit scoreboard policy admits this exact prepared hint.
+                // HintText is a field, not a DataSourceProperty. Do not call its
+                // hover commands or evaluate any BasicTooltipViewModel delegate.
+                if (policy != null && type == typeof(HintViewModel) && source is HintViewModel hint)
+                    value.Properties.Add("ReplicaHintText", Capture(hint.HintText?.ToString() ?? string.Empty,
+                        depth + 1, ref budget, ancestors, false, policy));
                 if (registerRows && (type.FullName == "TaleWorlds.CampaignSystem.ViewModelCollection.Inventory.SPItemVM" ||
                     type.FullName == "TaleWorlds.CampaignSystem.ViewModelCollection.Inventory.InventoryCharacterSelectorItemVM" ||
                     type.FullName == "TaleWorlds.CampaignSystem.ViewModelCollection.Party.PartyCharacterVM"))
@@ -211,7 +235,7 @@ namespace CoopSpectator.Campaign
                     Type child = property.PropertyType;
                     if (!(child.IsPrimitive || child.IsEnum || child == typeof(string) ||
                         typeof(ViewModel).IsAssignableFrom(child) || typeof(IMBBindingList).IsAssignableFrom(child))) continue;
-                    value.Properties.Add(property.Name, Capture(property.GetValue(source), depth + 1, ref budget, ancestors, registerRows));
+                    value.Properties.Add(property.Name, Capture(property.GetValue(source), depth + 1, ref budget, ancestors, registerRows, policy));
                 }
                 if (source is TooltipProperty row)
                 {
@@ -243,7 +267,14 @@ namespace CoopSpectator.Campaign
                 ns.StartsWith("TaleWorlds.Core.ViewModelCollection", StringComparison.Ordinal) ||
                 ns.StartsWith("TaleWorlds.Library", StringComparison.Ordinal);
         }
-        internal static void Reset() { _owner = null; _windowId = null; Rows.Clear(); }
+        private static string ResolveVisualItem(string id)
+        {
+            if (VisualAliases.TryGetValue(id, out string alias)) return alias;
+            var item = (Game.Current?.ObjectManager ?? TaleWorlds.ObjectSystem.MBObjectManager.Instance)?.GetObject<ItemObject>(id);
+            alias = BattleDetector.TryGetCraftedVisualMirrorId(item, out string crafted) ? crafted : id;
+            VisualAliases.Add(id, alias); return alias;
+        }
+        internal static void Reset() { _owner = null; _windowId = null; Rows.Clear(); VisualAliases.Clear(); }
         private sealed class ReferenceComparer : IEqualityComparer<object>
         {
             internal static readonly ReferenceComparer Instance = new ReferenceComparer();

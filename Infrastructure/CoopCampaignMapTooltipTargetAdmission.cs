@@ -4,12 +4,22 @@ namespace CoopSpectator.Infrastructure
 {
     public static class CoopCampaignMapTooltipTargetAdmission
     {
+        public static bool ContainsSettlementHint(CoopCampaignMapMenuPresentation menu, string token) =>
+            menu != null && !menu.IsEncounterMenu && menu.Aftermath == null && menu.SettlementOverlay != null &&
+            menu.SettlementOverlay.IsValid() && CoopCampaignSettlementMenuPresentation.IsHintToken(token) &&
+            System.Linq.Enumerable.Count(menu.SettlementOverlay.HintTokens.Values, value => value == token) == 1;
+        public static bool IsSettlementHintAdmitted(string session, CoopCampaignMapTooltipRequest request,
+            CoopCampaignMapMenuPresentation menu) => request != null && request.LeaseId != Guid.Empty &&
+            string.Equals(session, request.SessionId, StringComparison.Ordinal) &&
+            CoopCampaignMapTooltipPayloadCodec.IsValidCorrelation(request.SessionId, request.EntityId, request.Generation, 1) &&
+            ContainsSettlementHint(menu, request.EntityId);
         public static bool IsAftermathAdmitted(string session, CoopCampaignMapTooltipRequest request,
             CoopCampaignMapMenuPresentation menu) => request != null && request.LeaseId != Guid.Empty &&
             string.Equals(session, request.SessionId, StringComparison.Ordinal) &&
             CoopCampaignMapTooltipPayloadCodec.IsValidCorrelation(request.SessionId, request.EntityId, request.Generation, 1) &&
             (CoopCampaignAftermathInspectionTarget.IsDisclosed(menu?.Aftermath, request.EntityId) ||
-             CoopCampaignAftermathLoadoutTarget.IsDisclosed(menu?.Aftermath, request.EntityId));
+             CoopCampaignAftermathLoadoutTarget.IsDisclosed(menu?.Aftermath, request.EntityId) ||
+             (!request.IsExtended && CoopCampaignAftermathTroopTarget.IsDisclosed(menu?.Aftermath, request.EntityId)));
         public static bool ContainsBarHint(CoopCampaignMapBarPresentation bar, string token)
         {
             if (bar == null || !bar.IsEnabled || !bar.IsValid() ||

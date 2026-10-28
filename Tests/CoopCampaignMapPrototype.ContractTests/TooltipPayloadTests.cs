@@ -60,7 +60,7 @@ internal static class TooltipPayloadTests
         Reject(x => x.EntityId = "\ud800", "target invalid UTF16");
         Reject(x => x.RequestGeneration = 0, "zero generation");
         Reject(x => x.Sequence = -1, "negative sequence");
-        Reject(x => x.Kind = (CoopCampaignMapTooltipKind)12, "unknown provider kind");
+        Reject(x => x.Kind = (CoopCampaignMapTooltipKind)16, "unknown provider kind");
         Reject(x => x.Mode = 5, "unknown mode");
         Reject(x => x.Rows = null, "null rows");
         Reject(x => x.Rows.Clear(), "empty response is not a close message");

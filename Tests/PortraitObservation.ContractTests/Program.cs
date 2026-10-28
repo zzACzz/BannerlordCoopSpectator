@@ -133,7 +133,12 @@ internal static class Program
 
 namespace CoopSpectator.Infrastructure
 {
-    public static class ExperimentalFeatures { public static bool EnableCampaignMapPrototype = true; }
+    public static class ExperimentalFeatures
+    {
+        public static bool EnableCampaignMapPrototype = true;
+        public static bool EnableCampaignMapSiegeFlights => EnableCampaignMapPrototype &&
+            Environment.GetEnvironmentVariable("COOPSPECTATOR_SIEGE_FLIGHT_OBSERVER") != "0";
+    }
     public static class ModLogger
     {
         public static void Info(string text) { Console.WriteLine(text); }

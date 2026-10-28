@@ -1,5 +1,96 @@
 # Read-only aftermath screens
 
+Latest2026-10-27 r63/b287: user accepts the previously missing main-hero pre-citadel
+portrait and successful village battle/return. The detached unregistered resource
+path is described in CAMPAIGN_CRAFTED_VISUAL_RESOURCES.md. This does not close the
+cross-scenario/two-machine matrix. New manual findings: missing settlement top
+overlay and network return deadlock after siege-ambush withdrawal; see the focused
+documents linked from README. b287 remains installed until a fresh deployment.
+
+2026-10-27 latest native r61: user confirms b281 equipment, row portraits and
+independent prisoner inspection work; only the prebattle main-hero portrait remains
+in that repetition. Campaign19124 and MP75056 loaded MVID
+b6d1315a-36fb-4cf4-b38b-ba4e002f1f5a; DS26992 loaded
+f1de1b13-0727-4cae-a453-d2dbb75c655d. Final logs retained. All roles exited, all7
+configs restored/verified; Steam/saves preserved. This supersedes native-pending
+b281 statements below, but does not accept the broad cross-scenario/two-PC matrix.
+Source b283 carries only the bounded portrait-resource foundation; a client-only
+native prototype was removed after numeric item-ID order risk was proven. See
+CAMPAIGN_CRAFTED_VISUAL_RESOURCES.md. Installed b281 remains; no new test requested.
+
+2026-10-27 newest native r60 result: user confirms siege/citadel prisoner screens
+appear, citadel roster contains only the selected assault fighters, and citadel
+Loot equipment looks correct. Supplied PNGs still show missing prebattle portrait,
+naked prisoner model and missing hero row icons. All3 heroes have crafted weapons;
+MP creates exact mirrors only when the citadel Battle opens. Raw logs/PNGs retained.
+r60 CLOSED, all7 configuration hashes restored, Steam/saves preserved.
+
+b281 source: full owned aftermath tree now uses exact crafted
+aliases for equipment/row portraits. Independent prisoner selection is wired via
+AftermathTroop replies, exact window/positive current-row admission, client-local
+selection, suspension/removal/window revocation and a detached native preview.
+No live PartyVM setter/transfer/recruit/upgrade/confirm command is invoked. Installed
+PartyVM was freshly decompiled; preview mirrors its visual-only calculations while
+omitting InitializeUpgrades, UpdateTalkable and live row cleanup callbacks.
+Protocol67/bridge62, tooltip5/catalog10, CAF3/CML2. Both cmp-b281 builds, all26
+cmp-c186 contracts and four detached checks pass. Independent prisoner rendering
+and generic crafted alias visuals are NOT native-accepted yet. c185 failed a test
+constructor compilation error; it was corrected and superseded by c186.
+
+Prebattle crafted dependencies remain open; see
+[resource investigation and next implementation](CAMPAIGN_CRAFTED_VISUAL_RESOURCES.md).
+No resource creation/preload-before-battle fix or two-machine archive is claimed.
+r61 has now staged nine coherent b281 files with seven configuration preimages at
+`artifacts/runtime/map-prisoner-r61-20261027`. No game launched. Use its scoped
+Start-Campaign-Replica.cmd, normal MP shortcut and a real citadel battle, then test
+all hero row portraits/equipment and independent prisoner row clicks while the host
+selects another row. Cold prebattle crafted portraits remain an acknowledged open
+requirement; do not ask the user to treat that unchanged issue as a new regression.
+
+2026-10-27 r59 CLOSED, all7 configs restored. Save-switch -> citadel -> map passed
+on one machine with unchanged owned server PID. The prisoner failure is now proven
+`aftermath-tree-invalid:byte-limit`. User also reports naked main-hero Loot preview
+after citadel and full-army keep selection. Source b279 addresses these as follows:
+
+- CAF3 uses canonical per-envelope string references, preserving every row/value
+  under unchanged786432-byte/65536-value/1024-item/depth12 bounds. No truncation,
+  decompression or enlarged native payload. Protocol66/bridge61 require coherent
+  host/server/MP; tooltip5/catalog10 and CML2 remain unchanged.
+- A600-row complete prisoner/loot fixture preserves the final row, all50 prepared
+  properties and Unicode text below half the wire budget; undefined references,
+  ordinary corruption, bounds and canonical roundtrip are checked.
+- The saved roster proves main_hero has armor and crafted_item_0, mapped during the
+  MP battle to cs_crafted_b2834eadf9bb7620. The old strict preview resolver cannot
+  find the original crafted ID and therefore rejects the whole equipment code.
+  Host detached loadout capture now reuses the existing battle fingerprint builder
+  to project exact crafted aliases into its prepared mannequin/slot image data.
+  It does not modify live inventory or create native items. Aliases are derived
+  from the current item's design, never adopted by a reused save-local name.
+- A validated LordsHall prebattle selector now requires its materialized cohort,
+  waits if that cohort is not ready, and never merges the full campaign army.
+  The same resolver is used by server request validation. Other scenario branches
+  retain their existing behavior. This still needs native selection/possession proof.
+- cmp-b279: both isolated builds pass and installed inventories were unchanged.
+  cmp-c184: all26 contract projects pass; compiled mission-admission, detached loot
+  session and aftermath-binding checks pass. These do not accept native rendering.
+
+Installed is now b279 through r60: nine coherent files with seven config preimages
+retained under `artifacts/runtime/map-save-reload-r60-20261027`. No game launched;
+the prior user-started roles are closed. Use its Start-Campaign-Replica.cmd for the
+scoped automatic-mission/capture flags; MP must use the user's normal shortcut.
+Do not publish an archive
+or claim the three reported issues fixed before the next native check. Independent
+prisoner inspection and the older open fidelity gates below remain unfinished.
+
+2026-10-27 override: manual r58 siege prisoner capture failed with repeated
+`aftermath-tree-invalid`; loot did render. Its exact rejection remains unknown.
+Save reload also exposed repeated expensive roster construction after owned-session
+faulting. Source b278 implements reset/rebinding instead of permanent rejection;
+both builds, all26 c181 contracts and detached checks pass, native acceptance pending.
+See [save-reload investigation](CAMPAIGN_SAVE_RELOAD.md). r59 now stages coherent
+b278 and campaign63908 is launched; user prepares the siege -> citadel repetition.
+No native fix acceptance yet. This overrides the historical b274 entries below.
+
 Current consolidated status and next manual test:
 [2026-10-25 handoff](HANDOFF_2026-10-25_AFTERMATH.md). The dated entries below retain
 investigation history; older candidates and pending statuses are superseded by the

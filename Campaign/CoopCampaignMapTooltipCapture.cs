@@ -52,7 +52,8 @@ namespace CoopSpectator.Campaign
 
         private bool TryCaptureCore(PartyBase target, EquipmentElement? item, string session, string entityId,
             long generation, long sequence, bool extended,
-            out CoopCampaignMapTooltipPayload payload, out string reason, object encounter = null, MapInfoItemVM barInfo = null)
+            out CoopCampaignMapTooltipPayload payload, out string reason, object encounter = null, MapInfoItemVM barInfo = null,
+            CoopCampaignMapMenuCapture.SettlementHintSource settlementHint = null)
         {
             payload = null;
             reason = "tooltip-context-not-ready";
@@ -70,7 +71,20 @@ namespace CoopSpectator.Campaign
                 object[] args;
                 CoopCampaignMapTooltipKind kind;
                 Action<PropertyBasedTooltipVM, object[]> provider;
-                if (barInfo != null)
+                if (settlementHint != null)
+                {
+                    if (!IsCurrentSettlementHint(settlementHint, session, entityId)) return false;
+                    object portrait = settlementHint.Target;
+                    if (portrait is MobileParty mobile)
+                    { type = typeof(MobileParty); args = new object[] { mobile, true, false }; kind = CoopCampaignMapTooltipKind.MobileParty; provider = TooltipRefresherCollection.RefreshMobilePartyTooltip; }
+                    else if (portrait is Settlement settlement)
+                    { type = typeof(Settlement); args = new object[] { settlement }; kind = CoopCampaignMapTooltipKind.Settlement; provider = TooltipRefresherCollection.RefreshSettlementTooltip; }
+                    else if (portrait is Hero hero)
+                    { type = typeof(Hero); args = new object[] { hero, true }; kind = CoopCampaignMapTooltipKind.Hero; provider = TooltipRefresherCollection.RefreshHeroTooltip; }
+                    else
+                    { type = typeof(List<TooltipProperty>); args = null; kind = CoopCampaignMapTooltipKind.SettlementInfo; provider = PropertyBasedTooltipVM.RefreshGenericPropertyBasedTooltip; }
+                }
+                else if (barInfo != null)
                 {
                     if (!IsCurrentBarInfo(barInfo, session, entityId)) return false;
                     type = typeof(List<TooltipProperty>); args = null;
@@ -118,7 +132,8 @@ namespace CoopSpectator.Campaign
                     reason = "tooltip-text-context-incompatible-or-busy";
                     return false;
                 }
-                if (!(barInfo != null ? CoopCampaignMapTooltipLanguageState.AreBarWritableTemplatesIsolated() :
+                if (!(settlementHint != null ? CoopCampaignMapTooltipLanguageState.AreSettlementWritableTemplatesIsolated(kind == CoopCampaignMapTooltipKind.Hero) :
+                        barInfo != null ? CoopCampaignMapTooltipLanguageState.AreBarWritableTemplatesIsolated() :
                         item.HasValue ? CoopCampaignMapTooltipLanguageState.AreItemWritableTemplatesIsolated() :
                         CoopCampaignMapTooltipLanguageState.AreWritableTemplatesIsolated()) ||
                     !CoopCampaignMapTooltipLanguageState.TryBegin(_ownerThread, out languageScope))
@@ -139,7 +154,13 @@ namespace CoopSpectator.Campaign
                     reason = "tooltip-key-text-not-ready";
                     return false;
                 }
-                if (barInfo != null)
+                if (settlementHint != null && settlementHint.Target == null)
+                {
+                    var rows = CaptureSettlementRows(settlementHint);
+                    if (rows == null || rows.Count > CoopCampaignMapTooltipPayloadCodec.MaxRows) return false;
+                    args = new object[] { rows };
+                }
+                else if (barInfo != null)
                 {
                     var rows = CaptureBarInfoRows(barInfo.ItemId);
                     if (rows == null || rows.Count > CoopCampaignMapTooltipPayloadCodec.MaxRows) return false;
@@ -167,7 +188,8 @@ namespace CoopSpectator.Campaign
                     });
                 }
                 if (!IsMapContext() ||
-                    !(barInfo != null ? IsCurrentBarInfo(barInfo, session, entityId) :
+                    !(settlementHint != null ? IsCurrentSettlementHint(settlementHint, session, entityId) :
+                        barInfo != null ? IsCurrentBarInfo(barInfo, session, entityId) :
                         encounter != null ? IsCurrentEncounter(encounter, session, entityId) :
                         item.HasValue ? IsCurrentItem(item.Value, session, entityId) : IsDisclosedTarget(target, entityId)) ||
                     !CoopCampaignMapTooltipPayloadCodec.IsValid(result))

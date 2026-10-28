@@ -12,6 +12,10 @@ internal static class Program
             ValidateProtocolVersion();
             ControlHintTests.Run();
             AftermathPresentationTests.Run();
+            MissionReloadTests.Run();
+            CraftedVisualResourceTests.Run();
+            SettlementMenuTests.Run();
+            AutoBattlePresentationTests.Run();
             PartyAnimationTests.Run();
             SiegeTentTests.Run();
             SiegeOverlayTests.Run();
@@ -175,10 +179,10 @@ internal static class Program
     private static void ValidateProtocolVersion()
     {
         Assert(
-            CoopCampaignMapPrototypeContract.ProtocolVersion == 65 &&
-            CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion == 60 &&
+            CoopCampaignMapPrototypeContract.ProtocolVersion == 71 &&
+            CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion == 66 &&
             CoopCampaignMapCatalogBinarySerializer.SchemaVersion == 10,
-            "Aftermath loadout payload requires coherent protocol/bridge/catalog schema 65/60/10.");
+            "Auto-battle scoreboard requires coherent protocol/bridge/catalog schema 71/66/10.");
     }
 
     private static void ValidateSiegeTentTransport()
@@ -658,9 +662,8 @@ internal static class Program
                view.Contains("CoopCampaignMapReplicaStateProjection.Merge("),
             "The authoritative host-hidden permission and redacted values must reach the replica.");
         Assert(overlay.Contains("entity.IsPartyInformationHidden ? \"?\"") &&
-               info.Contains("dynamicState.IsPartyInformationHidden") &&
-               info.Contains("!dynamicState.IsPartyInformationHidden && dynamicState.ArmyTotalSize"),
-            "Nameplate and details must not present redaction zeroes as known counts.");
+               !info.Contains("PartySize") && !info.Contains("ArmyTotalSize"),
+            "Nameplates must redact hidden counts; the removed custom summary must not reintroduce them.");
         Assert(wire.Contains("IsPartyInformationHidden = ReadBoolFromPacket(ref valid)") &&
                wire.Contains("WriteBoolToPacket(entity?.IsPartyInformationHidden ?? false)"),
             "Dynamic wire format must carry the visibility permission symmetrically.");
@@ -3278,17 +3281,10 @@ internal static class Program
             "CoopCampaignMapReplicaInfo.xml"));
 
         Assert(
-            infoPrefab.Contains("ScaledPositionXOffset=\"@PositionX\"") &&
-            infoPrefab.Contains("ScaledPositionYOffset=\"@PositionY\"") &&
-            !infoPrefab.Contains("Position=\"@Position\"") &&
-            infoPrefab.Contains("SuggestedWidth=\"@PanelWidth\"") &&
-            infoPrefab.Contains("SuggestedHeight=\"@PanelHeight\"") &&
-            infoViewModel.Contains("public float PositionX") &&
-            infoViewModel.Contains("public float PositionY") &&
-            infoViewModel.Contains("ResolveInformationPanelPosition(") &&
-            missionView.Contains("_replicaInfoLayer?.UIContext?.CustomScale"),
-            "Generic Widget has no Position property: replica info must bind physical-pixel " +
-            "offsets and clamp with the same scaled dimensions used by Gauntlet.");
+            !infoPrefab.Contains("@PanelWidth") && !infoPrefab.Contains("@DetailsText") &&
+            !missionView.Contains("_selectedReplicaId") &&
+            infoPrefab.Contains("Command.Click=\"ExecuteFollowHost\""),
+            "Camera controls remain available without the custom click-pinned summary.");
 
         Assert(
             missionView.Contains(
@@ -3313,8 +3309,9 @@ internal static class Program
             missionView.Contains(
                 "CoopCampaignMapPrototypeInteractionPolicy") &&
             missionView.Contains("ResolveNativeHoveredReplica()") &&
-            infoViewModel.Contains("коліщатко — масштаб") &&
-            infoViewModel.Contains("ЛКМ — відомості"),
+            infoViewModel.Contains("Mouse wheel — Zoom") &&
+            infoViewModel.Contains("Return to host camera") &&
+            infoViewModel.Contains("Right mouse button — Rotate camera"),
             "Native picking and discoverable interaction guidance must remain wired.");
     }
 

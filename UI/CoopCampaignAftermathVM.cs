@@ -8,6 +8,12 @@ using TaleWorlds.ObjectSystem;
 
 namespace CoopSpectator.UI
 {
+    internal interface ICoopCampaignAftermathInspection
+    {
+        void Tick(CoopCampaignAftermathPresentation state);
+        void Suspend();
+        void Dispose();
+    }
     // Gauntlet's XML binding engine consumes IViewModel. Reimplement its access
     // interface instead of constructing native PartyVM/InventoryVM on the client.
     // Native commands and setter delegates never exist on these detached nodes.
@@ -194,6 +200,12 @@ namespace CoopSpectator.UI
         public void ExecuteSelectStealthOutfit() => ExecuteCommand(nameof(ExecuteSelectStealthOutfit), Array.Empty<object>());
         public void ExecuteSelectPreviousItem() => ExecuteCommand(nameof(ExecuteSelectPreviousItem), Array.Empty<object>());
         public void ExecuteSelectNextItem() => ExecuteCommand(nameof(ExecuteSelectNextItem), Array.Empty<object>());
+        public void ExecuteSetSelected() => ExecuteCommand(nameof(ExecuteSetSelected), Array.Empty<object>());
+        public void ExecuteSetFocused() => ExecuteCommand(nameof(ExecuteSetFocused), Array.Empty<object>());
+        public void ExecuteSetUnfocused() => ExecuteCommand(nameof(ExecuteSetUnfocused), Array.Empty<object>());
+        public void ExecuteClearSelectedCharacterTuple() => ExecuteCommand(nameof(ExecuteClearSelectedCharacterTuple), Array.Empty<object>());
+        public void ExecuteBeginHint() => ExecuteCommand(nameof(ExecuteBeginHint), Array.Empty<object>());
+        public void ExecuteEndHint() => ExecuteCommand(nameof(ExecuteEndHint), Array.Empty<object>());
         public new object GetViewModelAtPath(BindingPath path, bool isList) => GetViewModelAtPath(path);
         public new object GetViewModelAtPath(BindingPath path)
         {

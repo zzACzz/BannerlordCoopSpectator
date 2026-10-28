@@ -19,6 +19,10 @@ if (-not $contracts.IsFullSuite -or $contracts.ProjectCount -lt 26 -or
 foreach ($binary in @($build.ClientOutput, $build.DedicatedOutput)) {
     if ((Get-FileHash -LiteralPath $binary.Path).Hash -ne $binary.Sha256) { throw 'Build output changed after verification' }
 }
+$defaultEvidence=@()
+foreach($binary in @($build.ClientOutput,$build.DedicatedOutput)) {
+    $defaultEvidence += & (Join-Path $PSScriptRoot 'Test-ReplicaDefaults.ps1') -CandidateDirectory (Split-Path -Parent $binary.Path)
+}
 $output = Join-Path $repo ('dist/previews/' + $PackageName)
 $zip = $output + '.zip'
 if ((Test-Path -LiteralPath $output) -or (Test-Path -LiteralPath $zip)) { throw 'Use a fresh package name' }
@@ -36,6 +40,8 @@ function Copy-Static([string]$source, [string]$target) {
     foreach ($file in Get-ChildItem -LiteralPath $source -Recurse -File) {
         $relative = $file.FullName.Substring($source.Length + 1)
         if ($relative -match '^(bin|obj)[\\/]' -or $file.Extension -eq '.pdb') { continue }
+        # Abandoned, unreferenced tooltip experiment; native tooltips are used.
+        if ($relative.Replace('\','/') -eq 'GUI/Prefabs/CoopCampaignLootTooltip.xml') { continue }
         Copy-One $file.FullName (Join-Path $target $relative)
     }
 }
@@ -60,13 +66,19 @@ Copy-One (Join-Path $repo 'artifacts/hotfix-v032-server-harmony/LICENSE-Harmony.
 Copy-One (Join-Path $repo 'docs/TWO_PC_PREVIEW_TEST_EN.md') (Join-Path $output 'README_TEST_EN.md')
 Copy-One (Join-Path $BuildRunRoot 'artifacts/results/compile-only.json') (Join-Path $output 'Verification/compile-only.json')
 Copy-One (Join-Path $ContractRunRoot 'artifacts/results/contracts.json') (Join-Path $output 'Verification/contracts.json')
+$defaultEvidence | Set-Content -LiteralPath (Join-Path $output 'Verification/replica-defaults.txt') -Encoding UTF8
 [xml]$clientXml = Get-Content (Join-Path $client 'SubModule.xml')
 [xml]$hostXml = Get-Content (Join-Path $hostModule 'SubModule.xml')
 if ($clientXml.Module.Version.value -ne $hostXml.Module.Version.value) { throw 'Module versions differ' }
 $files = @(Get-ChildItem -LiteralPath $output -Recurse -File | ForEach-Object {
     [pscustomobject]@{ Path = $_.FullName.Substring($output.Length + 1).Replace('\','/'); Length = $_.Length; SHA256 = (Get-FileHash -LiteralPath $_.FullName).Hash }
 })
-[pscustomobject]@{ Package=$PackageName; Kind='Development preview, not public v0.3.2 release'; BuildRun=$build.RunId; Files=$files } |
+[xml]$nativeXml=Get-Content -LiteralPath (Join-Path $game 'Modules/Native/SubModule.xml')
+[pscustomobject]@{ Package=$PackageName; Kind='Development preview, not public v0.3.2 release';
+    BuildRun=$build.RunId; ContractRun=$contracts.RunId; NativeVersion=$nativeXml.Module.Version.value;
+    SourceRevision=(& git -C $repo rev-parse HEAD); WorkingTreeSnapshot=$true;
+    ReplicaEnabledByDefault=$true; AutomaticMissionsEnabledByDefault=$true; SiegeFlightsEnabledByDefault=$true;
+    Files=$files } |
     ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $output 'MANIFEST.json') -Encoding UTF8
 $writer = [IO.Compression.ZipFile]::Open($zip, [IO.Compression.ZipArchiveMode]::Create)
 try {

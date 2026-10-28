@@ -12,7 +12,7 @@ namespace CoopSpectator.Campaign
 {
     internal sealed partial class CoopCampaignMapTooltipCapture
     {
-        // Unwired projection candidate. Do not call the host CurrentCharacter
+        // Owned inspection projection. Do not call the host CurrentCharacter
         // setter: it refreshes live rows and removes zero counts from the roster.
         internal bool TryPreparePrisonerPreview(string window, string rowId, out CoopCampaignPresentationValue preview)
         {
@@ -53,6 +53,12 @@ namespace CoopSpectator.Campaign
                 }
                 var result = CoopCampaignPresentationValue.Node();
                 result.Properties.Add("SelectedCharacter", CoopCampaignAftermathCapture.CapturePrepared(detached));
+                var aliases = new System.Collections.Generic.Dictionary<string, string>(StringComparer.Ordinal);
+                for (int i = 0; i < (int)TaleWorlds.Core.EquipmentIndex.NumEquipmentSetSlots; i++)
+                {
+                    var item = character.Equipment.GetEquipmentFromSlot((TaleWorlds.Core.EquipmentIndex)i).Item;
+                    if (BattleDetector.TryGetCraftedVisualMirrorId(item, out string mirror)) aliases[item.StringId] = mirror;
+                }
                 result.Properties.Add("CurrentCharacter", CoopCampaignAftermathCapture.CapturePrepared(row));
                 result.Properties.Add("CurrentCharacterLevelLbl", PreviewText(character.Level.ToString(System.Globalization.CultureInfo.InvariantCulture)));
                 result.Properties.Add("CurrentCharacterWageLbl", PreviewText(row.Type == PartyScreenLogic.TroopType.Member &&
@@ -60,6 +66,7 @@ namespace CoopSpectator.Campaign
                 result.Properties.Add("CurrentCharacterTier", CoopCampaignAftermathCapture.CapturePrepared(CampaignUIHelper.GetCharacterTierData(character, isBig: true)));
                 result.Properties.Add("IsCurrentCharacterFormationEnabled", PreviewFlag(!row.IsMainHero && !row.IsPrisoner && row.Side != PartyScreenLogic.PartyRosterSide.Left));
                 result.Properties.Add("IsCurrentCharacterWageEnabled", PreviewFlag(!row.IsMainHero && !row.IsPrisoner));
+                CoopCampaignAftermathEquipmentProjection.ApplyCraftedAliases(result, aliases);
                 if (!CoopCampaignAftermathCapture.TryResolvePrisonerRow(window, rowId, out var currentOwner, out var currentRow) ||
                     !ReferenceEquals(owner, currentOwner) || !ReferenceEquals(raw, currentRow) || !ReferenceEquals(character, row.Character)) return false;
                 if (!new CoopCampaignAftermathPresentation { Kind = CoopCampaignAftermathKind.Prisoners, WindowId = window, Root = result }.IsValid()) return false;

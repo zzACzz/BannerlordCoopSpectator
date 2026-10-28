@@ -10,6 +10,21 @@ namespace CoopSpectator.UI
     public sealed class CoopConversationHudImageVM : ViewModel
     {
         private static int _portraitFailureDiagnostics;
+        private CoopDetachedPortraitBinding _detachedPortrait;
+        internal CoopConversationHudImageVM(string id, int portraitPose, CoopDetachedPortraitResources resources)
+        {
+            TextureProviderName = "CoopDetachedPortraitTextureProvider";
+            AdditionalArgs = string.Empty; Id = string.Empty;
+            if (portraitPose < -1 || portraitPose > 7 || resources == null ||
+                !Patches.CoopDetachedPortraitEquipmentPatch.IsInstalled || !ValidPortraitBody(id)) return;
+            try
+            {
+                if (!resources.TryBuild(id, out var equipment)) return;
+                _detachedPortrait = new CoopDetachedPortraitBinding(id, equipment, portraitPose);
+                Id = id; AdditionalArgs = _detachedPortrait.Token;
+            }
+            catch (Exception) { }
+        }
         public CoopConversationHudImageVM(string id, bool banner, bool nineGrid = false, int portraitPose = -1)
         {
             TextureProviderName = banner ? "BannerImageTextureProvider" : "CharacterImageTextureProvider";
@@ -68,6 +83,24 @@ namespace CoopSpectator.UI
                 return resolved;
             }
             catch (Exception ex) { return PortraitUnavailable("exception:" + ex.GetType().Name); }
+        }
+        private static bool ValidPortraitBody(string id)
+        {
+            if (string.IsNullOrEmpty(id) || !CoopConversationHudCodec.IsPortraitCode(id)) return false;
+            try
+            {
+                var fields = id.Split(new[] { "@---@" }, StringSplitOptions.None);
+                if (!BodyProperties.FromString(fields[2], out var body) || !InRange(body.Age, 0, 128) ||
+                    !InRange(body.Weight, 0, 1) || !InRange(body.Build, 0, 1)) return false;
+                var code = CharacterCode.CreateFrom(id);
+                return code.Race < FaceGen.GetRaceCount() && FaceGen.GetBaseMonsterFromRace(code.Race) != null;
+            }
+            catch (Exception) { return false; }
+        }
+        public override void OnFinalize()
+        {
+            _detachedPortrait?.Dispose(); _detachedPortrait = null;
+            base.OnFinalize();
         }
         // Failure-only, explicit verbose mode, bounded per process. No extra
         // native reads, body codes, player IDs or exception messages are logged.

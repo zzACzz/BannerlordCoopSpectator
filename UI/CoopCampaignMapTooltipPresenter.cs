@@ -143,7 +143,7 @@ namespace CoopSpectator.UI
         {
             vm.TooltipPropertyList.Clear();
             vm.Mode = payload.Mode;
-            foreach (var row in payload.Kind == CoopCampaignMapTooltipKind.BarControl ? payload.ControlHint.Rows : payload.Rows)
+            foreach (var row in CoopCampaignMapTooltipPayloadCodec.IsControlKind(payload.Kind) ? payload.ControlHint.Rows : payload.Rows)
                 vm.TooltipPropertyList.Add(new TooltipProperty(row.Definition, row.Value, row.TextHeight,
                     new Color(row.Red, row.Green, row.Blue, row.Alpha), false,
                     (TooltipProperty.TooltipPropertyFlags)row.PropertyModifier));
@@ -161,7 +161,7 @@ namespace CoopSpectator.UI
         }
 
         private static bool IsPlainHint(CoopCampaignMapTooltipPayload payload) =>
-            payload?.Kind == CoopCampaignMapTooltipKind.BarControl && !string.IsNullOrEmpty(payload.ControlHint?.Text);
+            payload != null && CoopCampaignMapTooltipPayloadCodec.IsControlKind(payload.Kind) && !string.IsNullOrEmpty(payload.ControlHint?.Text);
 
         private static void RefreshHint(HintVM vm, object[] args)
         {
@@ -189,7 +189,7 @@ namespace CoopSpectator.UI
             }
             var previousRows = previous.Rows;
             var nextRows = next.Rows;
-            if (next.Kind == CoopCampaignMapTooltipKind.BarControl)
+            if (CoopCampaignMapTooltipPayloadCodec.IsControlKind(next.Kind))
             {
                 if (previous.ControlHint == null || next.ControlHint == null ||
                     previous.ControlHint.Text != next.ControlHint.Text ||

@@ -60,20 +60,15 @@ internal static class PartyBodyTests
         string pickingSource = File.ReadAllText(Path.Combine(root, "UI", "CoopCampaignMapPrototypeMissionView.Picking.cs"));
         Check(hoverSource.Contains("ResolveNativeHoveredReplica()") &&
               pickingSource.Contains("replica.Target.Kind, dynamicState.PartyNameplateFlags") &&
-              hoverSource.Contains("catalog.Kind, dynamicState.PartyNameplateFlags") &&
-              hoverSource.Contains("_selectedReplicaId = null"),
-            "Hidden body cannot be newly hovered or retain its pinned panel");
+              hoverSource.Contains("IsPickTargetAdmitted(hoveredId)"),
+            "Hidden body cannot become the current native tooltip target");
         int upsert = view.IndexOf("private void UpsertEntityReplica(", StringComparison.Ordinal);
         int upsertEnd = view.IndexOf("private void RemoveEntityReplica(", upsert, StringComparison.Ordinal);
         string upsertSource = view.Substring(upsert, upsertEnd - upsert);
         Check(upsertSource.Contains("entity.Kind, entity.PartyNameplateFlags") &&
-              upsertSource.Contains("_replicaInfoViewModel?.DisplayedEntityId") &&
-              upsertSource.Contains("_replicaInfoViewModel.Hide()") &&
-              upsertSource.Contains("_selectedReplicaId = null"),
-            "Host update invalidates hidden hover/pin independently of UI focus");
-        string info = File.ReadAllText(Path.Combine(root, "UI", "CoopCampaignMapReplicaInfoVM.cs"));
-        Check(info.Contains("DisplayedEntityId = catalog.EntityId") && info.Contains("DisplayedEntityId = null"),
-            "Info identity follows exactly the displayed entity and clears on hide");
+              upsertSource.Contains("_hoveredReplicaId = null") &&
+              upsertSource.Contains("_tooltipPresenter?.Clear()"),
+            "Host update invalidates hidden hover independently of UI focus");
         string publisher = File.ReadAllText(Path.Combine(root, "Campaign", "CoopCampaignMapPrototypePublisherBehavior.cs"));
         Check(publisher.Contains("party.CurrentSettlement != null, party.IsDisorganized") &&
               publisher.Replace("\r\n", "\n").Contains(

@@ -6,7 +6,7 @@ using TaleWorlds.Library;
 namespace CoopSpectator.UI
 {
     // Local inspection only. No campaign command or inventory mutation delegate.
-    internal sealed class CoopCampaignLootInspection
+    internal sealed class CoopCampaignLootInspection : ICoopCampaignAftermathInspection
     {
         private readonly CoopCampaignAftermathVM _root;
         private CoopCampaignAftermathVM _card = new CoopCampaignAftermathVM();
@@ -207,6 +207,9 @@ namespace CoopSpectator.UI
             }
             SetCardVisible(valid);
         }
+        void ICoopCampaignAftermathInspection.Tick(CoopCampaignAftermathPresentation state) => Tick(state);
+        void ICoopCampaignAftermathInspection.Suspend() => Suspend();
+        void ICoopCampaignAftermathInspection.Dispose() => Dispose();
         internal void Suspend() { Invalidate(); InvalidateVisual(); }
         internal void Dispose()
         {

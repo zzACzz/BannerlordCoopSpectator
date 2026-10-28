@@ -1,5 +1,34 @@
 # Runtime Flows
 
+Auto-battle candidate: host Send troops -> native map simulation scoreboard owner
+-> prepared display-only CAS1 inside CMN12 -> dedicated map peers -> detached
+SPScoreboard. Only native host UI advances the simulation. Live progress/final
+result replace values in place; host closes it -> explicit menu/aftermath update
+releases replica. Settings suspend, lifetime/freshness/reload/reconnect revoke.
+Native scenario acceptance pending; see CAMPAIGN_AUTO_BATTLE_WINDOW.md.
+
+b292 settlement hover candidate: current native prepared overlay source -> opaque
+settlementui token in CMN11 publication -> independent client hover -> leased
+dedicated/host admission -> current owner/source revalidation -> isolated native
+property/hero/string provider -> tooltip6 response to that peer -> stock detached
+tooltip presentation. Source replacement/hidden/menu/save/session/modal transitions
+revoke interests. No host action or hover forwarding. Native hover acceptance
+pending; b290 top-panel layout/popup fix accepted by user.
+
+2026-10-27 native-ended close candidate: an exact published result and host applied
+journal acknowledgement still precede EndBattle. If native combat has already set
+MissionEnded while the mission remains Continuing, the adapter dispatches the
+owned lobby Ending path; the listed manager would reject that state. Native UDP
+UnloadMission and observed teardown still precede StartMap. Save reload uses the
+same scoped close helper under separate abandonment admission. See
+CAMPAIGN_MISSION_NATIVE_ENDED_CLOSE.md for proof/remaining native gates.
+
+Settlement panel candidate b289: active host native SettlementMenuOverlayVM ->
+bounded CMN10/protocol69/bridge64 menu -> detached client stock SettlementOverlay.
+Prepared portraits use the mission-owned unregistered resource pool. A null panel
+or menu release revokes it; conversation/modal visibility follows existing menu
+suspension. No campaign actions are forwarded; panel hover payloads remain open.
+
 Current aftermath runtime and manual validation sequence:
 [2026-10-25 handoff](HANDOFF_2026-10-25_AFTERMATH.md). Older staged/pending version
 notes below are historical; installed b274 uses65/60/5/10/CAF2.

@@ -10,16 +10,22 @@ namespace CoopSpectator.Infrastructure
     {
         private readonly string _session;
         private readonly CoopMissionProcessIdentity _self;
+        private readonly string _epoch, _campaign;
+        private readonly CoopMissionProcessIdentity _host;
         private CoopCampaignMissionEnvelope _last;
         private string _lastDigest;
-        public CoopCampaignMissionAdmission(string session, CoopMissionProcessIdentity self)
-        { _session = session; _self = self; }
+        public CoopCampaignMissionAdmission(string session, CoopMissionProcessIdentity self,
+            string epoch = null, string campaign = null, CoopMissionProcessIdentity host = null)
+        { _session = session; _self = self?.Copy() ?? throw new ArgumentNullException(nameof(self));
+            _epoch = epoch; _campaign = campaign; _host = host?.Copy(); }
         public CoopCampaignMissionEnvelope Admit(CoopCampaignMissionEnvelope value, long now, long frequency,
             Func<CoopMissionProcessIdentity, bool> hostAlive)
         {
             if (value == null || value.Intent.Session != _session || !CoopCampaignMissionChannel.IsFresh(value, now, frequency) ||
-                !_self.Matches(value.Dedicated) || !hostAlive(value.Host)) return null;
-            if (_last != null && (!_last.Host.Matches(value.Host) || _last.CampaignId != value.CampaignId))
+                !_self.Matches(value.Dedicated) || !hostAlive(value.Host) ||
+                (_epoch != null && value.Epoch != _epoch) || (_campaign != null && value.CampaignId != _campaign) ||
+                (_host != null && !_host.Matches(value.Host))) return null;
+            if (_last != null && (!_last.Host.Matches(value.Host) || _last.CampaignId != value.CampaignId || _last.Epoch != value.Epoch))
                 throw new InvalidDataException("Session identity changed.");
             if (_last != null && value.Pulse < _last.Pulse) return null;
             byte[] encoded = CoopCampaignMissionChannel.Encode(value);
@@ -39,6 +45,7 @@ namespace CoopSpectator.Infrastructure
         public int Id;
         public long StartUtcTicks;
         public string Path;
+        internal CoopMissionProcessIdentity Copy() => new CoopMissionProcessIdentity { Id = Id, StartUtcTicks = StartUtcTicks, Path = Path };
         public static CoopMissionProcessIdentity Capture(Process process) => new CoopMissionProcessIdentity
         { Id = process.Id, StartUtcTicks = process.StartTime.ToUniversalTime().Ticks, Path = process.MainModule.FileName };
         public bool Matches(CoopMissionProcessIdentity other) => other != null && Id == other.Id &&
@@ -55,7 +62,7 @@ namespace CoopSpectator.Infrastructure
         public CoopCampaignMissionIntent Intent;
         public CoopMissionProcessIdentity Host, Dedicated;
         public long Pulse, SentTimestamp;
-        public string CampaignId, BattleId, BattleInstanceId, Scene, GameType, RosterSha256;
+        public string CampaignId, Epoch, BattleId, BattleInstanceId, Scene, GameType, RosterSha256;
     }
 
     // Local, inherited session only. No directory enumeration, arbitrary path input,
@@ -142,14 +149,14 @@ namespace CoopSpectator.Infrastructure
             using (var stream = new MemoryStream())
             using (var writer = new BinaryWriter(stream, Utf8, true))
             {
-                writer.Write(0x434D4C01);
+                writer.Write(0x434D4C02);
                 var intent = value.Intent;
                 Text(writer, intent.Session); writer.Write(intent.Revision); writer.Write((int)intent.Kind);
                 Text(writer, intent.BattleKey); writer.Write(intent.HostOnGlobalMap);
                 writer.Write(intent.AftermathApplied); Text(writer, intent.AppliedBattleKey); writer.Write(intent.FollowupStagePending);
                 Identity(writer, value.Host); Identity(writer, value.Dedicated);
                 writer.Write(value.Pulse); writer.Write(value.SentTimestamp);
-                Text(writer, value.CampaignId); Text(writer, value.BattleId); Text(writer, value.BattleInstanceId);
+                Text(writer, value.CampaignId); Text(writer, value.Epoch); Text(writer, value.BattleId); Text(writer, value.BattleInstanceId);
                 Text(writer, value.Scene); Text(writer, value.GameType); Text(writer, value.RosterSha256);
                 writer.Flush();
                 if (stream.Length > MaxEnvelopeBytes) throw new InvalidDataException("Envelope bound.");
@@ -164,7 +171,7 @@ namespace CoopSpectator.Infrastructure
             using (var stream = new MemoryStream(bytes, false))
             using (var reader = new BinaryReader(stream, Utf8))
             {
-                if (reader.ReadInt32() != 0x434D4C01) throw new InvalidDataException("Schema.");
+                if (reader.ReadInt32() != 0x434D4C02) throw new InvalidDataException("Schema.");
                 var intent = new CoopCampaignMissionIntent {
                     Session = Text(reader), Revision = reader.ReadInt64(), Kind = (CoopCampaignMissionIntentKind)reader.ReadInt32(),
                     BattleKey = Text(reader), HostOnGlobalMap = Boolean(reader), AftermathApplied = Boolean(reader),
@@ -172,11 +179,12 @@ namespace CoopSpectator.Infrastructure
                 var result = new CoopCampaignMissionEnvelope {
                     Intent = intent, Host = Identity(reader), Dedicated = Identity(reader),
                     Pulse = reader.ReadInt64(), SentTimestamp = reader.ReadInt64(),
-                    CampaignId = Text(reader), BattleId = Text(reader), BattleInstanceId = Text(reader),
+                    CampaignId = Text(reader), Epoch = Text(reader), BattleId = Text(reader), BattleInstanceId = Text(reader),
                     Scene = Text(reader), GameType = Text(reader), RosterSha256 = Text(reader) };
                 if (stream.Position != stream.Length || !Guid.TryParseExact(intent.Session, "N", out _) || intent.Revision <= 0 ||
                     !Enum.IsDefined(typeof(CoopCampaignMissionIntentKind), intent.Kind) || result.Pulse <= 0 || result.SentTimestamp <= 0 ||
-                    string.IsNullOrEmpty(result.CampaignId) || intent.BattleKey.Length > 256 || intent.AppliedBattleKey.Length > 256)
+                    string.IsNullOrEmpty(result.CampaignId) || !Guid.TryParseExact(result.Epoch, "N", out var epoch) || epoch == Guid.Empty ||
+                    result.Epoch != epoch.ToString("N") || intent.BattleKey.Length > 256 || intent.AppliedBattleKey.Length > 256)
                     throw new InvalidDataException("Invalid intent.");
                 if (intent.Kind == CoopCampaignMissionIntentKind.Battle && (string.IsNullOrEmpty(result.BattleId) ||
                     string.IsNullOrEmpty(result.BattleInstanceId) || !IsToken(result.Scene) || !IsToken(result.GameType) ||

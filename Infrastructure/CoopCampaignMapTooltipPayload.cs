@@ -19,7 +19,11 @@ namespace CoopSpectator.Infrastructure
         BarInfo = 8,
         BarControl = 9,
         AftermathItem = 10,
-        AftermathLoadout = 11
+        AftermathLoadout = 11,
+        AftermathTroop = 12,
+        SettlementControl = 13,
+        SettlementInfo = 14,
+        Hero = 15
     }
 
     public sealed class CoopCampaignMapTooltipRow
@@ -52,7 +56,7 @@ namespace CoopSpectator.Infrastructure
 
     public static class CoopCampaignMapTooltipPayloadCodec
     {
-        public const int Version = 5;
+        public const int Version = 6;
         public const int MaxPayloadBytes = 1048576;
         public const int MaxRows = 512;
         public const int MaxTextCharacters = 4096;
@@ -124,7 +128,7 @@ namespace CoopSpectator.Infrastructure
                         if (!CoopCampaignMapRundownCodec.TryEncode(payload.Rundown, out var rundownBytes)) return false;
                         writer.Write(rundownBytes.Length); writer.Write(rundownBytes);
                     }
-                    if (payload.Kind == CoopCampaignMapTooltipKind.BarControl)
+                    if (IsControlKind(payload.Kind))
                     {
                         if (!CoopCampaignMapControlHintCodec.TryEncode(payload.ControlHint, out var controlBytes)) return false;
                         writer.Write(controlBytes.Length); writer.Write(controlBytes);
@@ -166,7 +170,7 @@ namespace CoopSpectator.Infrastructure
                     decoded.Mode = reader.ReadInt32();
                     int count = reader.ReadInt32();
                     // Each row requires two length prefixes and six 32-bit fields.
-                    if (count < (decoded.Kind == CoopCampaignMapTooltipKind.BarRundown || decoded.Kind == CoopCampaignMapTooltipKind.BarControl || IsAftermath(decoded.Kind) ? 0 : 1) || count > MaxRows || count > (stream.Length - stream.Position) / 32) return false;
+                    if (count < (decoded.Kind == CoopCampaignMapTooltipKind.BarRundown || IsControlKind(decoded.Kind) || IsAftermath(decoded.Kind) ? 0 : 1) || count > MaxRows || count > (stream.Length - stream.Position) / 32) return false;
                     for (int i = 0; i < count; i++)
                     {
                         decoded.Rows.Add(new CoopCampaignMapTooltipRow {
@@ -185,7 +189,7 @@ namespace CoopSpectator.Infrastructure
                             !CoopCampaignMapRundownCodec.TryDecode(reader.ReadBytes(length), out var rundown)) return false;
                         decoded.Rundown = rundown;
                     }
-                    if (decoded.Kind == CoopCampaignMapTooltipKind.BarControl)
+                    if (IsControlKind(decoded.Kind))
                     {
                         int length = reader.ReadInt32();
                         if (length < 0 || length > MaxPayloadBytes || length != stream.Length - stream.Position ||
@@ -213,31 +217,37 @@ namespace CoopSpectator.Infrastructure
         {
             size = 0;
             if (payload == null || !IsValidCorrelation(payload.SessionId, payload.EntityId, payload.RequestGeneration, payload.Sequence) ||
-                (int)payload.Kind < 1 || (int)payload.Kind > 11 || payload.Mode < 0 || payload.Mode > 4 ||
+                (int)payload.Kind < 1 || (int)payload.Kind > 15 || payload.Mode < 0 || payload.Mode > 4 ||
                 payload.Rows == null || payload.Rows.Count > MaxRows) return false;
             try
             {
                 long measured = 45L + Utf8.GetByteCount(payload.SessionId) + Utf8.GetByteCount(payload.EntityId);
-                if (payload.Kind != CoopCampaignMapTooltipKind.BarControl && payload.ControlHint != null) return false;
+                if (!IsControlKind(payload.Kind) && payload.ControlHint != null) return false;
                 if (!IsAftermath(payload.Kind) && payload.AftermathCard != null) return false;
                 if (IsAftermath(payload.Kind))
                 {
                     string window;
                     if (payload.Kind == CoopCampaignMapTooltipKind.AftermathItem)
                     { if (!CoopCampaignAftermathInspectionTarget.TryParse(payload.EntityId, out var target)) return false; window = target.WindowId; }
+                    else if (payload.Kind == CoopCampaignMapTooltipKind.AftermathTroop)
+                    { if (!CoopCampaignAftermathTroopTarget.TryParse(payload.EntityId, out var target) || payload.IsExtended ||
+                        !target.MatchesPresentation(payload.AftermathCard)) return false; window = target.WindowId; }
                     else
                     { if (!CoopCampaignAftermathLoadoutTarget.TryParse(payload.EntityId, out var target) || payload.IsExtended ||
                         !target.MatchesPresentation(payload.AftermathCard)) return false; window = target.WindowId; }
                     if (payload.Rows.Count != 0 || payload.Mode != 0 || payload.Rundown != null ||
-                        payload.AftermathCard?.Kind != CoopCampaignAftermathKind.Loot || payload.AftermathCard.WindowId != window ||
+                        payload.AftermathCard?.Kind != (payload.Kind == CoopCampaignMapTooltipKind.AftermathTroop ?
+                            CoopCampaignAftermathKind.Prisoners : CoopCampaignAftermathKind.Loot) || payload.AftermathCard.WindowId != window ||
                         !CoopCampaignAftermathCodec.TryEncode(payload.AftermathCard, out var cardBytes)) return false;
                     measured += 4L + cardBytes.Length;
                     if (measured > MaxPayloadBytes) return false;
                 }
-                else if (payload.Kind == CoopCampaignMapTooltipKind.BarControl)
+                else if (IsControlKind(payload.Kind))
                 {
                     if (payload.Rows.Count != 0 || payload.Mode != 0 || payload.Rundown != null ||
-                        !CoopCampaignMapBarHintIdentity<object>.IsToken(payload.EntityId) ||
+                        !(payload.Kind == CoopCampaignMapTooltipKind.SettlementControl
+                            ? CoopCampaignSettlementMenuPresentation.IsHintToken(payload.EntityId)
+                            : CoopCampaignMapBarHintIdentity<object>.IsToken(payload.EntityId)) ||
                         !CoopCampaignMapControlHintCodec.TryEncode(payload.ControlHint, out var controlBytes)) return false;
                     measured += 4L + controlBytes.Length;
                     if (measured > MaxPayloadBytes) return false;
@@ -255,6 +265,9 @@ namespace CoopSpectator.Infrastructure
                 else if (payload.Rundown != null || payload.Rows.Count < 1) return false;
                 if (payload.Kind == CoopCampaignMapTooltipKind.BarInfo &&
                     (payload.Mode != 0 || !CoopCampaignMapBarHintIdentity<object>.IsToken(payload.EntityId))) return false;
+                if ((payload.Kind == CoopCampaignMapTooltipKind.SettlementInfo || payload.Kind == CoopCampaignMapTooltipKind.Hero) &&
+                    (!CoopCampaignSettlementMenuPresentation.IsHintToken(payload.EntityId) ||
+                     (payload.Kind == CoopCampaignMapTooltipKind.SettlementInfo && payload.Mode != 0))) return false;
                 foreach (var row in payload.Rows)
                 {
                     if (row == null || !ValidText(row.Definition, MaxTextCharacters, true) ||
@@ -271,8 +284,11 @@ namespace CoopSpectator.Infrastructure
             catch (ArgumentException) { return false; }
         }
 
+        public static bool IsControlKind(CoopCampaignMapTooltipKind kind) =>
+            kind == CoopCampaignMapTooltipKind.BarControl || kind == CoopCampaignMapTooltipKind.SettlementControl;
         private static bool IsAftermath(CoopCampaignMapTooltipKind kind) =>
-            kind == CoopCampaignMapTooltipKind.AftermathItem || kind == CoopCampaignMapTooltipKind.AftermathLoadout;
+            kind == CoopCampaignMapTooltipKind.AftermathItem || kind == CoopCampaignMapTooltipKind.AftermathLoadout ||
+            kind == CoopCampaignMapTooltipKind.AftermathTroop;
         private static bool ColorChannel(float value)
         {
             return !float.IsNaN(value) && !float.IsInfinity(value) && value >= 0f && value <= 1f;

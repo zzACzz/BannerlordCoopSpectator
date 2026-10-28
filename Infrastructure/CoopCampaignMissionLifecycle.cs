@@ -7,6 +7,22 @@ namespace CoopSpectator.Infrastructure
     internal enum CoopCampaignObservedMissionKind { Intermission, Map, Battle, Other }
     internal enum CoopCampaignMissionAction { Wait, StartMap, EndMap, StartBattle, Fault, EndBattle }
 
+    internal enum CoopCampaignMissionCloseRoute { Unavailable, ListedManager, EndedMissionLobby }
+    internal static class CoopCampaignMissionClosePolicy
+    {
+        // Native MissionEnded marks a combat result, not completed network
+        // teardown. The listed manager refuses that state; its exact owned
+        // lobby must still deliver Ending/UnloadMission after result admission.
+        internal static CoopCampaignMissionCloseRoute Select(bool managerReady, bool activeMissionState,
+            bool owned, bool hasLobby, bool missionEnded, bool continuing, bool lobbyEnding)
+        {
+            if (!managerReady || !activeMissionState || !owned || !hasLobby || lobbyEnding)
+                return CoopCampaignMissionCloseRoute.Unavailable;
+            if (!missionEnded) return CoopCampaignMissionCloseRoute.ListedManager;
+            return continuing ? CoopCampaignMissionCloseRoute.EndedMissionLobby : CoopCampaignMissionCloseRoute.Unavailable;
+        }
+    }
+
     // Adapter inputs are detached values. Freshness and exact PID/path/start-time
     // admission belong to the adapters; Session binds the admitted process pair.
     internal sealed class CoopCampaignMissionIntent

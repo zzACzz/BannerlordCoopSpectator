@@ -58,6 +58,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         private string _lastMissionExitRequestedBattleResultKey;
         private string _lastMissionExitFailedBattleResultKey;
         private string _battleResultCampaignContextId;
+        private TaleWorlds.CampaignSystem.Campaign _battleResultCampaignContext;
         private CoopBattleResultApplicationLease _battleResultApplicationLease;
         private bool _battleResultApplicationLeaseIsLegacy;
         private string _preExitBattleResultWritebackAppliedKey;
@@ -462,6 +463,10 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         { // Починаємо блок методу
             RefreshBattleResultCampaignContext();
 
+            // No stale result polling or roster work while the loaded world is
+            // waiting for the old owned mission to finish teardown.
+            if (!CoopCampaignMissionHost.CanAttemptBattleStart) return;
+
             if (GameNetwork.IsClient) // MP-клієнт не повинен керувати dedicated helper під час join/load місії.
             {
                 bool isHostedCampaignBattleClient = IsHostedLocalCampaignBattleClient();
@@ -611,6 +616,12 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         private void TryStartMissionForCurrentRole()
         {
             if (_hasSentBattleStartForThisMission)
+                return;
+
+            // Check the owned session before scene validation and expensive
+            // participant/equipment capture. All supported battle types share
+            // this entry; do not fall back to a different server after save load.
+            if (!CoopCampaignMissionHost.CanAttemptBattleStart)
                 return;
 
             if (TryGetUnsupportedCoopMissionReason(out string unsupportedReason, out string unsupportedSummary))
@@ -1000,7 +1011,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             BattleResultWritebackJournalBehavior.TryGetActiveCampaignId(
                 out activeCampaignId);
 
-            if (string.Equals(
+            if (ReferenceEquals(_battleResultCampaignContext, TaleWorlds.CampaignSystem.Campaign.Current) && string.Equals(
                     _battleResultCampaignContextId,
                     activeCampaignId,
                     StringComparison.Ordinal))
@@ -1021,6 +1032,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
             ResetMissionExitState();
             ClearPendingLordsHallStageState();
             _battleResultCampaignContextId = activeCampaignId;
+            _battleResultCampaignContext = TaleWorlds.CampaignSystem.Campaign.Current;
         }
 
         private static void TryAttachCampaignBattleDamageDiagnosticsMissionLogic()
@@ -14129,6 +14141,20 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                 TryGetPropertyValue(equipmentElement, "Modifier");
             return TryGetStringId(itemModifier);
         }
+
+        // Reuse the exact battle fingerprint for detached aftermath visuals.
+        // Reads the current item's prepared design; does not register/replace an
+        // ItemObject, mutate equipment, or adopt an alias by reused save-local ID.
+        internal static bool TryGetCraftedVisualMirrorId(ItemObject item, out string mirrorId)
+        {
+            var snapshot = CaptureCraftedVisualDefinition(item);
+            mirrorId = snapshot?.MirrorItemId;
+            return !string.IsNullOrEmpty(mirrorId);
+        }
+
+        internal static CraftedWeaponSnapshotMessage CaptureCraftedVisualDefinition(ItemObject item) =>
+            item == null || !TryGetBoolProperty(item, "IsCraftedByPlayer") ? null :
+                TryBuildCraftedWeaponSnapshot(item, item.StringId, TryGetPropertyValue(item, "WeaponDesign"));
 
         private static CraftedWeaponSnapshotMessage TryBuildCraftedWeaponSnapshot(
             ItemObject itemObject,

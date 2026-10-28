@@ -108,6 +108,14 @@ namespace CoopSpectator.Campaign
         {
             _applicationTickPublisher?._siegeProjectileCapture?.ReleaseFlights();
             _applicationTickPublisher = this;
+            CampaignEvents.OnSessionLaunchedEvent.AddNonSerializedListener(this, OnCampaignSessionLaunched);
+        }
+
+        private void OnCampaignSessionLaunched(CampaignGameStarter starter)
+        {
+            CoopCampaignCraftedVisualCapture.Reset();
+            CoopCampaignMissionHost.ObserveCampaignLoaded();
+            CoopCampaignMapTooltipHost.ObserveCampaignLoaded();
         }
 
         public override void SyncData(IDataStore dataStore)
@@ -179,6 +187,19 @@ namespace CoopSpectator.Campaign
             {
                 if (CoopCampaignMapTooltipTargetAdmission.IsAftermathAdmitted(publisher._lastPublishedSession, request, publisher._lastPublishedMenu) &&
                     CoopCampaignMapTooltipPayloadCodec.IsValidCorrelation(request.SessionId, request.EntityId, request.Generation, sequence) &&
+                    !request.IsExtended && CoopCampaignAftermathTroopTarget.TryParse(request.EntityId, out var troop))
+                {
+                    if (publisher._tooltipCapture == null) publisher._tooltipCapture = new CoopCampaignMapTooltipCapture();
+                    if (!publisher._tooltipCapture.TryPreparePrisonerPreview(troop.WindowId, troop.RowId, out var preview)) return false;
+                    var prepared = new CoopCampaignMapTooltipPayload { SessionId = request.SessionId, EntityId = request.EntityId,
+                        RequestGeneration = request.Generation, Sequence = sequence, Kind = CoopCampaignMapTooltipKind.AftermathTroop,
+                        AftermathCard = new CoopCampaignAftermathPresentation { Kind = CoopCampaignAftermathKind.Prisoners,
+                            WindowId = troop.WindowId, Root = preview } };
+                    if (!CoopCampaignMapTooltipPayloadCodec.IsValid(prepared)) return false;
+                    payload = prepared; reason = null; return true;
+                }
+                if (CoopCampaignMapTooltipTargetAdmission.IsAftermathAdmitted(publisher._lastPublishedSession, request, publisher._lastPublishedMenu) &&
+                    CoopCampaignMapTooltipPayloadCodec.IsValidCorrelation(request.SessionId, request.EntityId, request.Generation, sequence) &&
                     CoopCampaignAftermathInspectionTarget.TryParse(request.EntityId, out var inspection))
                 {
                     if (publisher._tooltipCapture == null) publisher._tooltipCapture = new CoopCampaignMapTooltipCapture();
@@ -204,6 +225,13 @@ namespace CoopSpectator.Campaign
                             WindowId = loadout.WindowId, Root = visual } };
                     if (!CoopCampaignMapTooltipPayloadCodec.IsValid(prepared)) return false;
                     payload = prepared; reason = null; return true;
+                }
+                if (CoopCampaignMapTooltipTargetAdmission.IsSettlementHintAdmitted(publisher._lastPublishedSession, request, publisher._lastPublishedMenu))
+                {
+                    if (!CoopCampaignMapMenuCapture.TryResolveCurrentSettlementHint(request.SessionId, request.EntityId, out var hint)) return false;
+                    if (publisher._tooltipCapture == null) publisher._tooltipCapture = new CoopCampaignMapTooltipCapture();
+                    return publisher._tooltipCapture.TryCaptureSettlementHint(hint, request.SessionId, request.EntityId,
+                        request.Generation, sequence, request.IsExtended, out payload, out reason);
                 }
                 if (CoopCampaignMapTooltipTargetAdmission.IsBarHintAdmitted(publisher._lastPublishedSession, request, publisher._lastPublishedMapBar))
                 {

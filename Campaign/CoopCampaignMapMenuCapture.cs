@@ -1,6 +1,7 @@
 using System;
 using System.Reflection;
 using System.Collections.Generic;
+using System.Linq;
 using CoopSpectator.Infrastructure;
 using CoopSpectator.Patches;
 using SandBox.View.Map;
@@ -14,7 +15,7 @@ using TaleWorlds.MountAndBlade.View.Tableaus.Thumbnails;
 
 namespace CoopSpectator.Campaign
 {
-    internal static class CoopCampaignMapMenuCapture
+    internal static partial class CoopCampaignMapMenuCapture
     {
         private sealed class EquipmentIdentityComparer : IEqualityComparer<EquipmentElement>
         {
@@ -36,6 +37,8 @@ namespace CoopSpectator.Campaign
         {
             PlunderIdentity.Clear();
             EncounterIdentity.Clear(); _encounterOverlay = null;
+            SettlementHintIdentity.Clear(); _settlementOverlay = null;
+            _settlementHintSources.Clear();
             _plunderSession = null; _plunderOwner = null; _plunderContext = null; _plunderMenuId = null;
         }
 
@@ -56,10 +59,17 @@ namespace CoopSpectator.Campaign
                 if (!string.Equals(session, _plunderSession, StringComparison.Ordinal)) ResetPlunderIdentity();
                 var campaign = TaleWorlds.CampaignSystem.Campaign.Current;
                 var screen = MapScreen.Instance;
-                if (campaign == null || screen == null || !screen.IsInMenu ||
+                if (campaign == null || screen == null ||
                     Mission.Current != null || !(Game.Current?.GameStateManager?.ActiveState is MapState) ||
                     campaign.ConversationManager?.IsConversationInProgress == true)
-                    return true;
+                { CoopCampaignAutoBattleCapture.Reset(); return true; }
+                if (!CoopCampaignAutoBattleCapture.TryCapture(session, out var simulation, out reason)) return false;
+                if (simulation != null)
+                {
+                    var autoMenu = new CoopCampaignMapMenuPresentation { MenuId = "autobattle:" + simulation.WindowId, AutoBattle = simulation };
+                    return autoMenu.TrySnapshot(out snapshot);
+                }
+                if (!screen.IsInMenu) return true;
                 if (ContextField == null || ActiveField == null)
                 { reason = "native-menu-layout-unavailable"; return false; }
                 var context = ContextField.GetValue(screen) as MenuViewContext;
@@ -130,11 +140,17 @@ namespace CoopSpectator.Campaign
                 for (int i = 0; i < tooltipIds.Length; i++) captured.PlunderItems[i].TooltipId = tooltipIds[i];
                 if (captured.IsEncounterMenu)
                 {
+                    SettlementHintIdentity.Clear(); _settlementOverlay = null;
+                    _settlementHintSources.Clear();
                     captured.Encounter = CaptureEncounter(context, captured.MenuId);
                     if (captured.Encounter == null)
                     { reason = "native-encounter-source-unavailable"; return false; }
                 }
-                else { EncounterIdentity.Clear(); _encounterOverlay = null; }
+                else
+                {
+                    EncounterIdentity.Clear(); _encounterOverlay = null;
+                    captured.SettlementOverlay = CaptureSettlementOverlay(context, session, captured.MenuId);
+                }
                 if (!captured.TrySnapshot(out snapshot))
                 { reason = "native-menu-presentation-invalid"; return false; }
                 return true;
@@ -216,7 +232,42 @@ namespace CoopSpectator.Campaign
             _encounterOverlay = source;
             for (int i = 0; i < attackerTokens.Length; i++) result.Attackers[i].TooltipId = attackerTokens[i];
             for (int i = 0; i < defenderTokens.Length; i++) result.Defenders[i].TooltipId = defenderTokens[i];
+            if (!CoopCampaignCraftedVisualCapture.TryProjectEncounter(result)) return null;
             return result.TrySnapshot(out var detached) ? detached : null;
+        }
+
+        private static CoopCampaignSettlementMenuPresentation CaptureSettlementOverlay(MenuViewContext context, string session, string menuId)
+        {
+            SettlementMenuOverlayVM source = null;
+            foreach (var view in context.MenuViews)
+            {
+                var type = view?.GetType();
+                if (type?.FullName != "SandBox.GauntletUI.Menu.GauntletMenuOverlayBaseView") continue;
+                source = type.GetField("_overlayDataSource", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(view) as SettlementMenuOverlayVM;
+                break;
+            }
+            if (source == null) { SettlementHintIdentity.Clear(); _settlementOverlay = null; _settlementHintSources.Clear(); return null; }
+            if (source.CharacterList == null || source.PartyList == null ||
+                source.CharacterList.Count > CoopCampaignMapEncounterPresentation.MaxPartiesPerSide ||
+                source.PartyList.Count > CoopCampaignMapEncounterPresentation.MaxPartiesPerSide)
+                throw new InvalidOperationException("Invalid settlement overlay lists.");
+            var result = new CoopCampaignSettlementMenuPresentation { BannerCode = source.SettlementOwnerBanner?.Id ?? string.Empty };
+            // Whitelisted audited scalar getters only. Never Refresh, tick,
+            // produce tooltips or query simulation to rebuild undisclosed data.
+            foreach (string name in CoopCampaignSettlementMenuPresentation.LabelNames)
+                result.Labels[name] = (string)typeof(SettlementMenuOverlayVM).GetProperty(name).GetValue(source) ?? string.Empty;
+            foreach (string name in CoopCampaignSettlementMenuPresentation.NumberNames)
+                result.Numbers[name] = (int)typeof(SettlementMenuOverlayVM).GetProperty(name).GetValue(source);
+            foreach (string name in CoopCampaignSettlementMenuPresentation.FlagNames)
+                result.Flags[name] = (bool)typeof(SettlementMenuOverlayVM).GetProperty(name).GetValue(source);
+            foreach (var character in source.CharacterList) result.Characters.Add(CaptureEncounterParty(character));
+            foreach (var party in source.PartyList) result.Parties.Add(CaptureEncounterParty(party));
+            CaptureSettlementHintTargets(source, context, session, menuId, result);
+            if (!CoopCampaignCraftedVisualCapture.TryProjectParties(result.Characters.Concat(result.Parties), out var weapons))
+                throw new InvalidOperationException("Settlement portrait resources unavailable.");
+            result.VisualWeapons = weapons;
+            if (!result.IsValid()) throw new InvalidOperationException("Invalid settlement overlay presentation.");
+            return result;
         }
 
         private static object EncounterTarget(GameMenuPartyItemVM entry)

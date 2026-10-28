@@ -1,5 +1,62 @@
 # Build, Test, and Debug Guide
 
+b302 isolated reward-details candidate: both builds/all26 c203 pass. Eight compiled
+checks pass; AutoBattleRewardBindings includes plain auto-battle checks and actual
+installed closure/row metadata tests, plus structured detached UI behavior.
+This does not execute the native reward provider or live text formatter. Native
+formatting/restoration/rendering remain acceptance gates. Installed modules and
+the b299 tester ZIP remain unchanged; see CAMPAIGN_AUTO_BATTLE_WINDOW.md.
+
+b299 rollout: both isolated builds and all26 c202 contracts pass. Eight compiled
+client checks include Test-ReplicaDefaults.ps1; the same defaults script passes
+against the dedicated binary. Each case uses a fresh child with process-only
+environment: absent gates, explicit map0 with child gates1, automatic0, flights0,
+all1. Diagnostics/automation must remain false. No native game is constructed.
+No new default-off portrait behavior or global user/machine settings are changed.
+Current native/two-PC acceptance is bounded separately; see RELEASE_PACKAGING.md.
+
+b298 adds camera English labels/removes pinned summary and local plain scoreboard
+hints. Both builds and seven detached compiled checks pass; logs under
+artifacts/runtime/autobattle-b298-managed-checks. New hint checks use native plain
+HintViewModel metadata/prepared text and injected display actions; no simulator.
+c199/c200 each failed an obsolete source assertion, not a native game execution.
+Corrected targeted map contracts and final full c201 aggregate pass.
+Use the runner for canonical source-root environment and isolated test resources.
+
+2026-10-28 auto-battle candidate b296: both isolated builds and all26 c198
+contracts pass. All seven detached compiled checks pass; logs retained under
+artifacts/runtime/autobattle-b296-managed-checks. Test-AutoBattleBindings loads
+installed managed metadata and the detached adapter only, verifies the actual
+MapScreen simulation owner field, side updates and inert simulation commands.
+It never constructs a native simulation. Native rendering/progress/result and
+transition acceptance remain separate gates; see CAMPAIGN_AUTO_BATTLE_WINDOW.md.
+
+2026-10-28 settlement hint candidate b292: both isolated builds, all26 c195
+contracts and six compiled checks pass. SettlementMenuTests covers source-owner
+leases, replaced/hidden/unknown/out-of-range targets, current publication/peer
+admission, namespace fencing, deep copy and typed tooltip payloads. The compiled
+settlement bindings script also checks hidden popup/default contexts, independent
+stat/portrait hover, stable model resources, source replacement/finalization and
+unchanged encounter hover. Native tooltip values, placement, Alt and transitions
+still need r67 manual acceptance. No multi-peer proof follows from these checks.
+
+Settlement panel candidate check:
+`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Test-SettlementMenuBindings.ps1 -CandidateDirectory <isolated-client-bin>`.
+This loads managed metadata/candidate only, validates native scalar property types
+and stock XML bindings, detached labels/list updates, action isolation and list
+revocation. It never constructs a native settlement overlay or starts the game.
+Combined b289/c191 builds/contracts pass; native village/town/castle and ambush
+return acceptance must use a fresh coherent staging run.
+
+Detached encounter portrait candidate check:
+`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Test-DetachedPortraitScope.ps1 -CandidateDirectory <isolated-client-bin>`.
+Use Windows PowerShell5 after an isolated CompileOnly build. It loads installed
+managed metadata and the candidate without starting a game/native renderer.
+Checks: exact-request scope, unrelated-code pass-through, nested-call masking,
+exception restoration, binding revocation/in-flight lifetime and the read-only
+ItemObject counter layout. Native rendering remains a separate acceptance gate;
+see CAMPAIGN_CRAFTED_VISUAL_RESOURCES.md.
+
 Current b274 evidence and exact isolated build/test commands are consolidated in
 [the aftermath handoff](HANDOFF_2026-10-25_AFTERMATH.md). It supersedes the older
 installed/candidate version notes below. Never deploy mixed protocol65/bridge60 roles.

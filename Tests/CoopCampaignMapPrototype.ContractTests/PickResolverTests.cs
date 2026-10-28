@@ -90,8 +90,8 @@ internal static class PickResolverTests
         int remove = view.IndexOf("private void RemoveEntityReplica(", upsert, StringComparison.Ordinal);
         string update = view.Substring(upsert, remove - upsert);
         Check(update.Contains("CoopCampaignMapPartyPickPolicy.ShouldAllowPick") &&
-            update.Contains("_hoveredReplicaId = null") && update.Contains("_tooltipPresenter?.Clear()") &&
-            update.Contains("_selectedReplicaId = null"), "Authoritative raft/settlement change invalidates hover and pin");
+            update.Contains("_hoveredReplicaId = null") && update.Contains("_tooltipPresenter?.Clear()"),
+            "Authoritative raft/settlement change invalidates native hover");
         int render = view.IndexOf("private void UpdateEntityReplicas(float dt)", remove, StringComparison.Ordinal);
         string removal = view.Substring(remove, render - remove);
         Check(removal.IndexOf("_tooltipPresenter?.Clear()", StringComparison.Ordinal) <

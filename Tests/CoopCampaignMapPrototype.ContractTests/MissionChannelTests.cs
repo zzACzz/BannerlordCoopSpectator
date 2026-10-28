@@ -10,7 +10,7 @@ internal static class MissionChannelTests
     { Id = id, StartUtcTicks = 639000000000000000, Path = Path.GetFullPath("synthetic-role.exe") };
     private static CoopCampaignMissionEnvelope Value() => new CoopCampaignMissionEnvelope {
         Host = Identity(111), Dedicated = Identity(222), Pulse = 1, SentTimestamp = 100000,
-        CampaignId = "8324ccc7ad0b48248478e77bd9f966c87",
+        CampaignId = "8324ccc7ad0b48248478e77bd9f966c87", Epoch = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         Intent = new CoopCampaignMissionIntent { Session = Session, Revision = 1, Kind = CoopCampaignMissionIntentKind.Map,
             HostOnGlobalMap = true, BattleKey = "", AppliedBattleKey = "" } };
     private static void Check(bool value, string name)

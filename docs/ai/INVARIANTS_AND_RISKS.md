@@ -1,5 +1,44 @@
 # Invariants and Risks
 
+Auto-battle replicas may read the already-active native scoreboard only. Never
+construct/Initialize/Tick SPScoreboardVM or BattleSimulation, invoke simulation
+commands/events or apply results. Bind exact MapScreen._battleSimulationView and
+revalidate current source/owner/screen/campaign. CAS1 cannot overlap ordinary menu
+or aftermath. Missing/failed/hidden state revokes the old window. Shared detached
+value serialization does not grant native command or setter targets on clients.
+See CAMPAIGN_AUTO_BATTLE_WINDOW.md for unresolved native/tooltip fidelity gates.
+
+Settlement panel hover interests must bind active context/overlay/session/menu,
+exact prepared source and portrait target, plus current successful publication
+and peer lease. Never resolve raw client hero/settlement IDs or invoke native
+hover commands (crime wrapper emits an event). Only audited providers may run in
+the existing owner-thread text/language transaction, with current-source recheck.
+GetHeroKingdomRank variation copies need isolation checks before HERO writes.
+Missing nested popup data sources are not a hidden state: keep an explicitly
+hidden detached child and inert commands. See CAMPAIGN_SETTLEMENT_MENU_OVERLAY.md.
+
+MissionEnded=true is combat-result state, not completed multiplayer teardown.
+The listed manager refuses it. Only the exact owned, still-Continuing mission may
+use the native lobby Ending route after existing result/application admission (or
+explicit reload abandonment). Keep UDP unload and observed teardown; never reset
+MissionEnded, replay results or use elapsed time as persistence proof. See
+CAMPAIGN_MISSION_NATIVE_ENDED_CLOSE.md.
+
+Settlement top panels must copy the active native owner's prepared fields/lists,
+not query hidden settlement simulation or construct native overlay VMs. Its crime
+tooltip producer emits an event and is not a safe passive getter. b289 leaves
+new-panel tooltip interests disabled pending a separate audit/admission path;
+non-null passive hint wrappers preserve stock display binding parents. See
+CAMPAIGN_SETTLEMENT_MENU_OVERLAY.md.
+
+Encounter portrait resources must never consume registered ItemObject IDs only
+on a client: native equipment packets serialize those IDs. The2026-10-27 candidate
+uses owned ID-zero smithy previews and verifies the item counter is unchanged.
+Equipment substitution is exact-thumbnail-request/code scoped; nested stock calls
+mask it and finalizers restore it. Never strip weapon slots, reassign IDs,
+decrement counters or unregister objects to make a portrait succeed. Native
+lifetime/mesh acceptance remains open; see CAMPAIGN_CRAFTED_VISUAL_RESOURCES.md.
+
 Current aftermath baseline is protocol65/bridge60/tooltip5/catalog10/CAF2. Independent
 loot cards, hero models and equipment slots are connected and bounded native checks
 passed; older candidate claims below are historical. Independent prisoner selection,
@@ -158,7 +197,8 @@ Map return from every battle path remains a regression surface. See
 [candidate, transport versions and open gates](CAMPAIGN_MAP_HOVER_DECALS.md).
 
 Body visibility does not imply pick admission. Non-main raft parties remain
-renderable but must not receive ordinary hover/pinned information. Recheck the
+renderable but must not receive ordinary hover information. The custom pinned
+summary was removed in b298; local map clicks must not issue campaign orders. Recheck the
 current native raft state before host tooltip capture; stale publication cannot
 authorize it. State transitions and removal clear hover payloads even when map
 input is yielding to another UI. Main-party exemption is retained; prisoner and

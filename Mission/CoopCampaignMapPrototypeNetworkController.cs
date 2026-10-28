@@ -250,6 +250,7 @@ namespace CoopSpectator.MissionBehaviors
             if (GameNetwork.IsClient)
             {
                 TickClientCatalogTransport();
+                TickClientPortraitResources();
                 ReconcileClientPartyPoses();
                 return;
             }

@@ -17,7 +17,7 @@ namespace CoopSpectator.UI
         private string _aftermathWindow;
         private CoopCampaignAftermathPresentation _appliedAftermath;
         private string _aftermathFailedWindow;
-        private CoopCampaignLootInspection _aftermathInspection;
+        private ICoopCampaignAftermathInspection _aftermathInspection;
 
         private bool HasAftermathPresentation => CoopCampaignMapPrototypeNetworkController.CurrentClientMenu?.Aftermath != null &&
             CoopCampaignMapPrototypeNetworkController.IsClientMenuHostFresh;
@@ -50,6 +50,8 @@ namespace CoopSpectator.UI
                 _aftermathVm.Apply(state.Root);
                 if (state.Kind == CoopCampaignAftermathKind.Loot)
                     _aftermathInspection = new CoopCampaignLootInspection(_aftermathVm, state.WindowId);
+                else
+                    _aftermathInspection = new CoopCampaignPrisonerInspection(_aftermathVm, state.WindowId);
                 _aftermathLayer = new GauntletLayer("CoopCampaignAftermath", ViewOrderPriority + 5, false) { IsFocusLayer = false };
                 _aftermathLayer.InputRestrictions.SetInputRestrictions(true, InputUsageMask.Mouse);
                 MissionScreen.AddLayer(_aftermathLayer);

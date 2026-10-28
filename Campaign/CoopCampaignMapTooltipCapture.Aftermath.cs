@@ -43,6 +43,10 @@ namespace CoopSpectator.Campaign
                 if (equipment == null) return false;
                 var elements = new EquipmentElement[(int)EquipmentIndex.NumEquipmentSetSlots];
                 for (int i = 0; i < elements.Length; i++) elements[i] = equipment.GetEquipmentFromSlot((EquipmentIndex)i);
+                var craftedAliases = new Dictionary<string, string>(StringComparer.Ordinal);
+                foreach (var element in elements)
+                    if (!element.IsEmpty && BattleDetector.TryGetCraftedVisualMirrorId(element.Item, out string mirrorId))
+                        craftedAliases[element.Item.StringId] = mirrorId;
                 detached = new TaleWorlds.CampaignSystem.ViewModelCollection.HeroViewModel();
                 detached.FillFrom(hero);
                 detached.SetEquipment(equipment);
@@ -93,6 +97,7 @@ namespace CoopSpectator.Campaign
                 result.Properties.Add("ReplicaLoadoutVersion", PreviewText(loadoutVersion));
                 result.Properties.Add("EquipmentMode", new CoopCampaignPresentationValue {
                     Kind = CoopCampaignPresentationValueKind.Integer, Number = equipmentMode });
+                CoopCampaignAftermathEquipmentProjection.ApplyCraftedAliases(result, craftedAliases);
                 if (!CoopCampaignAftermathCapture.TryResolveLootHero(window, heroRowId, out var currentOwner, out var currentRow) ||
                     !ReferenceEquals(owner, currentOwner) || !ReferenceEquals(raw, currentRow)) return false;
                 var currentEquipment = equipmentMode == 0 ? character.FirstCivilianEquipment :

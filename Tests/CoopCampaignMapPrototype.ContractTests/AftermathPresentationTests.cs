@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using CoopSpectator.Infrastructure;
 
 internal static class AftermathPresentationTests
@@ -12,6 +13,9 @@ internal static class AftermathPresentationTests
         ValidateInspectionTransport();
         ValidateLoadoutTarget();
         ValidateTroopTarget();
+        ValidateRejectionCodes();
+        ValidateCompactLargeScreens();
+        ValidateCraftedEquipmentProjection();
         for (int mode = 0; mode < 3; mode++)
         {
             Check(CoopCampaignAftermathComparisonPolicy.IsValidSelection(mode, 0, 0, 0), "nonweapon comparison mode admitted");
@@ -76,6 +80,106 @@ internal static class AftermathPresentationTests
         Check(!state.IsValid(), "oversize screen fails rather than silently truncating prisoners");
         Check(CoopCampaignMapMenuSendPolicy.ShouldPreempt("aftermath:1:a", "aftermath:2:b", false), "prisoner-to-loot transition preempts old transfer");
         Console.WriteLine("Aftermath detached presentation, bounded transport and screen-identity checks passed.");
+    }
+    private static void ValidateRejectionCodes()
+    {
+        var root = CoopCampaignPresentationValue.Node();
+        var state = new CoopCampaignAftermathPresentation { Kind = CoopCampaignAftermathKind.Prisoners,
+            WindowId = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Root = root };
+        Check(CoopCampaignAftermathCodec.TryEncode(state, out _, out var reason) && reason == null, "valid tree has no rejection code");
+        root.Properties.Add("Sensitive.Value", new CoopCampaignPresentationValue());
+        Check(!CoopCampaignAftermathCodec.TryEncode(state, out _, out reason) && reason == "property-name", "fixed code omits rejected binding contents");
+        root.Properties.Clear(); root.Properties.Add("Value", new CoopCampaignPresentationValue { Kind = CoopCampaignPresentationValueKind.Double, Number = double.NaN });
+        Check(!CoopCampaignAftermathCodec.TryEncode(state, out _, out reason) && reason == "number", "nonfinite number distinguished");
+        root.Properties.Clear(); root.Properties.Add("Loop", root);
+        Check(!CoopCampaignAftermathCodec.TryEncode(state, out _, out reason) && reason == "cycle", "cycle distinguished");
+        root.Properties.Clear(); root.Properties.Add("Value", new CoopCampaignPresentationValue { Kind = CoopCampaignPresentationValueKind.Text, Text = new string('x', 32769) });
+        Check(!CoopCampaignAftermathCodec.TryEncode(state, out _, out reason) && reason == "text-limit", "individual text limit distinguished");
+        root.Properties.Clear();
+        // Unique ordinary-sized strings still enforce the unchanged wire bound.
+        for (int i = 0; i < 100; i++) root.Properties.Add("Field" + i, new CoopCampaignPresentationValue {
+            Kind = CoopCampaignPresentationValueKind.Text, Text = new string((char)(0x100 + i), 10000) });
+        Check(!CoopCampaignAftermathCodec.TryEncode(state, out _, out reason) && reason == "byte-limit", "total byte limit distinguished");
+        string repo = Environment.GetEnvironmentVariable("COOPSPECTATOR_REPOSITORY_ROOT");
+        string capture = File.ReadAllText(Path.Combine(repo, "Campaign", "CoopCampaignAftermathCapture.cs"));
+        Check(capture.Contains("COOPSPECTATOR_AFTERMATH_CAPTURE_DIAGNOSTICS") && capture.Contains("if (CaptureDiagnostics) reason +="), "host rejection detail requires explicit opt-in");
+    }
+    private static void ValidateCraftedEquipmentProjection()
+    {
+        string original = string.Concat(Enumerable.Range(0, 12).Select(slot => "+" + slot + "-" +
+            (slot == 0 ? "crafted_item_0" : slot == 5 ? "campaign_helmet" : "@null") + "-@null"));
+        foreach (string mirror in new[] { "cs_crafted_first_save", "cs_crafted_other_save" })
+        {
+            var root = CoopCampaignPresentationValue.Node();
+            root.Properties.Add("EquipmentCode", new CoopCampaignPresentationValue {
+                Kind = CoopCampaignPresentationValueKind.Text, Text = original });
+            var image = CoopCampaignPresentationValue.Node();
+            image.Properties.Add("Id", new CoopCampaignPresentationValue { Kind = CoopCampaignPresentationValueKind.Text, Text = "crafted_item_0" });
+            image.Properties.Add("TextureProviderName", new CoopCampaignPresentationValue {
+                Kind = CoopCampaignPresentationValueKind.Text, Text = "ItemImageTextureProvider" });
+            root.Properties.Add("WeaponImage", image);
+            var portrait = CoopCampaignPresentationValue.Node();
+            portrait.Properties.Add("TextureProviderName", new CoopCampaignPresentationValue {
+                Kind = CoopCampaignPresentationValueKind.Text, Text = "CharacterImageTextureProvider" });
+            portrait.Properties.Add("Id", new CoopCampaignPresentationValue { Kind = CoopCampaignPresentationValueKind.Text,
+                Text = "@---@" + original + "@---@body@---@0@---@0@---@0@---@1@---@2@---@0@---@" });
+            root.Properties.Add("HeroRowPortrait", portrait);
+            CoopCampaignAftermathEquipmentProjection.ApplyCraftedAliases(root,
+                new Dictionary<string, string> { { "crafted_item_0", mirror } });
+            string resolved = root.Properties["EquipmentCode"].Text;
+            Check(resolved.Contains("+0-" + mirror + "-@null") && resolved.Contains("+5-campaign_helmet-@null") &&
+                resolved.Split('+').Length == 13 && image.Properties["Id"].Text == mirror,
+                "crafted weapon fingerprint resolves without stripping armor or any equipment slot");
+            Check(CoopConversationHudCodec.IsPortraitCode(portrait.Properties["Id"].Text) &&
+                portrait.Properties["Id"].Text.Contains("+0-" + mirror + "-@null") && portrait.Properties["Id"].Text.Contains("@---@body@---@"),
+                "hero row portrait resolves the same exact crafted identity while retaining body and colors");
+            Check(CoopConversationHudCodec.ResolveEquipmentCode(resolved, id => id, _ => true) == resolved,
+                "projected complete equipment survives strict client parser");
+        }
+        Check(original.Contains("crafted_item_0") && !original.Contains("cs_crafted"),
+            "same save-local original ID is not changed or globally remapped");
+    }
+
+    private static void ValidateCompactLargeScreens()
+    {
+        // Large siege aftermath: the former encoding repeats each long binding
+        // name/text per troop. Keep every row/value; do not raise transport limits.
+        foreach (var kind in new[] { CoopCampaignAftermathKind.Prisoners, CoopCampaignAftermathKind.Loot })
+        {
+            var root = CoopCampaignPresentationValue.Node();
+            var rows = new CoopCampaignPresentationValue { Kind = CoopCampaignPresentationValueKind.List,
+                Items = new List<CoopCampaignPresentationValue>() };
+            root.Properties.Add("Rows", rows);
+            for (int row = 0; row < 600; row++)
+            {
+                var node = CoopCampaignPresentationValue.Node();
+                node.Properties.Add("Name", new CoopCampaignPresentationValue {
+                    Kind = CoopCampaignPresentationValueKind.Text, Text = "Troop " + row });
+                for (int field = 0; field < 50; field++) node.Properties.Add("RepeatedPreparedProperty" + field,
+                    new CoopCampaignPresentationValue { Kind = CoopCampaignPresentationValueKind.Text,
+                        Text = "Prepared localized value — повний опис " + field });
+                rows.Items.Add(node);
+            }
+            var state = new CoopCampaignAftermathPresentation { Kind = kind,
+                WindowId = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Root = root };
+            Check(CoopCampaignAftermathCodec.TryEncode(state, out var encoded) && encoded.Length < CoopCampaignAftermathCodec.MaximumBytes / 2,
+                kind + " large complete screen fits existing wire budget through references");
+            Check(CoopCampaignAftermathCodec.TryDecode(encoded, out var decoded), kind + " compact screen decodes");
+            var decodedRows = decoded.Root.Properties["Rows"].Items;
+            Check(decodedRows.Count == 600 && decodedRows[599].Properties["Name"].Text == "Troop 599" &&
+                decodedRows[599].Properties["RepeatedPreparedProperty49"].Text == "Prepared localized value — повний опис 49",
+                kind + " final row and every property retained without truncation");
+            // Roundtrip must be byte-canonical; malformed references cannot read
+            // a later entry, carry a table between messages or duplicate literals.
+            Check(CoopCampaignAftermathCodec.TryEncode(decoded, out var again) && encoded.SequenceEqual(again),
+                kind + " deterministic string table roundtrip");
+            byte[] forward = (byte[])encoded.Clone();
+            // CAF3 header: magic4 + kind1 + id-length4 + id32 + root-kind1 + count4.
+            Array.Copy(BitConverter.GetBytes(0), 0, forward, 46, 4);
+            Check(!CoopCampaignAftermathCodec.TryDecode(forward, out _), kind + " undefined/forward string reference rejected");
+        }
+        var invalid = new byte[] { 0x33, 0x46, 0x41, 0x43 };
+        Check(!CoopCampaignAftermathCodec.TryDecode(invalid, out _), "incomplete compact frame rejected");
     }
     private static void ValidateInspectionTransport()
     {
@@ -184,6 +288,32 @@ internal static class AftermathPresentationTests
         root.Properties.Add("OtherPartyPrisoners", list);
         var state = new CoopCampaignAftermathPresentation { Kind = CoopCampaignAftermathKind.Prisoners, WindowId = target.WindowId, Root = root };
         Check(CoopCampaignAftermathTroopTarget.IsDisclosed(state, id), "current positive prisoner row admitted");
+        var request = new CoopCampaignMapTooltipRequest("dddddddddddddddddddddddddddddddd", Guid.NewGuid(), id, 1, false);
+        var menu = new CoopCampaignMapMenuPresentation { Aftermath = state };
+        Check(CoopCampaignMapTooltipTargetAdmission.IsAftermathAdmitted(request.SessionId, request, menu),
+            "disclosed troop target admitted through owned current session");
+        Check(!CoopCampaignMapTooltipTargetAdmission.IsAftermathAdmitted("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", request, menu),
+            "different publisher session cannot admit prisoner selection");
+        request = new CoopCampaignMapTooltipRequest(request.SessionId, request.LeaseId, id, 1, true);
+        Check(!CoopCampaignMapTooltipTargetAdmission.IsAftermathAdmitted(request.SessionId, request, menu),
+            "troop preview cannot impersonate extended item tooltip");
+        request = new CoopCampaignMapTooltipRequest(request.SessionId, request.LeaseId, id, 1, false);
+        var preview = CoopCampaignPresentationValue.Node();
+        preview.Properties.Add("SelectedCharacter", CoopCampaignPresentationValue.Node());
+        preview.Properties.Add("CurrentCharacter", row);
+        var response = new CoopCampaignMapTooltipPayload { SessionId = request.SessionId, EntityId = id,
+            RequestGeneration = 1, Sequence = 1, Kind = CoopCampaignMapTooltipKind.AftermathTroop,
+            AftermathCard = new CoopCampaignAftermathPresentation { Kind = CoopCampaignAftermathKind.Prisoners,
+                WindowId = target.WindowId, Root = preview } };
+        Check(CoopCampaignMapTooltipPayloadCodec.TrySerialize(response, out var encoded) &&
+            CoopCampaignMapTooltipPayloadCodec.TryDeserialize(encoded, out var decoded) && target.MatchesPresentation(decoded.AftermathCard),
+            "full troop preview roundtrip binds exact row and window");
+        row.Properties["ReplicaRowId"].Text = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+        Check(!CoopCampaignMapTooltipPayloadCodec.IsValid(response), "another row cannot impersonate selected troop");
+        row.Properties["ReplicaRowId"].Text = target.RowId;
+        response.AftermathCard.Kind = CoopCampaignAftermathKind.Loot;
+        Check(!CoopCampaignMapTooltipPayloadCodec.IsValid(response), "loot payload cannot impersonate prisoner preview");
+        response.AftermathCard.Kind = CoopCampaignAftermathKind.Prisoners;
         root.Properties.Add("MainPartyTroops", list);
         Check(!CoopCampaignAftermathTroopTarget.IsDisclosed(state, id), "same identity in two rosters rejects");
         root.Properties.Remove("MainPartyTroops"); row.Properties["Number"].Number = 0;

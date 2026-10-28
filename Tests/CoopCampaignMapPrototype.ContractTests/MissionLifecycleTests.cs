@@ -22,6 +22,7 @@ internal static class MissionLifecycleTests
 
     internal static void Run()
     {
+        NativeEndedClose();
         // Every supported scenario uses exact battle identity, never a map-return
         // special case. These pure tests do not claim native scenario coverage.
         foreach (string scenario in new[] { "field", "village", "siege", "sally-out", "siege-ambush",
@@ -152,6 +153,40 @@ internal static class MissionLifecycleTests
             var idle = Idle(++observed.Sequence); idle.CompletedBattleKey = "result-bound";
             Is(m.Step(host, idle, 105), followup ? CoopCampaignMissionAction.Wait : CoopCampaignMissionAction.StartMap,
                 "native teardown required and followup still blocks map");
+        }
+    }
+
+    private static void NativeEndedClose()
+    {
+        Check(CoopCampaignMissionClosePolicy.Select(true, true, true, true, false, true, false) ==
+            CoopCampaignMissionCloseRoute.ListedManager, "unfinished combat retains listed-manager close");
+        Check(CoopCampaignMissionClosePolicy.Select(true, true, true, true, true, true, false) ==
+            CoopCampaignMissionCloseRoute.EndedMissionLobby, "native-ended combat still has a network close route");
+        foreach (int missing in new[] { 0, 1, 2, 3, 4, 5 })
+            Check(CoopCampaignMissionClosePolicy.Select(missing != 0, missing != 1, missing != 2, missing != 3,
+                true, missing != 4, missing == 5) == CoopCampaignMissionCloseRoute.Unavailable,
+                "native-ended close rejects missing readiness/owner/lobby/continuation or existing Ending " + missing);
+        foreach (string scenario in new[] { "field", "village", "siege", "sally-out", "siege-ambush", "relief", "lords-hall", "hideout-day", "hideout-night" })
+        {
+            var lifecycle = new CoopCampaignMissionLifecycle(Session, 30);
+            var battle = Battle("native-ended-" + scenario, 1);
+            var start = lifecycle.Step(battle, Idle(1), 0);
+            var observed = Active(2, CoopCampaignObservedMissionKind.Battle, "owned-native", start.Command, battle.BattleKey);
+            observed.CanEnd = CoopCampaignMissionClosePolicy.Select(true, true, true, true, true, true, false) !=
+                CoopCampaignMissionCloseRoute.Unavailable;
+            observed.CompletedBattleKey = battle.BattleKey;
+            Is(lifecycle.Step(battle, observed, 1), CoopCampaignMissionAction.Wait,
+                "native-ended publication alone never authorizes " + scenario);
+            var applied = Map(2); applied.AftermathApplied = true; applied.AppliedBattleKey = battle.BattleKey;
+            observed.Sequence++;
+            Is(lifecycle.Step(applied, observed, 2), CoopCampaignMissionAction.EndBattle,
+                "native-ended exact applied result closes " + scenario);
+            observed.Sequence++;
+            Is(lifecycle.Step(applied, observed, 3), CoopCampaignMissionAction.Wait,
+                "native-ended close is one-shot " + scenario);
+            var idle = Idle(5); idle.CompletedBattleKey = battle.BattleKey;
+            Is(lifecycle.Step(applied, idle, 4), CoopCampaignMissionAction.StartMap,
+                "native teardown then returns map " + scenario);
         }
     }
 

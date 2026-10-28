@@ -1,5 +1,160 @@
 # AI Knowledge Base
 
+2026-10-29 checkpoint / next task: read
+[shared-module handoff](HANDOFF_2026-10-29_SHARED_MODULES.md). User requested commit
+and push before removing SandBox/SandBoxCore copies from the dedicated install.
+Goal tool currently reports PAUSED, overriding historical active-status notes.
+Source b302 remains uninstalled; b299 remains the installed/tester baseline.
+The first remote two-PC attempt failed: campaign NavalDLC versus base-only MP/DS
+resources, with confirmed missing equipment/crafting dependencies blocking field
+battle readiness. Map label mismatch is strongly indicated; missing parties still
+need diagnosis. No DLC fix/shared-module implementation or two-PC pass is claimed.
+Private evidence and generated archives are excluded from the checkpoint.
+
+2026-10-28 source b302 ONLY: prepared auto-battle renown/influence/morale detail
+rows added with exact native closure IL/field admission, no callback execution,
+isolated host text formatting and local read-only rendering. Both builds, all26
+c203 and eight compiled checks pass; no installation/package. b299 remains the
+installed/tester baseline and its ZIP hash unchanged. Read
+CAMPAIGN_AUTO_BATTLE_WINDOW.md before any further native test. Full Goal active.
+
+2026-10-28 newest b299 installed; r69/r70 CLOSED, seven config hashes match and
+no game roles retained. User accepts b298 English camera UI/removed custom card.
+Replica, automatic owned map/battle/map and functional siege-flight capture now
+default ON; explicit0 opt-outs retained. Diagnostics/automation/portrait observer
+stay off. Both b299 builds, all26 c202 and eight compiled client checks plus
+dedicated defaults checks pass. Verified50-entry tester ZIP:
+dist/previews/Warhost_MapReplica_TwoPC_b299_20261028.zip. See RELEASE_PACKAGING.md
+for hash/layout and docs/TWO_PC_PREVIEW_TEST_EN.md for installation/test instructions.
+No new native default-launch/two-PC proof follows from compiled flag checks.
+Full Goal remains active; no public upload/commit performed.
+
+2026-10-28 newest r69/b298 OPEN: nine coherent files verified, seven fresh config
+preimages retained. Campaign85732 started2026-10-28T05:14:13.0121836Z; user asked
+to launch server/client with their working shortcut. No native acceptance yet.
+Both builds, all26 c201 contracts and seven compiled checks pass. English replica
+camera controls, removed custom pinned card and plain scoreboard hints ready to test.
+See map-camera-english-r69-20261028/OBSERVATION.md. Goal remains active.
+
+2026-10-28 source b298: English replica camera labels/instructions and
+custom click-pinned summary removed; native hover/Alt retained. Adds plain local
+scoreboard hints without native simulation callbacks. Both builds and seven
+compiled checks pass; final c201 aggregate passes after obsolete source assertions
+were corrected (targeted map contracts also pass). Installed in r69 above.
+r68/b296 CLOSED: user confirms live auto-battle numbers match campaign. Seven
+config hashes restored/match, no product processes retained. Native result/rewards
+and further lifetime gates remain open. Read CAMPAIGN_AUTO_BATTLE_WINDOW.md.
+
+2026-10-28 current source b296: implementing the user's auto-battle window request
+with the current native SPScoreboard presentation, no local simulation. CAS1 is an
+exclusive CMN12 member; protocol71/bridge66/tooltip6/catalog10/CAF3/CML2. c198 all26
+contracts and all seven detached compiled checks pass; both b296 builds pass.
+b293-b295 were never installed. Existing aftermath helper API is preserved;
+the private recursive capture test now supplies the explicit optional policy. Installed
+b292/r67 is CLOSED, all7 configs match; no game roles deliberately retained.
+Read CAMPAIGN_AUTO_BATTLE_WINDOW.md before staging/native test. Full Goal active.
+
+2026-10-28 current: user accepts b292 settlement top interface/tooltips, requests
+replication of the auto-battle progress/result window when host chooses Send troops.
+r67 CLOSED after user exited all roles; all7 config hashes match. Direct native
+evidence covers Walls/Level1 and Food216.51/change+41.56; screenshot retained, plus
+user militia/all-working confirmation. Wider Goal/multi-peer proof remains open.
+Installed b292: protocol70/bridge65/tooltip6/catalog10/CMN11/CAF3/CML2. Native
+GauntletMapBattleSimulationView audit started; do not construct a native simulator
+on clients. See CAMPAIGN_SETTLEMENT_MENU_OVERLAY.md for bounded acceptance.
+
+2026-10-28 newest r67: b292 installed coherently (nine verified files/seven fresh
+config preimages); campaign74532 launched2026-10-28T03:20:29.7478561Z. Both isolated
+builds, all26 c195 contracts and six compiled checks passed. Adds independent settlement
+statistic/control/portrait tooltips with current owner-scoped capabilities and
+audited native providers. Protocol70/bridge65/tooltip6/catalog10/CMN11/CAF3/CML2.
+Native hover/Alt/transition acceptance pending. User accepts b290 upper panel and
+popup fix; r66 CLOSED with all7 config hashes matching. Read
+CAMPAIGN_SETTLEMENT_MENU_OVERLAY.md. Full Goal remains active.
+
+2026-10-28 newest r66: b290 coherently installed (nine verified files/seven config
+preimages), campaign launch requested. Both isolated builds, all26 c192 contracts
+and six compiled checks pass. Fixes b289's null CardSelectionPopup binding, which
+showed a large empty stock popup with Missing footer. Native corrected appearance
+pending. r65 CLOSED, all7 configurations match; user accepts ambush return. Direct
+paired comparison confirmed Morenia Castle top values match. Settlement-panel
+hover fidelity remains open. Protocol69/bridge64/tooltip5/catalog10/CMN10/CAF3/CML2.
+Read CAMPAIGN_SETTLEMENT_MENU_OVERLAY.md for current correction and test gap.
+
+2026-10-28 current r65: unchanged coherent b289 re-staged after user reboot (nine
+verified files/seven fresh config preimages), campaign launch requested. Both b289
+builds, all26 c191 contracts and six compiled checks pass. Native settlement-panel
+and ambush-return acceptance pending user report. Protocol69/bridge64/tooltip5/
+catalog10/CMN10/CAF3/CML2. r64 CLOSED, all7 config hashes match; only inspected test
+DS map switch was restored. Do not follow older b287-installed snapshots below.
+
+2026-10-27 combined candidate b289: missing settlement top panel is source-wired
+to the stock SettlementOverlay movie, including prepared labels/flags/banners and
+ordered portrait lists; ambush native-ended close route is corrected. Both builds,
+all26 c191 contracts and compiled settlement bindings pass. b288 never installed.
+User requested one combined test. b287/r63 remains installed until fresh staging.
+New panel hover tooltip interests remain open; do not claim full Goal acceptance.
+
+2026-10-27 current native r63/b287: user accepts cold pre-citadel main-hero portrait
+and village battle/return. Current gap: settlement/notable top overlay is absent
+(paired user PNGs retained). Siege-ambush withdrawal produced an applied final
+result but no network mission close. Source b288 addresses the native MissionEnded
+close-route deadlock; build/contracts pending. Read
+CAMPAIGN_MISSION_NATIVE_ENDED_CLOSE.md and CAMPAIGN_SETTLEMENT_MENU_OVERLAY.md.
+Do not restart/replace the user's manual test without coordinating completion.
+
+2026-10-27 source candidate b287 adds unregistered smithy-style encounter portrait
+resources and exact-request-scoped equipment rendering. Both isolated builds and
+all26 c189 contracts pass. No registered item IDs may change. Read
+CAMPAIGN_CRAFTED_VISUAL_RESOURCES.md before staging; b282 stays prohibited.
+Installed b281/r61 remains the native baseline until a fresh deployment supersedes
+it. Cold prebattle hero rendering is not yet native-accepted.
+
+2026-10-27 newest: user r61 accepts b281 prisoner equipment/portraits/independent
+selection; the prebattle main-hero portrait remains. r61 CLOSED, all7 config hashes
+restored. Installed b281 retained. Source b283 has bounded portrait-dependency data
+transport (protocol68/bridge63/CMN9) and pure readiness tests ONLY; native preparation
+is deliberately UNWIRED after proving ItemObject numeric IDs depend on creation
+order and are serialized in equipment packets. Do NOT install cmp-b282 client-only
+prototype. Both cmp-b283 builds and all26 cmp-c188 contracts pass, no installed
+mutation. Next: server/client resource identity/ledger agreement, then native test.
+Read CAMPAIGN_CRAFTED_VISUAL_RESOURCES.md before any resource creation/deployment.
+
+2026-10-27 newest override: r60 CLOSED, all7 config hashes match. User accepts b279
+prisoner screen visibility, citadel cohort selection and Loot appearance. Remaining
+native bugs: prebattle hero portrait; prisoner hero model/row portraits. Source
+b281 adds full aftermath crafted-alias projection and independent prisoner selection.
+Both isolated builds, all26 cmp-c186 contracts and four detached checks pass.
+r61 staged nine coherent b281 files with seven config preimages; no game launched,
+native rendering acceptance pending. Protocol67/bridge62/tooltip5/catalog10,
+CAF3/CML2. Read CAMPAIGN_MAP_AFTERMATH_SCREENS.md and
+CAMPAIGN_CRAFTED_VISUAL_RESOURCES.md. Prebattle resource preparation remains to be
+implemented; do not mistake battle-preloaded resource success for cold-join proof.
+
+2026-10-27 newest: r59 CLOSED with all7 config hashes restored. Its unchanged
+dedicated process successfully reset on save load, ran citadel and returned to map.
+Prisoner rejection is proven byte-limit. User additionally reports naked hero on
+citadel Loot and full-army keep selection. b279 adds CAF3 string references, exact
+crafted-item preview aliases and LordsHall cohort-only selection. Both builds,
+all26 cmp-c184 contracts and three detached checks pass. r60 staged nine coherent
+b279 files with seven config preimages; NO game process launched. Protocol66 /
+bridge61 / tooltip5 / catalog10 / CAF3 / CML2. Three fixes need native validation;
+do not publish the two-PC archive. See CAMPAIGN_MAP_AFTERMATH_SCREENS.md and
+CAMPAIGN_SAVE_RELOAD.md. Older b278-installed/pending notes below are historical.
+
+2026-10-27 ACTIVE correction: save reload must reset/rebind the already-owned
+server, including same-campaign rewinds; permanent rejection/manual restart is not
+the requested behavior. [Save-reload work and r58 evidence](CAMPAIGN_SAVE_RELOAD.md).
+b278 wires load completion, owned reset transport,
+native teardown readiness, generation fencing and same-ID BattleDetector reset.
+Both isolated builds pass, c181 is26/26 and three detached compiled checks pass.
+Native save-reload recovery remains UNVERIFIED. CML2 requires coherent host/server
+installation. r59 staged nine coherent b278 files with seven config preimages;
+campaign63908 started2026-10-27T06:52:16.4511712Z, loaded MVID verified. User is
+preparing siege -> prisoners/loot -> load citadel save with server/client retained.
+The manual siege test failed prisoner replication; opt-in rejection
+codes are prepared, but its cause is not yet known. Do not create the two-PC archive.
+
 Current user-test checkpoint: [2026-10-25 aftermath handoff](HANDOFF_2026-10-25_AFTERMATH.md).
 Use that document for the installed b274 identity, verified scope, open issues and
 single-machine test matrix. Dated progress entries below are historical; newest

@@ -154,11 +154,17 @@ namespace CoopSpectator.Infrastructure
         }
     }
 
-    // Foundation for independent prisoner/troop inspection. Not network-admitted
-    // until its native provider and client lifetime are connected coherently.
+    // Exact window/row correlation for independent prisoner/troop inspection.
     public sealed class CoopCampaignAftermathTroopTarget
     {
         public string WindowId, RowId;
+        public bool MatchesPresentation(CoopCampaignAftermathPresentation state) =>
+            state?.Kind == CoopCampaignAftermathKind.Prisoners && state.WindowId == WindowId &&
+            state.Root?.Kind == CoopCampaignPresentationValueKind.Node &&
+            state.Root.Properties.TryGetValue("SelectedCharacter", out var model) && model.Kind == CoopCampaignPresentationValueKind.Node &&
+            state.Root.Properties.TryGetValue("CurrentCharacter", out var row) && row.Kind == CoopCampaignPresentationValueKind.Node &&
+            row.Properties.TryGetValue("ReplicaRowId", out var id) && id.Kind == CoopCampaignPresentationValueKind.Text && id.Text == RowId &&
+            row.Properties.TryGetValue("Number", out var count) && count.Kind == CoopCampaignPresentationValueKind.Integer && count.Number > 0;
         public string Encode() => "troop:" + CoopCampaignAftermathInspectionTarget.Pack(WindowId) + ":" +
             CoopCampaignAftermathInspectionTarget.Pack(RowId);
         public static bool TryParse(string text, out CoopCampaignAftermathTroopTarget target)
@@ -279,9 +285,47 @@ namespace CoopSpectator.Infrastructure
         }
     }
 
+    // Operates only on a newly captured detached tree. Battle materialization
+    // already owns creation of fingerprinted crafted items. Never create a native
+    // item here, strip a missing slot or change the host's equipment selection.
+    public static class CoopCampaignAftermathEquipmentProjection
+    {
+        public static void ApplyCraftedAliases(CoopCampaignPresentationValue node, IReadOnlyDictionary<string, string> aliases)
+        {
+            if (node == null || aliases == null || aliases.Count == 0) return;
+            ApplyResolvedAliases(node, id => aliases.TryGetValue(id, out string mirror) ? mirror : id);
+        }
+        public static void ApplyResolvedAliases(CoopCampaignPresentationValue node, Func<string, string> resolve)
+        {
+            if (node == null || resolve == null) return;
+            if (node.Kind == CoopCampaignPresentationValueKind.Node)
+            {
+                if (node.Properties.TryGetValue("EquipmentCode", out var equipment) &&
+                    equipment.Kind == CoopCampaignPresentationValueKind.Text && CoopConversationHudCodec.IsEquipmentCode(equipment.Text))
+                {
+                    string code = CoopConversationHudCodec.ResolveEquipmentCode(equipment.Text, resolve, _ => true);
+                    if (code.Length == 0) throw new InvalidDataException("Invalid detached equipment code.");
+                    equipment.Text = code;
+                }
+                if (node.Properties.TryGetValue("TextureProviderName", out var provider) &&
+                    provider.Kind == CoopCampaignPresentationValueKind.Text &&
+                    node.Properties.TryGetValue("Id", out var image) && image.Kind == CoopCampaignPresentationValueKind.Text &&
+                    !string.IsNullOrEmpty(image.Text))
+                {
+                    if (provider.Text == "ItemImageTextureProvider") image.Text = resolve(image.Text);
+                    else if (provider.Text == "CharacterImageTextureProvider" && CoopConversationHudCodec.IsPortraitCode(image.Text))
+                        image.Text = CoopConversationHudCodec.ResolvePortraitEquipment(image.Text, resolve, _ => true);
+                }
+                foreach (var child in node.Properties.Values) ApplyResolvedAliases(child, resolve);
+            }
+            else if (node.Kind == CoopCampaignPresentationValueKind.List)
+                foreach (var child in node.Items) ApplyResolvedAliases(child, resolve);
+        }
+    }
+
     public static class CoopCampaignAftermathCodec
     {
-        private const int Magic = 0x43414632; // CAF2: typed UI color
+        private const int Magic = 0x43414633; // CAF3: lossless per-envelope string references
         public const int MaximumBytes = 786432;
         public const int MaximumValues = 65536;
         public const int MaximumDepth = 12;
@@ -289,8 +333,14 @@ namespace CoopSpectator.Infrastructure
         private static readonly UTF8Encoding Utf8 = new UTF8Encoding(false, true);
 
         public static bool TryEncode(CoopCampaignAftermathPresentation source, out byte[] bytes)
+            => TryEncode(source, out bytes, out _);
+
+        // Fixed rejection codes only: no binding values, identifiers or exception
+        // payloads. The host logs these only under explicit capture diagnostics.
+        public static bool TryEncode(CoopCampaignAftermathPresentation source, out byte[] bytes, out string rejection)
         {
             bytes = null;
+            rejection = "envelope";
             if (source == null || (source.Kind != CoopCampaignAftermathKind.Prisoners && source.Kind != CoopCampaignAftermathKind.Loot) ||
                 source.WindowId == null || source.WindowId.Length != 32 || !source.WindowId.All(IsHex) ||
                 source.Root?.Kind != CoopCampaignPresentationValueKind.Node) return false;
@@ -301,13 +351,19 @@ namespace CoopSpectator.Infrastructure
                 {
                     writer.Write(Magic); writer.Write((byte)source.Kind); WriteText(writer, source.WindowId, 32);
                     int budget = MaximumValues;
-                    Write(writer, source.Root, 0, ref budget, new HashSet<CoopCampaignPresentationValue>());
+                    Write(writer, source.Root, 0, ref budget, new HashSet<CoopCampaignPresentationValue>(),
+                        new Dictionary<string, int>(StringComparer.Ordinal));
                     writer.Flush();
-                    if (stream.Length > MaximumBytes) return false;
-                    bytes = stream.ToArray(); return true;
+                    if (stream.Length > MaximumBytes) { rejection = "byte-limit"; return false; }
+                    bytes = stream.ToArray(); rejection = null; return true;
                 }
             }
-            catch (Exception ex) when (ex is ArgumentException || ex is IOException || ex is InvalidDataException || ex is OverflowException) { return false; }
+            catch (Exception ex) when (ex is ArgumentException || ex is IOException || ex is InvalidDataException || ex is OverflowException)
+            {
+                rejection = ex is InvalidDataException && ex.Message.StartsWith("CAF2:", StringComparison.Ordinal)
+                    ? ex.Message.Substring(5) : "encoding";
+                return false;
+            }
         }
 
         public static bool TryDecode(byte[] bytes, out CoopCampaignAftermathPresentation result)
@@ -323,7 +379,7 @@ namespace CoopSpectator.Infrastructure
                     var kind = (CoopCampaignAftermathKind)reader.ReadByte();
                     string id = ReadText(reader, 32);
                     int budget = MaximumValues;
-                    var root = Read(reader, 0, ref budget);
+                    var root = Read(reader, 0, ref budget, new List<string>(), new HashSet<string>(StringComparer.Ordinal));
                     if (stream.Position != stream.Length || root.Kind != CoopCampaignPresentationValueKind.Node ||
                         (kind != CoopCampaignAftermathKind.Prisoners && kind != CoopCampaignAftermathKind.Loot) ||
                         id.Length != 32 || !id.All(IsHex)) return false;
@@ -334,10 +390,13 @@ namespace CoopSpectator.Infrastructure
             catch (Exception ex) when (ex is ArgumentException || ex is IOException || ex is InvalidDataException || ex is OverflowException) { return false; }
         }
 
-        private static void Write(BinaryWriter writer, CoopCampaignPresentationValue value, int depth, ref int budget,
-            HashSet<CoopCampaignPresentationValue> ancestors)
+        internal static void Write(BinaryWriter writer, CoopCampaignPresentationValue value, int depth, ref int budget,
+            HashSet<CoopCampaignPresentationValue> ancestors, Dictionary<string, int> strings)
         {
-            if (value == null || depth > MaximumDepth || --budget < 0 || !ancestors.Add(value)) throw new InvalidDataException();
+            if (value == null) throw new InvalidDataException("CAF2:null-value");
+            if (depth > MaximumDepth) throw new InvalidDataException("CAF2:depth-limit");
+            if (--budget < 0) throw new InvalidDataException("CAF2:value-limit");
+            if (!ancestors.Add(value)) throw new InvalidDataException("CAF2:cycle");
             writer.Write((byte)value.Kind);
             switch (value.Kind)
             {
@@ -349,28 +408,30 @@ namespace CoopSpectator.Infrastructure
                 case CoopCampaignPresentationValueKind.Float:
                 case CoopCampaignPresentationValueKind.Double:
                     ValidateNumber(value.Kind, value.Number); writer.Write(value.Number); break;
-                case CoopCampaignPresentationValueKind.Text: WriteText(writer, value.Text, 32768); break;
+                case CoopCampaignPresentationValueKind.Text: WriteReference(writer, value.Text, 32768, strings); break;
                 case CoopCampaignPresentationValueKind.Node:
-                    if (value.Properties == null || value.Properties.Count > 256) throw new InvalidDataException();
+                    if (value.Properties == null || value.Properties.Count > 256) throw new InvalidDataException("CAF2:property-count");
                     writer.Write(value.Properties.Count);
                     foreach (var property in value.Properties.OrderBy(p => p.Key, StringComparer.Ordinal))
                     {
-                        if (!IsPropertyName(property.Key)) throw new InvalidDataException();
-                        WriteText(writer, property.Key, 128); Write(writer, property.Value, depth + 1, ref budget, ancestors);
+                        if (!IsPropertyName(property.Key)) throw new InvalidDataException("CAF2:property-name");
+                        WriteReference(writer, property.Key, 128, strings);
+                        Write(writer, property.Value, depth + 1, ref budget, ancestors, strings);
                     }
                     break;
                 case CoopCampaignPresentationValueKind.List:
-                    if (value.Items == null || value.Items.Count > MaximumItems) throw new InvalidDataException();
+                    if (value.Items == null || value.Items.Count > MaximumItems) throw new InvalidDataException("CAF2:list-count");
                     writer.Write(value.Items.Count);
-                    foreach (var item in value.Items) Write(writer, item, depth + 1, ref budget, ancestors);
+                    foreach (var item in value.Items) Write(writer, item, depth + 1, ref budget, ancestors, strings);
                     break;
-                default: throw new InvalidDataException();
+                default: throw new InvalidDataException("CAF2:value-kind");
             }
             ancestors.Remove(value);
-            if (writer.BaseStream.Length > MaximumBytes) throw new InvalidDataException();
+            if (writer.BaseStream.Length > MaximumBytes) throw new InvalidDataException("CAF2:byte-limit");
         }
 
-        private static CoopCampaignPresentationValue Read(BinaryReader reader, int depth, ref int budget)
+        internal static CoopCampaignPresentationValue Read(BinaryReader reader, int depth, ref int budget,
+            List<string> strings, HashSet<string> defined)
         {
             if (depth > MaximumDepth || --budget < 0) throw new InvalidDataException();
             var result = new CoopCampaignPresentationValue { Kind = (CoopCampaignPresentationValueKind)reader.ReadByte() };
@@ -384,21 +445,21 @@ namespace CoopSpectator.Infrastructure
                 case CoopCampaignPresentationValueKind.Float:
                 case CoopCampaignPresentationValueKind.Double:
                     result.Number = reader.ReadDouble(); ValidateNumber(result.Kind, result.Number); break;
-                case CoopCampaignPresentationValueKind.Text: result.Text = ReadText(reader, 32768); break;
+                case CoopCampaignPresentationValueKind.Text: result.Text = ReadReference(reader, 32768, strings, defined); break;
                 case CoopCampaignPresentationValueKind.Node:
                     int count = ReadCount(reader, 256);
                     result.Properties = new Dictionary<string, CoopCampaignPresentationValue>(StringComparer.Ordinal);
                     string previous = null;
                     for (int i = 0; i < count; i++)
                     {
-                        string key = ReadText(reader, 128);
+                        string key = ReadReference(reader, 128, strings, defined);
                         if (!IsPropertyName(key) || (previous != null && string.CompareOrdinal(previous, key) >= 0)) throw new InvalidDataException();
-                        result.Properties.Add(key, Read(reader, depth + 1, ref budget)); previous = key;
+                        result.Properties.Add(key, Read(reader, depth + 1, ref budget, strings, defined)); previous = key;
                     }
                     break;
                 case CoopCampaignPresentationValueKind.List:
                     int items = ReadCount(reader, MaximumItems); result.Items = new List<CoopCampaignPresentationValue>();
-                    for (int i = 0; i < items; i++) result.Items.Add(Read(reader, depth + 1, ref budget));
+                    for (int i = 0; i < items; i++) result.Items.Add(Read(reader, depth + 1, ref budget, strings, defined));
                     break;
                 default: throw new InvalidDataException();
             }
@@ -412,7 +473,7 @@ namespace CoopSpectator.Infrastructure
                 (kind == CoopCampaignPresentationValueKind.Integer && (n < int.MinValue || n > int.MaxValue || n != Math.Truncate(n))) ||
                 ((kind == CoopCampaignPresentationValueKind.Unsigned || kind == CoopCampaignPresentationValueKind.Color) &&
                     (n < 0 || n > uint.MaxValue || n != Math.Truncate(n))) ||
-                (kind == CoopCampaignPresentationValueKind.Float && (n < -float.MaxValue || n > float.MaxValue))) throw new InvalidDataException();
+                (kind == CoopCampaignPresentationValueKind.Float && (n < -float.MaxValue || n > float.MaxValue))) throw new InvalidDataException("CAF2:number");
         }
         public static bool IsPropertyName(string name) => name != null && name.Length > 0 && name.Length <= 128 &&
             ((name[0] >= 'A' && name[0] <= 'Z') || (name[0] >= 'a' && name[0] <= 'z') || name[0] == '_') &&
@@ -420,9 +481,30 @@ namespace CoopSpectator.Infrastructure
         private static bool IsHex(char c) => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
         private static int ReadCount(BinaryReader reader, int max)
         { int count = reader.ReadInt32(); if (count < 0 || count > max) throw new InvalidDataException(); return count; }
+        private static void WriteReference(BinaryWriter writer, string text, int max, Dictionary<string, int> strings)
+        {
+            // Validate at every use: a long text cannot become a property name
+            // through a reference. The table is local to this bounded envelope.
+            if (text == null || text.Length > max) throw new InvalidDataException("CAF2:text-limit");
+            if (strings.TryGetValue(text, out int index)) { writer.Write(index); return; }
+            writer.Write(-1); WriteText(writer, text, max); strings.Add(text, strings.Count);
+        }
+        private static string ReadReference(BinaryReader reader, int max, List<string> strings, HashSet<string> defined)
+        {
+            int index = reader.ReadInt32();
+            if (index >= 0)
+            {
+                if (index >= strings.Count || strings[index].Length > max) throw new InvalidDataException();
+                return strings[index];
+            }
+            if (index != -1 || strings.Count >= MaximumValues * 2) throw new InvalidDataException();
+            string text = ReadText(reader, max);
+            if (!defined.Add(text)) throw new InvalidDataException(); // Canonical first-use definition only.
+            strings.Add(text); return text;
+        }
         private static void WriteText(BinaryWriter writer, string text, int max)
         {
-            if (text == null || text.Length > max) throw new InvalidDataException();
+            if (text == null || text.Length > max) throw new InvalidDataException("CAF2:text-limit");
             byte[] bytes = Utf8.GetBytes(text); writer.Write(bytes.Length); writer.Write(bytes);
         }
         private static string ReadText(BinaryReader reader, int max)

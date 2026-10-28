@@ -35,6 +35,9 @@ namespace CoopSpectator.DedicatedServer
         private static CoopCampaignMissionOpening<Mission> _dispatchOpening;
         private static Mission _closingMission;
         private static bool _dispatchClosing;
+        private static readonly CoopCampaignMissionReload Reload = new CoopCampaignMissionReload();
+        private static CoopCampaignReloadFrame _reloadFrame;
+        private static CoopMissionProcessIdentity _boundHost;
 
         private static bool IsOwnedBattle(Mission mission) => _lifecycle != null && !_ownedMap &&
             mission != null && ReferenceEquals(mission, _ownedMission);
@@ -77,7 +80,7 @@ namespace CoopSpectator.DedicatedServer
 
         public static void Tick()
         {
-            if (!ExperimentalFeatures.EnableAutomaticCampaignMissions || _failure != null) return;
+            if (!ExperimentalFeatures.EnableAutomaticCampaignMissions) return;
             long now = Stopwatch.GetTimestamp();
             if (now < _nextTick) return;
             _nextTick = now + Stopwatch.Frequency / 4;
@@ -95,20 +98,23 @@ namespace CoopSpectator.DedicatedServer
                     CoopCampaignMissionChannel.ResultPublished = OnResultPublished;
                 }
                 if (_lifecycle == null) return;
-                CoopCampaignMissionEnvelope envelope = ReadAdmitted(now);
-                if (envelope != null) _lastFreshAt = Clock.Elapsed.TotalSeconds;
-                else if (Clock.Elapsed.TotalSeconds - _lastFreshAt > 300)
-                { Fail("host-session-expired"); return; }
-
                 object manager = GetManager();
                 bool ready = manager != null && (bool)_idle.Invoke(manager, null) && ListedReady(manager);
                 object active = GameStateManager.Current?.ActiveState;
                 Mission mission = Mission.Current;
                 bool canStart = ready && mission == null && active != null && active.GetType().GetInterfaces().Any(
                     type => type.FullName == "TaleWorlds.MountAndBlade.ListedServer.IIntermissionState");
-                bool canEnd = ready && active is MissionState && mission != null && !mission.MissionEnded &&
-                    mission.GetMissionBehavior<MissionLobbyComponent>() != null;
                 bool owned = mission != null && ReferenceEquals(mission, _ownedMission);
+                bool canEnd = GetCloseRoute(ready, active, mission, owned) != CoopCampaignMissionCloseRoute.Unavailable;
+                if (_opening && owned && mission.CurrentState == Mission.State.Continuing) _opening = false;
+                // OpenNew can return before Mission.Current is assigned. That
+                // gap is not teardown/intermission and must never earn a reset ack.
+                if (ProcessReload(now, manager, mission, owned, canStart && !_opening, canEnd && !_opening)) return;
+                if (_failure != null) return;
+                CoopCampaignMissionEnvelope envelope = ReadAdmitted(now);
+                if (envelope != null) { _lastFreshAt = Clock.Elapsed.TotalSeconds; _boundHost = envelope.Host; }
+                else if (Clock.Elapsed.TotalSeconds - _lastFreshAt > 300)
+                { Fail("host-session-expired"); return; }
                 bool readyObservation = !_opening || (owned && mission.CurrentState == Mission.State.Continuing);
                 if (_opening && readyObservation) _opening = false;
                 var observed = new CoopCampaignMissionObservation {
@@ -129,7 +135,7 @@ namespace CoopSpectator.DedicatedServer
                         throw new InvalidOperationException("mission-close-identity-mismatch");
                     _closingMission = mission;
                     _dispatchClosing = true;
-                    try { _endMission.Invoke(manager, null); }
+                    try { CloseOwnedMission(manager, mission); }
                     finally { _dispatchClosing = false; _closingMission = null; }
                 }
                 else
@@ -146,6 +152,64 @@ namespace CoopSpectator.DedicatedServer
         {
             var value = _admission.Admit(CoopCampaignMissionChannel.Read(_session), now, Stopwatch.Frequency, host => host.IsAlive());
             return value;
+        }
+
+        private static bool ProcessReload(long now, object manager, Mission mission, bool owned, bool canStart, bool canEnd)
+        {
+            var request = CoopCampaignMissionReloadChannel.Read(_session, false);
+            if (request != null && _self.Matches(request.Binding.Dedicated) && request.Binding.Host.IsAlive() &&
+                (_boundHost == null || _boundHost.Matches(request.Binding.Host)) &&
+                CoopCampaignMissionChannel.IsFresh(request.Binding, now, Stopwatch.Frequency) && Reload.Request(request.Request))
+            {
+                _boundHost = request.Binding.Host;
+                if (Reload.IsPending) { _reloadFrame = request; _failure = null; }
+                else PublishReloadAcknowledgement(request, now); // Completed duplicate: never re-close/re-clear.
+            }
+            if (!Reload.IsPending) return false;
+            if (_reloadFrame == null || !_reloadFrame.Binding.Host.IsAlive() ||
+                !CoopCampaignMissionChannel.IsFresh(_reloadFrame.Binding, now, Stopwatch.Frequency)) return true;
+            var decision = Reload.Step(mission == null ? CoopCampaignObservedMissionKind.Intermission :
+                !owned ? CoopCampaignObservedMissionKind.Other : _ownedMap ? CoopCampaignObservedMissionKind.Map : CoopCampaignObservedMissionKind.Battle,
+                owned ? _instance : mission == null ? null : "unowned", owned, canEnd, canStart);
+            if (decision.Action == CoopCampaignReloadAction.Fault) { Fail(decision.Reason); return true; }
+            if (decision.Action == CoopCampaignReloadAction.EndOwnedMission)
+            {
+                if (!owned || !canEnd || decision.MissionInstance != _instance)
+                    throw new InvalidOperationException("reload-close-identity-mismatch");
+                _closingMission = mission; _dispatchClosing = true;
+                try { CloseOwnedMission(manager, mission); }
+                finally { _dispatchClosing = false; _closingMission = null; }
+                ModLogger.Info("CampaignMissionServer: closing abandoned owned mission for save reload.");
+            }
+            else if (decision.Action == CoopCampaignReloadAction.Acknowledge)
+            {
+                // No old native mission remains. Preserve dynamic native resources
+                // until this boundary; discard only the retired battle's state.
+                if (mission != null || !canStart || !_reloadFrame.Request.Same(decision.Request))
+                    throw new InvalidOperationException("reload-cleanup-readiness-lost");
+                BattleSnapshotRuntimeState.Clear("campaign-save-reload");
+                CoopPreMissionTopologyRuntimeState.Clear("campaign-save-reload");
+                CoopCampaignMissionChannel.WriteAtomic(BattleRosterFileHelper.GetRosterFilePath(), System.Text.Encoding.UTF8.GetBytes("{}"));
+                _battle = null; _ownedMission = null; _ownedMap = false; _opening = false;
+                _completedBattleKey = null; _instance = null; _origin = _sequence = 0; _dispatchOpening = null;
+                _lifecycle = new CoopCampaignMissionLifecycle(_session, 120);
+                _admission = new CoopCampaignMissionAdmission(_session, _self,
+                    decision.Request.Epoch, decision.Request.CampaignId, _boundHost);
+                PublishReloadAcknowledgement(_reloadFrame, now);
+                if (!Reload.Commit(decision.Request)) throw new InvalidOperationException("reload-commit-identity-lost");
+                _reloadFrame = null; _lastFreshAt = Clock.Elapsed.TotalSeconds;
+                ModLogger.Info("CampaignMissionServer: cleared abandoned state and acknowledged loaded world.");
+            }
+            return true;
+        }
+
+        private static void PublishReloadAcknowledgement(CoopCampaignReloadFrame request, long now)
+        {
+            var previous = CoopCampaignMissionReloadChannel.Read(_session, true);
+            if (request.Matches(previous) && CoopCampaignMissionChannel.IsFresh(previous.Binding, now, Stopwatch.Frequency)) return;
+            var binding = CoopCampaignMissionChannel.Decode(CoopCampaignMissionChannel.Encode(request.Binding));
+            binding.SentTimestamp = now;
+            CoopCampaignMissionReloadChannel.Write(new CoopCampaignReloadFrame { Acknowledgement = true, Binding = binding });
         }
 
         private static void Start(CoopCampaignMissionDecision decision, CoopCampaignMissionEnvelope value)
@@ -225,9 +289,35 @@ namespace CoopSpectator.DedicatedServer
 
         private static void OnResultPublished(object mission, string campaign, string battle, string instance)
         {
-            if (_failure == null && !_ownedMap && ReferenceEquals(mission, _ownedMission) && _battle != null &&
+            if (_failure == null && !Reload.IsPending && !_ownedMap && ReferenceEquals(mission, _ownedMission) && _battle != null &&
                 campaign == _battle.CampaignId && battle == _battle.BattleId && instance == _battle.BattleInstanceId)
                 _completedBattleKey = _battle.Intent.BattleKey;
+        }
+
+        private static CoopCampaignMissionCloseRoute GetCloseRoute(bool ready, object active, Mission mission, bool owned)
+        {
+            var lobby = mission?.GetMissionBehavior<MissionLobbyComponent>();
+            return CoopCampaignMissionClosePolicy.Select(ready, active is MissionState, owned, lobby != null,
+                mission?.MissionEnded == true, mission?.CurrentState == Mission.State.Continuing,
+                lobby?.CurrentMultiplayerState == MissionLobbyComponent.MultiplayerGameState.Ending);
+        }
+
+        private static void CloseOwnedMission(object manager, Mission mission)
+        {
+            if (!_dispatchClosing || !ReferenceEquals(mission, _closingMission) ||
+                !ReferenceEquals(mission, _ownedMission) || !ReferenceEquals(Mission.Current, mission))
+                throw new InvalidOperationException("mission-close-ownership-lost");
+            var route = GetCloseRoute(ListedReady(manager) && (bool)_idle.Invoke(manager, null),
+                GameStateManager.Current?.ActiveState, mission, true);
+            if (route == CoopCampaignMissionCloseRoute.ListedManager) _endMission.Invoke(manager, null);
+            else if (route == CoopCampaignMissionCloseRoute.EndedMissionLobby)
+            {
+                // Same native Ending/timer/UDP/UnloadMission path as the listed
+                // manager, which rejects MissionEnded before reaching this call.
+                // Never clear MissionEnded, replay results or unload directly.
+                mission.GetMissionBehavior<MissionLobbyComponent>().SetStateEndingAsServer();
+            }
+            else throw new InvalidOperationException("mission-close-readiness-lost");
         }
 
         private static object GetManager()

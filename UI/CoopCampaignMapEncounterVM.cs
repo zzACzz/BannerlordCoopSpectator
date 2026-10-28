@@ -14,6 +14,7 @@ namespace CoopSpectator.UI
             foreach (var p in DefenderPartyList) p.ExecuteCloseTooltip();
         }
         private CoopCampaignMapEncounterPresentation _state;
+        private CoopDetachedPortraitResources _resources;
         [DataSourceProperty] public string TitleText => _state.TitleText;
         [DataSourceProperty] public bool IsSiege => _state.IsSiege;
         [DataSourceProperty] public bool IsNaval => _state.IsNaval;
@@ -46,9 +47,12 @@ namespace CoopSpectator.UI
         [DataSourceProperty] public MBBindingList<CoopCampaignMapEncounterPartyVM> DefenderPartyList { get; } = new MBBindingList<CoopCampaignMapEncounterPartyVM>();
 
         public void Apply(CoopCampaignMapEncounterPresentation state)
+            => Apply(state, null);
+        internal void Apply(CoopCampaignMapEncounterPresentation state, CoopDetachedPortraitResources resources)
         {
             if (!state.TrySnapshot(out var copy)) throw new System.ArgumentException("Invalid encounter presentation.");
             _state = copy;
+            _resources = resources;
             AttackerPartyBanner?.OnFinalize(); DefenderPartyBanner?.OnFinalize(); PowerComparer?.OnFinalize();
             AttackerPartyBanner = new CoopConversationHudImageVM(copy.AttackerBanner, true, true);
             DefenderPartyBanner = new CoopConversationHudImageVM(copy.DefenderBanner, true, true);
@@ -69,7 +73,7 @@ namespace CoopSpectator.UI
         {
             while (target.Count > source.Count) { target[target.Count - 1].OnFinalize(); target.RemoveAt(target.Count - 1); }
             while (target.Count < source.Count) target.Add(new CoopCampaignMapEncounterPartyVM(_hover));
-            for (int i = 0; i < source.Count; i++) target[i].Apply(source[i]);
+            for (int i = 0; i < source.Count; i++) target[i].Apply(source[i], _resources);
         }
         public override void OnFinalize()
         {
@@ -84,6 +88,9 @@ namespace CoopSpectator.UI
     {
         private readonly System.Action<string, bool> _hover;
         private bool _isHovered;
+        private string _tooltipId;
+        private bool _craftedReady;
+        private CoopDetachedPortraitResources _resources;
         public CoopCampaignMapEncounterPartyVM(System.Action<string, bool> hover = null) { _hover = hover; }
         private CoopCampaignMapEncounterParty _state = new CoopCampaignMapEncounterParty();
         [DataSourceProperty] public string NameText => _state.NameText;
@@ -108,14 +115,29 @@ namespace CoopSpectator.UI
         [DataSourceProperty] public CoopConversationHudImageVM Banner_9 { get; private set; }
         [DataSourceProperty] public MBBindingList<CoopConversationHudQuestVM> Quests { get; } = new MBBindingList<CoopConversationHudQuestVM>();
         public void Apply(CoopCampaignMapEncounterParty state)
+            => Apply(state, null);
+        internal void Apply(CoopCampaignMapEncounterParty state, CoopDetachedPortraitResources resources, string tooltipId = null)
         {
-            bool hoverChanged = _state.TooltipId != state.TooltipId;
-            if (_isHovered && hoverChanged) _hover?.Invoke(_state.TooltipId, false);
-            bool portraitChanged = Visual == null || _state.PortraitCode != state.PortraitCode || _state.PortraitPose != state.PortraitPose;
+            string nextTooltip = tooltipId ?? state.TooltipId;
+            if (tooltipId != null && tooltipId.Length != 0 && !CoopCampaignSettlementMenuPresentation.IsHintToken(tooltipId))
+                throw new System.ArgumentException("Invalid settlement portrait interest.");
+            bool hoverChanged = _tooltipId != nextTooltip;
+            if (_isHovered && hoverChanged) _hover?.Invoke(_tooltipId, false);
+            bool crafted = state.PortraitCode?.Contains("cs_crafted_") == true;
+            // Readiness is checked by the whole encounter before a refresh;
+            // no native item creation is allowed in this binding adapter.
+            bool ready = crafted && resources != null && resources.TryBuild(state.PortraitCode, out _);
+            bool portraitChanged = Visual == null || _state.PortraitCode != state.PortraitCode || _state.PortraitPose != state.PortraitPose ||
+                _craftedReady != ready || !ReferenceEquals(_resources, resources);
+            _craftedReady = ready; _resources = resources;
             bool bannerChanged = Banner_9 == null || _state.BannerCode != state.BannerCode;
             _state = state.Clone();
-            if (_isHovered && hoverChanged && !string.IsNullOrEmpty(_state.TooltipId)) _hover?.Invoke(_state.TooltipId, true);
-            if (portraitChanged) { Visual?.OnFinalize(); Visual = new CoopConversationHudImageVM(state.PortraitCode, false, portraitPose: state.PortraitPose); OnPropertyChanged("Visual"); }
+            _tooltipId = nextTooltip;
+            if (_isHovered && hoverChanged && !string.IsNullOrEmpty(_tooltipId)) _hover?.Invoke(_tooltipId, true);
+            if (portraitChanged) { Visual?.OnFinalize();
+                Visual = crafted ? new CoopConversationHudImageVM(state.PortraitCode, state.PortraitPose, ready ? resources : null) :
+                    new CoopConversationHudImageVM(state.PortraitCode, false, portraitPose: state.PortraitPose);
+                OnPropertyChanged("Visual"); }
             if (bannerChanged) { Banner_9?.OnFinalize(); Banner_9 = new CoopConversationHudImageVM(state.BannerCode, true, true); OnPropertyChanged("Banner_9"); }
             foreach (var q in Quests) q.OnFinalize();
             Quests.Clear(); foreach (int q in state.QuestMarkers) Quests.Add(new CoopConversationHudQuestVM(q));
@@ -127,11 +149,11 @@ namespace CoopSpectator.UI
         public void ExecuteOpenTooltip()
         {
             _isHovered = true;
-            if (!string.IsNullOrEmpty(_state.TooltipId)) _hover?.Invoke(_state.TooltipId, true);
+            if (!string.IsNullOrEmpty(_tooltipId)) _hover?.Invoke(_tooltipId, true);
         }
         public void ExecuteCloseTooltip()
         {
-            if (_isHovered) _hover?.Invoke(_state.TooltipId, false);
+            if (_isHovered) _hover?.Invoke(_tooltipId, false);
             _isHovered = false;
         }
         public override void OnFinalize()

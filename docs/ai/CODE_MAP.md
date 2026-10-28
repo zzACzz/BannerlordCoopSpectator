@@ -1,5 +1,73 @@
 # Code Map
 
+b302 source-only reward details: CoopCampaignAutoBattleRewardCapture inspects
+audited exact native captured ExplainedNumber fields, scopes cache to the current
+scoreboard, and appends prepared CAS1 rows. CoopCampaignMapTooltipCapture.AutoBattle
+reuses text/language isolation for native formatting. CoopCampaignAutoBattleHints
+supports bounded local property rows as well as plain hints; no simulation owner.
+Test-AutoBattleRewardBindings checks installed native closure IL/typed row capture
+and detached UI lifetimes without constructing a Game or running a delegate.
+
+b299 default rollout: ExperimentalFeatures uses default-on map/automatic/functional
+siege-flight gates with explicit0 opt-out. CoopSiegeFlightObservationPatch retains
+its exact original-instruction validation and owner-scoped teardown. All diagnostic
+and automation gates remain opt-in. Test-ReplicaDefaults.ps1 checks compiled client
+and server flags in fresh processes. CreateTwoPcPreviewPackage.ps1 validates these
+defaults, embeds verification and excludes the unused tooltip prefab. No launcher
+environment injection is required for the map on either PC.
+
+2026-10-28 camera UI candidate b298: CoopCampaignMapReplicaInfoVM retains only
+English camera mode/return/control text. CoopCampaignMapReplicaInfo.xml removes
+the custom pinned card. UpdateReplicaInformation performs admitted native hover
+only; no local click pin or campaign order. Old pure panel-position utility remains
+unused for compatibility. Native hover/Alt and body/disclosure revocation persist.
+Auto-battle plain hints use CoopCampaignAutoBattleHints and exact HintViewModel
+field capture under the explicit scoreboard policy; no provider/simulator commands.
+
+Auto-battle candidate: `Campaign/CoopCampaignAutoBattleCapture.cs` reads the exact
+MapScreen-owned current native scoreboard; `CoopCampaignAutoBattlePresentation.cs`
+owns CAS1 and uses the bounded shared prepared-value codec. CMN12 publishes it
+exclusively; `CoopCampaignMapPrototypeMissionView.AutoBattle.cs` binds the stock
+SPScoreboard through detached VMs. `AutoBattlePresentationTests` and
+`scripts/Test-AutoBattleBindings.ps1` cover transport/progress and local command
+isolation. See CAMPAIGN_AUTO_BATTLE_WINDOW.md; native acceptance pending.
+
+2026-10-28 settlement tooltip candidate: `CoopCampaignMapMenuCapture.SettlementHints.cs`
+owns current prepared source leases; `CoopCampaignSettlementHintIdentity` lives
+with the pure settlement presentation. `CoopCampaignMapTooltipCapture.Settlement.cs`
+captures audited native rows/string hints with existing text/language isolation.
+`CoopSettlementHintVM` and separate portrait interests reuse the existing leased
+tooltip relay/presenter. CMN11/protocol70/bridge65/tooltip6. Native hover acceptance
+pending; see CAMPAIGN_SETTLEMENT_MENU_OVERLAY.md.
+
+## Settlement top panel and native-ended close (2026-10-27 b289 candidate)
+
+`CoopCampaignSettlementMenuPresentation` and CMN10 carry prepared native settlement
+labels/flags/numbers, owner banner and ordered people/party portraits. Host capture
+reads the current SettlementMenuOverlayVM; client `CoopCampaignSettlementMenuVM`
+binds the stock SettlementOverlay movie. Compiled binding/metadata check:
+`scripts/Test-SettlementMenuBindings.ps1`. Native and hover fidelity remain open;
+see [canonical panel boundary](CAMPAIGN_SETTLEMENT_MENU_OVERLAY.md).
+
+`CoopCampaignMissionClosePolicy` in the lifecycle file selects the owned native
+close route; `CoopCampaignMissionServer.CloseOwnedMission` dispatches it for normal
+applied-result completion or explicitly admitted save reload. Never confuse
+MissionEnded with completed multiplayer teardown. See
+[ambush failure and native audit](CAMPAIGN_MISSION_NATIVE_ENDED_CLOSE.md).
+
+## Detached encounter portrait resources (2026-10-27 candidate)
+
+`Infrastructure/CoopCampaignCraftedVisualWeapon.cs` and
+`Campaign/CoopCampaignCraftedVisualCapture.cs` own bounded exact dependency data.
+`Infrastructure/CoopDetachedPortraitResources.cs` owns client-mission unregistered
+preview items, prepared outside rendering. `CoopItemRegistryCounter.cs` observes
+managed registration metadata. `UI/CoopDetachedPortraitTextureProvider.cs` owns
+local binding/request lifetimes; `Patches/CoopDetachedPortraitEquipmentPatch.cs`
+limits equipment substitution to the exact own thumbnail request/code reference.
+`scripts/Test-DetachedPortraitScope.ps1` verifies compiled scope/lifetime and the
+installed managed counter layout without a native game. See
+[canonical boundaries and acceptance](CAMPAIGN_CRAFTED_VISUAL_RESOURCES.md).
+
 Current aftermath entry points and acceptance boundaries:
 [2026-10-25 handoff](HANDOFF_2026-10-25_AFTERMATH.md). Earlier dated entries describe
 their then-current candidates, including now-superseded format versions.

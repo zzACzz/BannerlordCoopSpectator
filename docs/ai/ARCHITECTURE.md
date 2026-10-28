@@ -1,5 +1,32 @@
 # Architecture
 
+Auto-battle presentation uses the existing campaign-map mission, transporting the
+current native host scoreboard as an exclusive CAS1/CMN12 display tree. It does not
+start a dedicated combat mission or a client simulation. Detached stock movie
+bindings have no simulation/action authority. Protocol71/bridge66 coherent roles
+required. See CAMPAIGN_AUTO_BATTLE_WINDOW.md; native/fidelity acceptance remains open.
+
+b292 settlement tooltip candidate extends the leased host-formatted tooltip path
+with owner-bound prepared settlement sources, not campaign simulation on clients.
+CMN11/protocol70/bridge65/tooltip6 requires coherent installation. Native property,
+hero and string providers preserve native hidden-information rules; each peer
+owns hover independently. Host command delegates are never copied. Read
+CAMPAIGN_SETTLEMENT_MENU_OVERLAY.md for audit and remaining native gates.
+
+Settlement top-panel b289 candidate uses prepared native host fields and ordered
+portrait lists in CMN10/protocol69/bridge64. Clients own detached stock bindings,
+local list browsing and render-only unregistered resources, with no campaign
+commands or native SettlementMenuOverlayVM construction. See
+CAMPAIGN_SETTLEMENT_MENU_OVERLAY.md; native/hover fidelity remains open.
+
+Detached encounter-portrait candidate (2026-10-27): current host-disclosed crafting
+definitions travel with the encounter menu. The client map mission owns
+unregistered smithy-style items. A local thumbnail request supplies its Equipment
+only to the stock renderer for its exact CharacterCode. Gameplay item state and
+dedicated authority remain unchanged. No remote provider name, pointer or native
+ID is admitted. Native rendering remains pending; see
+[resource ownership](CAMPAIGN_CRAFTED_VISUAL_RESOURCES.md).
+
 Current aftermath architecture uses CAF2, protocol65/bridge60/tooltip5/catalog10.
 See [current checkpoint](HANDOFF_2026-10-25_AFTERMATH.md); older candidate notes below
 are retained history. Local loot inspection and hero/gear projection are connected;

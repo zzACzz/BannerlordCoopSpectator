@@ -86,6 +86,23 @@ namespace CoopSpectator.Campaign
         internal static bool AreControlWritableTemplatesIsolated() =>
             AreTemplatesIsolated(new[] { "str_hotkey_with_hint" });
 
+        internal static bool AreSettlementWritableTemplatesIsolated(bool hero)
+        {
+            if (!AreWritableTemplatesIsolated()) return false;
+            if (!hero) return true;
+            // Installed GetHeroKingdomRank writes HERO to a copied variation;
+            // a non-null empty source dictionary would be shared by CopyTextObject.
+            foreach (var entry in new[] { new[] { "str_hero_rank_of_faction", "0" }, new[] { "str_hero_rank_of_faction", "1" },
+                new[] { "str_hero_rank_of_faction_mercenary", (string)null }, new[] { "str_hero_rank_of_faction_nobleman", (string)null } })
+            {
+                var text = GameTexts.FindText(entry[0], entry[1]);
+                if (text == null || (text.Attributes != null && text.Attributes.Count == 0)) return false;
+            }
+            return true;
+        }
+
+        internal static bool AreAutoBattleWritableTemplatesIsolated() => AreTemplatesIsolated(new[] { "str_plus_with_number" });
+
         private static bool AreTemplatesIsolated(string[] ids)
         {
             var manager = Game.Current?.GameTextManager;

@@ -44,6 +44,14 @@ namespace CoopSpectator.Campaign
             _binding = null; _campaign = null; _nextTick = _lastRound = _nextLivenessCheck = _nextDiagnostic = 0; _ownerThread = 0;
             // Old run files expire/become unreachable; never enumerate/delete another run.
         }
+        internal static void ObserveCampaignLoaded()
+        {
+            if (_binding == null || _binding.Dedicated == null || !_binding.Dedicated.IsAlive()) return;
+            // Keep process-pair/run ownership and monotonic round history. Each
+            // request still has to match the new publisher's disclosed map session.
+            _campaign = TaleWorlds.CampaignSystem.Campaign.Current;
+            _nextTick = 0;
+        }
         internal static void Tick()
         {
             if (_binding == null || _ownerThread != System.Threading.Thread.CurrentThread.ManagedThreadId) return;
@@ -52,7 +60,7 @@ namespace CoopSpectator.Campaign
             _nextTick = now + Math.Max(1, Stopwatch.Frequency / 10);
             try
             {
-                if (!ReferenceEquals(_campaign, TaleWorlds.CampaignSystem.Campaign.Current)) { Reset(); return; }
+                if (!ReferenceEquals(_campaign, TaleWorlds.CampaignSystem.Campaign.Current)) return;
                 if (_binding.Dedicated == null) return; // Failed/unattached launch retains no cross-campaign reference.
                 if (now >= _nextLivenessCheck)
                 {

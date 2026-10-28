@@ -185,6 +185,8 @@
     <Compile Include="..\Infrastructure\ExactCampaignItemCatalogLoadPolicy.cs" Link="Infrastructure\ExactCampaignItemCatalogLoadPolicy.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignRuntimeItemRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeItemRegistry.cs" />
     <Compile Include="..\Infrastructure\CoopStoryBannerResources.cs" Link="Infrastructure\CoopStoryBannerResources.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMissionReload.cs" Link="Infrastructure\CoopCampaignMissionReload.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignMissionReloadChannel.cs" Link="Infrastructure\CoopCampaignMissionReloadChannel.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMirrorEquipmentResolver.cs" Link="Infrastructure\CoopCampaignMirrorEquipmentResolver.cs" />
     <Compile Include="..\Infrastructure\ExactCampaignRuntimeObjectRegistry.cs" Link="Infrastructure\ExactCampaignRuntimeObjectRegistry.cs" />
     <Compile Include="..\Infrastructure\ExactCreateAgentCorridorDiagnostics.cs" Link="Infrastructure\ExactCreateAgentCorridorDiagnostics.cs" />
@@ -227,6 +229,11 @@
     <Compile Include="..\Infrastructure\CoopCampaignMapRundownCodec.cs" Link="Infrastructure\CoopCampaignMapRundownCodec.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMapInterfaceCodec.cs" Link="Infrastructure\CoopCampaignMapInterfaceCodec.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMapMenuCodec.cs" Link="Infrastructure\CoopCampaignMapMenuCodec.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignCraftedVisualWeapon.cs" Link="Infrastructure\CoopCampaignCraftedVisualWeapon.cs" />
+    <Compile Include="..\Infrastructure\CoopItemRegistryCounter.cs" Link="Infrastructure\CoopItemRegistryCounter.cs" />
+    <Compile Include="..\Infrastructure\CoopDetachedPortraitResources.cs" Link="Infrastructure\CoopDetachedPortraitResources.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignSettlementMenuPresentation.cs" Link="Infrastructure\CoopCampaignSettlementMenuPresentation.cs" />
+    <Compile Include="..\Infrastructure\CoopCampaignAutoBattlePresentation.cs" Link="Infrastructure\CoopCampaignAutoBattlePresentation.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMapBattleMarkers.cs" Link="Infrastructure\CoopCampaignMapBattleMarkers.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMapBattleMarkerCodec.cs" Link="Infrastructure\CoopCampaignMapBattleMarkerCodec.cs" />
     <Compile Include="..\Infrastructure\CoopCampaignMapBattleMarkerAssembler.cs" Link="Infrastructure\CoopCampaignMapBattleMarkerAssembler.cs" />

@@ -21,8 +21,7 @@ namespace CoopSpectator.Patches
         internal static bool TryInstall(Action<SettlementVisualManager> begin, Action finish,
             Action abort, Action<SettlementVisual, Missile, object> observe)
         {
-            if (!string.Equals(Environment.GetEnvironmentVariable("COOPSPECTATOR_SIEGE_FLIGHT_OBSERVER"), "1", StringComparison.Ordinal) ||
-                !CoopSpectator.Infrastructure.ExperimentalFeatures.EnableCampaignMapPrototype ||
+            if (!CoopSpectator.Infrastructure.ExperimentalFeatures.EnableCampaignMapSiegeFlights ||
                 begin == null || finish == null || abort == null || observe == null || _harmony != null) return false;
             try
             {

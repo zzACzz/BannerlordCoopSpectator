@@ -144,11 +144,12 @@ $nativeRow.DefinitionLabel = 'Weight'; $nativeRow.ValueLabel = '0.68'; $nativeRo
 $nativeRow.TextColor = [TaleWorlds.Library.Color]::FromUint(4279383126)
 $captureType = [CoopSpectator.UI.CoopCampaignAftermathVM].Assembly.GetType('CoopSpectator.Campaign.CoopCampaignAftermathCapture')
 $captureMethod = $captureType.GetMethod('Capture', [Reflection.BindingFlags]'NonPublic,Static')
-$captureArguments = New-Object object[] 5
+$captureArguments = New-Object object[] 6
 $captureArguments[0] = $nativeRow.PSObject.BaseObject; $captureArguments[1] = [int]0
 $captureArguments[2] = [int]65536
 $captureArguments[3] = (New-Object 'System.Collections.Generic.HashSet[object]').PSObject.BaseObject
 $captureArguments[4] = $true
+$captureArguments[5] = $null # Default aftermath policy; scoreboard supplies its own explicit policy.
 $captured = $captureMethod.Invoke($null, $captureArguments)
 Assert-Binding ($captured.Properties['DefinitionLabel'].Text -eq 'Weight' -and $captured.Properties['ValueLabel'].Text -eq '0.68') 'Unannotated native tooltip labels captured'
 Assert-Binding ($captured.Properties['TextHeight'].Number -eq 7 -and $captured.Properties['TextColor'].Kind.ToString() -eq 'Color') 'Native tooltip layout/color captured'

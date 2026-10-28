@@ -64,7 +64,7 @@ internal static class ReplicaCameraTests
                 (string)e.Attribute("Text") == "@FollowHostText"),
             "Exactly one visible native button must bind the explicit return action and label.");
         Check(vm.Contains("ExecuteFollowHost() => _followHost?.Invoke()") &&
-              vm.Contains("До камери хоста") && vm.Contains("Самостійний огляд") &&
+              vm.Contains("Return to host camera") && vm.Contains("Free camera") &&
               view.Contains("new CoopCampaignMapReplicaInfoVM(FollowHostCamera)"),
             "Button and camera ownership status must be connected to the view, not decorative.");
         Check(view.Contains("_cameraPolicy.AdmitHostFrame(true)") &&

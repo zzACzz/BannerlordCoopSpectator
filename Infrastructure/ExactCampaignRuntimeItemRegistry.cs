@@ -71,6 +71,7 @@ namespace CoopSpectator.Infrastructure
         private static string _indexSummary = "not-built";
         private static bool _craftingSupportLoaded;
         private static bool _craftingSupportReady;
+        private static bool _detachedPortraitPreparationFaulted;
         private static string _craftingSupportSummary = "not-loaded";
         private const string MirrorItemIdPrefix = "cs_mirror_";
         private const string CraftedMirrorItemIdPrefix = "cs_crafted_";
@@ -297,6 +298,65 @@ namespace CoopSpectator.Infrastructure
                     originalItemId,
                     out mirrorItemId,
                     out failureSummary);
+            }
+        }
+
+        // Same unregistered ItemObject path as native smithy preview. These
+        // objects are owned by a portrait request and never enter the game item
+        // registry, battle snapshot, crafting-key lookup or network serialization.
+        internal static bool TryCreateDetachedPortraitWeapon(CoopCampaignCraftedVisualWeapon definition, out ItemObject item)
+        {
+            item = null;
+            if (_detachedPortraitPreparationFaulted || !GameNetwork.IsClient ||
+                !ExperimentalFeatures.EnableCampaignMapPrototype || definition == null || !definition.IsValid()) return false;
+            var manager = Game.Current?.ObjectManager ?? MBObjectManager.Instance;
+            if (manager == null) return false;
+            lock (Sync)
+            {
+                if (!CoopItemRegistryCounter.TryRead(manager, out uint before)) return false;
+                ItemObject prepared = null;
+                try
+                {
+                    EnsureIndexBuilt();
+                    EnsureCraftingSupportLoaded(manager);
+                    if (_craftingSupportReady)
+                    {
+                        var template = TryResolveObject<CraftingTemplate>(manager, definition.TemplateId);
+                        var modifier = string.IsNullOrEmpty(definition.ModifierGroupId) ? template?.ItemModifierGroup :
+                            TryResolveObject<ItemModifierGroup>(manager, definition.ModifierGroupId);
+                        var snapshot = new CraftedWeaponSnapshotMessage {
+                            Key = definition.Key, OriginalItemId = definition.OriginalId, MirrorItemId = definition.MirrorId,
+                            Name = definition.Name, CraftingTemplateId = definition.TemplateId, CultureId = definition.CultureId,
+                            ModifierGroupId = definition.ModifierGroupId, WeaponDesignHash = definition.DesignHash,
+                            IsCraftedByPlayer = true, Pieces = definition.OrderedPieces().Select(p => new CraftedWeaponPieceSnapshotMessage {
+                                PieceId = p.Id, PieceType = p.Type, ScalePercentage = p.Scale }).ToList() };
+                        if (template != null && (string.IsNullOrEmpty(definition.ModifierGroupId) || modifier != null))
+                        {
+                            var pieces = BuildCraftedWeaponDesignElements(manager, template, snapshot, out _);
+                            if (pieces != null && TryValidateCraftedWeaponDesignElements(manager, template, pieces, out _))
+                            {
+                                var owned = new ItemObject(definition.MirrorId);
+                                TryMarkItemObjectAsPlayerCrafted(ref owned);
+                                var generated = Crafting.CreatePreCraftedWeaponOnDeserialize(owned, pieces,
+                                    definition.TemplateId, CreateCraftedWeaponName(snapshot, definition.MirrorId), modifier);
+                                if (ReferenceEquals(owned, generated) && generated.Id.InternalValue == 0 && IsRuntimeWeaponItemUsable(generated))
+                                { ApplyCraftedItemMetadata(manager, generated, snapshot); prepared = generated; }
+                            }
+                        }
+                    }
+                }
+                catch (Exception) { prepared = null; }
+                // Fail closed, never decrement a counter or unregister an item
+                // to conceal a changed native contract. Only this owned preview
+                // preparation is disabled; existing battle materialization stays.
+                if (!CoopItemRegistryCounter.TryRead(manager, out uint after) || before != after)
+                {
+                    _detachedPortraitPreparationFaulted = true;
+                    ModLogger.Info("Detached portrait preparation disabled: item registry counter changed unexpectedly.");
+                    return false;
+                }
+                if (prepared == null || prepared.Id.InternalValue != 0) return false;
+                item = prepared; return true;
             }
         }
 

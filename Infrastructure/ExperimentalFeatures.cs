@@ -24,15 +24,20 @@ namespace CoopSpectator.Infrastructure
             IsEnvironmentFlagEnabledCore("COOPSPECTATOR_TEST_AUTOMATION");
 
         /// <summary>
-        /// Explicit opt-in for the isolated multiplayer Main_map rendering prototype.
-        /// It is independent from verbose diagnostics and remains disabled by default.
+        /// Campaign map replica is enabled for ordinary campaign/client/server launches.
+        /// Explicit process-local 0 retains a rollback path; diagnostics stay separate.
         /// </summary>
         public static readonly bool EnableCampaignMapPrototype =
-            IsEnvironmentFlagEnabledCore("COOPSPECTATOR_CAMPAIGN_MAP_PROTOTYPE");
+            IsDefaultOnEnvironmentFlag("COOPSPECTATOR_CAMPAIGN_MAP_PROTOTYPE");
 
-        // Separate rollout gate until native map/battle/map acceptance is complete.
+        // Only the campaign-launched, exact owned server receives transition authority.
         public static readonly bool EnableAutomaticCampaignMissions = EnableCampaignMapPrototype &&
-            IsEnvironmentFlagEnabledCore("COOPSPECTATOR_AUTOMATIC_CAMPAIGN_MISSIONS");
+            IsDefaultOnEnvironmentFlag("COOPSPECTATOR_AUTOMATIC_CAMPAIGN_MISSIONS");
+
+        // Functional projectile capture, not verbose diagnostics. Native call-site
+        // validation and exact map-scene ownership remain mandatory before hooking.
+        public static readonly bool EnableCampaignMapSiegeFlights = EnableCampaignMapPrototype &&
+            IsDefaultOnEnvironmentFlag("COOPSPECTATOR_SIEGE_FLIGHT_OBSERVER");
 
         /// <summary>
         /// Stable baseline: use vanilla TeamDeathmatch in listed flow and keep the
@@ -350,6 +355,13 @@ namespace CoopSpectator.Infrastructure
             return string.Equals(
                 global::System.Environment.GetEnvironmentVariable(variableName),
                 "1",
+                global::System.StringComparison.Ordinal);
+        }
+
+        private static bool IsDefaultOnEnvironmentFlag(string variableName)
+        {
+            return !string.Equals(
+                global::System.Environment.GetEnvironmentVariable(variableName), "0",
                 global::System.StringComparison.Ordinal);
         }
     }

@@ -182,8 +182,8 @@ internal static class MenuPresentationTests
             "encounter side banners retain native nine-grid presentation (source wiring)");
         foreach (string action in new[] { "ExecuteOpenEncyclopedia", "ExecuteSetAsContextMenuItem" })
             Check(encounterVm.Contains("public void " + action + "() { }"), "encounter action is read-only (source wiring): " + action);
-        Check(encounterVm.Contains("_hover?.Invoke(_state.TooltipId, true)") &&
-            encounterVm.Contains("_hover?.Invoke(_state.TooltipId, false)") &&
+        Check(encounterVm.Contains("_hover?.Invoke(_tooltipId, true)") &&
+            encounterVm.Contains("_hover?.Invoke(_tooltipId, false)") &&
             !encounterVm.Contains("InformationManager.ShowTooltip"),
             "encounter hover emits opaque interest, never native campaign provider in MP (source wiring)");
         string menuView = File.ReadAllText(Path.Combine(root, "UI", "CoopCampaignMapPrototypeMissionView.Menu.cs"));

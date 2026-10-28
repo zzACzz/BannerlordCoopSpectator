@@ -13,6 +13,18 @@ namespace CoopSpectator.MissionBehaviors
         private static readonly CoopCampaignMapInterfaceAssembler MenuAssembler = new CoopCampaignMapInterfaceAssembler();
         public static CoopCampaignMapBarPresentation CurrentClientMapBar { get; private set; }
         public static CoopCampaignMapMenuPresentation CurrentClientMenu { get; private set; }
+        internal static CoopDetachedPortraitResources ClientPortraitResources { get; private set; } = new CoopDetachedPortraitResources();
+        private double _nextPortraitPreparationAttempt;
+        private void TickClientPortraitResources()
+        {
+            if (!IsClientMenuHostFresh || CurrentClientConversation?.IsActive == true ||
+                StateReceiptClock.Elapsed.TotalSeconds < _nextPortraitPreparationAttempt) return;
+            ClientPortraitResources.Prepare(CurrentClientMenu?.Encounter);
+            ClientPortraitResources.Prepare(CurrentClientMenu?.SettlementOverlay);
+            // A failed native dependency is retried at a bounded rate, never
+            // acknowledged ready just because this interval has elapsed.
+            _nextPortraitPreparationAttempt = StateReceiptClock.Elapsed.TotalSeconds + 1;
+        }
         public static event Action<CoopCampaignMapMenuPresentation> ClientMenuChanged;
         internal static bool IsClientMenuHostFresh => CurrentClientState != null &&
             _clientStateReceivedAt >= 0 && StateReceiptClock.Elapsed.TotalSeconds - _clientStateReceivedAt <= 2;
@@ -100,7 +112,8 @@ namespace CoopSpectator.MissionBehaviors
         }
 
         private static void ResetClientMenu()
-        { MenuAssembler.Reset(); CurrentClientMenu = null; CurrentClientMapBar = null; ClientMenuChanged?.Invoke(null); }
+        { MenuAssembler.Reset(); CurrentClientMenu = null; CurrentClientMapBar = null;
+            ClientPortraitResources = new CoopDetachedPortraitResources(); ClientMenuChanged?.Invoke(null); }
 
         private void ResetServerMenu()
         { _menuSends.Clear(); _menuContents = null; _menuPayload = null; _menuRevision = 0; _menuId = null; _serverMenu = null; _serverMapBar = null; _hasMapBar = false; }

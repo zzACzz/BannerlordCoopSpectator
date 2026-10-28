@@ -1,5 +1,33 @@
 # Release Packaging Standard
 
+## Default-on map replica testing preview (2026-10-28)
+
+User requested automatic replica startup by default and a package for remote testers.
+Verified artifact: `dist/previews/Warhost_MapReplica_TwoPC_b299_20261028.zip`,
+11,566,650 bytes, SHA256
+`E672ADB1393F8F8B832F047EE2EFA51C7114895CB7F0CBDFA58E763F8DF3F4FD`.
+Sources cmp-b299 (both isolated builds) and cmp-c202 (all26 projects); eight
+compiled client checks and five fresh-process defaults cases on the dedicated
+binary pass. Manifest records source checkpoint plus dirty snapshot, build/test
+IDs, tested Native v1.4.8 and default-on capabilities. Ten defaults cases across
+both binaries are retained in Verification/replica-defaults.txt. All50 ZIP entries
+enumerated;49 payload entries length/hash-verified, plus MANIFEST.json.
+
+Package layout remains Client (both game installations) / Host (host dedicated
+module only). Includes English current instructions and Harmony license; excludes
+the abandoned CoopCampaignLootTooltip.xml experiment and PDB/debug/private files.
+It contains no saves, networking credentials or machine configuration. No upload,
+tag, public release or Git commit is implied. Metadata remains0.3.2; preview name
+and file hashes identify it. Two-PC acceptance remains for the user/testers.
+
+Map replica, owned automatic mission transitions and functional siege-flight
+capture now default ON in the compiled mod, not via the BAT. Each previous
+environment gate supports explicit0 opt-out. Diagnostics/test automation and
+portrait-pose observer remain default OFF. Existing exact native call-site and
+process/campaign ownership guards are retained. No separate console map command
+is needed for a campaign-launched server. Standalone servers are not adopted.
+This overrides historical default-off map guidance below.
+
 ## Two-PC development preview exception (2026-10-17)
 
 For a user-requested local test archive, `scripts/CreateTwoPcPreviewPackage.ps1`
@@ -14,7 +42,8 @@ Build output hashes, matching descriptors, copied files and ZIP entry hashes are
 checked. A manifest, build/test evidence, Harmony license and the English manual
 test instructions are included. This is not a clean public release: metadata may
 remain v0.3.2, so the preview name and hashes identify it. No speculative diagnosis
-may be advertised as a confirmed fix. Keep default-off portrait/map gates explicit.
+may be advertised as a confirmed fix. Document current rollout gates explicitly;
+the b299 map defaults above supersede the old opt-in map preview behavior.
 
 Verified preview: `dist/previews/BannerlordCoop_TwoPC_b124_20261017_r4.zip`,
 11,338,876 bytes, SHA256
