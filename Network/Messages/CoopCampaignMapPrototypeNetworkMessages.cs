@@ -31,6 +31,7 @@ namespace CoopSpectator.Network.Messages
         {
             ProtocolVersion = CoopCampaignMapPrototypeContract.ProtocolVersion;
             SessionId = state?.SessionId ?? string.Empty;
+            ContentProfileId = state?.ContentProfileId ?? string.Empty;
             Revision = ClampPositive(state?.Revision ?? 0);
             NormalizedX = ClampUnit(state?.NormalizedX ?? 0);
             NormalizedY = ClampUnit(state?.NormalizedY ?? 0);
@@ -58,6 +59,7 @@ namespace CoopSpectator.Network.Messages
 
         public int ProtocolVersion { get; private set; }
         public string SessionId { get; private set; } = string.Empty;
+        public string ContentProfileId { get; private set; } = string.Empty;
 
         public int Revision { get; private set; }
 
@@ -87,6 +89,7 @@ namespace CoopSpectator.Network.Messages
         {
             return new CoopCampaignMapPrototypeState
             {
+                ContentProfileId = ContentProfileId,
                 SessionId = SessionId,
                 Revision = Revision,
                 NormalizedX = NormalizedX,
@@ -126,6 +129,9 @@ namespace CoopSpectator.Network.Messages
                 : null;
             MovementTarget = ReadStringFromPacket(ref valid);
             SessionId = ReadStringFromPacket(ref valid);
+            ContentProfileId = ReadStringFromPacket(ref valid) ?? string.Empty;
+            valid &= ContentProfileId.Length <= CoopCampaignContentProfile.MaxIdLength &&
+                CoopCampaignContentProfile.IsValid(ContentProfileId);
             valid &= Guid.TryParseExact(SessionId, "N", out var session) && session != Guid.Empty;
             valid &= CoopCampaignMapMovementTargetCodec.TryDecode(MovementTarget, out _);
             return valid;
@@ -156,6 +162,7 @@ namespace CoopSpectator.Network.Messages
                 WriteCamera(Camera);
             WriteStringToPacket(MovementTarget);
             WriteStringToPacket(SessionId);
+            WriteStringToPacket(ContentProfileId);
         }
 
         protected override MultiplayerMessageFilter OnGetLogFilter() =>

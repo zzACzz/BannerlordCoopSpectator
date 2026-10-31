@@ -8,7 +8,7 @@ namespace CoopSpectator.Infrastructure
     internal static class BattleSnapshotBinarySerializer
     {
         private const int Magic = 0x43534231; // "CSB1"
-        private const int SchemaVersion = 19;
+        private const int SchemaVersion = 20;
 
         public static bool TrySerialize(BattleSnapshotMessage snapshot, out byte[] payloadBytes)
         {
@@ -77,6 +77,7 @@ namespace CoopSpectator.Infrastructure
                         schemaVersion != 16 &&
                         schemaVersion != 17 &&
                         schemaVersion != 18 &&
+                        schemaVersion != 19 &&
                         schemaVersion != SchemaVersion)
                     {
                         ModLogger.Info(
@@ -378,6 +379,7 @@ namespace CoopSpectator.Infrastructure
             WriteString(writer, context.ScenarioKind);
             writer.Write(context.IsSiegeBattle);
             WriteString(writer, context.Source);
+            WriteString(writer, context.ContentProfileId);
             WriteBattleSiegeContext(writer, context.SiegeContext);
         }
 
@@ -392,6 +394,7 @@ namespace CoopSpectator.Infrastructure
                 ScenarioKind = ReadString(reader),
                 IsSiegeBattle = reader.ReadBoolean(),
                 Source = ReadString(reader),
+                ContentProfileId = schemaVersion >= 20 ? ReadString(reader) : string.Empty,
                 SiegeContext = ReadBattleSiegeContext(reader, schemaVersion)
             };
         }

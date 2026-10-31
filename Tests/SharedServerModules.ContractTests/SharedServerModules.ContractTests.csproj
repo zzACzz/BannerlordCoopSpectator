@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="NavalResourceTests.cs" />
+    <Compile Include="NavalClientModulePolicyTests.cs" />
+    <Compile Include="../../Infrastructure/CoopNavalClientModulePolicy.cs" Link="CoopNavalClientModulePolicy.cs" />
+    <Compile Include="MapVisualResourceTests.cs" />
+    <Compile Include="NavalTextureAdmissionTests.cs" />
+    <Compile Include="NavalMaterialCatalogTests.cs" />
+    <Compile Include="BattleContentTransportTests.cs" />
+    <Compile Include="ContentOwnerReadinessTests.cs" />
+    <Compile Include="../../Infrastructure/CoopCampaignContentIdentityCache.cs" Link="CoopCampaignContentIdentityCache.cs" />
+    <Compile Include="../../Infrastructure/CoopCampaignMapResourceOwner.cs" Link="CoopCampaignMapResourceOwner.cs" />
+    <Compile Include="../../Infrastructure/ModulePathHelper.cs" Link="ModulePathHelper.cs" />
+    <Compile Include="../../Infrastructure/BattleSnapshotBinarySerializer.cs" Link="BattleSnapshotBinarySerializer.cs" />
+    <Compile Include="../../Network/Messages/BattleStartMessage.cs" Link="BattleStartMessage.cs" />
+    <Compile Include="../../Infrastructure/CoopNavalCatalogReadiness.cs" Link="CoopNavalCatalogReadiness.cs" />
+    <Compile Include="../../Infrastructure/CoopNavalTextureAdmission.cs" Link="CoopNavalTextureAdmission.cs" />
+    <Compile Include="../../Infrastructure/CoopNavalMaterialCatalog.cs" Link="CoopNavalMaterialCatalog.cs" />
+    <Compile Include="../../Infrastructure/CoopCampaignContentProfile.cs" Link="CoopCampaignContentProfile.cs" />
+    <Compile Include="../../DedicatedHelper/CoopNavalResourceAdapter.cs" Link="CoopNavalResourceAdapter.cs" />
+    <Compile Include="../../DedicatedHelper/CoopMapVisualResourceAdapter.cs" Link="CoopMapVisualResourceAdapter.cs" />
+    <Compile Include="../../DedicatedHelper/BannerlordInstallationPaths.cs" Link="BannerlordInstallationPaths.cs" />
+    <Compile Include="../../DedicatedHelper/WindowsDirectoryJunction.cs" Link="WindowsDirectoryJunction.cs" />
+    <Compile Include="../../DedicatedHelper/SharedServerModules.cs" Link="SharedServerModules.cs" />
+  </ItemGroup>
+</Project>

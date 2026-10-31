@@ -26,7 +26,7 @@ namespace CoopSpectator.UI
         private void TickMapBar()
         {
             var state = CoopCampaignMapPrototypeNetworkController.CurrentClientMapBar;
-            bool modal = ScreenManager.FocusedLayer != null && !ReferenceEquals(ScreenManager.FocusedLayer, _replicaInfoLayer);
+            bool modal = IsReplicaModalOpen() || (ScreenManager.FocusedLayer != null && !ReferenceEquals(ScreenManager.FocusedLayer, _replicaInfoLayer));
             bool visible = _mapSceneReadyToRender && MissionScreen != null && state != null && state.IsEnabled &&
                 CoopCampaignMapPrototypeNetworkController.IsClientMenuHostFresh &&
                 CoopCampaignMapPrototypeNetworkController.CurrentClientConversation?.IsActive != true && !modal;

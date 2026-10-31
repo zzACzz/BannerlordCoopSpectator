@@ -1,5 +1,406 @@
 # AI Knowledge Base
 
+2026-10-31 CHECKPOINT / b34 two-PC test baseline: user authorized committing and
+pushing the accumulated source and creating a fresh local test archive. The
+earlier archive hold is superseded for this creation; archive upload/publication
+is not requested. Use RELEASE_PACKAGING.md and TWO_PC_PREVIEW_TEST_EN.md.
+r103 water acceptance below remains bounded local evidence. A separate base-game
+siege on empire_town_d completed on b34:2622 healthy roster troops,2000 initial
+foot agents (1500 attacker/500 defender), native reinforcements, final result
+writeback and connected map return. One multiplayer peer; this does not reproduce
+the tester's two-client khuzait_city_b defender freeze or establish its cause.
+This chat is in normal approval mode; older Goal ACTIVE notes are historical.
+
+ACTUAL r103 CLOSED / b34 locally accepted: user water PASS initially, after
+VillageBattle empire_village_002 through aftermath, and connected save reload;
+hero/training/background also accepted. Read r103/ACCEPTANCE.md. Exact reload
+handshake PASS,17creates/0throws; durations are bounded observations, not full
+scenario/remote proof. All7 configs/normal BAT restored, all12 installed files
+and catalog/official sources verify, zero game roles. b34 retained. No test pending.
+USER HOLD: WAIT WITH THE ARCHIVE. Local creation already completed; no distribution.
+No further packaging/archive modification/distribution until user resumes.
+Goal ACTIVE; remaining native/base/remote coverage separate, only one PC available.
+Earlier CURRENT/ACTIVE notes below are historical.
+
+
+r103/b34 INITIAL+AFTER VILLAGE WATER PASS (user), connected reload NOW pending.
+Actual VillageBattle empire_village_002; postbattle assigned3 flowmaps/two materials
+captured, current normal bound in river(copy) and static water, no creation throws.
+Read r103/ACCEPTANCE.md and LIVE_STATE before action. Same roles36548/100920/94440;
+before-reload protocol captured011502. Keep games open for After/Reloaded captures.
+No new launch/cleanup. All offline checks pass; Goal ACTIVE/remote untested.
+
+
+ACTUAL r103 ACTIVE / b34 INSTALLED: paired water retirement candidate, both builds/
+all27 c26/all18 compiled checks PASS.12 fresh b32 preimages/seven configs, XML-only
+catalog unchanged. Campaign36548 start2026-10-31T01:01:39.7852846Z. Manual first-map
+water check requested; NO battle/reload yet. Read r103/LIVE_STATE and r102/RESULT.
+Keep maps for initial scene/wake/assigned-material capture. b33 NEVER installed;
+b34 follows stock and skips Delete if view clear fails. Visual cause not proven.
+Goal ACTIVE; use actual owned roles before any action. Native acceptance pending.
+
+
+NEW SOURCE b34/r102 (NOT installed): paired exact-scene public water retirement
+before common layer/scene finalization, matching stock MapScreen.ClearGPUMemory.
+Native finalization already frees the wake but omits assigned flowmap slot7
+clear/rebind before entities disappear; this is new static evidence, not proof
+of the remaining visual cause. Read r102/PLAN.md. Isolated builds pending.
+Installed b32/r100 CLOSED/all7 match/normal BAT/no roles remains the partial
+baseline. User is closing games; no launch/deployment/manual test pending.
+Private r101 assigned-mesh reader compiled, saved dumps lack native ranges;
+actual live assigned-material comparison remains open. Goal ACTIVE.
+
+ACTUAL CURRENT r100 CLOSED / b32 PARTIAL: initial and post-save-reload water
+user-correct, after battle dark again. Movement user-stable. Read r100/PARTIAL.md
+FIRST: captured bad/good both have wake128/8/.994 and same four prepared programs;
+post-join flag1/gameplay0 proven.116 source templates differ only in expected new
+wake normal texture. Remaining cause is NOT missing wake/native identity; inspect
+assigned material copies/full headers/render-view targets before another fix.
+User closed all3 roles; all7 hashes match/normal BAT restored, b32 retained.
+430.003s/14creates/0throws, no10min/full scenario/two-PC claim. No new run pending.
+Goal ACTIVE. Do not add retries/extra Scene.Tick/global flags by guess.
+
+ACTUAL CURRENT r100/b32 INSTALLED: both builds/all27 c24/all18 compiled checks
+PASS. Fresh12 b31 preimages/seven configs, exact existing XML-only catalog reused
+unchanged. Campaign76120 started2026-10-31T00:08:51.8154023Z. Manual user first-map
+water check requested (waves/shore shading), no battle/reload yet; leave roles for
+post-join native feature and four raw wake program headers. Read r100/LIVE_STATE.md
+and actual roles before any capture/cleanup. Client1FA7E38F...55E485E, DS identical
+to b31. Native water setup is sensitive and not accepted yet. Goal ACTIVE.
+
+NEW SOURCE b32/r99 (NOT INSTALLED): adds one stock water setup only after actual
+canonical Naval admission/current ready lease AND public water_simulation_macro /
+grad_fold_clear definition. r98 now proves missing wake after b31's corrected
+native admission; this is new causal evidence, not a delay variant. Both b32
+builds/focused compiled water check PASS, full c24 RUNNING/remaining checks pending.
+Read r99/PLAN.md. Installed b31/r98 CLOSED/all7 match/normal BAT/no roles. No new
+user test pending. Goal ACTIVE; water/native/two-PC acceptance still OPEN.
+
+CURRENT r98 CLOSED23:57:07Z: canonical b31 admission passes actual menu gate
+(MP flag1/gameplay0, SP1/gameplay4), but first-map water remains flat/dark in
+user screenshots; post-map wake0 versus SP present. Read r98/RESULT.md FIRST.
+374.886s closed map/5creates/0throws, not a10min/background fidelity pass. User
+closed roles; all7 configs match/normal trace-off BAT restored. b31/new10-file
+XML-only catalog retained; b26 backups preserved. No game/user test pending.
+Next: stock water setup with proven canonical admission AND public shader flag
+prerequisite, not a timing variant. No b32 yet. Goal ACTIVE/water/two-PC OPEN.
+
+ACTUAL CURRENT r98 / b31 MENU PASS: manual MP96940 start23:44:41.3648548Z has
+native Naval identity1/canonical NavalDLC/11 constructed submodules/0 Naval
+gameplay. SP102848 start23:43:45.6672320Z control1/gameplay4. Exact loaded client
+MVID610277c4-0d42-405c-9b83-0d036db6a3b9, SHA5C1922A5...0F709A4. Read
+r98/MENU_GATE.md and LIVE_STATE.md. Existing roles first-map water check requested,
+no battle/reload. Both builds/all27 c23/all18 compiled checks PASS;12 preimages/
+seven configs/separate new10-file XML-only catalog manifest. Official files
+unchanged, DS5BA1F212...7C2EE13. b26 backups retained. Goal ACTIVE; no water/map/
+native lifetime/two-PC claim. No new archive/commit. Earlier notes historical.
+
+NEW CANDIDATE r97 / naval-b31 (not installed): constructor-time validated public
+managed SubModules-list admission keeps canonical NavalDLC native identity while
+excluding four known campaign gameplay submodules before construction. Separate
+CoopSpectatorNavalCatalog contains only projected XML; DS keeps old resource alias.
+Both b31 builds PASS/installed inventories unchanged. New focused compiled checks
+PASS on b30; repeat against b31 pending. c22 new module/catalog contracts and26/27
+projects PASS, unrelated runner-core timed stream assertion FAILED; c23 repeat
+alone RUNNING, inspect its real process/status before any retry. r96 closed/all7
+match/no game roles. Source differs from installed b26; no new user test pending.
+Read artifacts/runtime/naval-native-admission-r97-20261031/PLAN.md. Goal ACTIVE.
+
+CURRENT r96 CLOSED20:49:54Z / native identity prerequisite PROVEN: exact b26
+menu comparison reads module-manager+93C =1 in SP with NavalDLC, =0 in MP with
+CoopSpectatorNavalResources. Exact Native code skips four wake program pointer
+assignments when0, then copies those unassigned fields to crashing31C296.
+Read artifacts/runtime/naval-feature-r96-20261030/RESULT.md FIRST. Both roles
+exited gracefully/all7 configs match; no deployment/launcher/water change.
+Installed b26 retained; rollback b28 not installed. No user run pending.
+Next: investigate supported canonical native module admission without campaign
+submodule activation; do not write the native flag or repeat an initializer.
+Goal ACTIVE (resumed2026-10-31). Water/native Naval admission/two-PC remain OPEN.
+
+CURRENT r95 CLOSED / b27 REJECTED: late water allocation after full readiness
+still crashes at Native module RVA31C296, the SAME instruction as rejected r78.
+New crash reads null; old crash read garbage. Read r95/REJECTED.md and
+NAVAL_WATER_RELOAD_2026-10-30.md FIRST. Preserved dump/logs; all12 installed
+preimages restored to b26, all7 configuration hashes match, normal trace-off BAT,
+no game roles. Source b27 initializer/policy/tests removed after preservation.
+Rollback b28 isolated builds/all27 c21/all17 compiled checks PASS, including new
+Test-NoReplicaWaterAllocation; b28 is NOT deployed. Installed client remains
+D5F4804B...98B96E2 / MVID6c89aedf-4e89-47ac-909b-1e1a237ac850; DS unchanged.
+r94 proves initial MP wake missing, SP present128/8/0.994, Had0 in BOTH.
+Timing/readiness alone is insufficient; do not try another delay/extra tick/global
+setter without new native evidence. Offline dump analysis next; no user run pending.
+Goal ACTIVE. Water/two-PC remain OPEN; b26 preview has known water issue.
+
+Earlier run notes below are historical; actual lifecycle above takes precedence.
+
+ACTUAL CURRENT r94 PASSIVE WATER RUN: user available now; same b26, no b27/code
+change. Fresh12 files/seven preimages; campaign52612 (19:45:48.3146301Z) launched.
+Manual server/MP and INITIAL water appearance before reload requested. Read
+r94/LIVE_STATE.md, r94/PLAN.md and NAVAL_WATER_RELOAD_2026-10-30.md. Native state
+reader prepared; capture initial before asking reload. Actual owned/loaded records
+govern live identities. r93 CLOSED/all7 configs match. Goal ACTIVE, water unproven.
+
+ACTUAL NEWEST r93 CLOSED19:32:22Z: user closed games; all7 configurations match,
+normal trace-off BAT restored, no game/debugger roles. Stable map1292.072s across
+reload,27 creates/0throws; user confirms background/hero/training recovery, BUT
+MP water black while campaign water normal. Read NAVAL_WATER_RELOAD_2026-10-30.md
+first for exact offline callbacks, correct old crash RVA31C296 and stock guarded
+water recovery contract. Live Had/wake/flowmap data NOT captured before closure;
+do not claim a cause or ship an initializer. Same b26, no b27. r94 passive reader/
+run plan prepared ONLY, no deployment or launch. Preview remains DEVELOPMENT with
+known water issue. Goal ACTIVE; next native comparison needs manual client login.
+
+HIGHEST CURRENT r93 WATER FAILURE: after connected reload, user reports black
+water ONLY in MP98912; campaign91640 normal. Exact same DS98064/session with new
+epoch/reset-ack/map recovery proven; all8 character materials still bind alias4.
+Hero/training/background otherwise accepted. Read NAVAL_WATER_RELOAD_2026-10-30.md
+and r93/LIVE_STATE.md FIRST. Keep current windows for read-only native scene/water
+comparison. Source b26; no b27 or speculative water change. Do NOT repeat rejected
+r78 initializer. Preview ZIP is immutable DEVELOPMENT only, known-issues notice
+added; no final two-PC acceptance. Goal ACTIVE. Earlier positive water notes are
+bounded historical results, not a pass of the current reload case.
+
+ACTUAL CURRENT r93: r92 base night hideout bandit_forest_sv/map return accepted,
+10 creates/0throws; r92 CLOSED/all7 config hashes match/normal BAT restored.
+r93 stages12 files/seven preimages and runs Naval campaign91640 (19:02:46.8503226Z),
+DS98064 (19:05:18.8764911Z), manual client/10min actual background map use pending.
+Read r93/LIVE_STATE.md and actual roles before launch/cleanup. Same b26, no new fix.
+New verified development ZIP b26_20261030_preview (50files+manifest, SHA
+8011361A85B28946FFDD9D0016341DC6BE83DDBF1393895180F10F88BBC8EF77); see
+r93/PACKAGE.md. Archive creation does not prove remote use. Goal ACTIVE; soak,
+save reload/remaining native scenarios/two-PC still open. All older notes history.
+
+CURRENT r92 BASE REGRESSION: b26/r91 user accepts corrected materials and ordinary
+FieldBattle return, correct water/Training Field. r91 CLOSED/all7 configs match,
+normal BAT restored/all3 graceful; b26 retained. 33 creates/0throws, measured live
+owned-map439s, explicitly NOT10min. Native scene battle_terrain_001. Read
+r91/ACCEPTANCE.md. Fresh r92 stages12 files/seven preimages and launches base-only
+campaign75628 (01:41:09.3910355Z); manual base save/server/client and battle or
+hideout check requested. Consult actual r92 records before another launch/cleanup.
+Goal ACTIVE; final background/soak/save-reload/scenario/two-PC gates remain open.
+
+ACTUAL LATEST b26/r91: user accepts correct boots/weapons on map/loot/prisoners.
+Post-init native read proves all8 inspected templates bind their owning alias4;
+visible hero metadata retained. Read NAVAL_MATERIALS_2026-10-30.md and
+r91/ACCEPTANCE.md. Campaign92084/DS90700/manual MP84240 exact loaded identities
+verified. New ~10min background/recruitment/land-battle-return check pending;
+keep roles open and consult actual run records before cleanup. No full base,
+seven-scenario or two-PC pass. Second PC unavailable. Goal ACTIVE; no archive.
+
+NEWEST b26/r91: r89 offline metadata proves source material stale tileset binding
+differs from stock team-color copies. Read NAVAL_MATERIALS_2026-10-30.md and
+r89/RESULT.md. Once-only public same-texture refresh of official primary imports
+added after activation. Both builds/all27 c19/all16 compiled checks PASS. r90
+read before initialization confirms sources bind Native despite owning alias4;
+later log confirms497/497 refreshes. User closed the automatic client due missing
+Steam login before post-init read. r90 CLOSED/all7 match/normal BAT restored.
+Fresh r91 stages12 files/seven preimages and launches campaign92084 for manual
+Steam-supported client launch and targeted weapon/boot acceptance. Consult actual
+r91 records for process/loaded identity/cleanup before further action.
+Goal ACTIVE; visual/base/soak/scenario/two-PC gates remain open. No archive/commit.
+
+NEWEST r89: actual visible hero metadata captured immutably at005655302; read
+r89/RESULT.md and NAVAL_MATERIALS_2026-10-30.md. Correct boot material/texture
+assignments across six LODs, but yellow sampling remains unexplained. Source
+still b25; no speculative rebind/copy/palette/native-field fix and no b26 build.
+User may close windows after capture. Lifecycle MUST use full-system CIM and
+exact path/start checks; sandbox-only Get-Process falsely hid live roles. Consult
+r89 actual cleanup before launch/restoration. Goal ACTIVE; no archive/commit/push.
+
+ACTUAL LATEST r87/b25 PARTIAL: user screenshots show black/textured main garments
+but yellow boots/weapons persist. Read r87/PARTIAL.md and NAVAL_MATERIALS_2026-10-30.md.
+Native0+alias4 activation is proven; remaining material rebind/copy difference is
+under research, no second fix applied. Previous10min request withdrawn as stale.
+All roles exited; consult r87 cleanup. Second PC unavailable; no archive. Goal ACTIVE.
+
+Completion audit ledger: [Naval acceptance matrix](NAVAL_ACCEPTANCE_MATRIX_2026-10-30.md).
+It distinguishes concrete local proof from still-open native/soak/base/scenario/
+two-PC gates and preserves the handoff's naval-combat boundary. Do not mark the
+Goal complete using compiled contracts or a short map load alone.
+
+NEWEST2026-10-30: r86 read-only native comparison proves campaign Native0/NavalDLC5
+texture modules active, but MP only Native0 despite registered Naval alias4.
+Read [Naval materials](NAVAL_MATERIALS_2026-10-30.md) and r86/RESULT.md. r86 CLOSED,
+both graceful exits/all7 configs match. b25 initializes the alias's texture pages
+once through the stock API before first UI root. Both builds/16 compiled checks
+PASS; all27 c18 PASS. Fresh r87 stages12 coherent b25 files/seven config preimages
+for native activation+garment acceptance. Campaign100028/DS69716/MP88724 exact
+identities/MVIDs verified; external native read proves Native0+alias4 texture
+activation. User rendering/soak result pending; read r87/LIVE_STATE.md. Goal
+ACTIVE; no archive/commit/push.
+
+LATEST2026-10-30: r85/b24 user accepts Training Field model and no crash through
+prisoners/loot opening. Hero clothes remain gold/flat in MP map/aftermath but black
+in campaign. Read [Naval materials](NAVAL_MATERIALS_2026-10-30.md) and r85/ACCEPTANCE.md.
+r85 CLOSED/all7 configs restored; b24 kept installed with normal trace-off BAT.
+Fresh r86 is read-only texture activation comparison at main menu, campaign94680;
+manual MP login-only launch requested. Consult actual processes before cleanup.
+No material fix/native soak/base/two-PC acceptance yet; Goal ACTIVE.
+
+CURRENT2026-10-30 r84/b23 FAILED on prisoners after a Naval land battle. Read
+[aftermath portrait cause](NAVAL_AFTERMATH_PORTRAIT_2026-10-30.md) and r84/FAILED.md.
+Saved dump proves ordinary thumbnail generation admitted a ready but componentless
+northern_round_shield; new source shares component-aware selection across UI paths.
+Training prefab is explicitly unavailable in MP; small official prefab projection
+is being added without StoryMode gameplay. r84 CLOSED/all12 preimages/all7 configs
+restored, zero game/debugger roles. Installed b9 is still Naval-unstable. New source
+validation: b24 both isolated builds/all27 c17/15 compiled checks PASS. Fresh r85
+stages12 coherent files/seven configuration preimages for native acceptance;
+campaign73732 loaded exact b24 MVID, both resource adapters prepared. Manual MP
+join/training model/land battle prisoners+loot return pending. Read r85/LIVE_STATE.md
+and actual live records before another action. Goal ACTIVE. Older CURRENT entries
+are history.
+
+CURRENT 2026-10-30 training follow-up: r83/b21 user accepts movement/recruitment/
+background rendering without a crash and confirms water is correct. Its measured
+map lifetime is ~3 minutes, not10; no broad battle/two-PC pass. r83 CLOSED/all12
+preimages/all7 configs restored. Read [Training Field](TRAINING_FIELD_REPLICA_2026-10-30.md).
+b23 adds the exact official prefab under host-visible Special/level0 admission,
+preserving authored children/rotation. Both builds/all27 c16/15 compiled checks
+PASS. Fresh r84 installed12 files/seven preimages, campaign86364 launched;
+native model availability/rendering pending. Goal ACTIVE, no archive/commit/push.
+
+CURRENT 2026-10-30: r82 proves failed exact player construction matches the native
+crash pointer; read [visual provenance](WAR_SAILS_VISUAL_PROVENANCE_2026-10-30.md)
+and r82/CONFIRMED_CAUSE.md. Ready original northern_round_shield has no component;
+its complete preloaded mirror exists. b21 validates components and retires partial
+native allocations through public Reset. Both isolated builds/all27 c15/15 compiled
+checks pass. r82 CLOSED/all12 preimages/all7 configs restored. Fresh r83 installed12
+files/seven config preimages, campaign98812 launched; manual MP native acceptance
+pending. No focus veto or rejected water experiment restored. Goal ACTIVE.
+
+CURRENT HANDOFF 2026-10-30: read
+[Naval crash / model handoff](HANDOFF_2026-10-30_NAVAL_CRASH.md) first.
+User requested continuation in a new chat, with exact last-working boundaries.
+Latest base acceptance is r74/naval-b7 (ordinary campaign only); af-b2/r73
+previously accepted shared-resource aftermath/input recovery. No crash-free
+Naval version exists. Installed rollback b9 remains Naval-unstable; source b17
+rollback is tested but not installed or a crash fix. r79/r80/r81 CLOSED/restored.
+No game/manual test pending, no new archive/commit/push. Originating Goal ACTIVE;
+destination chat must check its own mechanism. All older state below is history.
+
+CURRENT2026-10-29: r81/b16 FAILED immediately after replica load, same native
+TickVisuals null read. Both focus veto and deferred-reset experiments REMOVED.
+Read WAR_SAILS_SCENE_LIFECYCLE_2026-10-29.md and r81/FAILED.md. Native creation/
+ownership remains unproven; partial constructor allocation is a research lead,
+not a verified cause. r81 CLOSED/all12 module preimages restored/all7 configs
+match, no game/debugger roles remain; dumps retained. Installed b9 is NOT stable
+Naval. Source b17 rollback both builds/all27 naval-c12/focused compiled check PASS,
+not installed. No further manual test requested or game launched. Goal ACTIVE;
+background fidelity, water/Training Field/native stability/DLC gates incomplete.
+
+2026-10-29 latest r80/b15 FAILED: another native TickVisuals crash after recruiting/
+movement, plus unacceptable background-motion freeze. Focus veto REMOVED. Read
+WAR_SAILS_SCENE_LIFECYCLE_2026-10-29.md and r80/FAILED.md. ClrMD saved-state evidence
+matches the failing native MBAgentVisuals pointer to a no-longer-owned map visual;
+exact prior owner/field semantics remain unproven. b16 defers retirement through
+stock ResetNextFrame and restores background rendering. Both builds/all27 naval-c11/
+twelve compiled checks PASS, native acceptance OPEN. r80 CLOSED/all12 preimages
+restored/all7 configs match. r81 installed12 files/seven fresh config preimages;
+campaign94992 launched and user asked to repeat recruiting/leaving/background
+movement. Goal ACTIVE; water/Training Field/broader DLC gates still incomplete.
+
+2026-10-29 latest: r79/b13 FAILED after OS focus loss, same native TickVisuals
+null read as r77. Both new dumps retained; r79 CLOSED/all12 preimages restored,
+all7 configs match. Read WAR_SAILS_SCENE_LIFECYCLE_2026-10-29.md and r79/FAILED.md.
+b15 now handles actual MissionScreen.IsFocusLost, defers native entity updates
+while receiving state, and reconciles latest stores on return. Both builds/all27
+naval-c10/twelve compiled checks PASS; native focus/recovery acceptance OPEN.
+r80 installed12 files/seven fresh config preimages; campaign89204 launched and
+user asked to load Naval save/start/join/switch windows. No water initializer;
+black water/Training Field/DLC battle gates remain open. Goal ACTIVE.
+
+2026-10-29 lifecycle follow-up: read WAR_SAILS_SCENE_LIFECYCLE_2026-10-29.md.
+The retained WER dump lacks the native object/view heap pages; exact null-field
+identity remains unknown. A separate concrete stale-readiness defect is corrected
+in source: current top view/loading admission, loading progress, revocation and
+recovery; native diagnostic reads require ready+verbose. Both naval-b13 builds and
+twelve compiled checks and all27 naval-c9 contracts pass; native acceptance open.
+No water initializer is restored. r79 installed12 verified files/seven fresh config
+preimages and launched campaign92628; its loaded b13 MVID is verified. User manual
+Naval load/start/join pending. r79 records determine actual deployment/cleanup state.
+Goal ACTIVE; black water, Training Field and broader DLC acceptance remain open.
+
+2026-10-29 latest: r78/naval-b10 REJECTED after immediate native worker crash
+MP51056 while loading Naval replica. The water initializer and test script were
+removed; b11 rollback builds PASS. r78 CLOSED with all12 exact module/launcher
+preimages restored and all7 configs matching. Installed client is naval-b9 again,
+which still has the delayed Naval TickVisuals crash: NOT a stable DLC build.
+Both WER dumps retained/hash-verified in r78/evidence/preserved-wer. No game roles
+running/next test requested. Read r78/REJECTED.md and WAR_SAILS_RESOURCE_SUPPORT.md.
+Goal remains ACTIVE; native lifecycle/water/training model/battle gates incomplete.
+
+2026-10-29 current Goal ACTIVE again (user mechanism resumed); GOAL_MODE.md applies.
+r77 naval-b9 successfully starts server and renders the War Sails map, but MP77780
+crashed in native MBMapScene.TickVisuals. Missing official water-wake initialization
+is repaired in naval-b10; crash causality/native acceptance remains UNPROVEN.
+Both builds/all27 naval-c7/twelve compiled checks pass. r77 CLOSED/all7 configs
+match, original dumps retained. Training Field is independently missing because
+dynamic custom settlement prefabs/level0 are not supported; black water observed.
+Fresh r78 installed12 files/seven preimages and launched Naval campaign22936;
+user requested to compare water and observe around10 minutes. Native retry pending.
+Read WAR_SAILS_RESOURCE_SUPPORT.md. No commit,
+push or archive performed; do not mark the full Goal achieved.
+
+2026-10-29 current official-DLC scan correction: r76 passed map/profile preparation
+but both server attempts exited on the native NavalDLC base-version scan. Approved
+naval-b9 removes raw official-module linking and relocates only exact journal-owned
+legacy junctions outside Modules. Both builds/all27 naval-c6/eleven compiled checks
+pass. r76 CLOSED/all7 configs match. Fresh r77 installed12 files/seven preimages;
+actual owned link relocation and repeat preparation PASS with source profile and
+resource adapter unchanged. Native server retry pending. Read
+WAR_SAILS_RESOURCE_SUPPORT.md; do not restore the obsolete raw link inside Modules.
+Goal stays PAUSED; no archive/commit/push requested.
+
+2026-10-29 current War Sails owner correction: naval-b8 both builds, naval-c5
+all27 contracts and eleven compiled checks pass. r75 exposed a pre-server
+unknown-owner guard despite successful native Naval map loading. Source now uses
+the stock active-module/actual-file ordering rule for campaign and replica, and
+retries transient content failures. r75 CLOSED/all7 configs match; user save
+Тест доповнення preserved. Fresh r76 installed12 verified files/seven new config
+preimages and launched Naval campaign64448. Native server/map retry pending. Read
+WAR_SAILS_RESOURCE_SUPPORT.md. Goal stays PAUSED; normal fix plan approved.
+
+2026-10-29 War Sails candidate: read WAR_SAILS_RESOURCE_SUPPORT.md. Final naval-b7
+both builds, naval-c4 all27 contracts and ten compiled net472 checks pass. Binary
+battle schema20 preserves ContentProfileId, including seven scenario shapes;
+legacy schema19 stays readable without guessing its content selection. Naval
+projection uses local small ModuleData metadata and shared heavy assets.
+Native Naval acceptance is PENDING. User accepts the r74 base campaign regression;
+r74 CLOSED with all7 configuration hashes matching and no owned IDs remaining.
+Fresh r75 stages the same12 coherent files and seven new preimages for the first
+official NavalDLC campaign launch. User will create a new test campaign, then
+start server and the working MP shortcut. No new ZIP,
+commit or push. Goal stays PAUSED; normal-mode implementation was approved.
+
+2026-10-29 final af-b2/af-c2: both builds, all27 contracts and eight compiled checks
+pass. r73 CLOSED: nine coherent files installed/seven fresh config preimages;
+campaign51340 loaded MVID e5e5c8c8-5445-4bb7-a0d3-507e57dc60e4. User accepts
+Prisoners/Loot and camera input. All7 configuration hashes match after cleanup;
+no owned IDs remain. Read AFTERMATH_PUBLICATION_BUNDLE_2026-10-29.md. No new ZIP,
+commit or push. Shared-module links/backups retained; Goal still PAUSED.
+
+2026-10-29 approved aftermath follow-up: read
+[publication bundle and input recovery](AFTERMATH_PUBLICATION_BUNDLE_2026-10-29.md).
+r72 exposed missing Prisoners/Loot (`aftermath-dynamic-anchor-unavailable`) and
+camera keys restored by Escape. Source now retains an owned frame/catalog/dynamic
+bundle, restores live dependencies after aftermath and adds conservative scene/null
+focus recovery with modal vetoes. Native acceptance pending; managed tests do not
+prove the user scenario repaired. r72 CLOSED, all7 configs match, no game roles
+remain; shared-module junctions retained. Goal remains PAUSED; fix plan approved.
+
+2026-10-29 approved implementation: [shared server modules](SHARED_SERVER_MODULES.md)
+adds transactional Windows junction preparation for SandBox/SandBoxCore before
+campaign-owned server launch, Steam-library/explicit path discovery, reversible
+legacy-copy preservation and no-copy deployment/packaging. Both sm-b2 builds,
+all27 sm-c1 contracts and compiled net472 scratch check pass. r72 installed nine
+coherent files and retained seven configuration preimages. Retried campaign96160,
+user DS94308/MP97004 prove actual junction migration, startup and full field battle
+with map return. Other scene/multi-PC gates remain open. New manual aftermath
+and camera-input findings are recorded in SHARED_SERVER_MODULES.md. The b299 ZIP is
+unchanged. Source-only b302 notes below predate this new installed candidate.
+Read this document before building/installing or restoring any module link.
+
 2026-10-29 checkpoint / next task: read
 [shared-module handoff](HANDOFF_2026-10-29_SHARED_MODULES.md). User requested commit
 and push before removing SandBox/SandBoxCore copies from the dedicated install.

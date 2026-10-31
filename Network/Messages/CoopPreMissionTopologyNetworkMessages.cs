@@ -8,7 +8,7 @@ namespace CoopSpectator.Network.Messages
     [DefineGameNetworkMessageTypeForMod(GameNetworkMessageSendType.FromServer)]
     public sealed class CoopPreMissionTopologyContractMessage : GameNetworkMessage
     {
-        public const int CurrentSchemaVersion = 2;
+        public const int CurrentSchemaVersion = 3;
         public const int MaxWallRatioCount = 16;
         public const int MaxSiegeEngineCountPerSide = 32;
 
@@ -103,6 +103,7 @@ namespace CoopSpectator.Network.Messages
         {
             bool bufferReadValid = true;
             SchemaVersion = ReadIntFromPacket(SchemaVersionCompressionInfo, ref bufferReadValid);
+            if (!bufferReadValid || SchemaVersion != CurrentSchemaVersion) return false;
             BattleIndex = ReadIntFromPacket(BattleIndexCompressionInfo, ref bufferReadValid);
             BattleId = ReadStringFromPacket(ref bufferReadValid) ?? string.Empty;
             RuntimeScene = ReadStringFromPacket(ref bufferReadValid) ?? string.Empty;
@@ -124,7 +125,8 @@ namespace CoopSpectator.Network.Messages
                 CampaignBattleType = ReadStringFromPacket(ref bufferReadValid) ?? string.Empty,
                 ScenarioKind = ReadStringFromPacket(ref bufferReadValid) ?? string.Empty,
                 IsSiegeBattle = ReadBoolFromPacket(ref bufferReadValid),
-                Source = ReadStringFromPacket(ref bufferReadValid) ?? string.Empty
+                Source = ReadStringFromPacket(ref bufferReadValid) ?? string.Empty,
+                ContentProfileId = ReadStringFromPacket(ref bufferReadValid) ?? string.Empty
             };
 
             bool hasSiegeContext = ReadBoolFromPacket(ref bufferReadValid);
@@ -211,6 +213,7 @@ namespace CoopSpectator.Network.Messages
             WriteStringToPacket(scenarioContext?.ScenarioKind ?? string.Empty);
             WriteBoolToPacket(scenarioContext?.IsSiegeBattle == true);
             WriteStringToPacket(scenarioContext?.Source ?? string.Empty);
+            WriteStringToPacket(scenarioContext?.ContentProfileId ?? string.Empty);
 
             BattleSiegeContextMessage siegeContext = scenarioContext?.SiegeContext;
             WriteBoolToPacket(siegeContext != null);

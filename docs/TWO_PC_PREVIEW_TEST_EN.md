@@ -1,4 +1,52 @@
-# Warhost campaign-map replica — two-PC testing preview b299 (2026-10-28)
+# Warhost campaign-map replica — development testing instructions
+
+Source update2026-10-31 (b34; two-PC acceptance still pending):
+a newly built candidate prepares server SandBox/SandBoxCore directory links to
+the HOST's running game before starting the dedicated process. No manual resource
+copies are needed for that candidate.
+Existing folders are retained outside Modules under CoopSpectator.SharedModuleBackups
+with RESTORE.txt. Close the server before migration; keep the game drive available
+while it runs. Write access to the dedicated installation is required. An explicit
+BANNERLORD_DEDICATED_SERVER_PATH may select a server in another location; normal
+discovery also checks configured Steam libraries. Base and official War Sails
+campaign resources are supported by explicit matching content profiles. Unrelated
+overhaul resources are not admitted. The previously delivered b299 archive is
+unchanged and does not contain these new source features; check MANIFEST.json.
+Do not treat an old archive or installed b9 as a stable War Sails candidate.
+
+Latest local evidence: b34 preserves the original failed-visual/portrait fixes and
+Training Field model. Canonical Naval graphics admission, guarded water setup and
+paired material cleanup now keep water correct initially, after VillageBattle
+empire_village_002 through prisoners/loot and after connected save reload. The
+user also confirms hero appearance, Training Field and background movement. The
+same host/server/session and new reload epoch/acknowledgement were verified.
+Measured map ownership738.428s spans three scene lifetimes and includes idle/
+diagnostic time; it is not a continuous10-minute movement test. This is bounded
+one-PC evidence, not all native battle scenarios or remote acceptance. Earlier
+Naval field/base night-hideout acceptance was on b26. Identify the current archive
+by MANIFEST.json hashes; v0.3.2 labels alone do not identify it.
+
+Additional local base-game evidence (2026-10-31): b34 completed the campaign siege
+on empire_town_d with2622 healthy roster troops and2000 initial foot agents
+(1500 attacker/500 defender). Commander deployment, active combat, subsequent
+native agent creation, final victory/writeback and connected map return passed.
+Only one multiplayer peer was connected, on the attacker side. This does not
+establish two-PC acceptance or resolve the tester's older b299 freeze on
+khuzait_city_b while selecting/controlling defenders.
+
+For War Sails, BOTH game installations must contain the same official DLC version.
+On each game PC, the launcher selects the official canonical NavalDLC graphics
+plus a small XML-only CoopSpectatorNavalCatalog generated from that installation.
+The four known Naval campaign gameplay plugins remain inactive in multiplayer;
+official files are not edited. Use this archive's BAT/profile helper rather than
+an older alias-only launch list. The dedicated host still prepares a separate
+resource-only Naval adapter with machine-local resource links; it must not scan
+the raw official Naval module. No heavy resources or directory links are archived.
+For either content profile, the helper also projects the exact official Training
+Field prefab from local StoryMode metadata into a small map-resource module.
+It preserves the authored model/rotation and does not enable StoryMode gameplay.
+Existing verified adapters are reused; updated adapters are retained outside
+Modules before replacement. Modified or foreign folders are refused and preserved.
 
 This is a development test package, not a new public release. Module/assembly
 version labels remain v0.3.2; identify this exact preview by MANIFEST.json and
@@ -30,13 +78,18 @@ base game's Native, SandBoxCore, SandBox or Multiplayer folders.
 ## Normal startup — no console command or environment setup required
 
 1. On the HOST PC, launch Bannerlord campaign with CoopSpectator enabled and
-   load a TEST save. Dismiss the shader notice if shown. Choose No if asked to
+   load a TEST save with the intended base/War Sails content. Enable official
+   NavalDLC in the campaign for a War Sails test. Dismiss the shader notice if shown. Choose No if asked to
    enter Safe Mode, so the mod remains enabled.
 2. Start the dedicated server using the campaign's Coop Dedicated Server menu.
    Leave the campaign open. Once the server is ready and the host is on the
    global map, the server automatically starts the map-replica mission.
 3. Start modded multiplayer using the supplied BAT on BOTH PCs. Steam must be
-   running normally under the same Windows user as the game.
+   running normally under the same Windows user as the game. The same-PC host
+   launcher can detect its running campaign profile. On the REMOTE PC, choose
+   the SAME profile when prompted:1=Base,2=War Sails. The BAT also accepts
+   --base or --naval. A content-profile mismatch is a failed setup; correct it
+   before testing battles. Never suppress the mismatch or mix individual files.
 4. Complete the game's Login screen and connect BOTH multiplayer clients to the
    same server (for example AC_COOP). The HOST must join in multiplayer too:
    the campaign window is not the host's multiplayer participant.
@@ -61,6 +114,12 @@ Standalone servers started outside the campaign are not adopted automatically.
 
 - Map: compare visible parties/settlements, movement/heading, camera follow and
   detach/return, normal/Alt tooltips and the English camera-control labels.
+- Keep each replica in the background while the host moves; the movement must
+  remain visible. Switch windows repeatedly, recruit and leave settlements,
+  and observe at least10 minutes of actual map use. Record the elapsed time.
+- Compare the Training Field's full3D model and water with the campaign. A label
+  alone does not establish model rendering. Check the model again after returning
+  from battle and after save reload. Hidden settlements must remain undisclosed.
 - Settlement/raid/siege: compare top panels, progress, markers, engine animations
   and projectile flights. Replica clients observe the host's choices.
 - Dialogue: compare text/options and character appearance/motion. Answer choices
@@ -75,9 +134,19 @@ Standalone servers started outside the campaign are not adopted automatically.
 - Finish the multiplayer battle and let the campaign apply its results. The
   server should return automatically to the replica, including prisoners and
   loot where applicable. Players inspect independently and see host changes.
+  On BOTH clients, inspect prisoners and equipment, then loot including shields
+  and modified items; check appearance, counts and tooltips. Complete the host's
+  screens and verify camera movement/detach/return after the map comes back.
 - Repeat a second battle without restarting. Then test village, siege assault,
   citadel (selected cohort only), siege ambush withdrawal and save reload while
   server/clients remain connected. Report exactly which scenario failed.
+- For the reported siege freeze, use khuzait_city_b if available, approximately
+  1680 attackers/750 defenders and a2000 concurrent-troop limit, with both
+  multiplayer clients connected. Exercise defender selection and deployment;
+  record each PC's phase and time. A freeze after all2000 agents are ready is a
+  distinct boundary from scene load. If frozen, retain the process long enough
+  to capture a full hang dump before closing it. Do not treat this preview as a
+  proven fix for that report.
 
 Local acceptance does not establish two-PC/network acceptance. This archive is
 provided for that next test. Not all combinations, packet delays, reconnection

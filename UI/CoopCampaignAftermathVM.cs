@@ -155,7 +155,7 @@ namespace CoopSpectator.UI
             }
             if (_resourceCache.TryGetValue(key, out var cached) && cached.Item1 == text && cached.Item2 == providerName)
                 return cached.Item3;
-            string resolved = key == "EquipmentCode" ? CoopConversationHudCodec.ResolveEquipmentCode(text, ResolveItem, HasModifier) :
+            string resolved = key == "EquipmentCode" ? CoopConversationHudCodec.ResolveEquipmentCodeForSlots(text, ResolveEquipmentItem, HasModifier) :
                 providerName == "ItemImageTextureProvider" ? ResolveItem(text) ?? string.Empty : CoopConversationHudImageVM.SafePortrait(text);
             // Static preloaded resources only; stable snapshots must not repeatedly
             // enter object/portrait resolution. Cache lifetime is this owned node.
@@ -166,10 +166,11 @@ namespace CoopSpectator.UI
         {
             var objects = Game.Current?.ObjectManager ?? MBObjectManager.Instance;
             if (objects == null) return null;
-            if (objects.GetObject<ItemObject>(id) != null) return id;
-            return ExactCampaignRuntimeItemRegistry.TryResolvePreloadedMirrorItem(id, out string mirror, out _) &&
-                objects.GetObject<ItemObject>(mirror) != null ? mirror : null;
+            return CoopCampaignVisualItemResolver.TryResolveImage(objects, id, out var item) ? item.StringId : null;
         }
+        private static string ResolveEquipmentItem(int slot, string id) =>
+            CoopCampaignVisualItemResolver.TryResolve(Game.Current?.ObjectManager ?? MBObjectManager.Instance,
+                id, slot, out var item) ? item.StringId : null;
         private static bool HasModifier(string id) =>
             (Game.Current?.ObjectManager ?? MBObjectManager.Instance)?.GetObject<ItemModifier>(id) != null;
         public new object GetPropertyValue(string name) => _local.TryGetValue(name, out var local) ? local :

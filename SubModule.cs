@@ -56,6 +56,11 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
         private const bool EnableCampaignBehaviors = true;
         private const bool EnableNonCampaignModelRegistration = true;
 
+        public SubModule()
+        {
+            CoopNavalClientModuleAdmission.PrepareBeforeSubmoduleConstruction();
+        }
+
         private bool _hasShownLoadedMessage; // Ð—Ð±ÐµÑ€Ñ–Ð³Ð°Ñ”Ð¼Ð¾ Ð¿Ñ€Ð°Ð¿Ð¾Ñ€ÐµÑ†ÑŒ, Ñ‰Ð¾Ð± Ð¿Ð¾ÐºÐ°Ð·Ð°Ñ‚Ð¸ "mod loaded" Ð»Ð¸ÑˆÐµ Ð¾Ð´Ð¸Ð½ Ñ€Ð°Ð· (Ñ– Ð½Ðµ ÑÐ¿Ð°Ð¼Ð¸Ñ‚Ð¸ Ð¿Ñ€Ð¸ Ð¿ÐµÑ€ÐµÐ·Ð°Ð¿ÑƒÑÐºÐ°Ñ… Ð³Ñ€Ð¸/ÑÐµÑÑ–Ð¹)
         private BattleDetector _battleDetector; // Ð”ÐµÑ‚ÐµÐºÑ‚Ð¾Ñ€ ÑÑ‚Ð°Ñ€Ñ‚Ñƒ Ð±Ð¸Ñ‚Ð²Ð¸ (Ð²Ñ–Ð´ÑÑ‚ÐµÐ¶ÑƒÑ” Ð¿ÐµÑ€ÐµÑ…Ñ–Ð´ Mission.Current Ð· null â†’ Ð½Ðµ-null)
 
@@ -507,6 +512,15 @@ namespace CoopSpectator // Ð’Ð¸ÐºÐ¾Ñ€Ð¸ÑÑ‚Ð¾Ð²ÑƒÑ”�
             {
                 ModLogger.Error("Не вдалося застосувати Harmony патчі.", ex);
             }
+        }
+
+        protected override void OnBeforeInitialModuleScreenSetAsRoot()
+        {
+            base.OnBeforeInitialModuleScreenSetAsRoot();
+            // Engine resources exist, and no campaign/replica character has been
+            // created. Activate texture pages and refresh the adapter's existing
+            // material bindings through public APIs before the first render.
+            UI.CoopNavalVisualResources.EnsureTextureTilesetLoaded();
         }
 
         protected override void OnGameStart(Game game, IGameStarter gameStarterObject) // Викликається коли стартує гра/кампанія (UI вже зазвичай ініціалізований)

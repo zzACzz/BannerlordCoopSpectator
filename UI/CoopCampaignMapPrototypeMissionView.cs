@@ -109,6 +109,7 @@ namespace CoopSpectator.UI
         private GameEntity _hostMarker;
         private GameEntity[] _tickedMapEntities = Array.Empty<GameEntity>();
         private Mesh[] _tickedMapMeshes = Array.Empty<Mesh>();
+        private bool _deferredEntityReconciliation;
         private readonly CoopCampaignMapSettlementGeometryAdmission<GameEntity>
             _settlementGeometry;
 
@@ -202,6 +203,8 @@ namespace CoopSpectator.UI
         public override void OnMissionScreenTick(float dt)
         {
             base.OnMissionScreenTick(dt);
+            UpdateRenderReadiness(dt);
+            RestoreReplicaInputFocus();
             HandleReplicaEscapeInput();
             TickCampaignMenu();
             TickMapBar();
@@ -221,9 +224,10 @@ namespace CoopSpectator.UI
             if (_sceneLayer == null)
             { HideNativeMovementTargets(); HideNativeHoverDecals(); _tooltipPresenter?.Clear(); return; }
 
-            UpdateRenderReadiness(dt);
             if (_hostMarker == null)
             { HideNativeMovementTargets(); HideNativeHoverDecals(); _tooltipPresenter?.Clear(); return; }
+
+            if (!TryPrepareNavalWater()) return;
 
             ApplyPendingVisibleEntities();
             CoopCampaignMapPrototypeState current =
@@ -260,6 +264,17 @@ namespace CoopSpectator.UI
             UpdateNativeHoverDecal();
             if (HasAftermathPresentation || HasAutoBattlePresentation) _tooltipPresenter?.SuspendPresentation();
             else _tooltipPresenter?.Tick(dt, IsPointerOverMapBar() ? _hoveredMapBarHint : IsPointerOverCampaignMenu() ? _hoveredPlunderId : _hoveredReplicaId);
+            }
+            catch (CoopCampaignVisualCleanupException ex)
+            {
+                // A failed retirement cannot be treated as an ordinary fallback:
+                // the native scene may still contain the partial allocation.
+                _renderStateProbeFailed = true;
+                ModLogger.Error("Campaign map visual cleanup failed; releasing the owned scene.", ex);
+                ReleaseSceneLayer();
+                InformationManager.ShowInquiry(new InquiryData("Campaign map unavailable",
+                    "A campaign model could not be safely released. Reconnect to reload the map.",
+                    true, false, "OK", string.Empty, null, null));
             }
             finally
             {
@@ -314,6 +329,7 @@ namespace CoopSpectator.UI
             IReadOnlyList<CoopCampaignMapPrototypeCatalogEntityState> entities)
         {
             _catalogById.Clear();
+            _deferredEntityReconciliation = true;
             if (entities == null)
                 return;
             foreach (CoopCampaignMapPrototypeCatalogEntityState entity in entities)
@@ -336,13 +352,14 @@ namespace CoopSpectator.UI
 
                 CoopCampaignMapPrototypeCatalogEntityState update = entity.Clone();
                 _catalogById[update.EntityId] = update;
-                if (_mapScene != null &&
+                if (CanApplyReplicaEntityUpdates() &&
                     _dynamicById.TryGetValue(
                         update.EntityId,
                         out CoopCampaignMapPrototypeDynamicEntityState dynamicState))
                 {
                     ApplyDynamicEntityUpdate(dynamicState);
                 }
+                else _deferredEntityReconciliation = true;
             }
         }
 
@@ -359,27 +376,37 @@ namespace CoopSpectator.UI
 
                 CoopCampaignMapPrototypeDynamicEntityState update = entity.Clone();
                 _dynamicById[update.EntityId] = update;
-                if (_mapScene != null)
+                if (CanApplyReplicaEntityUpdates())
                     ApplyDynamicEntityUpdate(update);
+                else _deferredEntityReconciliation = true;
             }
         }
 
         private void TryLoadCampaignMap()
         {
+            var contentState = _targetState ?? CoopCampaignMapPrototypeNetworkController.CurrentClientState;
+            if (contentState == null) return;
             _loadAttempted = true;
             try
             {
-                string[] activeModules = Utilities.GetModulesNames();
-                string ownerModule =
-                    CoopCampaignMapPrototypeContract.ResolveLastOwningModule(
-                        activeModules,
-                        moduleId => Utilities.GetSingleModuleScenesOfModule(moduleId));
+                if (!CoopCampaignContentRuntime.Matches(contentState.ContentProfileId, out var contentReason))
+                    throw new InvalidOperationException(contentReason);
+                CoopCampaignNavalMapResources.EnsurePrepared();
+                string ownerModule = CoopCampaignContentRuntime.ResolveActiveMapOwner();
                 if (string.IsNullOrWhiteSpace(ownerModule))
                 {
                     ModLogger.Info(
                         "CoopCampaignMapPrototypeMissionView: Main_map owner module was not found among active modules.");
                     return;
                 }
+                string expectedOwner = CoopCampaignContentProfile.IsNaval(contentState.ContentProfileId)
+                    ? "NavalDLC" : "Sandbox";
+                if (!string.Equals(ownerModule, expectedOwner, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("Active campaign map owner does not match the host content profile.");
+
+                _navalWaterRequired = CoopCampaignContentProfile.IsNaval(contentState.ContentProfileId);
+                if (_navalWaterRequired && !CoopNavalClientModuleAdmission.IsPrepared)
+                    throw new InvalidOperationException("Canonical Naval client resources were not admitted at startup.");
 
                 _mapScene = Scene.CreateNewScene(
                     initialize_physics: false,
@@ -423,6 +450,7 @@ namespace CoopSpectator.UI
                 }
                 ModLogger.Info(
                     "CoopCampaignMapPrototypeMissionView: Main_map Scene.Read returned successfully.");
+                CoopCampaignMapVisualLifetimeTrace.SceneEvent("map-read-return", _mapScene);
 
                 RemoveSettlementAuthoringCircles();
                 RemoveFortificationAuthoringHelpers();
@@ -488,6 +516,8 @@ namespace CoopSpectator.UI
                 ModLogger.Error(
                     "CoopCampaignMapPrototypeMissionView: Main_map load failed.",
                     ex);
+                InformationManager.ShowInquiry(new InquiryData("Campaign map unavailable", ex.Message,
+                    true, false, "OK", string.Empty, null, null));
                 ReleaseSceneLayer();
             }
         }
@@ -511,10 +541,11 @@ namespace CoopSpectator.UI
 
         private void InitializeSettlementGeometryAdmission()
         {
+            ClearCustomSettlementVisuals();
             _settlementGeometry.Clear();
             var observed = new HashSet<UIntPtr>();
-            // Stock Main_map roots: 492 installed settlement definitions match
-            // these tags. Dynamically instantiated/missing roots are not guessed.
+            // Static Main_map roots use wall-level admission. Dynamic special
+            // settlements preserve prefab visibility through a separate binding.
             foreach (string tag in new[] { "town", "castle", "village", "wm_hideout", "hideout" })
             {
                 foreach (GameEntity root in _mapScene.FindEntitiesWithTag(tag))
@@ -735,9 +766,10 @@ namespace CoopSpectator.UI
 
         private void ApplyPendingVisibleEntities()
         {
-            if (_mapScene == null ||
-                _pendingVisibleEntities == null ||
-                _pendingVisibleEntitiesRevision <= _appliedVisibleEntitiesRevision)
+            if (!CanApplyReplicaEntityUpdates() ||
+                (!_deferredEntityReconciliation &&
+                 (_pendingVisibleEntities == null ||
+                  _pendingVisibleEntitiesRevision <= _appliedVisibleEntitiesRevision)))
             {
                 return;
             }
@@ -771,10 +803,24 @@ namespace CoopSpectator.UI
 
             _entityOverlayViewModel?.Synchronize(visibleEntities);
             _settlementOverlayViewModel?.Synchronize(visibleEntities);
-            _appliedVisibleEntitiesRevision = _pendingVisibleEntitiesRevision;
+            _appliedVisibleEntitiesRevision = Math.Max(
+                _appliedVisibleEntitiesRevision, _pendingVisibleEntitiesRevision);
             _pendingVisibleEntitiesRevision = -1;
             _pendingVisibleEntities = null;
+            _deferredEntityReconciliation = false;
         }
+
+        private bool HasActiveReplicaView()
+        {
+            // OS focus governs input, not background rendering. A visible replica
+            // must keep following the host while another application is active.
+            return MissionScreen != null &&
+                ReferenceEquals(ScreenManager.TopScreen, MissionScreen) &&
+                _sceneLayer != null && !_sceneLayer.IsFinalized && _sceneLayer.IsActive;
+        }
+
+        private bool CanApplyReplicaEntityUpdates() =>
+            _mapScene != null && _mapSceneReadyToRender && HasActiveReplicaView();
 
         private void ApplyDynamicEntityUpdate(
             CoopCampaignMapPrototypeDynamicEntityState dynamicState)
@@ -885,6 +931,8 @@ namespace CoopSpectator.UI
             _settlementGeometry.Apply(entity.EntityId,
                 entity.Kind == CoopCampaignMapPrototypeEntityKind.Settlement, entity.SettlementLevelFlags,
                 entity.SettlementWallStates, entity.SettlementPreparationState, entity.SettlementRaidState);
+            if (entity.Kind != CoopCampaignMapPrototypeEntityKind.Settlement)
+                _customSettlementGeometry.Apply(entity.EntityId, false);
             if (_dynamicById.TryGetValue(
                     entity.EntityId,
                     out CoopCampaignMapPrototypeDynamicEntityState dynamicState))
@@ -906,6 +954,7 @@ namespace CoopSpectator.UI
                 return;
 
             _settlementGeometry.Apply(entityId, false);
+            _customSettlementGeometry.Apply(entityId, false);
             if (string.Equals(_hoveredReplicaId, entityId, StringComparison.OrdinalIgnoreCase))
             {
                 _hoveredReplicaId = null;
@@ -1022,6 +1071,7 @@ namespace CoopSpectator.UI
                 if (target.Kind ==
                     CoopCampaignMapPrototypeEntityKind.Settlement)
                 {
+                    UpdateCustomSettlementVisual(target, replica.WorldPosition);
                     if (updateStaticOverlays)
                     {
                         if (IsSettlementProjectionCandidate(
@@ -1383,7 +1433,11 @@ namespace CoopSpectator.UI
 
         private void UpdateRenderReadiness(float dt)
         {
-            if (_sceneLayer == null || _renderStateProbeFailed)
+            // Readiness is a current-frame lease, not a one-time loading latch.
+            // Deactivation, another top screen or a failed probe must revoke it.
+            _mapSceneReadyToRender = false;
+            if (_sceneLayer == null || _sceneLayer.IsFinalized ||
+                _mapScene == null || _renderStateProbeFailed)
                 return;
 
             if (dt > 0f)
@@ -1393,8 +1447,8 @@ namespace CoopSpectator.UI
             {
                 bool viewReady = _sceneLayer.ReadyToRender();
                 bool sceneReady = _sceneLayer.SceneView.CheckSceneReadyToRender();
-                if (viewReady && sceneReady)
-                    _mapSceneReadyToRender = true;
+                _mapSceneReadyToRender = viewReady && sceneReady && HasActiveReplicaView() &&
+                    _mapScene.IsLoadingFinished();
 
                 if (!_initialRenderStateLogged)
                 {
@@ -1402,7 +1456,7 @@ namespace CoopSpectator.UI
                     LogRenderState("initial", viewReady, sceneReady);
                 }
 
-                if (viewReady && sceneReady && !_readyRenderStateLogged)
+                if (_mapSceneReadyToRender && !_readyRenderStateLogged)
                 {
                     _readyRenderStateLogged = true;
                     LogRenderState("ready", viewReady, sceneReady);
@@ -1429,6 +1483,17 @@ namespace CoopSpectator.UI
             bool viewReady,
             bool sceneReady)
         {
+            ModLogger.Info(
+                "CoopCampaignMapPrototypeMissionView: render-state " + stage +
+                ". ViewReady=" + viewReady + " SceneReady=" + sceneReady +
+                " MapReady=" + _mapSceneReadyToRender +
+                " Elapsed=" + _renderReadinessElapsed.ToString("0.000") + ".");
+            // Native projection/terrain inspection is diagnostic work, not a
+            // loading prerequisite. Never probe it on an unready scene, and keep
+            // it out of ordinary production runs even after readiness.
+            if (!ExperimentalFeatures.EnableVerboseDiagnostics || !_mapSceneReadyToRender)
+                return;
+
             float x = _sceneMinimum.x +
                       (_sceneMaximum.x - _sceneMinimum.x) * (float)_displayedX;
             float y = _sceneMinimum.y +
@@ -1686,8 +1751,29 @@ namespace CoopSpectator.UI
 
         private void TickMapSceneVisuals()
         {
-            if (!_mapSceneReadyToRender || _mapScene == null)
+            if (_mapScene == null || _sceneLayer == null || _sceneLayer.IsFinalized ||
+                _renderStateProbeFailed)
                 return;
+
+            bool activeTopView = HasActiveReplicaView();
+            // Like stock MapScreen.TickVisuals: keep loading work progressing,
+            // but never submit visual work against an unavailable view/scene.
+            var action = CoopCampaignMapVisualTickPolicy.Select(
+                ownedSceneAvailable: true,
+                activeTopView: activeTopView,
+                sceneLoaded: activeTopView && _mapScene.IsLoadingFinished(),
+                renderReady: _mapSceneReadyToRender,
+                probeFailed: false);
+            if (action == CoopCampaignMapVisualTickAction.AdvanceLoading)
+            {
+                _mapScene.HandleCurrentFrameTickEntities();
+                return;
+            }
+            if (action != CoopCampaignMapVisualTickAction.UpdateVisuals)
+            {
+                _mapScene.ClearCurrentFrameTickEntities();
+                return;
+            }
 
             MBMapScene.TickVisuals(
                 _mapScene,
@@ -1697,12 +1783,14 @@ namespace CoopSpectator.UI
 
         private void ReleaseSceneLayer()
         {
+            CoopCampaignMapVisualLifetimeTrace.SceneEvent("map-release-begin", _mapScene);
             ReleaseCampaignMenu();
             ReleaseMapBar();
             ReleaseBattleMarkers();
             ClearNativeMovementTargets();
             ClearNativeHoverDecals();
             ClearNativePicking();
+            ClearCustomSettlementVisuals();
             _settlementGeometry.Clear();
             ReleaseReplicaInfoLayer();
             ReleaseSettlementOverlayLayer();
@@ -1714,6 +1802,7 @@ namespace CoopSpectator.UI
             }
             _entityReplicas.Clear();
             _pendingVisibleEntities = null;
+            _deferredEntityReconciliation = false;
             _pendingVisibleEntitiesRevision = -1;
             _appliedVisibleEntitiesRevision = -1;
             _catalogById.Clear();
@@ -1739,6 +1828,7 @@ namespace CoopSpectator.UI
             }
             _agentRendererSceneController = null;
 
+            ReleaseCanonicalWater();
             bool sceneOwnedByLayer = _sceneLayer != null;
             try
             {
@@ -1765,6 +1855,8 @@ namespace CoopSpectator.UI
 
             _sceneLayer = null;
             _mapScene = null;
+            _navalWater.Reset();
+            _navalWaterRequired = false;
             _mapSceneReadyToRender = false;
             _mainPartyVisualActive = false;
             _mainPartyRenderVisible = false;
@@ -1913,10 +2005,39 @@ namespace CoopSpectator.UI
 
         private bool CanUseReplicaMapInput()
         {
-            return _replicaInfoLayer != null && _replicaInfoLayer.IsActive &&
+            return _replicaInfoLayer != null && _replicaInfoLayer.IsActive && !IsReplicaModalOpen() &&
                    CoopCampaignMapPrototypeNetworkController.CurrentClientConversation?.IsActive != true &&
                    (ScreenManager.FocusedLayer == null ||
                     ReferenceEquals(ScreenManager.FocusedLayer, _replicaInfoLayer));
+        }
+
+        private bool IsReplicaModalOpen()
+        {
+            if (MissionScreen == null || !ReferenceEquals(ScreenManager.TopScreen, MissionScreen) ||
+                Mission?.GetMissionBehavior<MissionEscapeMenuView>()?.IsActive == true ||
+                InformationManager.IsAnyInquiryActive()) return true;
+            foreach (ScreenLayer layer in MissionScreen.Layers)
+                if (layer != null && !layer.IsFinalized && layer.IsActive &&
+                    string.Equals(layer.Name, "MissionOptions", StringComparison.Ordinal)) return true;
+            return false;
+        }
+
+        private void RestoreReplicaInputFocus()
+        {
+            if (!GameNetwork.IsClient || !ExperimentalFeatures.EnableCampaignMapPrototype ||
+                MissionScreen == null) return;
+            ScreenLayer focused = ScreenManager.FocusedLayer;
+            // No foreign layer is unfocused or reactivated. In particular stock
+            // options, inquiries and dialogue remain the sole input owners.
+            if (CoopCampaignMapInputFocusPolicy.CanRestore(
+                ReferenceEquals(ScreenManager.TopScreen, MissionScreen),
+                _replicaInfoLayer != null && !_replicaInfoLayer.IsFinalized && _replicaInfoLayer.IsActive,
+                _mapSceneReadyToRender,
+                CoopCampaignMapPrototypeNetworkController.CurrentClientConversation?.IsActive == true,
+                Mission?.GetMissionBehavior<MissionEscapeMenuView>()?.IsActive == true,
+                IsReplicaModalOpen(), InformationManager.IsAnyInquiryActive(),
+                focused == null || ReferenceEquals(focused, MissionScreen.SceneLayer)))
+                ScreenManager.TrySetFocus(_replicaInfoLayer);
         }
 
         private void HandleReplicaEscapeInput()

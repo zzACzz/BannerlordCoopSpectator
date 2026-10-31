@@ -1,5 +1,22 @@
 # Read-only aftermath screens
 
+2026-10-29 approved source correction: see
+[retained dependency bundle](AFTERMATH_PUBLICATION_BUNDLE_2026-10-29.md).
+The anchor retains its matching catalog/dynamic pair instead of comparing an old
+frame against newer dialogue caches. Retained publication leaves live caches
+dirty for restoration. Campaign/session ownership and expiry remain enforced;
+native repeated Prisoners/Loot/input acceptance pending. r72 CLOSED, all7 configs
+restored, no game roles retained.
+
+2026-10-29 r72/sm-b2: shared-base-module migration/startup and field battle passed,
+but user reports both Prisoners and Loot absent in MP. Host repeats
+`capture:aftermath-dynamic-anchor-unavailable`, indicating the retained aftermath
+frame does not match the current catalog/dynamic cache. Investigate ownership and
+revision evolution before changing that guard; do not remove it to display stale
+or unrelated state. User also reports camera keys blocked until Esc menu roundtrip;
+focus lifetime is not yet independently reproduced. No fix in this source change.
+See SHARED_SERVER_MODULES.md for exact roles/evidence and native acceptance bounds.
+
 Latest2026-10-27 r63/b287: user accepts the previously missing main-hero pre-citadel
 portrait and successful village battle/return. The detached unregistered resource
 path is described in CAMPAIGN_CRAFTED_VISUAL_RESOURCES.md. This does not close the

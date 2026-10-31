@@ -1,5 +1,47 @@
 # Invariants and Risks
 
+b34/r102 candidate water retirement is runtime-sensitive: only the exact scene
+whose canonical/shader-gated initializer started may run one public view-clear/
+DeleteWaterWakeRenderer pair, before entity/layer finalization. Consume the gate
+before both operations; partial setup must retire, shader rejection must not.
+If view clear throws, skip Delete like stock; never retry a failed retirement.
+Existing layer finalization remains responsible for destruction.
+No arbitrary native writes, global GPU/texture release or extra scene tick.
+Stock/native cleanup asymmetry justifies this candidate, not visual root-cause
+acceptance. b32 retained in r103 preimages; its initial/reloaded water accepted, VillageBattle
+water failed. Same owning view is shared across all seven battle kinds and reload.
+
+Native Naval identity is a rendering prerequisite: r96 SP1/MP0 at native manager
++93C and exact code prove alias-only loading skips wake program assignments.
+Candidate canonical admission is constructor-sensitive: validate current load
+order, exact known four official definitions, not-yet-constructed status and owned
+XML-only catalog before clearing that module's public managed list. Never clear
+unknown gameplay modules or edit official files/native flags. DS must keep raw
+official NavalDLC outside its incompatible scanner. Native menu/flag/no-gameplay,
+water/map/reload/battle/background acceptance remains unproven for b31.
+
+b27 late water creation is REJECTED and removed: full current scene/view readiness,
+five ready frames and resource checking did not prevent the SAME native31C296
+worker crash as old r78 early creation. Missing-renderer proof is not proof of a
+safe creation contract. No more timing variants, retries, extra Scene.Tick/global
+allocation/loading changes without new evidence. Background rendering must remain.
+Current installed b26 has known black water; compiled guards cannot prove fidelity.
+
+b26 refreshes shared Naval source material bindings once before render objects,
+using only official primary imports and each material's unchanged diffuse texture
+through the public API. This changes native resource state and requires actual
+post-init binding/pixel validation; a count or compiled check alone is not visual
+proof. No arbitrary offsets, recoloring, global material reset or tick-loop work.
+The same defect affects map/dialogue/thumbnail/battle/aftermath; do not narrow
+acceptance to prisoners. Preserve all7 configurations and user saves across runs.
+
+Shared base-module paths must never be deployment copy destinations. Preparation
+validates both exact sources first, holds a per-server lock, refuses active or
+unverifiable matching servers and unknown links, and renames originals outside
+Modules. Remove only a verified owned junction, never recurse through it. A link
+is not a read-only filesystem mount. Retained copies/legacy hideout overrides and
+manual recovery rules are documented in [shared modules](SHARED_SERVER_MODULES.md).
+
 Auto-battle replicas may read the already-active native scoreboard only. Never
 construct/Initialize/Tick SPScoreboardVM or BattleSimulation, invoke simulation
 commands/events or apply results. Bind exact MapScreen._battleSimulationView and

@@ -26,6 +26,7 @@
     { "Name": "CoopSiegeFormationMembershipSafety.ContractTests", "Path": "Tests/CoopSiegeFormationMembershipSafety.ContractTests/CoopSiegeFormationMembershipSafety.ContractTests.csproj" },
     { "Name": "CoopSiegeLadderInteraction.ContractTests", "Path": "Tests/CoopSiegeLadderInteraction.ContractTests/CoopSiegeLadderInteraction.ContractTests.csproj" },
     { "Name": "CoopSiegeSceneScriptRegistration.ContractTests", "Path": "Tests/CoopSiegeSceneScriptRegistration.ContractTests/CoopSiegeSceneScriptRegistration.ContractTests.csproj" },
-    { "Name": "NativeAftermath.ContractTests", "Path": "Tests/NativeAftermath.ContractTests/NativeAftermath.ContractTests.csproj" }
+    { "Name": "NativeAftermath.ContractTests", "Path": "Tests/NativeAftermath.ContractTests/NativeAftermath.ContractTests.csproj" },
+    { "Name": "SharedServerModules.ContractTests", "Path": "Tests/SharedServerModules.ContractTests/SharedServerModules.ContractTests.csproj" }
   ]
 }

@@ -50,6 +50,18 @@ internal static class ConversationHudTests
         Check(!CoopConversationHudCodec.IsValid(clone), "duplicate slot rejected");
         string portrait = Portrait().Replace("+0-@null-@null", "+0-campaign_sword-fine");
         string equipment = portrait.Split(new[] { "@---@" }, StringSplitOptions.None)[1];
+        string shieldPortrait = portrait.Replace("+1-@null-@null", "+1-northern_round_shield-@null");
+        int seenSlots = 0;
+        string checkedPortrait = CoopConversationHudCodec.ResolvePortraitEquipmentForSlots(shieldPortrait, (slot, item) =>
+        {
+            seenSlots |= 1 << slot;
+            return slot == 1 && item == "northern_round_shield" ? "cs_mirror_northern_round_shield_eadc3638" : item;
+        }, _ => true);
+        Check(seenSlots == 3 && checkedPortrait == shieldPortrait.Replace("+1-northern_round_shield-", "+1-cs_mirror_northern_round_shield_eadc3638-"),
+            "slot-aware validation changes the broken shield only and preserves all portrait/body fields");
+        Check(CoopConversationHudCodec.ResolvePortraitEquipmentForSlots(shieldPortrait,
+            (slot, item) => slot == 1 ? null : item, _ => true) == string.Empty,
+            "a rejected weapon slot cannot enter a native thumbnail as partial equipment");
         Check(CoopConversationHudCodec.IsEquipmentCode(equipment), "standalone equipment structure");
         Check(CoopConversationHudCodec.ResolveEquipmentCode(equipment, item => "cs_mirror_" + item, modifier => modifier == "fine") ==
             equipment.Replace("campaign_sword", "cs_mirror_campaign_sword"), "aftermath equipment resolves mirror without losing slots/modifiers");

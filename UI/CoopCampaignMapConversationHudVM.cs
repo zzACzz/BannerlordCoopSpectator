@@ -65,11 +65,10 @@ namespace CoopSpectator.UI
                 var objects = Game.Current?.ObjectManager ?? MBObjectManager.Instance;
                 if (objects == null) return PortraitUnavailable("object-manager");
                 string unavailableResource = "equipment-code";
-                string resolved = CoopConversationHudCodec.ResolvePortraitEquipment(id, itemId =>
+                string resolved = CoopConversationHudCodec.ResolvePortraitEquipmentForSlots(id, (slot, itemId) =>
                 {
-                    if (objects.GetObject<ItemObject>(itemId) != null) return itemId;
-                    if (ExactCampaignRuntimeItemRegistry.TryResolvePreloadedMirrorItem(itemId, out string mirror, out _) &&
-                        objects.GetObject<ItemObject>(mirror) != null) return mirror;
+                    if (CoopCampaignVisualItemResolver.TryResolve(objects, itemId, slot, out var item))
+                        return item.StringId;
                     unavailableResource = "item:" + itemId;
                     return null;
                 }, modifierId =>

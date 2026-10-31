@@ -329,6 +329,15 @@ internal static class Program
     private static void ValidateLauncherOrder(string launcherPath)
     {
         string launcher = File.ReadAllText(launcherPath);
+        if (string.Equals(Path.GetFileName(launcherPath), "run_mp_with_mod.bat", StringComparison.OrdinalIgnoreCase))
+        {
+            AssertTrue(launcher.Contains("call \"%GAME_ROOT%\\run_mp_with_mod_from_game_root.bat\" %*", StringComparison.OrdinalIgnoreCase),
+                "Legacy entry must forward arguments to the portable launcher.");
+            AssertFalse(launcher.Contains("/multiplayer", StringComparison.OrdinalIgnoreCase) || launcher.Contains("C:\\Program Files", StringComparison.OrdinalIgnoreCase),
+                "Legacy entry must not duplicate game/cache launch or fix a Steam drive.");
+            ValidateLauncherOrder(Path.Combine(Path.GetDirectoryName(launcherPath)!, "run_mp_with_mod_from_game_root.bat"));
+            return;
+        }
         int wrapperPhase = launcher.IndexOf(
             "-Phase RunMultiplayer",
             StringComparison.OrdinalIgnoreCase);

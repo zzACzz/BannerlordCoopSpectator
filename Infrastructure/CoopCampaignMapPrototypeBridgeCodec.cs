@@ -162,6 +162,7 @@ namespace CoopSpectator.Infrastructure
             {
                 "SchemaVersion=" + snapshot.SchemaVersion.ToString(CultureInfo.InvariantCulture),
                 "SessionId=" + (snapshot.SessionId ?? string.Empty),
+                "ContentProfileId=" + (snapshot.ContentProfileId ?? string.Empty),
                 "Revision=" + snapshot.Revision.ToString(CultureInfo.InvariantCulture),
                 "NormalizedX=" + snapshot.NormalizedX.ToString(CultureInfo.InvariantCulture),
                 "NormalizedY=" + snapshot.NormalizedY.ToString(CultureInfo.InvariantCulture),
@@ -311,6 +312,7 @@ namespace CoopSpectator.Infrastructure
 
             if (!TryReadInt(values, "SchemaVersion", out int schemaVersion) ||
                 !values.TryGetValue("SessionId", out string sessionId) ||
+                !values.TryGetValue("ContentProfileId", out string contentProfileId) ||
                 !TryReadInt(values, "Revision", out int revision) ||
                 !TryReadInt(values, "NormalizedX", out int normalizedX) ||
                 !TryReadInt(values, "NormalizedY", out int normalizedY) ||
@@ -556,6 +558,7 @@ namespace CoopSpectator.Infrastructure
 
             snapshot = new CoopCampaignMapPrototypeHostSnapshot
             {
+                ContentProfileId = contentProfileId,
                 SchemaVersion = schemaVersion,
                 SessionId = sessionId,
                 Revision = revision,

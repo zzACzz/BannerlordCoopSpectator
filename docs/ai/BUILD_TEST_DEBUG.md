@@ -1,5 +1,73 @@
 # Build, Test, and Debug Guide
 
+b34/r102 both isolated builds PASS, all27 c26 PASS, all18 compiled checks PASS.
+Installed for r103 native verification; consult current live role records.
+Extended map contract tests cover exact-scene retirement/partial setup/failing
+view clear and Delete/no retries/new scene. Test-CanonicalNavalWater now checks
+the public pair and shared release-before-layer-clear ordering in compiled code.
+Do not run the updated check against old b32 and report a product regression.
+Private r101 WaterMeshInspector builds successfully; two historical saved dumps
+lack the required native heap ranges, so they do NOT validate assigned materials.
+It stays outside production. Before r103 staging, installed b32/seven configs/normal BAT matched exactly;
+r103 now owns fresh preimages and its trace launcher. See r102 offline record.
+
+b32 isolated client/dedicated PASS, all27 c24 PASS, all18 compiled checks PASS.
+Test-CanonicalNavalWater replaces baseline-only Test-NoReplicaWaterAllocation;
+do not claim both pass b32. Private reader now prints four bounded wake-program
+headers (raw+10/+38) after exact native/role checks, no engine calls or writes.
+Client1FA7E38F78776CBE615C5CED7D9C263298BE21539D662246627CC16EA55E485E;
+dedicated unchanged from b31. r100 native first-map appearance/safety pending.
+
+Current canonical admission b31: both isolated builds PASS, installed inventories
+unchanged during builds; all27 c23 PASS and all18 compiled checks PASS, including
+Test-NavalClientModuleAdmission and Test-NoReplicaWaterAllocation. Constructor
+ordering verified against actual stock LoadSubModules IL and official definitions.
+Client5C1922A5ABB90C66790D23AB95C7604F0F89528ACF398684B001371130F709A4,
+DS5BA1F212316D90CADA1CAA1991CDE36B734626E5582FF978D399D621F7C2EE13.
+r98 native menu gate pending. Earlier c22 timed stream assertion failed during
+concurrent build; c23 full rerun alone passes, harness assertions unchanged.
+
+Current rollback b28: isolated client/dedicated PASS/all27 c21 PASS/all17 compiled
+checks PASS, including Test-NoReplicaWaterAllocation. Source excludes rejected
+b27 water initializer. b28 client SHA AFA5CC2C83AE574B1401E015CF394A4AA9910F42FA0793BB63FEFEFEA350A6F6;
+dedicated byte-identical to b26. b28 NOT deployed; installed all12 b26 preimages
+restored and all7 configs match after r95. b27 had green managed checks but FAILED
+native at31C296; read r95/REJECTED.md. No new gameplay run pending.
+
+2026-10-30 latest b26: both isolated builds PASS, all27 naval-c19 projects PASS,
+all16 compiled checks under artifacts/runtime/naval-b26-managed-checks PASS.
+Test-NavalTextureAdmission now verifies bounded official catalog names and compiled
+ordering (catalog before activation before existing-texture refresh), preserving
+resource/shader identity without executing native calls. Native r90 logs497/497
+refreshed templates, but its read happened before initialization; post-init native
+binding and pixel acceptance remain r91 gates. Client SHA256
+D5F4804BABE702BF727776B61D30044C1C0A7AF525BE62043A80E05AA98B96E2,
+MVID6c89aedf-4e89-47ac-909b-1e1a237ac850; dedicated unchanged from b24/b25.
+Use elevated full-system exact path/start inventory for owned role lifecycle.
+Sandbox Get-Process can falsely hide external roles; never restore from that alone.
+
+2026-10-29 Naval candidate: naval-b7 client/dedicated builds pass; naval-c4 all27
+contracts pass, including real schema20 binary battle transport across seven
+scenario shapes and an actual legacy19 fixture. Ten compiled net472 checks pass
+under artifacts/runtime/naval-b7-managed-checks. Read WAR_SAILS_RESOURCE_SUPPORT.md
+for source scope and native gates. r73 aftermath/input is user-accepted and CLOSED
+with all7 config hashes matching. Native Naval acceptance is still pending.
+
+Aftermath bundle/focus candidate af-b2: both isolated builds, all27 af-c2 contract
+projects and eight compiled detached checks pass. Test sources exercise retained
+dependency/file admission and all256 focus-policy combinations. No native game is
+constructed by these checks. r73 installation/campaign launch is separately
+recorded in AFTERMATH_PUBLICATION_BUNDLE_2026-10-29.md; native acceptance pending.
+
+Shared-base-module candidate: deploy no longer creates/copies SandBox/SandBoxCore
+resource trees or stock hideout clones. The approved campaign launcher prepares
+directory links at runtime; private scene-script DLL staging remains. Canonical
+contract inventory now has27 projects, including real Windows junction migration,
+source preservation and failure rollback. Read SHARED_SERVER_MODULES.md before
+deployment/native testing; old copy instructions below are historical.
+Both sm-b2 builds, all27 sm-c1 projects and Test-SharedServerModules.ps1 against
+the compiled net472 client passed. No native acceptance follows from these tests.
+
 b302 isolated reward-details candidate: both builds/all26 c203 pass. Eight compiled
 checks pass; AutoBattleRewardBindings includes plain auto-battle checks and actual
 installed closure/row metadata tests, plus structured detached UI behavior.
@@ -403,8 +471,7 @@ The main projects are not compile-only by default.
 - stage `SandBox.dll` and `TaleWorlds.CampaignSystem.dll` from the client installation;
 - create/update the installed `Modules\CoopSpectatorDedicated` tree;
 - copy server/client binaries and module XML data;
-- copy SandBox/SandBoxCore descriptors and XML data into the dedicated installation;
-- copy `battle_terrain_*` and supported hideout scene assets;
+- retain base scenes/XML in the game installation (shared by runtime directory links);
 - copy `TaleWorlds.MountAndBlade.Multiplayer.dll` into the dedicated client bin.
 
 Therefore:

@@ -69,7 +69,13 @@ internal static class ConversationVisualLifetimeTests
             tableau.Contains(".Scale(descriptor.Scale)"), "resolved native scale preserved from host to client");
         Check(view.Contains("CloseConversation(releaseTableau: false)") && view.Contains("_tableau.Apply(state.Tableau)") &&
             view.Contains("_tableau?.Tick(dt)") && view.Contains("_tableau?.Dispose()"), "view lifetime wiring");
-        Check(tableau.Contains("AgentVisuals.Create(") && !tableau.Contains("SpawnAgent(") &&
+        string lifetimeTrace = File.ReadAllText(Path.Combine(root, "UI", "CoopCampaignMapVisualLifetimeTrace.cs"));
+        string visualFactory = File.ReadAllText(Path.Combine(root, "UI", "CoopCampaignAgentVisualFactory.cs"));
+        Check(tableau.Contains("CoopCampaignAgentVisualFactory.Create(") &&
+            visualFactory.Contains("CoopCampaignMapVisualLifetimeTrace.Create(") &&
+            !visualFactory.Contains("SpawnAgent(") &&
+            lifetimeTrace.Contains("return AgentVisuals.Create(data, name,") &&
+            !lifetimeTrace.Contains("SpawnAgent(") && !tableau.Contains("SpawnAgent(") &&
             !tableau.Contains("new MapConversationTableau(") && !tableau.Contains("ThumbnailCacheManager."), "visual-only isolated ownership");
         Check(tableau.Contains(".PrepareImmediately(true)") && !tableau.Contains(".PrepareImmediately(false)"),
             "bounded dialogue actors match stock face preparation without changing global loading");

@@ -74,12 +74,7 @@ namespace CoopSpectator.UI
                 Visual?.OnFinalize();
                 _itemId = state.ItemId;
                 var objects = MBObjectManager.Instance;
-                var item = objects?.GetObject<ItemObject>(_itemId);
-                // Campaign trade goods may only exist under a preloaded mirror
-                // identifier in multiplayer. Never register objects while rendering.
-                if (item == null && objects != null &&
-                    ExactCampaignRuntimeItemRegistry.TryResolvePreloadedMirrorItem(_itemId, out string mirror, out _))
-                    item = objects.GetObject<ItemObject>(mirror);
+                CoopCampaignVisualItemResolver.TryResolveImage(objects, _itemId, out var item);
                 Visual = item == null ? null : new ItemImageIdentifierVM(item);
                 OnPropertyChanged("Visual");
             }

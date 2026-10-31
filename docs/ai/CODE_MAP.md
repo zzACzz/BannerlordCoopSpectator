@@ -1,5 +1,50 @@
 # Code Map
 
+b34/r102 candidate (installed for r103 verification): the same water preparation lease now
+tracks initialization-started and consumes exact-scene retirement before a public
+ClearRuntimeGPUMemory(true)/DeleteWaterWakeRenderer pair. MissionView's common
+ReleaseSceneLayer runs it before owning-layer removal/scene clear/reset. Base,
+ineligible and shader-rejected scenes never run the pair. Partial initialization
+and failed cleanup are once-only. Runtime water fidelity is still unverified;
+r100 b32 is preserved in r103 preimages as the partial rollback baseline. See r102/PLAN.md and water report.
+
+Canonical water b32: `CoopNavalMapWaterPreparation` consumes one attempt for an
+eligible/current-ready owned scene; `...MissionView.NavalWater.cs` requires early
+canonical module admission and public water_simulation_macro/grad_fold_clear
+before stock resource/wake operations. Release resets the scene lease. Map
+contract tests cover missing shader/failure/no retry; Test-CanonicalNavalWater
+checks compiled boundaries. This is distinct from rejected alias-based b27.
+b32 installed in r100; native water acceptance pending. No extra tick/focus veto.
+
+Canonical Naval client candidate: `CoopNavalClientModuleAdmission` runs from the
+public `SubModule` constructor before later official NavalDLC construction. Pure
+`CoopNavalClientModulePolicy` validates order/exact four known definitions. It
+changes only the public managed list after source/catalog checks, never native
+flags. `CoopNavalResourceAdapter.PrepareClient` projects XML-only catalog; original
+Prepare/DS retains shared resources. Client launcher lists canonical NavalDLC last.
+Not native-accepted/installed; see r97/PLAN.md and r96 native identity proof.
+
+b27 Naval water initializer and policy were REMOVED after r95 native failure.
+Preserved rejected copies are under r95/evidence/rejected-source, not production.
+`scripts/Test-NoReplicaWaterAllocation.ps1` checks compiled map view/nested types
+for rejected early/late wake calls, associated policy and extra Scene.Tick.
+Existing b26 visual/material fixes remain; water creation contract is unresolved.
+
+Naval texture initialization: `UI/CoopNavalVisualResources.cs` runs through the
+once-only role gate `Infrastructure/CoopNavalTextureAdmission.cs` before first
+UI root. `Infrastructure/CoopNavalMaterialCatalog.cs` validates bounded official
+primary imports; after alias activation, public same-texture assignment refreshes
+stale source-template tileset bindings. `NavalMaterialCatalogTests.cs` covers
+primary/secondary identity, deduplication, XML/import/name bounds and DTD refusal.
+
+Shared base-module candidate: DedicatedHelper/BannerlordInstallationPaths.cs owns
+bounded Steam-library/explicit-server discovery. SharedServerModules.cs owns the
+pre-launch lock, source validation, transactional link/migration/rollback and
+RESTORE.txt. WindowsDirectoryJunction.cs owns exact directory reparse operations.
+DedicatedHelperLauncher.Start holds the lease through StartPrepared. The new
+SharedServerModules.ContractTests project validates real Windows filesystem
+behavior without a game. See [canonical specification](SHARED_SERVER_MODULES.md).
+
 b302 source-only reward details: CoopCampaignAutoBattleRewardCapture inspects
 audited exact native captured ExplainedNumber fields, scopes cache to the current
 scoreboard, and appends prepared CAS1 rows. CoopCampaignMapTooltipCapture.AutoBattle

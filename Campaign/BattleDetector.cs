@@ -5901,6 +5901,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
 
                 return new BattleScenarioContextMessage
                 {
+                    ContentProfileId = CoopCampaignContentRuntime.GetLocalId(),
                     CampaignBattleType = battle?.EventType.ToString() ?? string.Empty,
                     ScenarioKind = ResolveScenarioKind(battle, encounterSettlement, missionScene, isSiegeBattle),
                     IsSiegeBattle = isSiegeBattle,
@@ -5922,6 +5923,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
                     " Error=" + ex.Message);
                 return new BattleScenarioContextMessage
                 {
+                    ContentProfileId = string.Empty,
                     ScenarioKind = "Unknown",
                     IsSiegeBattle = false,
                     Source = "scenario-context-exception"
@@ -5933,6 +5935,7 @@ namespace CoopSpectator.Campaign // Тримаємо battle/campaign логік�
         {
             return new BattleScenarioContextMessage
             {
+                ContentProfileId = original?.ContentProfileId ?? string.Empty,
                 CampaignBattleType = original?.CampaignBattleType ?? string.Empty,
                 ScenarioKind = CoopTestBattleOptions.GetCurrentBattleType(),
                 IsSiegeBattle = false,

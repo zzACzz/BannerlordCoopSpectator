@@ -18,9 +18,6 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         private const int DefaultPort = 7210; // Офіційний UDP-порт дедик-сервера за замовчуванням
         private const string DedicatedServerFolderName = "Mount & Blade II Dedicated Server";
         private const string ExplicitGameRootEnvVar = "BANNERLORD_GAME_ROOT";
-        private const string ServerBinRelativePath = @"bin\Win64_Shipping_Server";
-        /// <summary>Єдиний exe для custom dedicated server у стандартній інсталі: DedicatedCustomServer.Starter.exe (core exe в цій папці немає).</summary>
-        private static readonly string[] ExeCandidates = new[] { "DedicatedCustomServer.Starter.exe" };
         /// <summary>Папка Tokens у Documents — варіант з "and" (гра часто створює саме цю).</summary>
         private const string TokensSubFolder = @"Mount and Blade II Bannerlord\Tokens";
         /// <summary>Варіант з "&" — іноді з’являється в OneDrive/провіднику; dedicated може очікувати той чи інший.</summary>
@@ -40,11 +37,10 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         private const string ModulesArg = "_MODULES_*Native*Multiplayer*DedicatedCustomServerHelper*_MODULES_";
         /// <summary>
         /// Exact campaign-scene bootstrap module set for modded dedicated flow.
-        /// `Sandbox` and `SandBoxCore` are included deliberately so the dedicated
-        /// runtime can see staged `sp_battle_scenes.xml` and `battle_terrain_*`
-        /// scene assets during exact-scene experiments.
+        /// Sandbox and SandBoxCore resolve through verified directory junctions to
+        /// the running game. No base-module resource copies are deployed.
         /// </summary>
-        private const string ExactCampaignSceneModulesArg = "_MODULES_*Native*SandBoxCore*Sandbox*Multiplayer*CoopSpectatorDedicated*_MODULES_";
+        private const string ExactCampaignSceneModulesArg = "_MODULES_*Native*SandBoxCore*Sandbox*Multiplayer*CoopSpectatorMapResources*CoopSpectatorDedicated*_MODULES_";
         /// <summary>ТЗ C2: офіційний хвіст — блок _MODULES_ та /dedicatedcustomserver ... /playerhosteddedicatedserver для guard/normalization.</summary>
         private const string OfficialModulesTail = "_MODULES_*Native*Multiplayer*_MODULES_";
         private const string PlayerHostedSuffix = "/playerhosteddedicatedserver";
@@ -449,36 +445,9 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         /// <summary>Шукає exe дедик-сервера: поряд з грою (Steam common) або через змінну середовища. Перебирає кандидатів (core exe, потім Starter).</summary>
         public static string TryFindDedicatedServerExePath()
         {
-            string binDir = null;
-
-            // 1) Змінна середовища (корінь Dedicated Server або повний шлях до exe)
-            string envPath = Environment.GetEnvironmentVariable("BANNERLORD_DEDICATED_SERVER_PATH");
-            if (!string.IsNullOrWhiteSpace(envPath))
-            {
-                if (File.Exists(envPath)) return envPath;
-                binDir = Path.Combine(envPath, ServerBinRelativePath);
-            }
-
-            // 2) Поряд з грою: ...\Steam\steamapps\common\Mount & Blade II Bannerlord -> ...\Mount & Blade II Dedicated Server
-            if (string.IsNullOrEmpty(binDir))
-            {
-                string gameRoot = TryGetGameRootFromProcess();
-                if (!string.IsNullOrEmpty(gameRoot))
-                {
-                    string parent = Path.GetDirectoryName(gameRoot);
-                    if (!string.IsNullOrEmpty(parent))
-                        binDir = Path.Combine(parent, DedicatedServerFolderName, ServerBinRelativePath);
-                }
-            }
-
-            if (string.IsNullOrEmpty(binDir) || !Directory.Exists(binDir)) return null;
-
-            for (int i = 0; i < ExeCandidates.Length; i++)
-            {
-                string exe = Path.Combine(binDir, ExeCandidates[i]);
-                if (File.Exists(exe)) return exe;
-            }
-            return null;
+            return BannerlordInstallationPaths.FindDedicatedServer(TryGetGameRootFromProcess(),
+                Environment.GetEnvironmentVariable("BANNERLORD_DEDICATED_SERVER_PATH"),
+                BannerlordInstallationPaths.GetSteamRoots());
         }
 
         private static string TryGetGameRootFromProcess()
@@ -489,7 +458,8 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
                 if (string.IsNullOrEmpty(baseDir)) return null;
                 // Типовий шлях: ...\bin\Win64_Shipping_Client -> корінь гри на 2 рівні вгору
                 string root = Path.GetFullPath(Path.Combine(baseDir, "..", ".."));
-                if (Directory.Exists(root)) return root;
+                if (File.Exists(Path.Combine(root, "bin", "Win64_Shipping_Client", "Bannerlord.exe")) &&
+                    Directory.Exists(Path.Combine(root, "Modules"))) return root;
             }
             catch (Exception ex)
             {
@@ -780,12 +750,66 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
             string exePath = TryFindDedicatedServerExePath();
             if (string.IsNullOrEmpty(exePath))
             {
-                string msg = "Dedicated Server exe not found. Install 'Mount & Blade II: Dedicated Server' from Steam (Tools). Path: Steam\\steamapps\\common\\" + DedicatedServerFolderName + "\\" + ServerBinRelativePath + " (e.g. DedicatedCustomServer.Starter.exe)";
+                string msg = "Dedicated Server executable not found in the configured Steam libraries. Install it from Steam Tools, or set BANNERLORD_DEDICATED_SERVER_PATH to its installation folder or DedicatedCustomServer.Starter.exe. Check any existing override for a moved installation.";
                 UiFeedback.ShowMessageDeferred(msg);
                 ModLogger.Info("DedicatedHelper: " + msg);
                 return "ERROR: " + msg;
             }
 
+            SharedServerModuleLease sharedModules;
+            try
+            {
+                string serverRoot = GetDedicatedServerRootFromExe(exePath);
+                bool naval = CoopCampaignContentRuntime.UsesNavalResources;
+                CoopCampaignContentRuntime.RememberLocalHost();
+                sharedModules = SharedServerModules.Prepare(TryGetGameRootFromProcess(), serverRoot,
+                    () => HasDedicatedProcessUsingInstallation(serverRoot));
+                try
+                {
+                    CoopMapVisualResourceAdapter.Prepare(TryGetGameRootFromProcess(), serverRoot);
+                    if (naval) CoopNavalResourceAdapter.Prepare(TryGetGameRootFromProcess(), serverRoot);
+                }
+                catch { sharedModules.Dispose(); throw; }
+            }
+            catch (Exception ex)
+            {
+                string message = "Cannot prepare shared campaign modules. " + ex.Message +
+                    " Verify the game/server paths and write permission to the server folder. No server was launched.";
+                ModLogger.Error("DedicatedHelper: shared module preparation failed.", ex);
+                UiFeedback.ShowMessageDeferred(message);
+                return "ERROR: " + message;
+            }
+            using (sharedModules)
+            {
+                ModLogger.Info("DedicatedHelper shared modules: " + sharedModules.Summary);
+                return StartPrepared(exePath, port, token, launchSettings);
+            }
+        }
+
+        private static bool HasDedicatedProcessUsingInstallation(string serverRoot)
+        {
+            if (HasRunningDedicatedProcess()) return true;
+            string prefix = WindowsDirectoryJunction.ResolveDirectory(serverRoot) + Path.DirectorySeparatorChar;
+            foreach (string name in new[] { "DedicatedCustomServer.Starter", "DedicatedCustomServer" })
+                foreach (Process process in Process.GetProcessesByName(name))
+                    using (process)
+                    {
+                        try
+                        {
+                            if (process.HasExited) continue;
+                            string executable = process.MainModule?.FileName;
+                            if (string.IsNullOrEmpty(executable)) return true;
+                            string directory = WindowsDirectoryJunction.ResolveDirectory(Path.GetDirectoryName(executable));
+                            if (directory.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return true;
+                        }
+                        catch (Exception) { return true; } // Cannot prove a possibly active server is unrelated.
+                    }
+            return false;
+        }
+
+        private static string StartPrepared(string exePath, int port, string token, DedicatedServerLaunchSettings launchSettings)
+        {
+            string tokenFolder;
             // WorkingDirectory = строго папка, де лежить exe (як при Steam-запуску).
             string workingDir = Path.GetDirectoryName(exePath);
             if (string.IsNullOrEmpty(workingDir)) workingDir = Path.GetDirectoryName(Path.GetDirectoryName(exePath));
@@ -1074,6 +1098,9 @@ namespace CoopSpectator.DedicatedHelper // Запуск Dedicated Helper (офі
         {
             if (startInfo == null)
                 return;
+            if (CoopCampaignContentRuntime.UsesNavalResources)
+                startInfo.Arguments = startInfo.Arguments.Replace(ExactCampaignSceneModulesArg,
+                    "_MODULES_*Native*SandBoxCore*Sandbox*Multiplayer*CoopSpectatorNavalResources*CoopSpectatorMapResources*CoopSpectatorDedicated*_MODULES_");
 
             // Only the supported campaign-owned launch path may establish a fresh session.
             startInfo.EnvironmentVariables.Remove(CoopCampaignMissionChannel.SessionEnvironment);

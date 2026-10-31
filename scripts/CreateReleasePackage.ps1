@@ -475,7 +475,7 @@ function Create-GitHubReleaseAssets
         Copy-Item -LiteralPath $portableLauncher -Destination (Join-Path $githubClientDir "run_mp_with_mod_from_game_root.bat") -Force
 
         New-Item -ItemType Directory -Path (Join-Path $githubHostDir "Modules") -Force | Out-Null
-        Copy-HostPayload (Join-Path $githubHostDir "Modules") $false
+        Copy-HostPayload (Join-Path $githubHostDir "Modules")
 
         Remove-DebugSymbols $githubClientDir
         Remove-DebugSymbols $githubHostDir
@@ -719,13 +719,11 @@ function Create-NexusReleaseAssets
         Get-FileHash -LiteralPath $nexusHostZip -Algorithm SHA256).Hash)
 }
 
-function Copy-HostPayload([string]$hostModulesDir, [bool]$includeBaseSceneModules)
+function Copy-HostPayload([string]$hostModulesDir)
 {
     $hostDedicatedModuleDir = Join-Path $hostModulesDir "CoopSpectatorDedicated"
     $hostDedicatedBinServer = Join-Path $hostDedicatedModuleDir "bin\Win64_Shipping_Server"
     $hostDedicatedBinClient = Join-Path $hostDedicatedModuleDir "bin\Win64_Shipping_Client"
-    $sandboxSourceDir = Join-Path $BannerlordRootDir "Modules\SandBox"
-    $sandboxCoreSourceDir = Join-Path $BannerlordRootDir "Modules\SandBoxCore"
 
     Copy-DirectoryContent $dedicatedModuleSource $hostDedicatedModuleDir
     Copy-MatchingFilesRelative (Join-Path $clientModuleSource "ModuleData") (Join-Path $hostDedicatedModuleDir "ModuleData") "*.xml"
@@ -737,18 +735,8 @@ function Copy-HostPayload([string]$hostModulesDir, [bool]$includeBaseSceneModule
         (Join-Path $DedicatedServerRootDir "bin\Win64_Shipping_Client\TaleWorlds.MountAndBlade.Multiplayer.dll")
     ) $hostDedicatedBinClient
 
-    if (-not $includeBaseSceneModules)
-    {
-        return
-    }
-
-    $hostSandboxDir = Join-Path $hostModulesDir "SandBox"
-    $hostSandboxCoreDir = Join-Path $hostModulesDir "SandBoxCore"
-    Copy-RequiredFile (Join-Path $sandboxSourceDir "SubModule.xml") $hostSandboxDir
-    Copy-MatchingFilesRelative (Join-Path $sandboxSourceDir "ModuleData") (Join-Path $hostSandboxDir "ModuleData") "*.xml"
-    Copy-RequiredFile (Join-Path $sandboxCoreSourceDir "SubModule.xml") $hostSandboxCoreDir
-    Copy-MatchingFilesRelative (Join-Path $sandboxCoreSourceDir "ModuleData") (Join-Path $hostSandboxCoreDir "ModuleData") "*.xml"
-    Copy-ChildDirectories (Join-Path $sandboxCoreSourceDir "SceneObj") (Join-Path $hostSandboxCoreDir "SceneObj") "battle_terrain*"
+    # Base modules are shared from the running game by the campaign launcher.
+    # Never place resource copies or machine-specific directory links in an archive.
 }
 
 if (-not $SkipBuild)
@@ -807,7 +795,7 @@ if (-not $LightOnly)
 
     Copy-DirectoryContent $clientModuleSource (Join-Path $releaseDir "Client\Modules\CoopSpectator")
     Copy-Item -LiteralPath $portableLauncher -Destination (Join-Path $releaseDir "Client\run_mp_with_mod_from_game_root.bat") -Force
-    Copy-HostPayload (Join-Path $releaseDir "Host\Modules") $true
+    Copy-HostPayload (Join-Path $releaseDir "Host\Modules")
     Remove-DebugSymbols $releaseDir
 
     Copy-Item -LiteralPath $releaseReadmeEnTemplate -Destination (Join-Path $releaseDir "README_EN.md") -Force
@@ -824,7 +812,7 @@ Reset-Path $lightReleaseZip
 New-Item -ItemType Directory -Path $lightReleaseDir -Force | Out-Null
 
 Copy-DirectoryContent $clientModuleSource (Join-Path $lightReleaseDir "CoopSpectator")
-Copy-HostPayload $lightReleaseDir $false
+Copy-HostPayload $lightReleaseDir
 Remove-DebugSymbols $lightReleaseDir
 Validate-LightReleasePayload $lightReleaseDir
 Copy-Item -LiteralPath $lightReleaseReadmeEnTemplate -Destination (Join-Path $lightReleaseDir "README_EN.md") -Force

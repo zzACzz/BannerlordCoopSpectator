@@ -1,5 +1,14 @@
 # Replica map escape input
 
+2026-10-29 source follow-up: see
+[conservative input recovery](AFTERMATH_PUBLICATION_BUNDLE_2026-10-29.md).
+r72 user reports blocked camera keys recovered by Escape after field-battle
+return. New map focus recovery admits only null/exact native scene focus, an
+active rendered top MissionScreen and no dialogue/menu/options/inquiry. It does
+not release unknown focus or reactivate layers. The exact r72 focused layer was
+not captured; native repair acceptance remains open. Menu/map-bar visibility now
+also checks explicit modal guards even with null focus.
+
 Latest bounded cmp-b57 run is CLOSED. After elapsed-deadline survival, native
 Quit/rejoin and a field-victory map return, the agent opened native Options,
 then opened, advanced and closed Phorys' conversation in the campaign. Options

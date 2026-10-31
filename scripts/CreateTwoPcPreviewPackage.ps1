@@ -11,9 +11,10 @@ $repo = Split-Path -Parent $PSScriptRoot
 if ($PackageName -notmatch '^[a-zA-Z0-9_-]+$') { throw 'Unsafe package name' }
 $build = Get-Content (Join-Path $BuildRunRoot 'artifacts/results/compile-only.json') -Raw | ConvertFrom-Json
 $contracts = Get-Content (Join-Path $ContractRunRoot 'artifacts/results/contracts.json') -Raw | ConvertFrom-Json
+$expectedProjectCount = @((Get-Content (Join-Path $repo 'Tests/contract-tests.manifest.json') -Raw | ConvertFrom-Json).Projects).Count
 if ($build.ClientBuild.ExitCode -ne 0 -or $build.DedicatedBuild.ExitCode -ne 0 -or
     @($build.Assertions | Where-Object Outcome -ne 'Pass').Count) { throw 'Build is not verified' }
-if (-not $contracts.IsFullSuite -or $contracts.ProjectCount -lt 26 -or
+if (-not $contracts.IsFullSuite -or $contracts.ProjectCount -ne $expectedProjectCount -or
     $contracts.FailedCount -ne 0 -or $contracts.PassedCount -ne $contracts.ProjectCount -or
     @($contracts.Results | Where-Object Outcome -ne 'Pass').Count) { throw 'Contracts did not pass' }
 foreach ($binary in @($build.ClientOutput, $build.DedicatedOutput)) {

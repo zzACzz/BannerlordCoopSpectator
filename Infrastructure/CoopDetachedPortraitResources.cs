@@ -56,10 +56,7 @@ namespace CoopSpectator.Infrastructure
                 }
                 else
                 {
-                    item = manager.GetObject<ItemObject>(parts[1]);
-                    if (item == null && ExactCampaignRuntimeItemRegistry.TryResolvePreloadedMirrorItem(parts[1], out var mirror, out _))
-                        item = manager.GetObject<ItemObject>(mirror);
-                    if (item == null) return false;
+                    if (!CoopCampaignVisualItemResolver.TryResolve(manager, parts[1], i, out item)) return false;
                 }
                 var modifier = parts[2] == "@null" ? null : manager.GetObject<ItemModifier>(parts[2]);
                 if (parts[2] != "@null" && modifier == null) return false;

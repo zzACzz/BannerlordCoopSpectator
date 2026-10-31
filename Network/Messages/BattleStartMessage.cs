@@ -149,6 +149,7 @@ namespace CoopSpectator.Network.Messages
 
     public sealed class BattleScenarioContextMessage
     {
+        public string ContentProfileId { get; set; } = string.Empty;
         public string CampaignBattleType { get; set; }
         public string ScenarioKind { get; set; }
         public bool IsSiegeBattle { get; set; }
@@ -159,6 +160,7 @@ namespace CoopSpectator.Network.Messages
         {
             return new BattleScenarioContextMessage
             {
+                ContentProfileId = ContentProfileId,
                 CampaignBattleType = CampaignBattleType,
                 ScenarioKind = ScenarioKind,
                 IsSiegeBattle = IsSiegeBattle,

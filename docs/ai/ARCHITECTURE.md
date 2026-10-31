@@ -1,5 +1,19 @@
 # Architecture
 
+b26 Naval resource initialization refreshes exact official primary material
+templates once after alias texture activation and before first UI root. Source
+templates predate activation and retain Native's binding; stock team-color copies
+recompute theirs. The bounded catalog comes from the active alias's linked
+TileSets/ValidMaterials.xml. Only existing diffuse texture identity is reassigned
+through Material.SetTexture; host palettes/equipment/authority stay unchanged.
+Campaign/dedicated/base/official/mixed contexts remain excluded by the role gate.
+
+Shared base-module candidate: campaign-owned launch prepares verified local Windows
+directory junctions from server SandBox/SandBoxCore to the running game's modules.
+The server's native resource/module discovery is unchanged; no host data/native
+authority crosses this filesystem boundary. Private server binaries/configuration
+remain independent. See [ownership and migration](SHARED_SERVER_MODULES.md).
+
 Auto-battle presentation uses the existing campaign-map mission, transporting the
 current native host scoreboard as an exclusive CAS1/CMN12 display tree. It does not
 start a dedicated combat mission or a client simulation. Detached stock movie

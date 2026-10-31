@@ -1,5 +1,57 @@
 # Release Packaging Standard
 
+## Current b34 two-PC test baseline (2026-10-31)
+
+The user authorized a source checkpoint/push and a fresh local test archive after
+accepting b34 water and map rendering. Fresh archive target:
+`dist/previews/Warhost_MapReplica_TwoPC_b34_20261031_r2.zip`.
+Earlier archives remain immutable. This authorization supersedes the previous
+archive-creation hold; no archive upload, release or tag is requested.
+
+Reuse exact successful isolated runs `naval-b34` and `naval-c26` through
+`CreateTwoPcPreviewPackage.ps1`; do not rebuild or deploy merely to package.
+Client SHA256:B94F4F4488E2ECEC9FFFA2C5F7C92DA018120A79E1B8B1476F64A583656F114B.
+Dedicated SHA256:5BA1F212316D90CADA1CAA1991CDE36B734626E5582FF978D399D621F7C2EE13.
+Both builds, all27 contract projects and all18 focused compiled checks passed
+for that candidate. Package creation rechecks output hashes, default flags,
+copied payloads and every ZIP entry. Record the final ZIP hash at delivery;
+MANIFEST.json records the source checkpoint and exact payload identities.
+
+Local acceptance covers initial/post-village/post-reload Naval water, hero and
+Training Field appearance, and background recovery. A separate base-game b34
+siege on empire_town_d completed with2000 initial foot agents, native
+reinforcements, final campaign writeback and map return. This was one peer,
+attacker-side, not the tester's two-client khuzait_city_b defender reproduction.
+Two-PC acceptance and that freeze diagnosis remain open. Preserve background
+map updates; retain normal trace-off launchers and exclude private evidence,
+PDBs, heavy game resources, machine-local links and abandoned tooltip assets.
+See docs/TWO_PC_PREVIEW_TEST_EN.md for installation and matching content profiles.
+
+Earlier package status below is historical and does not override this baseline.
+
+CURRENT WATER ISSUE: b26 preview below is immutable DEVELOPMENT only; r93 reports
+black water in MP after connected reload, campaign normal. See adjacent preview
+KNOWN_ISSUES notice and NAVAL_WATER_RELOAD_2026-10-30.md. It is not the final
+accepted two-PC candidate. No b27 correction/archive exists.
+
+Verified development preview2026-10-30: Warhost_MapReplica_TwoPC_b26_20261030_preview.zip,
+11606667bytes, SHA2568011361A85B28946FFDD9D0016341DC6BE83DDBF1393895180F10F88BBC8EF77.
+Created from isolated naval-b26/all27 naval-c19; both compiled default checks pass,
+50 payload files+manifest, every ZIP entry hash verified. Normal trace-off BAT,
+no private diagnostics/PDB/abandoned tooltip/heavy resources. Naval field and base
+night-hideout/map return are user-accepted; sustained/reload/remaining scenarios
+and two-PC acceptance remain open. This is a development test artifact, not a
+public release. Read r93/PACKAGE.md and docs/TWO_PC_PREVIEW_TEST_EN.md.
+
+## Shared base-module source candidate (2026-10-29)
+
+New source no longer embeds SandBox/SandBoxCore resource subsets in any host
+layout. The campaign launcher creates validated machine-local directory links
+before dedicated startup; no link is archived. Keep private dedicated binaries
+and XML payloads. See SHARED_SERVER_MODULES.md for migration, rollback and native
+acceptance gates. Existing b299 ZIP below is immutable and predates this change;
+do not describe it as a shared-module build. No replacement archive is produced.
+
 ## Default-on map replica testing preview (2026-10-28)
 
 User requested automatic replica startup by default and a package for remote testers.

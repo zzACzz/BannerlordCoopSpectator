@@ -14,6 +14,7 @@ set "HARMONY_DLL=%GAME_ROOT%\Modules\Bannerlord.Harmony\bin\Win64_Shipping_Clien
 set "HARMONY_CORE_DLL=%GAME_ROOT%\Modules\Bannerlord.Harmony\bin\Win64_Shipping_Client\0Harmony.dll"
 set "MODULES_ARG=_MODULES_*Native*SandBoxCore*Sandbox*Multiplayer*CoopSpectator*_MODULES_"
 set "USE_EXTERNAL_HARMONY=0"
+set "PROFILE_HARMONY="
 set "DIAG_FILE=%GAME_ROOT%\CoopSpectator_launch_diagnostic.txt"
 
 > "%DIAG_FILE%" echo CoopSpectator launch diagnostic
@@ -83,11 +84,30 @@ if not exist "%COOP_HARMONY_DLL%" (
 
 if "%USE_EXTERNAL_HARMONY%"=="1" if exist "%HARMONY_MODULE%" if exist "%HARMONY_DLL%" if exist "%HARMONY_CORE_DLL%" (
   set "MODULES_ARG=_MODULES_*Native*SandBoxCore*Sandbox*Multiplayer*Bannerlord.Harmony*CoopSpectator*_MODULES_"
+  set "PROFILE_HARMONY=-UseExternalHarmony"
   echo [INFO] Using external Bannerlord.Harmony module.
 ) else (
   echo [INFO] Launching with bundled CoopSpectator Harmony runtime only.
 )
 
+set "CONTENT_PROFILE=Auto"
+if /I "%~1"=="--naval" set "CONTENT_PROFILE=Naval"
+if /I "%~1"=="--base" set "CONTENT_PROFILE=Base"
+set "PROFILE_HELPER=%GAME_ROOT%\Modules\CoopSpectator\CoopPrepareContentProfile.ps1"
+if not exist "%PROFILE_HELPER%" (
+  echo [ERROR] Content profile helper is missing. Reinstall the complete Warhost client module.
+  pause
+  exit /b 1
+)
+set "PROFILE_ARGS=%TEMP%\CoopSpectator_modules_%RANDOM%_%RANDOM%.txt"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PROFILE_HELPER%" -GameRoot "%GAME_ROOT%" -OutputPath "%PROFILE_ARGS%" -ContentProfile "%CONTENT_PROFILE%" %PROFILE_HARMONY%
+if errorlevel 1 (
+  echo [ERROR] Campaign resource preparation failed. No multiplayer client was started.
+  pause
+  exit /b 1
+)
+set /p "MODULES_ARG="<"%PROFILE_ARGS%"
+set "BANNERLORD_GAME_ROOT=%GAME_ROOT%"
 pushd "%GAME_ROOT%\bin\Win64_Shipping_Client"
 if exist "%SHADER_CACHE_SWITCH%" (
   powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%SHADER_CACHE_SWITCH%" -Phase RunMultiplayer -GameExecutable "%GAME_EXE%" -GameArguments "/multiplayer %MODULES_ARG%" -GameWorkingDirectory "%GAME_ROOT%\bin\Win64_Shipping_Client"

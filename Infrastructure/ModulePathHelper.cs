@@ -1,4 +1,6 @@
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 
@@ -15,6 +17,39 @@ namespace CoopSpectator.Infrastructure
         private const string ExplicitGameRootEnvVar = "BANNERLORD_GAME_ROOT";
         private const string BannerlordGameFolderName = "Mount & Blade II Bannerlord";
         private const string DedicatedServerFolderName = "Mount & Blade II Dedicated Server";
+
+        internal static IReadOnlyList<KeyValuePair<string, string>> GetActiveModulePaths()
+        {
+            // Read only public managed metadata. Preserve the native registry's
+            // ordering and actual FolderPath, including platform-provided DLC paths.
+            Type helper = Type.GetType("TaleWorlds.ModuleManager.ModuleHelper, TaleWorlds.ModuleManager", false)
+                ?? Type.GetType("TaleWorlds.ModuleManager.ModuleHelper, TaleWorlds.MountAndBlade", false);
+            MethodInfo getActive = helper?.GetMethod("GetActiveModules", BindingFlags.Public | BindingFlags.Static,
+                null, Type.EmptyTypes, null);
+            var modules = getActive?.Invoke(null, null) as IEnumerable;
+            if (modules == null)
+                throw new IOException("Active module registry is not ready.");
+            return ReadActiveModulePaths(modules);
+        }
+
+        internal static IReadOnlyList<KeyValuePair<string, string>> ReadActiveModulePaths(IEnumerable modules)
+        {
+            if (modules == null) throw new IOException("Active module registry is not ready.");
+            var result = new List<KeyValuePair<string, string>>();
+            foreach (object module in modules)
+            {
+                Type type = module?.GetType();
+                object active = type?.GetProperty("IsActive")?.GetValue(module, null);
+                if (!(active is bool)) throw new IOException("Active module metadata is incomplete.");
+                if (!(bool)active) continue;
+                string id = type.GetProperty("Id")?.GetValue(module, null) as string;
+                string folder = type.GetProperty("FolderPath")?.GetValue(module, null) as string;
+                if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(folder))
+                    throw new IOException("Active module identity or folder is unavailable.");
+                result.Add(new KeyValuePair<string, string>(id, folder));
+            }
+            return result;
+        }
 
         public static string GetModuleDataFilePath(string relativePathInModuleData)
         {

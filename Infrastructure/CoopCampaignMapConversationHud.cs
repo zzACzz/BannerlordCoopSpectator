@@ -121,16 +121,30 @@ namespace CoopSpectator.Infrastructure
         public static string ResolvePortraitEquipment(string code, Func<string, string> resolveItem,
             Func<string, bool> hasModifier)
         {
+            return resolveItem == null ? string.Empty :
+                ResolvePortraitEquipmentForSlots(code, (slot, id) => resolveItem(id), hasModifier);
+        }
+
+        public static string ResolvePortraitEquipmentForSlots(string code, Func<int, string, string> resolveItem,
+            Func<string, bool> hasModifier)
+        {
             if (string.IsNullOrEmpty(code) || !IsPortraitCode(code) || resolveItem == null || hasModifier == null)
                 return string.Empty;
             string[] fields = code.Split(new[] { "@---@" }, StringSplitOptions.None);
-            fields[1] = ResolveEquipmentCode(fields[1], resolveItem, hasModifier);
+            fields[1] = ResolveEquipmentCodeForSlots(fields[1], resolveItem, hasModifier);
             if (fields[1].Length == 0) return string.Empty;
             string result = string.Join("@---@", fields);
             return IsPortraitCode(result) ? result : string.Empty;
         }
 
         public static string ResolveEquipmentCode(string code, Func<string, string> resolveItem,
+            Func<string, bool> hasModifier)
+        {
+            return resolveItem == null ? string.Empty :
+                ResolveEquipmentCodeForSlots(code, (slot, id) => resolveItem(id), hasModifier);
+        }
+
+        public static string ResolveEquipmentCodeForSlots(string code, Func<int, string, string> resolveItem,
             Func<string, bool> hasModifier)
         {
             if (!IsEquipmentCode(code) || resolveItem == null || hasModifier == null) return string.Empty;
@@ -140,7 +154,7 @@ namespace CoopSpectator.Infrastructure
                 string[] parts = slots[i].Split('-');
                 if (parts[1] != "@null")
                 {
-                    string resolved = resolveItem(parts[1]);
+                    string resolved = resolveItem(i - 1, parts[1]);
                     if (string.IsNullOrEmpty(resolved) || resolved == "@null" || !ItemId(resolved)) return string.Empty;
                     parts[1] = resolved;
                 }

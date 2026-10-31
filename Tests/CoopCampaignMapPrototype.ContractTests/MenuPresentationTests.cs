@@ -200,9 +200,8 @@ internal static class MenuPresentationTests
         Check(capture.Contains("captured.Encounter = CaptureEncounter(context, captured.MenuId)") &&
             capture.Contains("?.GetValue(view) as EncounterMenuOverlayVM") &&
             !capture.Contains("new EncounterMenuOverlayVM("), "capture reads existing native overlay (source wiring)");
-        Check(menuVm.Contains("TryResolvePreloadedMirrorItem(_itemId, out string mirror, out _)") &&
-            menuVm.Contains("item = objects.GetObject<ItemObject>(mirror)"),
-            "plunder image binds preloaded campaign mirror when original is absent (source wiring)");
+        Check(menuVm.Contains("CoopCampaignVisualItemResolver.TryResolveImage(objects, _itemId, out var item)"),
+            "plunder image uses component-aware preloaded resource admission (source wiring)");
         Console.WriteLine("Menu presentation checks passed: " + _checks);
     }
 

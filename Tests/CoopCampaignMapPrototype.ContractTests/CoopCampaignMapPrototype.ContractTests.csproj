@@ -6,6 +6,16 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="ContentProfileTransportTests.cs" />
+    <Compile Include="../../Infrastructure/CoopCampaignContentProfile.cs" Link="CoopCampaignContentProfile.cs" />
+    <Compile Include="AftermathMapAnchorTests.cs" />
+    <Compile Include="ReplicaInputFocusTests.cs" />
+    <Compile Include="VisualTickReadinessTests.cs" />
+    <Compile Include="NavalWaterPreparationTests.cs" />
+    <Compile Include="../../Infrastructure/CoopNavalMapWaterPreparation.cs" Link="CoopNavalMapWaterPreparation.cs" />
+    <Compile Include="../../Infrastructure/CoopCampaignMapVisualTickPolicy.cs" Link="CoopCampaignMapVisualTickPolicy.cs" />
+    <Compile Include="../../Campaign/CoopCampaignAftermathMapAnchor.cs" Link="CoopCampaignAftermathMapAnchor.cs" />
+    <Compile Include="../../Infrastructure/CoopCampaignMapInputFocusPolicy.cs" Link="CoopCampaignMapInputFocusPolicy.cs" />
     <Compile Include="AftermathPresentationTests.cs" />
     <Compile Include="MissionReloadTests.cs" />
     <Compile Include="CraftedVisualResourceTests.cs" />
@@ -151,5 +161,7 @@
     <Compile Include="..\..\Infrastructure\CoopCampaignMapCatalogBinarySerializer.cs" Link="CoopCampaignMapCatalogBinarySerializer.cs" />
     <Compile Include="..\..\Infrastructure\CoopCampaignMapCatalogChunkCodec.cs" Link="CoopCampaignMapCatalogChunkCodec.cs" />
     <Compile Include="TestAutomationRuntimeBridge.cs" />
+    <Compile Include="CustomSettlementTests.cs" />
+    <Compile Include="..\..\Infrastructure\CoopCampaignMapCustomSettlementPolicy.cs" Link="CoopCampaignMapCustomSettlementPolicy.cs" />
   </ItemGroup>
 </Project>

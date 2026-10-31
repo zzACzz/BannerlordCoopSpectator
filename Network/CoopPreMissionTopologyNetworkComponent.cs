@@ -260,6 +260,15 @@ namespace CoopSpectator.Network
             if (!(baseMessage is CoopPreMissionTopologyContractMessage message))
                 return;
 
+            if (!CoopCampaignContentRuntime.Matches(message.ScenarioContext?.ContentProfileId, out var contentReason))
+            {
+                ClearPendingClientMissionLoad("content-profile-mismatch");
+                CoopPreMissionTopologyRuntimeState.Clear("content-profile-mismatch");
+                AbortUnsafeClientMissionLoad("Battle", message.RuntimeScene, message.BattleIndex,
+                    "content-profile", contentReason);
+                return;
+            }
+
             if (!CoopPreMissionTopologyRuntimeState.TryAccept(
                     message,
                     out string diagnostics))

@@ -96,8 +96,9 @@ namespace CoopSpectator.Campaign
         private readonly int _tooltipOwnerThread = System.Threading.Thread.CurrentThread.ManagedThreadId;
         private CoopCampaignMapTooltipCapture _tooltipCapture;
         private TaleWorlds.CampaignSystem.Campaign _lastPublishedCampaign;
-        private TaleWorlds.CampaignSystem.Campaign _aftermathAnchorCampaign;
-        private CoopCampaignMapPrototypeHostSnapshot _aftermathAnchor;
+        private readonly CoopCampaignAftermathMapAnchor _aftermathAnchor = new CoopCampaignAftermathMapAnchor();
+        private CoopCampaignMapPrototypeCatalogSnapshot _aftermathPublicationCatalog;
+        private CoopCampaignMapPrototypeDynamicSnapshot _aftermathPublicationDynamic;
         private string _lastPublishedSession;
         private CoopCampaignMapMenuPresentation _lastPublishedMenu;
         private CoopCampaignMapBarPresentation _lastPublishedMapBar;
@@ -113,6 +114,9 @@ namespace CoopSpectator.Campaign
 
         private void OnCampaignSessionLaunched(CampaignGameStarter starter)
         {
+            _aftermathAnchor.Reset();
+            try { CoopCampaignContentRuntime.RememberLocalHost(); }
+            catch (Exception ex) { ModLogger.Info("Campaign content profile unavailable: " + ex.Message); }
             CoopCampaignCraftedVisualCapture.Reset();
             CoopCampaignMissionHost.ObserveCampaignLoaded();
             CoopCampaignMapTooltipHost.ObserveCampaignLoaded();
@@ -159,6 +163,7 @@ namespace CoopSpectator.Campaign
 
         public static void ResetApplicationTickPublisher()
         {
+            _applicationTickPublisher?._aftermathAnchor.Reset();
             _applicationTickPublisher?._siegeProjectileCapture?.ReleaseFlights();
             CoopCampaignMapMenuCapture.ResetPlunderIdentity();
             CoopCampaignMapBarCapture.ResetHintIdentity();
@@ -333,28 +338,35 @@ namespace CoopSpectator.Campaign
                 return;
             }
 
-            if (_catalogDirty && _cachedCatalog != null)
+            bool aftermathPublication = _aftermathPublicationCatalog != null;
+            var publicationCatalog = _aftermathPublicationCatalog ?? _cachedCatalog;
+            var publicationDynamic = _aftermathPublicationDynamic ?? _cachedDynamic;
+            // The retained bundle can be older than live caches. Keep both dirty
+            // until a normal publication restores them, including after a failed
+            // write of the retained frame. Never roll live revision counters back.
+            if (aftermathPublication) _catalogDirty = _dynamicDirty = true;
+            if (_catalogDirty && publicationCatalog != null)
             {
                 if (!CoopCampaignMapPrototypeBridgeFile.TryWriteCatalog(
-                        _cachedCatalog,
+                        publicationCatalog,
                         out reason))
                 {
                     LogFailureRateLimited("catalog-write:" + (reason ?? "unknown"));
                     return;
                 }
-                _catalogDirty = false;
+                if (!aftermathPublication) _catalogDirty = false;
             }
 
-            if (_dynamicDirty && _cachedDynamic != null)
+            if (_dynamicDirty && publicationDynamic != null)
             {
                 if (!CoopCampaignMapPrototypeBridgeFile.TryWriteDynamic(
-                        _cachedDynamic,
+                        publicationDynamic,
                         out reason))
                 {
                     LogFailureRateLimited("dynamic-write:" + (reason ?? "unknown"));
                     return;
                 }
-                _dynamicDirty = false;
+                if (!aftermathPublication) _dynamicDirty = false;
             }
 
             if (!CoopCampaignMapPrototypeBridgeFile.TryWrite(snapshot, out reason))
@@ -368,8 +380,8 @@ namespace CoopSpectator.Campaign
                 if (GameStateManager.Current?.ActiveState is TaleWorlds.CampaignSystem.GameState.MapState &&
                     snapshot.Conversation?.IsActive != true)
                 {
-                    _aftermathAnchorCampaign = TaleWorlds.CampaignSystem.Campaign.Current;
-                    _aftermathAnchor = snapshot.Clone();
+                    _aftermathAnchor.Remember(TaleWorlds.CampaignSystem.Campaign.Current,
+                        snapshot, _cachedCatalog, _cachedDynamic);
                 }
                 _lastPublishedCampaign = TaleWorlds.CampaignSystem.Campaign.Current;
                 _lastPublishedSession = snapshot.SessionId;
@@ -396,6 +408,8 @@ namespace CoopSpectator.Campaign
         {
             snapshot = null;
             reason = null;
+            _aftermathPublicationCatalog = null;
+            _aftermathPublicationDynamic = null;
             TaleWorlds.CampaignSystem.Campaign campaign =
                 TaleWorlds.CampaignSystem.Campaign.Current;
             if (campaign == null)
@@ -415,22 +429,14 @@ namespace CoopSpectator.Campaign
                 activeState is TaleWorlds.CampaignSystem.GameState.InventoryState)
             {
                 reason = "aftermath-anchor-unavailable";
-                if (!ReferenceEquals(_aftermathAnchorCampaign, campaign) || _aftermathAnchor == null ||
-                    _aftermathAnchor.SessionId != _sessionId || _revision == int.MaxValue) return false;
+                if (_revision == int.MaxValue ||
+                    !_aftermathAnchor.TryAcquire(campaign, _sessionId, DateTime.UtcNow,
+                        out var anchoredFrame, out var anchoredCatalog, out var anchoredDynamic)) return false;
                 if (!CoopCampaignAftermathCapture.TryCapture(out var aftermathMenu, out reason)) return false;
-                // A new server map mission must admit the anchored dynamic catalog
-                // even after a long battle. Renew its receipt time, not world data.
-                // Never bind a different campaign/session/revision to this screen.
-                reason = "aftermath-dynamic-anchor-unavailable";
-                if (_cachedDynamic == null || _cachedDynamic.SessionId != _sessionId ||
-                    _cachedDynamic.Revision != _aftermathAnchor.DynamicRevision ||
-                    _cachedCatalog == null || _cachedCatalog.SessionId != _sessionId ||
-                    _cachedCatalog.Revision != _aftermathAnchor.CatalogRevision) return false;
-                snapshot = _aftermathAnchor.Clone();
+                snapshot = anchoredFrame;
+                _aftermathPublicationCatalog = anchoredCatalog;
+                _aftermathPublicationDynamic = anchoredDynamic;
                 snapshot.Revision = ++_revision;
-                snapshot.UpdatedUtc = DateTime.UtcNow;
-                _cachedDynamic.UpdatedUtc = snapshot.UpdatedUtc;
-                _dynamicDirty = true;
                 snapshot.SampleTimeMilliseconds = Environment.TickCount & int.MaxValue;
                 snapshot.IsMoving = false;
                 snapshot.Menu = aftermathMenu;
@@ -548,6 +554,7 @@ namespace CoopSpectator.Campaign
                 CoopCampaignMapBattleMarkerCapture.TryCapture(out var battleMarkers, out _);
                 snapshot = new CoopCampaignMapPrototypeHostSnapshot
                 {
+                    ContentProfileId = CoopCampaignContentRuntime.GetLocalId(),
                     SchemaVersion =
                         CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion,
                     SessionId = _sessionId,

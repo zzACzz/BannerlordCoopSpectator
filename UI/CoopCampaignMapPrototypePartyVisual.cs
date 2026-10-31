@@ -188,8 +188,9 @@ namespace CoopSpectator.UI
                     initialFrame,
                     out visual);
             }
-            catch
+            catch (Exception ex) when (!(ex is CoopCampaignVisualCleanupException))
             {
+                CoopCampaignMapVisualLifetimeTrace.Failure("candidate-exact-throw", ex);
                 return FailCandidate(candidate, out visual);
             }
         }
@@ -236,8 +237,9 @@ namespace CoopSpectator.UI
                     initialFrame,
                     out visual);
             }
-            catch
+            catch (Exception ex) when (!(ex is CoopCampaignVisualCleanupException))
             {
+                CoopCampaignMapVisualLifetimeTrace.Failure("candidate-fallback-throw", ex);
                 return FailCandidate(candidate, out visual);
             }
         }
@@ -323,7 +325,7 @@ namespace CoopSpectator.UI
             if (exact.HasBanner && !string.IsNullOrWhiteSpace(state.BannerCode))
                 data.Banner(new Banner(state.BannerCode));
 
-            return AgentVisuals.Create(
+            return CoopCampaignAgentVisualFactory.Create(
                 data,
                 "CoopCampaignMapPartyExact " + (state.EntityId ?? string.Empty),
                 false,
@@ -362,7 +364,7 @@ namespace CoopSpectator.UI
             if (!string.IsNullOrWhiteSpace(exact.MountCreationKey))
                 data.MountCreationKey(exact.MountCreationKey);
 
-            return AgentVisuals.Create(
+            return CoopCampaignAgentVisualFactory.Create(
                 data,
                 "CoopCampaignMapPartyExact" + label + " " +
                 (entityId ?? string.Empty),
@@ -409,7 +411,7 @@ namespace CoopSpectator.UI
                 .AddColorRandomness(!character.IsHero)
                 .Race(character.Race);
 
-            return AgentVisuals.Create(
+            return CoopCampaignAgentVisualFactory.Create(
                 data,
                 "CoopCampaignMapPartyFallback " +
                 (state.EntityId ?? string.Empty),
@@ -444,7 +446,7 @@ namespace CoopSpectator.UI
                         horseItem,
                         character.GetMountKeySeed()));
 
-            return AgentVisuals.Create(
+            return CoopCampaignAgentVisualFactory.Create(
                 data,
                 "CoopCampaignMapPartyFallbackMount " + character.StringId,
                 false,
@@ -478,16 +480,7 @@ namespace CoopSpectator.UI
                 if (string.IsNullOrWhiteSpace(itemId))
                     continue;
 
-                ItemObject item = TryResolveItem(objectManager, itemId);
-                if (item == null &&
-                    ExactCampaignRuntimeItemRegistry.TryResolvePreloadedMirrorItem(
-                        itemId,
-                        out string mirrorItemId,
-                        out _))
-                {
-                    item = TryResolveItem(objectManager, mirrorItemId);
-                }
-                if (item == null)
+                if (!CoopCampaignVisualItemResolver.TryResolve(objectManager, itemId, slot, out ItemObject item))
                     return false;
 
                 resolved[(EquipmentIndex)slot] =
@@ -496,22 +489,6 @@ namespace CoopSpectator.UI
 
             equipment = resolved;
             return true;
-        }
-
-        private static ItemObject TryResolveItem(
-            MBObjectManager objectManager,
-            string itemId)
-        {
-            if (objectManager == null || string.IsNullOrWhiteSpace(itemId))
-                return null;
-            try
-            {
-                return objectManager.GetObject<ItemObject>(itemId);
-            }
-            catch
-            {
-                return null;
-            }
         }
 
         private static IEnumerable<string> BuildCharacterCandidates(
@@ -660,7 +637,7 @@ namespace CoopSpectator.UI
         {
             try
             {
-                visual?.Reset();
+                CoopCampaignMapVisualLifetimeTrace.Reset(visual);
             }
             catch
             {

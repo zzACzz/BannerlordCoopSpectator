@@ -361,7 +361,7 @@ namespace CoopSpectator.UI
                     .RightWieldedItemIndex(visual.RightWieldedItemIndex).LeftWieldedItemIndex(visual.LeftWieldedItemIndex)
                     .AddColorRandomness(visual.AddColorRandomness);
                 if (item.Banner != null) data.Banner(item.Banner);
-                AgentVisuals actor = AgentVisuals.Create(data, "CoopConversationActor", false, false, false);
+                AgentVisuals actor = CoopCampaignAgentVisualFactory.Create(data, "CoopConversationActor", false, false, false);
                 _actors.Add(actor);
                 actor.SetAgentLodZeroOrMaxExternal(true);
                 Skeleton skeleton = actor.GetVisuals().GetSkeleton();
@@ -603,7 +603,7 @@ namespace CoopSpectator.UI
             _widget = null;
             _callbackFailure = null;
             _textureWidth = _textureHeight = 0;
-            foreach (AgentVisuals actor in _actors) { try { actor?.Reset(); } catch { cleanupErrors++; } }
+            foreach (AgentVisuals actor in _actors) { try { CoopCampaignMapVisualLifetimeTrace.Reset(actor); } catch { cleanupErrors++; } }
             _actors.Clear();
             _posePlayback.Clear();
             _poseActions.Clear();

@@ -1059,6 +1059,19 @@ namespace CoopSpectator.Infrastructure
                 duplicateCount += duplicatesInFile;
             }
 
+            if (CoopCampaignContentRuntime.UsesNavalResources)
+            {
+                string navalRoot = Path.Combine(CoopCampaignContentRuntime.GameRoot, "Modules", "NavalDLC");
+                var navalDescriptor = CoopCampaignContentProfile.ReadDescriptor(navalRoot, "NavalDLC");
+                foreach (XmlNode entry in navalDescriptor.SelectNodes("/Module/Xmls/XmlNode[XmlName[@id='Items']]"))
+                    foreach (string xmlPath in CoopCampaignContentProfile.ResolveDataFiles(navalRoot, entry.SelectSingleNode("XmlName/@path")?.Value))
+                    {
+                        int indexed = IndexDefinitionsFromXml("NavalDLC", xmlPath, out int duplicates);
+                        scannedFiles.Add("NavalDLC/" + Path.GetFileName(xmlPath) + "=" + indexed);
+                        duplicateCount += duplicates;
+                    }
+            }
+
             _indexBuilt = true;
             _indexSummary =
                 "IndexedItems=" + DefinitionsById.Count +
@@ -2029,13 +2042,24 @@ namespace CoopSpectator.Infrastructure
                 craftingTemplateCount >= Bannerlord148CraftingTemplateCount &&
                 weaponDescriptionCount >= Bannerlord148WeaponDescriptionCount;
 
+            int missingNavalPieces = 0;
+            if (CoopCampaignContentRuntime.UsesNavalResources)
+            {
+                string file = Path.Combine(CoopCampaignContentRuntime.GameRoot, "Modules", "NavalDLC", "ModuleData", "naval_crafting_pieces.xml");
+                var document = CoopCampaignContentProfile.ReadXml(file);
+                foreach (XmlElement piece in document.SelectNodes("/CraftingPieces/CraftingPiece"))
+                    if (TryResolveObject<CraftingPiece>(objectManager, piece.GetAttribute("id")) == null) missingNavalPieces++;
+                _craftingSupportReady &= missingNavalPieces == 0;
+            }
+
             _craftingSupportLoaded = true;
             _craftingSupportSummary =
                 "PreloadedOnly=true" +
                 " Ready=" + _craftingSupportReady +
                 " CraftingPieces=" + craftingPieceCount + "/" + requiredCraftingPieceCount +
                 " CraftingTemplates=" + craftingTemplateCount + "/" + Bannerlord148CraftingTemplateCount +
-                " WeaponDescriptions=" + weaponDescriptionCount + "/" + Bannerlord148WeaponDescriptionCount;
+                " WeaponDescriptions=" + weaponDescriptionCount + "/" + Bannerlord148WeaponDescriptionCount +
+                " MissingNavalCraftingPieces=" + missingNavalPieces;
 
             ModLogger.Info(
                 "ExactCampaignRuntimeItemRegistry: validated preloaded crafted-item support catalogs without mutation. " +

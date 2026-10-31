@@ -41,8 +41,8 @@ namespace CoopSpectator.UI
         private void TickCampaignMenu()
         {
             var state = CoopCampaignMapPrototypeNetworkController.CurrentClientMenu;
-            bool modal = ScreenManager.FocusedLayer != null &&
-                !ReferenceEquals(ScreenManager.FocusedLayer, _replicaInfoLayer);
+            bool modal = IsReplicaModalOpen() || (ScreenManager.FocusedLayer != null &&
+                !ReferenceEquals(ScreenManager.FocusedLayer, _replicaInfoLayer));
             TickAftermath(modal);
             TickAutoBattle(modal);
             bool visible = _mapSceneReadyToRender && MissionScreen != null &&

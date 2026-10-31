@@ -452,6 +452,7 @@ namespace CoopSpectator.Infrastructure
             Append(builder, scenarioContext?.ScenarioKind);
             Append(builder, scenarioContext?.IsSiegeBattle == true);
             Append(builder, scenarioContext?.Source);
+            Append(builder, scenarioContext?.ContentProfileId);
 
             BattleSiegeContextMessage siege = scenarioContext?.SiegeContext;
             Append(builder, siege != null);

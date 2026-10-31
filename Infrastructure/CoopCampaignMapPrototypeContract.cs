@@ -1542,6 +1542,7 @@ namespace CoopSpectator.Infrastructure
 
     public sealed class CoopCampaignMapPrototypeState
     {
+        public string ContentProfileId { get; set; } = string.Empty;
         public string SessionId { get; set; } = string.Empty;
         public int Revision { get; set; }
 
@@ -1571,6 +1572,7 @@ namespace CoopSpectator.Infrastructure
         {
             return new CoopCampaignMapPrototypeState
             {
+                ContentProfileId = ContentProfileId,
                 SessionId = SessionId,
                 Revision = Revision,
                 NormalizedX = NormalizedX,
@@ -1590,6 +1592,7 @@ namespace CoopSpectator.Infrastructure
 
     public sealed class CoopCampaignMapPrototypeHostSnapshot
     {
+        public string ContentProfileId { get; set; } = string.Empty;
         public int SchemaVersion { get; set; }
 
         public string SessionId { get; set; }
@@ -1642,6 +1645,7 @@ namespace CoopSpectator.Infrastructure
         {
             return new CoopCampaignMapPrototypeHostSnapshot
             {
+                ContentProfileId = ContentProfileId,
                 SchemaVersion = SchemaVersion,
                 SessionId = SessionId,
                 Revision = Revision,
@@ -1812,8 +1816,8 @@ namespace CoopSpectator.Infrastructure
     /// </summary>
     public static class CoopCampaignMapPrototypeContract
     {
-        public const int ProtocolVersion = 71;
-        public const int HostBridgeSchemaVersion = 66;
+        public const int ProtocolVersion = 72;
+        public const int HostBridgeSchemaVersion = 67;
         public const int ProtocolCompressionMaximum = 127;
         public const int MaxCatalogEntities = 2048;
         public const int MaxCatalogLogicalBytes = 16777216;
@@ -2243,6 +2247,8 @@ namespace CoopSpectator.Infrastructure
             }
             if (!snapshot.IsActive)
                 return Fail("inactive", out reason);
+            if (!string.IsNullOrEmpty(snapshot.ContentProfileId) && !CoopCampaignContentProfile.IsValid(snapshot.ContentProfileId))
+                return Fail("content-profile", out reason);
             if (snapshot.Revision <= 0)
                 return Fail("revision", out reason);
             if (snapshot.NormalizedX < 0 || snapshot.NormalizedX > UnitScale ||
@@ -2306,6 +2312,7 @@ namespace CoopSpectator.Infrastructure
 
             return new CoopCampaignMapPrototypeState
             {
+                ContentProfileId = snapshot.ContentProfileId,
                 Revision = Math.Max(0, networkRevision),
                 SessionId = Guid.TryParse(snapshot.SessionId, out var session) ? session.ToString("N") : string.Empty,
                 NormalizedX = snapshot.NormalizedX,

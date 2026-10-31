@@ -10,8 +10,13 @@ internal static class Program
         try
         {
             ValidateProtocolVersion();
+            ContentProfileTransportTests.Run();
             ControlHintTests.Run();
             AftermathPresentationTests.Run();
+            AftermathMapAnchorTests.Run();
+            ReplicaInputFocusTests.Run();
+            VisualTickReadinessTests.Run();
+            NavalWaterPreparationTests.Run();
             MissionReloadTests.Run();
             CraftedVisualResourceTests.Run();
             SettlementMenuTests.Run();
@@ -60,6 +65,7 @@ internal static class Program
             SettlementMarkerOrderTests.Run();
             SettlementMarkerTransportTests.Run();
             SettlementGeometryTests.Run();
+            CustomSettlementTests.Run();
             SettlementPartyBadgeTests.Run();
             ValidateSettlementLevels();
             ValidateConversationContract();
@@ -179,10 +185,10 @@ internal static class Program
     private static void ValidateProtocolVersion()
     {
         Assert(
-            CoopCampaignMapPrototypeContract.ProtocolVersion == 71 &&
-            CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion == 66 &&
+            CoopCampaignMapPrototypeContract.ProtocolVersion == 72 &&
+            CoopCampaignMapPrototypeContract.HostBridgeSchemaVersion == 67 &&
             CoopCampaignMapCatalogBinarySerializer.SchemaVersion == 10,
-            "Auto-battle scoreboard requires coherent protocol/bridge/catalog schema 71/66/10.");
+            "Content-aware map replication requires coherent protocol/bridge/catalog schema 72/67/10.");
     }
 
     private static void ValidateSiegeTentTransport()
